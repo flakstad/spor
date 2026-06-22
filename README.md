@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="vev-logo-fuller.png" alt="Vev logo" width="216">
+</div>
+
 # Vev
 
 **A native, embedded Datalog database for immutable database values.**

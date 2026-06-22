@@ -1,3 +1,4 @@
 .worktrees/
 /src/src
 build/
+/.DS_Store
