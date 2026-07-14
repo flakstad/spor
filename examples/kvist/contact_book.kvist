@@ -5,9 +5,39 @@
 
 (import fmt "core:fmt")
 (import os "core:os")
-(import d "../../src/vev_app")
+(import arr "kvist:arr")
+(import d "../../src/vev")
 
 (def default-store "/tmp/vev-contact-book-kvist.vev")
+
+(defn schema [] -> [dynamic]d.Tx-Data
+  (let [items (d.tx-data
+                [:db/add 10 :db/ident :contact/email]
+                [:db/add 10 :db/unique :db.unique/identity]
+                [:db/add 11 :db/ident :contact/knows]
+                [:db/add 11 :db/valueType :db.type/ref])]
+    (arr.into [dynamic]d.Tx-Data items)))
+
+(defn contacts [] -> [dynamic]d.Tx-Data
+  (let [items (d.tx-data
+                {:db/id 1
+                 :contact/name "Ada Lovelace"
+                 :contact/email "ada@example.com"
+                 :contact/company "Analytical Engines"}
+                {:db/id 2
+                 :contact/name "Grace Hopper"
+                 :contact/email "grace@example.com"
+                 :contact/company "Compilers"}
+                [:db/add 1 :contact/knows 2])]
+    (arr.into [dynamic]d.Tx-Data items)))
+
+(defn katherine [] -> [dynamic]d.Tx-Data
+  (let [items (d.tx-data
+                {:db/id 3
+                 :contact/name "Katherine Johnson"
+                 :contact/email "katherine@example.com"
+                 :contact/company "NASA"})]
+    (arr.into [dynamic]d.Tx-Data items)))
 
 (defn remove-store! [path: string]
   (os.remove path)
@@ -19,155 +49,162 @@
   (os.exit 1))
 
 (defn require-report! [report: d.Tx-Report]
-  (when (not (d.report-ok? report))
-    (let [error (d.report-error report)]
-      (d.close-report report)
-      (fail! error)))
-  (d.close-report report))
+  (when (not report.ok)
+    (fail! report.error)))
 
-(defn seed! [conn: d.Conn]
-  (require-report!
-    (d.transact
-      conn
-      [[:db/add 10 :db/ident :contact/email]
-       [:db/add 10 :db/unique :db.unique/identity]
-       [:db/add 11 :db/ident :contact/knows]
-       [:db/add 11 :db/valueType :db.type/ref]]))
-  (require-report!
-    (d.transact
-      conn
-      [{:db/id 1
-        :contact/name "Ada Lovelace"
-        :contact/email "ada@example.com"
-        :contact/company "Analytical Engines"}
-       {:db/id 2
-        :contact/name "Grace Hopper"
-        :contact/email "grace@example.com"
-        :contact/company "Compilers"}
-       [:db/add 1 :contact/knows 2]])))
+(defn require-store-report! [report: d.Store-Tx-Report]
+  (when (not report.ok)
+    (fail! report.error))
+  (d.delete-store-tx-report report))
 
-(defn contact-names [snapshot: d.DB] -> d.Result
+(defn result-has-string? [result: d.Result-Set, column: int, expected: string] -> bool
+  (for [row result.rows]
+    (when (and (< column (count row.values))
+               (= row.values[column].kind .String)
+               (= row.values[column].text expected))
+      (return true)))
+  false)
+
+(defn assert-contact-names! [result: d.Result-Set, expected-count: int, require-katherine: bool]
+  (when (not (and result.ok
+                  (= (count result.rows) expected-count)
+                  (result-has-string? result 0 "Ada Lovelace")
+                  (result-has-string? result 0 "Grace Hopper")
+                  (= (result-has-string? result 0 "Katherine Johnson") require-katherine)))
+    (fail! (fmt.tprintf "unexpected contact names: %s" result.error))))
+
+(defn seed! [conn: ^d.Conn]
+  (let [schema-data (schema) :defer
+        contact-data (contacts) :defer]
+    (require-report! (d.transact conn schema-data))
+    (require-report! (d.transact conn contact-data))))
+
+(defn seed-store! [store: ^d.Store-Conn]
+  (let [schema-data (schema) :defer
+        contact-data (contacts) :defer]
+    (require-store-report! (d.transact-store store schema-data))
+    (require-store-report! (d.transact-store store contact-data))))
+
+(defn contact-names [db: d.DB] -> d.Result-Set
   (d.q
     [:find ?name
      :where [?e :contact/name ?name]]
-    snapshot))
+    db))
 
-(defn assert-contact-names! [snapshot: d.DB, expected-count: int, require-katherine: bool]
-  (let [result (contact-names snapshot)
-        ok (and (d.result-ok? result)
-                (= (d.result-count result) expected-count)
-                (d.result-has-string? result 0 "Ada Lovelace")
-                (d.result-has-string? result 0 "Grace Hopper")
-                (= (d.result-has-string? result 0 "Katherine Johnson") require-katherine))]
-    (when (not ok)
-      (let [error (d.result-error result)]
-        (d.close-result result)
-        (fail! (fmt.tprintf "unexpected contact names: %s" error))))
-    (d.close-result result)))
+(defn store-contact-names [db: ^d.Store-DB] -> d.Query-Result
+  (d.q-result-store-db
+    [:find ?name
+     :where [?e :contact/name ?name]]
+    db))
 
-(defn assert-base-contacts! [snapshot: d.DB]
-  (assert-contact-names! snapshot 2 false)
-  (let [lookup (d.q
-                 [:find ?name
-                  :in $ ?email
-                  :where [?e :contact/email ?email]
-                         [?e :contact/name ?name]]
-                 snapshot
-                 "ada@example.com")
-        [name name-ok] (d.result-string-at lookup 0 0)]
-    (when (not (and (d.result-ok? lookup)
-                    (= (d.result-count lookup) 1)
-                    name-ok
-                    (= name "Ada Lovelace")))
-      (d.close-result lookup)
+(defn assert-base-contacts! [db: d.DB]
+  (assert-contact-names! (contact-names db) 2 false)
+  (let [email-result
+          (d.q
+            [:find ?name
+             :in $ ?email
+             :where [?e :contact/email ?email]
+                    [?e :contact/name ?name]]
+            db
+            "ada@example.com")
+        profile (d.pull
+                  db
+                  [:contact/name :contact/email {:contact/knows [:contact/name]}]
+                  1)]
+    (when (not (and (= (count email-result.rows) 1)
+                    (result-has-string? email-result 0 "Ada Lovelace")))
       (fail! "email lookup returned the wrong contact"))
-    (d.close-result lookup))
-  (let [profile-result (d.pull
-                         snapshot
-                         [:contact/name :contact/email {:contact/knows [:contact/name]}]
-                         1)
-        profile (d.pull-value profile-result)
-        [name name-ok] (d.value-map-get profile ":contact/name")
-        [name-text name-string?] (d.value-string name)
-        [knows knows-ok] (d.value-map-get profile ":contact/knows")
-        [friend-name friend-name-ok] (d.value-map-get knows ":contact/name")
-        [friend-text friend-string?] (d.value-string friend-name)
-        valid (and profile-result.ok
-                   name-ok name-string? (= name-text "Ada Lovelace")
-                   knows-ok friend-name-ok friend-string?
-                   (= friend-text "Grace Hopper"))]
-    (when (not valid)
-      (d.close-value friend-name)
-      (d.close-value knows)
-      (d.close-value name)
-      (d.close-value profile)
-      (fail! (fmt.tprintf "pull returned the wrong contact: %s" profile-result.error)))
-    (d.close-value friend-name)
-    (d.close-value knows)
-    (d.close-value name)
-    (d.close-value profile)))
+    (when (not (and (= (count profile.attrs) 3)
+                    (= profile.attrs[0].a ":contact/name")
+                    (= profile.attrs[0].v.text "Ada Lovelace")
+                    (= profile.attrs[2].a ":contact/knows")
+                    (= (count profile.attrs[2].attrs) 1)
+                    (= profile.attrs[2].attrs[0].v.text "Grace Hopper")))
+      (fail! "pull returned the wrong contact"))))
 
-(defn snapshot! [conn: d.Conn] -> d.DB
-  (let [[snapshot ok error] (d.db conn)]
-    (when (not ok)
-      (fail! error))
-    snapshot))
+(defn assert-base-store-contacts! [db: ^d.Store-DB]
+  (let [names (store-contact-names db)
+        email-result
+          (d.q-result-store-db
+            [:find ?name
+             :in $ ?email
+             :where [?e :contact/email ?email]
+                    [?e :contact/name ?name]]
+            db
+            "ada@example.com")
+        [profile profile-ok profile-error]
+          (d.pull-store-db
+            db
+            [:contact/name :contact/email {:contact/knows [:contact/name]}]
+            1)]
+    (assert-contact-names! names.result 2 false)
+    (when (not (and (= (count email-result.result.rows) 1)
+                    (result-has-string? email-result.result 0 "Ada Lovelace")))
+      (fail! "durable email lookup returned the wrong contact"))
+    (when (not profile-ok)
+      (fail! profile-error))
+    (let [[name name-ok] (d.map-get-value profile (d.value-keyword ":contact/name"))
+          [knows knows-ok] (d.map-get-value profile (d.value-keyword ":contact/knows"))
+          [friend friend-ok] (d.map-get-value knows (d.value-keyword ":contact/name"))]
+      (when (not (and name-ok (= name.text "Ada Lovelace")
+                      knows-ok friend-ok (= friend.text "Grace Hopper")))
+        (fail! "durable pull returned the wrong contact")))
+    (d.delete-owned-value profile)
+    (d.delete-query-result email-result)
+    (d.delete-query-result names)))
 
 (defn run-in-memory! []
   (let [conn (d.create-conn)]
-    (defer (d.close-conn! conn))
-    (seed! conn)
-    (let [snapshot (snapshot! conn)]
-      (defer (d.close-db! snapshot))
-      (assert-base-contacts! snapshot)
-      (let [next-db
-              (d.db-with
-                snapshot
-                [{:db/id 3
-                  :contact/name "Katherine Johnson"
-                  :contact/email "katherine@example.com"
-                  :contact/company "NASA"}])]
-        (defer (d.close-db! next-db))
-        (assert-contact-names! next-db 3 true)
-        (assert-contact-names! snapshot 2 false)))))
+    (seed! (addr conn))
+    (assert-base-contacts! conn.db)
+    (let [katherine-data (katherine) :defer
+          next-db (d.db-with-tx-data conn.db katherine-data)]
+      (assert-contact-names! (contact-names next-db) 3 true)
+      (assert-contact-names! (contact-names conn.db) 2 false))))
 
-(defn connect! [path: string] -> d.Conn
-  (let [[conn ok error] (d.connect path)]
+(defn connect! [path: string] -> d.Store-Conn
+  (let [[store ok error] (d.open-store path)]
     (when (not ok)
+      (d.close-store store)
       (fail! error))
-    conn))
+    store))
 
-(defn transact-katherine! [conn: d.Conn]
-  (require-report!
-    (d.transact
-      conn
-      [{:db/id 3
-        :contact/name "Katherine Johnson"
-        :contact/email "katherine@example.com"
-        :contact/company "NASA"}])))
+(defn transact-katherine! [store: ^d.Store-Conn]
+  (let [data (katherine) :defer]
+    (require-store-report! (d.transact-store store data))))
 
 (defn run-durable! [path: string]
   (remove-store! path)
-  (let [conn (connect! path)]
-    (seed! conn)
-    (let [snapshot (snapshot! conn)]
-      (assert-base-contacts! snapshot)
-      (d.close-db! snapshot))
-    (d.close-conn! conn))
-  (let [conn (connect! path)
-        snapshot (snapshot! conn)]
-    (assert-contact-names! snapshot 2 false)
-    (d.close-db! snapshot)
-    (transact-katherine! conn)
-    (let [updated (snapshot! conn)]
-      (assert-contact-names! updated 3 true)
-      (d.close-db! updated))
-    (d.close-conn! conn))
-  (let [conn (connect! path)
-        snapshot (snapshot! conn)]
-    (assert-contact-names! snapshot 3 true)
-    (d.close-db! snapshot)
-    (d.close-conn! conn))
+  (let [store (connect! path)]
+    (seed-store! (addr store))
+    (let [[db ok error] (d.store-db (addr store))]
+      (when (not ok) (fail! error))
+      (assert-base-store-contacts! (addr db))
+      (d.close-store-db db))
+    (d.close-store store))
+  (let [store (connect! path)
+        [db ok error] (d.store-db (addr store))]
+    (when (not ok) (fail! error))
+    (let [names (store-contact-names (addr db))]
+      (assert-contact-names! names.result 2 false)
+      (d.delete-query-result names))
+    (d.close-store-db db)
+    (transact-katherine! (addr store))
+    (let [[updated updated-ok updated-error] (d.store-db (addr store))]
+      (when (not updated-ok) (fail! updated-error))
+      (let [names (store-contact-names (addr updated))]
+        (assert-contact-names! names.result 3 true)
+        (d.delete-query-result names))
+      (d.close-store-db updated))
+    (d.close-store store))
+  (let [store (connect! path)
+        [db ok error] (d.store-db (addr store))]
+    (when (not ok) (fail! error))
+    (let [names (store-contact-names (addr db))]
+      (assert-contact-names! names.result 3 true)
+      (d.delete-query-result names))
+    (d.close-store-db db)
+    (d.close-store store))
   (remove-store! path))
 
 (defn main []
