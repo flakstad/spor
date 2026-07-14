@@ -138,7 +138,6 @@
   (remove-store! path))
 
 (defn main []
-  (defer (free_all context.allocator))
   (let [path (if (> (count os.args) 1) os.args[1] default-store)]
     (run-in-memory!)
     (run-durable! path)

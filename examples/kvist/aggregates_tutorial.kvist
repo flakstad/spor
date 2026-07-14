@@ -7,7 +7,7 @@
 (import fmt "core:fmt")
 (import math "core:math")
 (import os "core:os")
-(import vev "../../src/vev")
+(import d "../../src/vev_app")
 
 // Port source of truth:
 // build/upstream/day-of-datomic/tutorial/aggregates.clj
@@ -17,144 +17,144 @@
 
 (def default-uri "build/day-of-datomic/vev-aggregates.sqlite")
 
-(defn validate-scalar-int-result! [label: string, result: vev.Query-Result, expected: i64, passed: ^bool]
-  (let [ok (and result.result.ok
-                (= (count result.result.rows) 1)
-                (= (count result.result.rows[0].values) 1)
-                (= result.result.rows[0].values[0].kind .Int)
-                (= result.result.rows[0].values[0].int-value expected))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.result.rows) result.result.error)
+(defn validate-scalar-int-result! [label: string, result: d.Result, expected: i64, passed: ^bool]
+  (let [ok (and result.ok
+                (= (count result.rows) 1)
+                (= (count result.rows[0].values) 1)
+                (= result.rows[0].values[0].kind .Int)
+                (= result.rows[0].values[0].int-value expected))]
+    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result result)))
+    (d.close result)))
 
-(defn validate-scalar-float-result! [label: string, result: vev.Query-Result, expected: f64, passed: ^bool]
-  (let [ok (and result.result.ok
-                (= (count result.result.rows) 1)
-                (= (count result.result.rows[0].values) 1)
-                (= result.result.rows[0].values[0].kind .Float)
-                (= result.result.rows[0].values[0].float-value expected))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.result.rows) result.result.error)
+(defn validate-scalar-float-result! [label: string, result: d.Result, expected: f64, passed: ^bool]
+  (let [ok (and result.ok
+                (= (count result.rows) 1)
+                (= (count result.rows[0].values) 1)
+                (= result.rows[0].values[0].kind .Float)
+                (= result.rows[0].values[0].float-value expected))]
+    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result result)))
+    (d.close result)))
 
-(defn validate-scalar-float-close-result! [label: string, result: vev.Query-Result, expected: f64, tolerance: f64, passed: ^bool]
-  (let [actual (if (and result.result.ok
-                        (= (count result.result.rows) 1)
-                        (= (count result.result.rows[0].values) 1)
-                        (= result.result.rows[0].values[0].kind .Float))
-                 result.result.rows[0].values[0].float-value
+(defn validate-scalar-float-close-result! [label: string, result: d.Result, expected: f64, tolerance: f64, passed: ^bool]
+  (let [actual (if (and result.ok
+                        (= (count result.rows) 1)
+                        (= (count result.rows[0].values) 1)
+                        (= result.rows[0].values[0].kind .Float))
+                 result.rows[0].values[0].float-value
                  0.0)
-        ok (and result.result.ok
-                (= (count result.result.rows) 1)
-                (= (count result.result.rows[0].values) 1)
-                (= result.result.rows[0].values[0].kind .Float)
+        ok (and result.ok
+                (= (count result.rows) 1)
+                (= (count result.rows[0].values) 1)
+                (= result.rows[0].values[0].kind .Float)
                 (<= (math.abs (- actual expected)) tolerance))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.result.rows) result.result.error)
+    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result result)))
+    (d.close result)))
 
-(defn validate-empty-set-result! [label: string, result: vev.Query-Result, passed: ^bool]
-  (let [ok (and result.result.ok
-                (= (count result.result.rows) 1)
-                (= (count result.result.rows[0].values) 1)
-                (= result.result.rows[0].values[0].kind .Set)
-                (= (count result.result.rows[0].values[0].items) 0))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.result.rows) result.result.error)
+(defn validate-empty-set-result! [label: string, result: d.Result, passed: ^bool]
+  (let [ok (and result.ok
+                (= (count result.rows) 1)
+                (= (count result.rows[0].values) 1)
+                (= result.rows[0].values[0].kind .Set)
+                (= (count result.rows[0].values[0].items) 0))]
+    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result result)))
+    (d.close result)))
 
-(defn validate-int-int-row-result! [label: string, result: vev.Query-Result, expected-left: i64, expected-right: i64, passed: ^bool]
-  (let [ok (and result.result.ok
-                (= (count result.result.rows) 1)
-                (= (count result.result.rows[0].values) 2)
-                (= result.result.rows[0].values[0].kind .Int)
-                (= result.result.rows[0].values[1].kind .Int)
-                (= result.result.rows[0].values[0].int-value expected-left)
-                (= result.result.rows[0].values[1].int-value expected-right))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.result.rows) result.result.error)
+(defn validate-int-int-row-result! [label: string, result: d.Result, expected-left: i64, expected-right: i64, passed: ^bool]
+  (let [ok (and result.ok
+                (= (count result.rows) 1)
+                (= (count result.rows[0].values) 2)
+                (= result.rows[0].values[0].kind .Int)
+                (= result.rows[0].values[1].kind .Int)
+                (= result.rows[0].values[0].int-value expected-left)
+                (= result.rows[0].values[1].int-value expected-right))]
+    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result result)))
+    (d.close result)))
 
-(defn result-has-string? [result: vev.Query-Result, text: string] -> bool
-  (when (not result.result.ok)
+(defn result-has-string? [result: d.Result, text: string] -> bool
+  (when (not result.ok)
     (return false))
-  (for [row result.result.rows]
+  (for [row result.rows]
     (when (and (= (count row.values) 1)
                (= row.values[0].kind .String)
                (= row.values[0].text text))
       (return true)))
   false)
 
-(defn validate-random-name-result! [label: string, random-result: vev.Query-Result, names-result: vev.Query-Result, passed: ^bool]
-  (let [actual (if (and random-result.result.ok
-                        (= (count random-result.result.rows) 1)
-                        (= (count random-result.result.rows[0].values) 1)
-                        (= random-result.result.rows[0].values[0].kind .String))
-                 random-result.result.rows[0].values[0].text
+(defn validate-random-name-result! [label: string, random-result: d.Result, names-result: d.Result, passed: ^bool]
+  (let [actual (if (and random-result.ok
+                        (= (count random-result.rows) 1)
+                        (= (count random-result.rows[0].values) 1)
+                        (= random-result.rows[0].values[0].kind .String))
+                 random-result.rows[0].values[0].text
                  "")
-        ok (and random-result.result.ok
-                names-result.result.ok
-                (= (count random-result.result.rows) 1)
-                (= (count random-result.result.rows[0].values) 1)
-                (= random-result.result.rows[0].values[0].kind .String)
+        ok (and random-result.ok
+                names-result.ok
+                (= (count random-result.rows) 1)
+                (= (count random-result.rows[0].values) 1)
+                (= random-result.rows[0].values[0].kind .String)
                 (result-has-string? names-result actual))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count random-result.result.rows) random-result.result.error)
+    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count random-result.rows) random-result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result random-result)
-    (vev.delete-query-result names-result)))
+    (d.close random-result)
+    (d.close names-result)))
 
-(defn validate-float-vector-result! [label: string, result: vev.Query-Result, expected: []f64, passed: ^bool]
-  (let [ok-base (and result.result.ok
-                     (= (count result.result.rows) 1)
-                     (= (count result.result.rows[0].values) 1)
-                     (= result.result.rows[0].values[0].kind .Vector)
-                     (= (count result.result.rows[0].values[0].items) (count expected)))
+(defn validate-float-vector-result! [label: string, result: d.Result, expected: []f64, passed: ^bool]
+  (let [ok-base (and result.ok
+                     (= (count result.rows) 1)
+                     (= (count result.rows[0].values) 1)
+                     (= result.rows[0].values[0].kind .Vector)
+                     (= (count result.rows[0].values[0].items) (count expected)))
         ok ok-base]
     (when ok-base
       (for [i (arr.range 0 (count expected))]
-        (when (or (not (= result.result.rows[0].values[0].items[i].kind .Float))
-                  (not (= result.result.rows[0].values[0].items[i].float-value expected[i])))
+        (when (or (not (= result.rows[0].values[0].items[i].kind .Float))
+                  (not (= result.rows[0].values[0].items[i].float-value expected[i])))
           (set! ok false))))
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.result.rows) result.result.error)
+    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result result)))
+    (d.close result)))
 
-(defn validate-random-name-vector-result! [label: string, random-result: vev.Query-Result, names-result: vev.Query-Result, expected-count: int, passed: ^bool]
-  (let [ok-base (and random-result.result.ok
-                     names-result.result.ok
-                     (= (count random-result.result.rows) 1)
-                     (= (count random-result.result.rows[0].values) 1)
-                     (= random-result.result.rows[0].values[0].kind .Vector)
-                     (= (count random-result.result.rows[0].values[0].items) expected-count))
+(defn validate-random-name-vector-result! [label: string, random-result: d.Result, names-result: d.Result, expected-count: int, passed: ^bool]
+  (let [ok-base (and random-result.ok
+                     names-result.ok
+                     (= (count random-result.rows) 1)
+                     (= (count random-result.rows[0].values) 1)
+                     (= random-result.rows[0].values[0].kind .Vector)
+                     (= (count random-result.rows[0].values[0].items) expected-count))
         ok ok-base]
     (when ok-base
-      (for [item random-result.result.rows[0].values[0].items]
+      (for [item random-result.rows[0].values[0].items]
         (when (or (not (= item.kind .String))
                   (not (result-has-string? names-result item.text)))
           (set! ok false))))
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count random-result.result.rows) random-result.result.error)
+    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count random-result.rows) random-result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result random-result)
-    (vev.delete-query-result names-result)))
+    (d.close random-result)
+    (d.close names-result)))
 
-(defn validate-sampled-name-vector-result! [label: string, sample-result: vev.Query-Result, names-result: vev.Query-Result, expected-count: int, passed: ^bool]
-  (let [ok-base (and sample-result.result.ok
-                     names-result.result.ok
-                     (= (count sample-result.result.rows) 1)
-                     (= (count sample-result.result.rows[0].values) 1)
-                     (= sample-result.result.rows[0].values[0].kind .Vector)
-                     (= (count sample-result.result.rows[0].values[0].items) expected-count))
+(defn validate-sampled-name-vector-result! [label: string, sample-result: d.Result, names-result: d.Result, expected-count: int, passed: ^bool]
+  (let [ok-base (and sample-result.ok
+                     names-result.ok
+                     (= (count sample-result.rows) 1)
+                     (= (count sample-result.rows[0].values) 1)
+                     (= sample-result.rows[0].values[0].kind .Vector)
+                     (= (count sample-result.rows[0].values[0].items) expected-count))
         ok ok-base]
     (when ok-base
-      (let [items sample-result.result.rows[0].values[0].items]
+      (let [items sample-result.rows[0].values[0].items]
         (for [i (arr.range 0 (count items))]
           (let [item items[i]]
             (when (or (not (= item.kind .String))
@@ -163,14 +163,14 @@
             (for [j (arr.range (+ i 1) (count items))]
               (when (= item.text items[j].text)
                 (set! ok false)))))))
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count sample-result.result.rows) sample-result.result.error)
+    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count sample-result.rows) sample-result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result sample-result)
-    (vev.delete-query-result names-result)))
+    (d.close sample-result)
+    (d.close names-result)))
 
-(defn schema-name-modes [values: []vev.Value] -> vev.Native-Query-Function-Result
-  (let [modes (make [dynamic]vev.Value)
+(defn schema-name-modes [values: []d.Value] -> d.Native-Query-Function-Result
+  (let [modes (make [dynamic]d.Value)
         best-count 2]
     (for [candidate values]
       (when (= candidate.kind .Int)
@@ -180,147 +180,141 @@
                        (= value.int-value candidate.int-value))
               (set! candidate-count (+ candidate-count 1))))
           (when (= candidate-count best-count)
-            (when (not (vev.value-exists? (slice modes 0) candidate))
-              (arr.push! modes (vev.value-int candidate.int-value))))
+            (when (not (d.value-exists? (slice modes 0) candidate))
+              (arr.push! modes (d.value-int candidate.int-value))))
           (when (> candidate-count best-count)
             (while (> (count modes) 0)
               (arr.remove-ordered-at! modes 0))
-            (arr.push! modes (vev.value-int candidate.int-value))
+            (arr.push! modes (d.value-int candidate.int-value))
             (set! best-count candidate-count)))))
-    (vev.native-query-function-result (vev.value-set-owned modes))))
+    (d.native-query-function-result (d.value-set-owned modes))))
 
 (defn main []
-  (defer (free_all context.allocator))
   (let [uri (if (> (count os.args) 1) os.args[1] default-uri)
-        [store store-ok store-error] (vev.open-store-read-only uri)
+        conn (d.connect-read-only uri)
+        snapshot (d.db conn)
         passed true]
-    (when (not store-ok)
-      (fmt.printf "source=kvist section=open-store ok=false rows=0 expected=1 error=%s\n" store-error)
-      (return))
-    (defer (vev.close-store store))
-    (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))]
-      (when (not snapshot-ok)
-        (fmt.printf "source=kvist section=store-db ok=false rows=0 expected=1 error=%s\n" snapshot-error)
-        (return))
-      (defer (vev.close-store-db! (addr snapshot)))
+    (defer (d.close conn))
+    (defer (d.close snapshot))
+    (do
       (validate-scalar-int-result! "aggregate-object-count"
-        (vev.q-result-store-db
+        (d.q
           [:find (count ?e) .
            :where [?e :object/name ?n]]
-          (addr snapshot))
+          snapshot)
         17 (addr passed))
       (validate-scalar-float-result! "aggregate-largest-radius"
-        (vev.q-result-store-db
+        (d.q
           [:find (max ?radius) .
            :where [_ :object/meanRadius ?radius]]
-          (addr snapshot))
+          snapshot)
         696000.0 (addr passed))
       (validate-scalar-float-result! "aggregate-smallest-radius"
-        (vev.q-result-store-db
+        (d.q
           [:find (min ?radius) .
            :where [_ :object/meanRadius ?radius]]
-          (addr snapshot))
+          snapshot)
         1163.0 (addr passed))
       (validate-scalar-float-close-result! "aggregate-average-radius"
-        (vev.q-result-store-db
+        (d.q
           [:find (avg ?radius) .
            :with ?e
            :where [?e :object/meanRadius ?radius]]
-          (addr snapshot))
+          snapshot)
         53390.17647058824 0.0000001 (addr passed))
       (validate-scalar-float-result! "aggregate-median-radius"
-        (vev.q-result-store-db
+        (d.q
           [:find (median ?radius) .
            :with ?e
            :where [?e :object/meanRadius ?radius]]
-          (addr snapshot))
+          snapshot)
         2631.2 (addr passed))
       (validate-scalar-float-close-result! "aggregate-stddev-radius"
-        (vev.q-result-store-db
+        (d.q
           [:find (stddev ?radius) .
            :with ?e
            :where [?e :object/meanRadius ?radius]]
-          (addr snapshot))
+          snapshot)
         161902.52780945456 0.0000001 (addr passed))
       (validate-random-name-result! "aggregate-random-object-name"
-        (vev.q-result-store-db
+        (d.q
           [:find (rand ?name) .
            :where [?e :object/name ?name]]
-          (addr snapshot))
-        (vev.q-result-store-db
+          snapshot)
+        (d.q
           [:find ?name
            :where [?e :object/name ?name]]
-          (addr snapshot))
+          snapshot)
         (addr passed))
       (validate-float-vector-result! "aggregate-smallest-three-radii"
-        (vev.q-result-store-db
+        (d.q
           [:find (min 3 ?radius) .
            :with ?e
            :where [?e :object/meanRadius ?radius]]
-          (addr snapshot))
+          snapshot)
         ([]f64 [1163.0 1353.4 1561.0])
         (addr passed))
       (validate-float-vector-result! "aggregate-largest-three-radii"
-        (vev.q-result-store-db
+        (d.q
           [:find (max 3 ?radius) .
            :with ?e
            :where [?e :object/meanRadius ?radius]]
-          (addr snapshot))
+          snapshot)
         ([]f64 [696000.0 69911.0 58232.0])
         (addr passed))
       (validate-random-name-vector-result! "aggregate-five-random-object-names"
-        (vev.q-result-store-db
+        (d.q
           [:find (rand 5 ?name) .
            :with ?e
            :where [?e :object/name ?name]]
-          (addr snapshot))
-        (vev.q-result-store-db
+          snapshot)
+        (d.q
           [:find ?name
            :where [?e :object/name ?name]]
-          (addr snapshot))
+          snapshot)
         5
         (addr passed))
       (validate-sampled-name-vector-result! "aggregate-five-sampled-object-names"
-        (vev.q-result-store-db
+        (d.q
           [:find (sample 5 ?name) .
            :with ?e
            :where [?e :object/name ?name]]
-          (addr snapshot))
-        (vev.q-result-store-db
+          snapshot)
+        (d.q
           [:find ?name
            :where [?e :object/name ?name]]
-          (addr snapshot))
+          snapshot)
         5
         (addr passed))
       (validate-scalar-float-close-result! "aggregate-schema-name-average-length"
-        (vev.q-result-store-db
+        (d.q
           [:find (avg ?length) .
            :with ?e
            :where
            [?e :db/ident ?ident]
            [(name ?ident) ?name]
            [(count ?name) ?length]]
-          (addr snapshot))
+          snapshot)
         6.666666666666667 0.0000001
         (addr passed))
       (validate-empty-set-result! "aggregate-schema-name-modes"
-        (vev.q-result-store-db-with-fns
+        (d.q-with-fns
           [:find (datomic.samples.repl/modes ?length) .
            :with ?e
            :where
            [?e :db/ident ?ident]
            [(name ?ident) ?name]
            [(count ?name) ?length]]
-          (addr snapshot)
-          ([]vev.Native-Query-Fn [(vev.query-aggregate-fn "datomic.samples.repl/modes" schema-name-modes)]))
+          snapshot
+          ([]d.Native-Query-Fn [(d.query-aggregate-fn "datomic.samples.repl/modes" schema-name-modes)]))
         (addr passed))
       (validate-int-int-row-result! "aggregate-schema-attribute-value-types"
-        (vev.q-result-store-db
+        (d.q
           [:find (count ?a) (count-distinct ?vt)
            :where
            [?a :db/ident ?ident]
            [?a :db/valueType ?vt]]
-          (addr snapshot))
+          snapshot)
         3 2
         (addr passed)))
     (fmt.printf "source=kvist section=summary ok=%v\n" passed)))

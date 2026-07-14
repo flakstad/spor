@@ -204,6 +204,13 @@ Durability changes only connection creation:
   ...)
 ```
 
+Use `q-text` when a query is loaded as EDN at runtime rather than written as a
+Kvist literal:
+
+```clojure
+(d.q-text query-text snapshot input-text)
+```
+
 The database handle is an immutable snapshot and can be passed through normal
 Kvist code. Native values own resources, so the owner closes each connection,
 DB snapshot, query result, and pulled value exactly once with `d.close`. The

@@ -6,108 +6,101 @@
 (import arr "kvist:arr")
 (import fmt "core:fmt")
 (import os "core:os")
-(import vev "../../src/vev")
+(import d "../../src/vev_app")
 
 // Port source of truth:
 // build/upstream/day-of-datomic/tutorial/decomposing_a_query.clj
 // Section: opening in-memory `kvs` relation and first slow-query
 // decomposition examples.
 
-(defn kvs-relation [] -> vev.Value
-  (let [rows (make [dynamic]vev.Value)]
+(defn kvs-relation [] -> d.Value
+  (let [rows (make [dynamic]d.Value)]
     (for [e (arr.range 0 2000)]
-      (arr.push! rows (vev.value-vector3 (vev.value-int (i64 e)) (vev.value-keyword ":a") (vev.value-int (i64 e))))
-      (arr.push! rows (vev.value-vector3 (vev.value-int (i64 e)) (vev.value-keyword ":b") (vev.value-int (i64 e))))
-      (arr.push! rows (vev.value-vector3 (vev.value-int (i64 e)) (vev.value-keyword ":c") (vev.value-int (i64 e))))
-      (arr.push! rows (vev.value-vector3 (vev.value-int (i64 e)) (vev.value-keyword ":d") (vev.value-int (i64 e))))
-      (arr.push! rows (vev.value-vector3 (vev.value-int (i64 e)) (vev.value-keyword ":e") (vev.value-int (i64 e)))))
-    (vev.value-vector (slice rows 0))))
+      (arr.push! rows (d.value-vector3 (d.value-int (i64 e)) (d.value-keyword ":a") (d.value-int (i64 e))))
+      (arr.push! rows (d.value-vector3 (d.value-int (i64 e)) (d.value-keyword ":b") (d.value-int (i64 e))))
+      (arr.push! rows (d.value-vector3 (d.value-int (i64 e)) (d.value-keyword ":c") (d.value-int (i64 e))))
+      (arr.push! rows (d.value-vector3 (d.value-int (i64 e)) (d.value-keyword ":d") (d.value-int (i64 e))))
+      (arr.push! rows (d.value-vector3 (d.value-int (i64 e)) (d.value-keyword ":e") (d.value-int (i64 e)))))
+    (d.value-vector (slice rows 0))))
 
-(defn validate-count! [label: string, result: vev.Query-Result, expected: int, passed: ^bool]
-  (let [ok (and result.result.ok (= (count result.result.rows) expected))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=%d error=%s\n" label ok (count result.result.rows) expected result.result.error)
+(defn validate-count! [label: string, result: d.Result, expected: int, passed: ^bool]
+  (let [ok (and result.ok (= (count result.rows) expected))]
+    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=%d error=%s\n" label ok (count result.rows) expected result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result result)))
+    (d.close result)))
 
-(defn validate-better-query! [rows: vev.Value, passed: ^bool]
-  (let [result (vev.query-result-shallow
-                 (vev.q-relation-db
-                   [:find ?e1 ?e2
-                    :in $ ?e1
-                    :where [?e2 :a ?e1]]
-                   rows
-                   10))
-        ok (and result.result.ok
-                (= (count result.result.rows) 1)
-                (= (count result.result.rows[0].values) 2)
-                (= result.result.rows[0].values[0].kind .Int)
-                (= result.result.rows[0].values[1].kind .Int)
-                (= result.result.rows[0].values[0].int-value 10)
-                (= result.result.rows[0].values[1].int-value 10))]
-    (fmt.printf "source=kvist section=optimized-in-query ok=%v rows=%d expected=1 error=%s\n" ok (count result.result.rows) result.result.error)
+(defn validate-better-query! [rows: d.Value, passed: ^bool]
+  (let [result (d.q-relation
+                 [:find ?e1 ?e2
+                  :in $ ?e1
+                  :where [?e2 :a ?e1]]
+                 rows
+                 10)
+        ok (and result.ok
+                (= (count result.rows) 1)
+                (= (count result.rows[0].values) 2)
+                (= result.rows[0].values[0].kind .Int)
+                (= result.rows[0].values[1].kind .Int)
+                (= result.rows[0].values[0].int-value 10)
+                (= result.rows[0].values[1].int-value 10))]
+    (fmt.printf "source=kvist section=optimized-in-query ok=%v rows=%d expected=1 error=%s\n" ok (count result.rows) result.error)
     (when (not ok)
       (set! passed^ false))
-    (vev.delete-query-result result)))
+    (d.close result)))
 
 (defn main []
   (let [rows (kvs-relation)
         passed true]
     (validate-count! "kvs-count"
-      (vev.query-result-shallow
-        (vev.q-relation-db
-          [:find ?e ?a ?v
-           :where [?e ?a ?v]]
-          rows))
+      (d.q-relation
+        [:find ?e ?a ?v
+         :where [?e ?a ?v]]
+        rows)
       10000 (addr passed))
     (validate-count! "slow-query"
-      (vev.query-result-shallow
-        (vev.q-relation-db
-          [:find ?e1 ?e2
-           :where
-           [?e1 :a ?v1]
-           [?e2 :a ?v2]
-           [?e1 :a 10]
-           [?e2 :a ?e1]]
-          rows))
+      (d.q-relation
+        [:find ?e1 ?e2
+         :where
+         [?e1 :a ?v1]
+         [?e2 :a ?v2]
+         [?e1 :a 10]
+         [?e2 :a ?e1]]
+        rows)
       1 (addr passed))
     (validate-count! "drop-last-clause"
-      (vev.query-result-shallow
-        (vev.q-relation-db
-          [:find ?e1 ?e2
-           :where
-           [?e1 :a ?v1]
-           [?e2 :a ?v2]
-           [?e1 :a 10]]
-          rows))
+      (d.q-relation
+        [:find ?e1 ?e2
+         :where
+         [?e1 :a ?v1]
+         [?e2 :a ?v2]
+         [?e1 :a 10]]
+        rows)
       2000 (addr passed))
     (validate-count! "cross-product"
-      (vev.query-result-shallow
-        (vev.q-relation-db
-          [:find ?e1 ?e2
-           :where
-           [?e1 :a ?v1]
-           [?e2 :a ?v2]]
-          rows))
+      (d.q-relation
+        [:find ?e1 ?e2
+         :where
+         [?e1 :a ?v1]
+         [?e2 :a ?v2]]
+        rows)
       4000000 (addr passed))
     (validate-count! "single-clause"
-      (vev.query-result-shallow
-        (vev.q-relation-db
-          [:find ?e1
-           :where
-           [?e1 :a ?v1]]
-          rows))
+      (d.q-relation
+        [:find ?e1
+         :where
+         [?e1 :a ?v1]]
+        rows)
       2000 (addr passed))
     (validate-count! "reordered-query"
-      (vev.query-result-shallow
-        (vev.q-relation-db
-          [:find ?e1 ?e2
-           :where
-           [?e1 :a ?v1]
-           [?e1 :a 10]
-           [?e2 :a ?e1]
-           [?e2 :a ?v2]]
-          rows))
+      (d.q-relation
+        [:find ?e1 ?e2
+         :where
+         [?e1 :a ?v1]
+         [?e1 :a 10]
+         [?e2 :a ?e1]
+         [?e2 :a ?v2]]
+        rows)
       1 (addr passed))
     (validate-better-query! rows (addr passed))
     (fmt.printf "source=kvist section=summary ok=%v\n" passed)

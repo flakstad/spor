@@ -9,6 +9,24 @@
 (def DB (distinct rawptr))
 (def Value vev.Value)
 (def Row vev.Result-Row)
+(def Native-Query-Fn vev.Native-Query-Fn)
+(def Native-Query-Function-Result vev.Native-Query-Function-Result)
+
+(def value-equal? vev.value-equal?)
+(def value-exists? vev.value-exists?)
+(def value-int vev.value-int)
+(def value-keyword vev.value-keyword)
+(def value-nil vev.value-nil)
+(def value-serializable-text vev.value-serializable-text)
+(def value-string vev.value-string)
+(def value-set-owned vev.value-set-owned)
+(def value-vector vev.value-vector)
+(def value-vector3 vev.value-vector3)
+(def value-uuid vev.value-uuid)
+(def map-get-value vev.map-get-value)
+(def native-query-function-none vev.native-query-function-none)
+(def native-query-function-result vev.native-query-function-result)
+(def query-aggregate-fn vev.query-aggregate-fn)
 
 (defstruct Tx-Report {
   ok: bool
@@ -49,6 +67,12 @@
            rows: result.result.rows
            owns-values: result.ownsValues}))
 
+(defn- unchecked-result-value [result: vev.Query-Result] -> Result
+  (Result {ok: result.result.ok
+           error: result.result.error
+           rows: result.result.rows
+           owns-values: result.ownsValues}))
+
 (defn- tx-report-value [report: vev.Store-Tx-Report] -> Tx-Report
   (when (not report.ok)
     (let [error report.error]
@@ -74,8 +98,22 @@
         (vev.close-store store)
         (return (Conn nil) false opened-error)))))
 
+(defn try-connect-read-only [path: string] -> [conn: Conn, ok: bool, error: string]
+  (let [[store opened-ok opened-error] (vev.open-store-read-only path)]
+    (if opened-ok
+      (return (conn-handle store) true "")
+      (do
+        (vev.close-store store)
+        (return (Conn nil) false opened-error)))))
+
 (defn connect [path: string] -> Conn
   (let [[conn ok error] (try-connect path)]
+    (when (not ok)
+      (panic error))
+    conn))
+
+(defn connect-read-only [path: string] -> Conn
+  (let [[conn ok error] (try-connect-read-only path)]
     (when (not ok)
       (panic error))
     conn))
@@ -86,6 +124,18 @@
   (let [ptr (conn-ptr conn)]
     (vev.close-store ptr^)
     (free (rawptr conn))))
+
+(defn log-tx-ids [conn: Conn] -> [tx-ids: [dynamic]u64, ok: bool, error: string]
+  (let [store (conn-ptr conn)]
+    (when (not (= store^.kind .SQLite))
+      (return (make [dynamic]u64) false "transaction log requires a durable connection"))
+    (vev.sqlite-conn-tx-ids (addr store^.sqlite))))
+
+(defn log-tx-data [conn: Conn, tx: u64] -> [text: string, ok: bool, error: string]
+  (let [store (conn-ptr conn)]
+    (when (not (= store^.kind .SQLite))
+      (return "" false "transaction log requires a durable connection"))
+    (vev.sqlite-conn-tx-data-text (addr store^.sqlite) tx)))
 
 (defn try-db [conn: Conn] -> [db: DB, ok: bool, error: string]
   (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (conn-ptr conn))]
@@ -122,6 +172,45 @@
   `(result-value
      (vev.q-result-store-db ~query (db-ptr ~db) ~@inputs)))
 
+(defn try-q-text-inputs [query: string, db: DB, inputs: string] -> Result
+  (unchecked-result-value
+    (vev.q-result-store-db-text-with-input-text (db-ptr db) query inputs)))
+
+(defn try-q-text-no-input [query: string, db: DB] -> Result
+  (unchecked-result-value
+    (vev.q-result-store-db-text (db-ptr db) query)))
+
+(def try-q-text (overload try-q-text-inputs try-q-text-no-input))
+
+(defn q-text-inputs [query: string, db: DB, inputs: string] -> Result
+  (result-value
+    (vev.q-result-store-db-text-with-input-text (db-ptr db) query inputs)))
+
+(defn q-text-no-input [query: string, db: DB] -> Result
+  (result-value
+    (vev.q-result-store-db-text (db-ptr db) query)))
+
+(def q-text (overload q-text-inputs q-text-no-input))
+
+(defn try-q-rules [query: string, db: DB, rules: string, inputs: string] -> Result
+  (unchecked-result-value
+    (vev.q-result-store-db-text-with-rules-input-text
+      (db-ptr db) query rules inputs)))
+
+(defn q-rules [query: string, db: DB, rules: string, inputs: string] -> Result
+  (result-value
+    (vev.q-result-store-db-text-with-rules-input-text
+      (db-ptr db) query rules inputs)))
+
+(defmacro q-with-fns [query db fns & inputs]
+  `(result-value
+     (vev.q-result-store-db-with-fns ~query (db-ptr ~db) ~fns ~@inputs)))
+
+(defmacro q-relation [query relation & inputs]
+  `(result-value
+     (vev.query-result-shallow
+       (vev.q-relation-db ~query ~relation ~@inputs))))
+
 (defn result-count [result: Result] -> int
   (count result.rows))
 
@@ -148,6 +237,24 @@
   `(let [[value ok error]
           (vev.pull-store-db (db-ptr ~db) ~pattern ~entity)]
      (pulled-value value ok error)))
+
+(defn pull-text [db: DB, pattern: string, entity: u64] -> Value
+  (let [[value ok error]
+          (vev.pull-store-db-value-text (db-ptr db) pattern entity)]
+    (pulled-value value ok error)))
+
+(defn try-pull-text [db: DB, pattern: string, entity: u64] -> [value: Value, ok: bool, error: string]
+  (vev.pull-store-db-value-text (db-ptr db) pattern entity))
+
+(defn pull-lookup-text [db: DB, pattern: string, attr: string, lookup-value: Value] -> Value
+  (let [[value ok error]
+          (vev.pull-store-db-lookup-ref-value-text
+            (db-ptr db) pattern attr lookup-value)]
+    (pulled-value value ok error)))
+
+(defn try-pull-lookup-text [db: DB, pattern: string, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
+  (vev.pull-store-db-lookup-ref-value-text
+    (db-ptr db) pattern attr lookup-value))
 
 (defn close-value [value: Value]
   (vev.delete-owned-value value))
