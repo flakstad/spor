@@ -9,6 +9,45 @@
 
 (def default-store "/tmp/vev-contact-book-kvist.vev")
 
+(def contact-schema
+  '[[:db/add 10 :db/ident :contact/email]
+    [:db/add 10 :db/unique :db.unique/identity]
+    [:db/add 11 :db/ident :contact/knows]
+    [:db/add 11 :db/valueType :db.type/ref]])
+
+(def initial-contacts
+  '[{:db/id 1
+     :contact/name "Ada Lovelace"
+     :contact/email "ada@example.com"
+     :contact/company "Analytical Engines"}
+    {:db/id 2
+     :contact/name "Grace Hopper"
+     :contact/email "grace@example.com"
+     :contact/company "Compilers"}
+    [:db/add 1 :contact/knows 2]])
+
+(defn contact-tx [id: i64, name: string, email: string, company: string] -> Data
+  `[{:db/id ~id
+     :contact/name ~name
+     :contact/email ~email
+     :contact/company ~company}])
+
+(defn katherine-contact [] -> Data
+  (contact-tx 3 "Katherine Johnson" "katherine@example.com" "NASA"))
+
+(def contact-names-query
+  '[:find ?name
+    :where [?e :contact/name ?name]])
+
+(def contact-by-email-query
+  '[:find ?name
+    :in $ ?email
+    :where [?e :contact/email ?email]
+           [?e :contact/name ?name]])
+
+(def contact-profile-pattern
+  '[:contact/name :contact/email {:contact/knows [:contact/name]}])
+
 (defn remove-store! [path: string]
   (os.remove path)
   (os.remove (fmt.tprintf "%s-wal" path))
@@ -19,27 +58,11 @@
   (os.exit 1))
 
 (defn seed! [conn: d.Conn]
-  (d.transact conn
-    [[:db/add 10 :db/ident :contact/email]
-     [:db/add 10 :db/unique :db.unique/identity]
-     [:db/add 11 :db/ident :contact/knows]
-     [:db/add 11 :db/valueType :db.type/ref]])
-  (d.transact conn
-    [{:db/id 1
-      :contact/name "Ada Lovelace"
-      :contact/email "ada@example.com"
-      :contact/company "Analytical Engines"}
-     {:db/id 2
-      :contact/name "Grace Hopper"
-      :contact/email "grace@example.com"
-      :contact/company "Compilers"}
-     [:db/add 1 :contact/knows 2]]))
+  (d.transact conn contact-schema)
+  (d.transact conn initial-contacts))
 
 (defn contact-names [db: d.DB] -> d.Result
-  (d.q
-    [:find ?name
-     :where [?e :contact/name ?name]]
-    db))
+  (d.q contact-names-query db))
 
 (defn assert-contact-names! [result: d.Result, expected-count: int, require-katherine: bool]
   (when (not (and result.ok
@@ -51,19 +74,8 @@
 
 (defn assert-base-contacts! [db: d.DB]
   (let [names (contact-names db)
-        email-result
-          (d.q
-            [:find ?name
-             :in $ ?email
-             :where [?e :contact/email ?email]
-                    [?e :contact/name ?name]]
-            db
-            "ada@example.com")
-        profile
-          (d.pull
-            db
-            [:contact/name :contact/email {:contact/knows [:contact/name]}]
-            1)]
+        email-result (d.q contact-by-email-query db "ada@example.com")
+        profile (d.pull db contact-profile-pattern 1)]
     (assert-contact-names! names 2 false)
     (when (not (and (= (d.result-count email-result) 1)
                     (d.result-has-string? email-result 0 "Ada Lovelace")))
@@ -83,13 +95,7 @@
     (seed! conn)
     (let [db (d.db conn)]
       (assert-base-contacts! db)
-      (let [next-db
-              (d.db-with
-                db
-                [{:db/id 3
-                  :contact/name "Katherine Johnson"
-                  :contact/email "katherine@example.com"
-                  :contact/company "NASA"}])
+      (let [next-db (d.db-with db (katherine-contact))
             next-names (contact-names next-db)
             original-names (contact-names db)]
         (assert-contact-names! next-names 3 true)
@@ -101,11 +107,7 @@
     (d.close conn)))
 
 (defn transact-katherine! [conn: d.Conn]
-  (d.transact conn
-    [{:db/id 3
-      :contact/name "Katherine Johnson"
-      :contact/email "katherine@example.com"
-      :contact/company "NASA"}]))
+  (d.transact conn (katherine-contact)))
 
 (defn run-durable! [path: string]
   (remove-store! path)

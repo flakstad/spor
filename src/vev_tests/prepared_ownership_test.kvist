@@ -1,0 +1,209 @@
+// Copyright (c) Andreas Flakstad and Vev contributors
+// SPDX-License-Identifier: EPL-2.0
+
+(package vev-tests)
+
+(import strings "core:strings")
+(import edn "kvist:edn")
+(import t "kvist:test")
+(import vev "../vev")
+
+(defn prepared-runtime-query [] -> vev.Prepared-Query
+  (let [query (edn.read "[:find ?name :where [77 :user/name ?name]]")]
+    (vev.prepare-query-data query)))
+
+(defn prepared-runtime-query-text [] -> vev.Prepared-Query
+  (let [[source source-error] (strings.clone "[:find ?name :where [77 :user/name ?name]]")]
+    (assert (= source-error nil))
+    (let [prepared (vev.prepare-query-text source)]
+      (delete source)
+      prepared)))
+
+(defn prepared-runtime-rules-text [] -> vev.Prepared-Rules
+  (let [[source source-error]
+          (strings.clone "[[(reachable ?from ?to) [?from :follow ?to]] [(reachable ?from ?to) [?from :follow ?next] (reachable ?next ?to)]]")]
+    (assert (= source-error nil))
+    (let [prepared (vev.parse-rules-text source)]
+      (delete source)
+      prepared)))
+
+(defn prepared-runtime-pull-text [] -> vev.Prepared-Pull-Pattern
+  (let [[source source-error] (strings.clone "[:user/name]")]
+    (assert (= source-error nil))
+    (let [prepared (vev.prepare-pull-pattern-text source)]
+      (delete source)
+      prepared)))
+
+(defn prepared-runtime-query-with-rules-text [] -> vev.Prepared-Query
+  (let [[query-source query-error]
+          (strings.clone "[:find [?to ...] :in $ ?from % :where (reachable ?from ?to)]")
+        [rules-source rules-error]
+          (strings.clone "[[(reachable ?from ?to) [?from :follow ?to]] [(reachable ?from ?to) [?from :follow ?next] (reachable ?next ?to)]]")]
+    (assert (= query-error nil))
+    (assert (= rules-error nil))
+    (let [prepared (vev.prepare-query-text-with-rules query-source rules-source)]
+      (delete query-source)
+      (delete rules-source)
+      prepared)))
+
+(defn prepared-runtime-binding-text [] -> vev.Prepared-Binding
+  (let [[source source-error] (strings.clone "[?name ...]")]
+    (assert (= source-error nil))
+    (let [prepared (vev.parse-binding-text source)]
+      (delete source)
+      prepared)))
+
+(defn prepared-runtime-in-text [] -> vev.Prepared-In
+  (let [[source source-error] (strings.clone "[$ ?name]")]
+    (assert (= source-error nil))
+    (let [prepared (vev.parse-in-text source)]
+      (delete source)
+      prepared)))
+
+(defn prepared-runtime-with-text [] -> vev.Prepared-With
+  (let [[source source-error] (strings.clone "[?entity ?name]")]
+    (assert (= source-error nil))
+    (let [prepared (vev.parse-with-text source)]
+      (delete source)
+      prepared)))
+
+(defn prepared-runtime-clause-text [] -> vev.Prepared-Clause
+  (let [[source source-error] (strings.clone "[?entity :user/name ?name]")]
+    (assert (= source-error nil))
+    (let [prepared (vev.parse-clause-text source)]
+      (delete source)
+      prepared)))
+
+(t.deftest prepared-parser-objects-outlive-source-text
+  (defer (free_all context.allocator))
+  (let [binding (prepared-runtime-binding-text)
+        inputs (prepared-runtime-in-text)
+        with-vars (prepared-runtime-with-text)
+        clause (prepared-runtime-clause-text)]
+    (t.is binding.ok binding.error)
+    (t.is (= binding.binding.kind .Collection))
+    (t.is (= binding.binding.items[0].name "?name"))
+    (t.is inputs.ok inputs.error)
+    (t.is (= (count inputs.bindings) 2))
+    (t.is (= inputs.bindings[0].name "$"))
+    (t.is (= inputs.bindings[1].name "?name"))
+    (t.is with-vars.ok with-vars.error)
+    (t.is (= with-vars.vars[0] "?entity"))
+    (t.is (= with-vars.vars[1] "?name"))
+    (t.is clause.ok clause.error)
+    (t.is (= (count clause.clauses) 1))
+    (t.is (= clause.clauses[0].e-var "?entity"))
+    (t.is (= clause.clauses[0].a ":user/name"))
+    (t.is (= clause.clauses[0].v-var "?name"))
+    (vev.delete-prepared-binding-shallow binding)
+    (vev.delete-prepared-in-shallow inputs)
+    (vev.delete-prepared-with-shallow with-vars)
+    (vev.delete-prepared-clause-shallow clause)))
+
+(t.deftest prepared-tx-data-outlives-source-text
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        [source source-error] (strings.clone "[{:db/id 77 :user/name \"Source Buffer Name\"}]")]
+    (t.is (= source-error nil))
+    (let [prepared (vev.prepare-tx-text source)]
+      (delete source)
+      (let [[replacement replacement-error] (strings.clone "[{:db/id 88 :user/name \"Replacement Buffer Text\"}]")]
+        (t.is (= replacement-error nil))
+        (let [report (vev.transact-prepared (addr conn) prepared)]
+          (t.is report.ok report.error)
+          (vev.delete-live-tx-report-shallow report))
+        (delete replacement))
+      (let [result (vev.q-text conn.db "[:find ?name :where [77 :user/name ?name]]")]
+        (t.is result.ok result.error)
+        (t.is (= (count result.rows) 1))
+        (t.is (= result.rows[0].values[0].text "Source Buffer Name"))
+        (vev.delete-result-set-shallow result))
+      (vev.delete-prepared-tx-data-shallow prepared))))
+
+(t.deftest prepared-query-outlives-runtime-data
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        seed (vev.transact-text (addr conn) "[{:db/id 77 :user/name \"Ada\"}]")
+        prepared (prepared-runtime-query)
+        result (vev.q-prepared conn.db prepared)]
+    (t.is seed.ok seed.error)
+    (t.is result.ok result.error)
+    (t.is (= (count result.rows) 1))
+    (t.is (= result.rows[0].values[0].text "Ada"))
+    (vev.delete-live-tx-report-shallow seed)
+    (vev.delete-result-set-shallow result)
+    (vev.delete-prepared-query-shallow prepared)))
+
+(t.deftest prepared-query-text-outlives-source-text
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        seed (vev.transact-text (addr conn) "[{:db/id 77 :user/name \"Ada\"}]")
+        prepared (prepared-runtime-query-text)
+        result (vev.q-prepared conn.db prepared)]
+    (t.is seed.ok seed.error)
+    (t.is result.ok result.error)
+    (t.is (= (count result.rows) 1))
+    (t.is (= result.rows[0].values[0].text "Ada"))
+    (vev.delete-live-tx-report-shallow seed)
+    (vev.delete-result-set-shallow result)
+    (vev.delete-prepared-query-shallow prepared)))
+
+(t.deftest prepared-rules-outlive-source-text
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        seed (vev.transact-text
+               (addr conn)
+               "[[:db/add 100 :db/ident :follow] [:db/add 100 :db/valueType :db.type/ref] [:db/add 1 :follow 2] [:db/add 2 :follow 3]]")
+        query (vev.prepare-query-text "[:find [?to ...] :in $ ?from % :where (reachable ?from ?to)]")
+        rules (prepared-runtime-rules-text)
+        result (vev.q-prepared-with-rules
+                 conn.db
+                 query
+                 rules
+                 ([]vev.Query-Input [(vev.query-input-scalar (vev.value-entity 1))]))]
+    (t.is seed.ok seed.error)
+    (t.is rules.ok rules.error)
+    (t.is result.ok result.error)
+    (t.is (= (count result.rows) 2))
+    (t.is (= result.rows[0].values[0].entity 2))
+    (t.is (= result.rows[1].values[0].entity 3))
+    (vev.delete-live-tx-report-shallow seed)
+    (vev.delete-result-set-shallow result)
+    (vev.delete-prepared-rules-shallow rules)
+    (vev.delete-prepared-query-shallow query)))
+
+(t.deftest prepared-pull-pattern-outlives-source-text
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        seed (vev.transact-text (addr conn) "[{:db/id 77 :user/name \"Ada\"}]")
+        pattern (prepared-runtime-pull-text)
+        result (vev.pull-prepared conn.db pattern 77)]
+    (t.is seed.ok seed.error)
+    (t.is pattern.ok pattern.error)
+    (t.is (= (count result.attrs) 1))
+    (t.is (= result.attrs[0].a ":user/name"))
+    (t.is (= result.attrs[0].v.text "Ada"))
+    (vev.delete-live-tx-report-shallow seed)
+    (vev.delete-pull-result-shallow result)
+    (vev.delete-prepared-pull-pattern-shallow pattern)))
+
+(t.deftest prepared-query-with-rules-outlives-both-source-texts
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        seed (vev.transact-text
+               (addr conn)
+               "[[:db/add 100 :db/ident :follow] [:db/add 100 :db/valueType :db.type/ref] [:db/add 1 :follow 2] [:db/add 2 :follow 3]]")
+        prepared (prepared-runtime-query-with-rules-text)
+        result (vev.q-prepared-with-inputs
+                 conn.db
+                 prepared
+                 ([]vev.Query-Input [(vev.query-input-scalar (vev.value-entity 1))]))]
+    (t.is seed.ok seed.error)
+    (t.is prepared.ok prepared.error)
+    (t.is result.ok result.error)
+    (t.is (= (count result.rows) 2))
+    (t.is (= result.rows[0].values[0].entity 2))
+    (t.is (= result.rows[1].values[0].entity 3))
+    (vev.delete-live-tx-report-shallow seed)
+    (vev.delete-result-set-shallow result)
+    (vev.delete-prepared-query-shallow prepared)))

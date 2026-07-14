@@ -1,0 +1,199 @@
+// Copyright (c) Andreas Flakstad and Vev contributors
+// SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(import edn "kvist:edn")
+
+(defn data-edn-kind [value: Data] -> EDN-Kind
+  (cond
+    (data.nil? value) .Nil
+    (data.bool? value) .Bool
+    (data.int? value) .Int
+    (data.float? value) .Float
+    (data.string? value) .String
+    (data.symbol? value) .Symbol
+    (data.keyword? value) .Keyword
+    (data.vector? value) .Vector
+    (data.list? value) .List
+    (data.map? value) .Map
+    (data.set? value) .Set
+    :else .Nil))
+
+(defn data-edn-atom [value: Data] -> EDN-Node
+  (let [node (edn-node (data-edn-kind value)
+                       (if (or (data.string? value)
+                               (data.symbol? value)
+                               (data.keyword? value))
+                         (data.text value)
+                         ""))]
+    (cond
+      (data.bool? value) (set! node.bool-value (data.bool value))
+      (data.int? value) (set! node.int-value (data.int value))
+      (data.float? value) (set! node.float-value (data.float value)))
+    node))
+
+(defn data-edn-link-child! [doc: ^EDN-Doc, parent: int, previous: int, child: int] -> int
+  (if (= previous -1)
+    (edn-set-first-child! doc parent child)
+    (edn-set-next-sibling! doc previous child))
+  (edn-inc-child-count! doc parent)
+  child)
+
+(defn append-data-edn-node! [doc: ^EDN-Doc, value: Data] -> int
+  (let [parent (edn-add-node! doc (data-edn-atom value))]
+    (cond
+      (data.map? value)
+        (let [previous -1]
+          (for [i (arr.range 0 (count value))]
+            (let [key (append-data-edn-node! doc (data.key-at value i))]
+              (set! previous (data-edn-link-child! doc parent previous key)))
+            (let [item (append-data-edn-node! doc (data.value-at value i))]
+              (set! previous (data-edn-link-child! doc parent previous item)))))
+
+      (or (data.vector? value) (data.list? value) (data.set? value))
+        (let [previous -1]
+          (for [i (arr.range 0 (count value))]
+            (let [child (append-data-edn-node! doc (get value i))]
+              (set! previous (data-edn-link-child! doc parent previous child))))))
+    parent))
+
+(defn edn-doc-from-data [value: Data] -> EDN-Doc
+  (let [doc (empty-edn-doc)
+        root (append-data-edn-node! (addr doc) value)]
+    (edn-set-root! (addr doc) root)
+    doc))
+
+(defn prepare-query-data-with-sources [value: Data, sources: []DB-Source] -> Prepared-Query
+  (let [doc (edn-doc-from-data value)
+        query-value (empty-query)
+        [ok error] (parse-query-edn-with-sources! (addr query-value) doc sources)]
+    (delete doc.nodes)
+    (if ok
+      (Prepared-Query {ok: true
+                       error: ""
+                       query: (query-with-rule-call-plans query-value)
+                       source-owner: (data.retain value)
+                       owns-source: true})
+      (Prepared-Query {ok: false
+                       error: error
+                       query: query-value
+                       source-owner: (data.retain value)
+                       owns-source: true}))))
+
+(defn prepare-query-data [value: Data] -> Prepared-Query
+  (prepare-query-data-with-sources value ([]DB-Source [])))
+
+(defn prepare-rules-data [value: Data] -> Prepared-Rules
+  (let [doc (edn-doc-from-data value)
+        rules (make [dynamic]Rule)
+        [ok error] (parse-rules-edn! (addr rules) doc)]
+    (delete doc.nodes)
+    (when (not ok)
+      (return (Prepared-Rules {ok: false
+                               error: error
+                               rules: rules
+                               source-owner: (data.retain value)
+                               owns-source: true})))
+    (let [[valid valid-error] (validate-parsed-rules (slice rules 0))]
+      (Prepared-Rules {ok: valid
+                       error: (if valid "" valid-error)
+                       rules: rules
+                       source-owner: (data.retain value)
+                       owns-source: true}))))
+
+(defn parse-pull-pattern-data [value: Data] -> [pattern: [dynamic]Pull-Spec, ok: bool, error: string]
+  (let [doc (edn-doc-from-data value)]
+    (defer (delete doc.nodes))
+    (when (not (= doc.nodes[doc.root].kind .Vector))
+      (return (make [dynamic]Pull-Spec) false "pull pattern must be a vector"))
+    (edn-pull-specs doc doc.root)))
+
+(defn prepare-pull-pattern-data [value: Data] -> Prepared-Pull-Pattern
+  (let [[pattern ok error] (parse-pull-pattern-data value)]
+    (Prepared-Pull-Pattern {ok: ok
+                            error: error
+                            pattern: pattern
+                            source-owner: (data.retain value)
+                            owns-source: true})))
+
+(defn prepare-tx-data [value: Data] -> Prepared-Tx-Data
+  (let [doc (edn-doc-from-data value)
+        parsed (make [dynamic]Tx-Data)
+        [ok error] (parse-tx-data-edn! (addr parsed) doc)]
+    (delete doc.nodes)
+    (if ok
+      (let [owned (tx-data-slice-owned (slice parsed 0))]
+        (for [data parsed]
+          (delete-parser-tx-data-value-containers-shallow data))
+        (delete parsed)
+        (Prepared-Tx-Data {ok: true error: "" tx-data: owned}))
+      (do
+        (delete parsed)
+        (Prepared-Tx-Data {ok: false error: error tx-data: (make [dynamic]Tx-Data)})))))
+
+(defn q-result-store-db-data-with-inputs [snapshot: ^Store-DB, value: Data, inputs: []Query-Input] -> Query-Result
+  (let [prepared (prepare-query-data value)
+        result (q-result-store-db-prepared-with-inputs snapshot prepared inputs)]
+    (delete-prepared-query-shallow prepared)
+    result))
+
+(defn q-result-store-db-data-with-input-text [snapshot: ^Store-DB, value: Data, inputs-text: string] -> Query-Result
+  (let [prepared (prepare-query-data value)
+        result (q-result-store-db-prepared-with-input-text snapshot prepared inputs-text)]
+    (delete-prepared-query-shallow prepared)
+    result))
+
+(defn q-result-store-db-data-with-rules-input-text [snapshot: ^Store-DB, query-value: Data, rules-value: Data, inputs-text: string] -> Query-Result
+  (let [prepared-query (prepare-query-data query-value)
+        prepared-rules (prepare-rules-data rules-value)
+        result (q-result-store-db-prepared-with-rules-input-text snapshot prepared-query prepared-rules inputs-text)]
+    (delete-prepared-query-shallow prepared-query)
+    (delete-prepared-rules-shallow prepared-rules)
+    result))
+
+(defn q-result-store-db-data-with-rules-text-input-text [snapshot: ^Store-DB, query-value: Data, rules-text: string, inputs-text: string] -> Query-Result
+  (let [prepared-query (prepare-query-data query-value)
+        prepared-rules (parse-rules-text rules-text)
+        result (q-result-store-db-prepared-with-rules-input-text snapshot prepared-query prepared-rules inputs-text)]
+    (delete-prepared-query-shallow prepared-query)
+    (delete-prepared-rules-shallow prepared-rules)
+    result))
+
+(defn transact-store-report-data [store: ^Store-Conn, value: Data] -> Store-Tx-Report
+  (let [prepared (prepare-tx-data value)]
+    (when (not prepared.ok)
+      (let [[snapshot snapshot-ok _] (store-db store)
+            error prepared.error]
+        (delete-prepared-tx-data-shallow prepared)
+        (if snapshot-ok
+          (let [report (failed-store-tx-report snapshot error)]
+            (close-store-db snapshot)
+            (return report))
+          (return (failed-store-tx-report (Store-DB {}) error)))))
+    (let [report (transact-store-report-tx-data store (slice prepared.tx-data 0))]
+      (delete-prepared-tx-data-shallow prepared)
+      report)))
+
+(defn db-with-store-db-data [snapshot: ^Store-DB, value: Data] -> Store-DB
+  (let [prepared (prepare-tx-data value)]
+    (when (not prepared.ok)
+      (let [error prepared.error]
+        (delete-prepared-tx-data-shallow prepared)
+        (panic error)))
+    (let [out (db-with-store-db-tx-data snapshot (slice prepared.tx-data 0))]
+      (delete-prepared-tx-data-shallow prepared)
+      out)))
+
+(defn pull-store-db-value-data [snapshot: ^Store-DB, value: Data, entity: u64] -> [out: Value, ok: bool, error: string]
+  (let [prepared (prepare-pull-pattern-data value)
+        [result-value result-ok result-error] (pull-store-db-value-prepared snapshot prepared entity)]
+    (delete-prepared-pull-pattern-shallow prepared)
+    (return result-value result-ok result-error)))
+
+(defn pull-store-db-lookup-ref-value-data [snapshot: ^Store-DB, value: Data, attr: string, lookup-value: Value] -> [out: Value, ok: bool, error: string]
+  (let [prepared (prepare-pull-pattern-data value)
+        [result-value result-ok result-error]
+          (pull-store-db-lookup-ref-value-prepared snapshot prepared attr lookup-value)]
+    (delete-prepared-pull-pattern-shallow prepared)
+    (return result-value result-ok result-error)))

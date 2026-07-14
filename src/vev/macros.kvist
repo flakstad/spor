@@ -2545,7 +2545,7 @@
               ([]Rule [(splice (emit-rule-input-rules inputs))])))
           ([]Query-Input [(splice (emit-query-input-list-for-query find-items input-items inputs))]))))
     (quasiquote
-      (q-result-store-db-prepared-with-inputs
+      (q-result-store-db-data-with-inputs
         (unquote snapshot)
         (unquote query-form)
         ([]Query-Input [(splice (emit-query-input-list-without-rules inputs))])))))
@@ -2756,7 +2756,7 @@
       (transact-store-report-tx-data
         (unquote store)
         ([]Tx-Data [(splice (emit-tx-data-items tx-form))])))
-    (quasiquote (transact-store-report-tx-data (unquote store) (unquote tx-form)))))
+    (quasiquote (transact-store-report-data (unquote store) (unquote tx-form)))))
 
 (defmacro db-with-store-db [snapshot tx-form]
   (if (vector? tx-form)
@@ -2764,7 +2764,7 @@
       (db-with-store-db-tx-data
         (unquote snapshot)
         ([]Tx-Data [(splice (emit-tx-data-items tx-form))])))
-    (quasiquote (db-with-store-db-tx-data (unquote snapshot) (unquote tx-form)))))
+    (quasiquote (db-with-store-db-data (unquote snapshot) (unquote tx-form)))))
 
 (defmacro pull [db pattern entity]
   (if (vector? pattern)
@@ -2796,7 +2796,7 @@
         ([]Pull-Spec [(splice (emit-pull-specs pattern))])
         (unquote entity)))
     (quasiquote
-      (pull-store-db-value-prepared
+      (pull-store-db-value-data
         (unquote snapshot)
         (unquote pattern)
         (unquote entity)))))

@@ -182,6 +182,17 @@
 
 (def try-q-text (overload try-q-text-inputs try-q-text-no-input))
 
+(defn try-q-data-inputs [query: Data, db: DB, inputs: string] -> Result
+  (unchecked-result-value
+    (vev.q-result-store-db-data-with-input-text (db-ptr db) query inputs)))
+
+(defn try-q-data-no-input [query: Data, db: DB] -> Result
+  (unchecked-result-value
+    (vev.q-result-store-db-data-with-inputs
+      (db-ptr db) query ([]vev.Query-Input []))))
+
+(def try-q-data (overload try-q-data-inputs try-q-data-no-input))
+
 (defn q-text-inputs [query: string, db: DB, inputs: string] -> Result
   (result-value
     (vev.q-result-store-db-text-with-input-text (db-ptr db) query inputs)))
@@ -200,6 +211,21 @@
 (defn q-rules [query: string, db: DB, rules: string, inputs: string] -> Result
   (result-value
     (vev.q-result-store-db-text-with-rules-input-text
+      (db-ptr db) query rules inputs)))
+
+(defn try-q-data-rules [query: Data, db: DB, rules: Data, inputs: string] -> Result
+  (unchecked-result-value
+    (vev.q-result-store-db-data-with-rules-input-text
+      (db-ptr db) query rules inputs)))
+
+(defn q-data-rules [query: Data, db: DB, rules: Data, inputs: string] -> Result
+  (result-value
+    (vev.q-result-store-db-data-with-rules-input-text
+      (db-ptr db) query rules inputs)))
+
+(defn try-q-data-rules-text [query: Data, db: DB, rules: string, inputs: string] -> Result
+  (unchecked-result-value
+    (vev.q-result-store-db-data-with-rules-text-input-text
       (db-ptr db) query rules inputs)))
 
 (defmacro q-with-fns [query db fns & inputs]
@@ -254,6 +280,10 @@
 
 (defn try-pull-lookup-text [db: DB, pattern: string, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
   (vev.pull-store-db-lookup-ref-value-text
+    (db-ptr db) pattern attr lookup-value))
+
+(defn try-pull-lookup-data [db: DB, pattern: Data, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
+  (vev.pull-store-db-lookup-ref-value-data
     (db-ptr db) pattern attr lookup-value))
 
 (defn close-value [value: Value]

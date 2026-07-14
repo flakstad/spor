@@ -174,27 +174,35 @@ can still call `.close` explicitly.
 
 Kvist applications import the high-level `vev_app` package and use the same
 connection -> immutable DB value -> query shape. Queries, transactions, and
-pull patterns are Kvist data literals rather than EDN strings:
+pull patterns can be named, immutable Kvist data values rather than EDN
+strings:
 
 ```clojure
 (package main)
 
 (import d "../src/vev_app")
 
+(def artists
+  '[{:db/id 1 :artist/name "John Lennon"}
+    {:db/id 2 :artist/name "Yoko Ono"}])
+
+(def artist-names
+  '[:find ?name
+    :where [?e :artist/name ?name]])
+
+(def artist-pattern
+  '[:artist/name])
+
 (defn main []
   (let [conn (d.create-conn)]
     (defer (d.close conn))
-    (d.transact conn
-      [{:db/id 1 :artist/name "John Lennon"}
-       {:db/id 2 :artist/name "Yoko Ono"}])
+    (d.transact conn artists)
     (let [snapshot (d.db conn)]
       (defer (d.close snapshot))
-      (let [result
-              (d.q
-                [:find ?name
-                 :where [?e :artist/name ?name]]
-                snapshot)]
-        (defer (d.close result))))))
+      (let [result (d.q artist-names snapshot)
+            artist (d.pull snapshot artist-pattern 1)]
+        (defer (d.close result))
+        (defer (d.close artist))))))
 ```
 
 Durability changes only connection creation:
@@ -204,8 +212,9 @@ Durability changes only connection creation:
   ...)
 ```
 
-Use `q-text` when a query is loaded as EDN at runtime rather than written as a
-Kvist literal:
+Quoted values are `Data`, so the same value can be passed to `d.q`,
+`d.transact`, `d.pull`, or `d.db-with`. Use `q-text` only when a query arrives
+as EDN text at runtime:
 
 ```clojure
 (d.q-text query-text snapshot input-text)

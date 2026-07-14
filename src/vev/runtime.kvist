@@ -224,6 +224,29 @@
       (arr.push! out (tx-data-owned data)))
     out))
 
+(defn delete-owned-tx-data-item [data: Tx-Data]
+  (delete data.op)
+  (delete data.tempid)
+  (delete data.lookup-attr)
+  (delete-owned-value data.lookup-value)
+  (delete data.ident)
+  (delete data.a)
+  (delete-owned-value data.v)
+  (delete-owned-value data.expected)
+  (delete data.expected-lookup-attr)
+  (delete-owned-value data.expected-lookup-value)
+  (delete data.value-tempid)
+  (delete data.value-lookup-attr)
+  (delete-owned-value data.value-lookup-value)
+  (delete-owned-value data.nested-map)
+  (delete data.nested-tempid)
+  (delete data.map-group))
+
+(defn delete-owned-tx-data [tx-data: [dynamic]Tx-Data]
+  (for [data tx-data]
+    (delete-owned-tx-data-item data))
+  (delete tx-data))
+
 (defn get-some-owned [clause: Get-Some] -> Get-Some
   (let [out (Get-Some {source: clause.source
                        has-source: clause.has-source
@@ -337,13 +360,66 @@
   (delete query.return-map-keys))
 
 (defn delete-prepared-query-shallow [prepared: Prepared-Query]
-  (delete-query-shallow prepared.query))
+  (delete-query-shallow prepared.query)
+  (when prepared.owns-source
+    (data.release prepared.source-owner))
+  (when prepared.owns-rules-source
+    (data.release prepared.rules-source-owner)))
+
+(defn delete-input-binding-shallow [binding: Input-Binding]
+  (for [item binding.items]
+    (delete-input-binding-shallow item))
+  (delete binding.items))
+
+(defn delete-prepared-binding-shallow [prepared: Prepared-Binding]
+  (delete-input-binding-shallow prepared.binding)
+  (when prepared.owns-source
+    (data.release prepared.source-owner)))
+
+(defn delete-prepared-in-shallow [prepared: Prepared-In]
+  (for [binding prepared.bindings]
+    (delete-input-binding-shallow binding))
+  (delete prepared.bindings)
+  (when prepared.owns-source
+    (data.release prepared.source-owner)))
+
+(defn delete-prepared-with-shallow [prepared: Prepared-With]
+  (delete prepared.vars)
+  (when prepared.owns-source
+    (data.release prepared.source-owner)))
+
+(defn delete-prepared-clause-shallow [prepared: Prepared-Clause]
+  (delete prepared.clauses)
+  (delete prepared.predicates)
+  (delete prepared.function-clauses)
+  (delete prepared.rule-calls)
+  (delete prepared.get-elses)
+  (delete-get-somes prepared.get-somes)
+  (delete prepared.grounds)
+  (delete prepared.not-groups)
+  (delete prepared.or-groups)
+  (delete prepared.where-steps)
+  (when prepared.owns-source
+    (data.release prepared.source-owner)))
 
 (defn delete-prepared-rules-shallow [prepared: Prepared-Rules]
-  (delete prepared.rules))
+  (delete prepared.rules)
+  (when prepared.owns-source
+    (data.release prepared.source-owner)))
+
+(defn delete-pull-spec-containers-shallow [specs: []Pull-Spec]
+  (for [spec specs]
+    (delete-pull-spec-containers-shallow (slice spec.pattern 0))
+    (delete spec.pattern)))
+
+(defn delete-prepared-pull-pattern-shallow [prepared: Prepared-Pull-Pattern]
+  (delete-pull-spec-containers-shallow (slice prepared.pattern 0))
+  (delete prepared.pattern)
+  (when prepared.owns-source
+    (data.release prepared.source-owner)))
 
 (defn delete-prepared-tx-data-shallow [prepared: Prepared-Tx-Data]
-  (delete prepared.tx-data))
+  (delete-owned-tx-data prepared.tx-data))
 
 (defn delete-tx-report-shallow [report: Tx-Report]
   (when report.ok

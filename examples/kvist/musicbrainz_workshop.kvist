@@ -22,56 +22,56 @@
 (def default-uri "build/musicbrainz/vev-mbrainz-tutorial.sqlite")
 (def mbrainz-sample-rules-path "build/upstream/mbrainz-sample/resources/rules.edn")
 
-(def opening-release-pull-query "[:find [(pull $ ?release [*])] :in $ ?artist-name :where [?release :release/artists ?artist] [?artist :artist/name ?artist-name] [?release :release/name ?release-name]]")
-(def tuple-binding-query "[:find [(pull $ ?release [*])] :in $ [?artist-name ?release-name] :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]]")
-(def request-map-query "[:find (pull $ ?release [:release/name :release/artistCredit :release/year {:release/script [*]} {:release/media [{:medium/tracks [:track/name]}]}]) :in $ ?artist-name :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist]]")
-(def collection-binding-query "[:find ?release-name :in $ [?artist-name ...] :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]]")
-(def relation-binding-query "[:find ?release :in $ [[?artist-name ?release-name]] :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]]")
-(def relation-find-missing-db-query "[:find ?artist-name ?release-name :in ?artist-name :where [?release :release/name ?release-name] [?release :release/artists ?artist] [?artist :artist/name ?artist-name]]")
-(def relation-find-query "[:find ?artist-name ?release-name :in $ ?artist-name :where [?release :release/name ?release-name] [?release :release/artists ?artist] [?artist :artist/name ?artist-name]]")
-(def collection-find-query "[:find [?release-name ...] :in $ ?artist-name :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]]")
-(def tuple-find-query "[:find [?year ?month ?day] :in $ ?name :where [?artist :artist/name ?name] [?artist :artist/startDay ?day] [?artist :artist/startMonth ?month] [?artist :artist/startYear ?year]]")
-(def scalar-find-query "[:find ?year . :in $ ?name :where [?artist :artist/name ?name] [?artist :artist/startYear ?year]]")
-(def return-map-find-query "[:find ?artist-name ?release-name :keys artist release :in $ ?artist-name :where [?release :release/name ?release-name] [?release :release/artists ?artist] [?artist :artist/name ?artist-name]]")
-(def function-expression-query "[:find ?track-name ?minutes :in $ ?artist-name :where [?artist :artist/name ?artist-name] [?track :track/artists ?artist] [?track :track/duration ?millis] [(quot ?millis 60000) ?minutes] [?track :track/name ?track-name]]")
-(def artist-type-gender-query "[:find ?id ?type ?gender :in $ ?name :where [?e :artist/name ?name] [?e :artist/gid ?id] [?e :artist/type ?teid] [?teid :db/ident ?type] [?e :artist/gender ?geid] [?geid :db/ident ?gender]]")
-(def min-track-duration-query "[:find [(min ?dur)] :where [?e :track/duration ?dur]]")
-(def sum-medium-track-count-query "[:find (sum ?count) . :with ?medium :where [?medium :medium/trackCount ?count]]")
-(def artist-name-count-query "[:find (count ?name) (count-distinct ?name) :with ?artist :where [?artist :artist/name ?name]]")
-(def tracks-by-artist-name-query "[:find ?title :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?t :track/artists ?a] [?t :track/name ?title]]")
-(def pre-1970-release-names-query "[:find ?name :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [(< ?year 1970)] [?r :release/name ?name]]")
-(def pre-1970-release-names-switched-query "[:find ?name :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [?r :release/name ?name] [(< ?year 1970)]]")
-(def pre-1970-track-titles-broad-query "[:find ?title :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [?r :release/name ?name] [(< ?year 1970)] [?t :track/artists ?a] [?t :track/name ?title]]")
-(def pre-1970-track-titles-with-release-name-query "[:find ?title :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [?r :release/name ?name] [(< ?year 1970)] [?r :release/media ?m] [?m :medium/tracks ?t] [?t :track/name ?title]]")
-(def pre-1970-track-titles-query "[:find ?title :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [(< ?year 1970)] [?r :release/media ?m] [?m :medium/tracks ?t] [?t :track/name ?title]]")
+(def opening-release-pull-query '[:find [(pull $ ?release [*])] :in $ ?artist-name :where [?release :release/artists ?artist] [?artist :artist/name ?artist-name] [?release :release/name ?release-name]])
+(def tuple-binding-query '[:find [(pull $ ?release [*])] :in $ [?artist-name ?release-name] :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]])
+(def request-map-query '[:find (pull $ ?release [:release/name :release/artistCredit :release/year {:release/script [*]} {:release/media [{:medium/tracks [:track/name]}]}]) :in $ ?artist-name :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist]])
+(def collection-binding-query '[:find ?release-name :in $ [?artist-name ...] :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]])
+(def relation-binding-query '[:find ?release :in $ [[?artist-name ?release-name]] :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]])
+(def relation-find-missing-db-query '[:find ?artist-name ?release-name :in ?artist-name :where [?release :release/name ?release-name] [?release :release/artists ?artist] [?artist :artist/name ?artist-name]])
+(def relation-find-query '[:find ?artist-name ?release-name :in $ ?artist-name :where [?release :release/name ?release-name] [?release :release/artists ?artist] [?artist :artist/name ?artist-name]])
+(def collection-find-query '[:find [?release-name ...] :in $ ?artist-name :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]])
+(def tuple-find-query '[:find [?year ?month ?day] :in $ ?name :where [?artist :artist/name ?name] [?artist :artist/startDay ?day] [?artist :artist/startMonth ?month] [?artist :artist/startYear ?year]])
+(def scalar-find-query '[:find ?year . :in $ ?name :where [?artist :artist/name ?name] [?artist :artist/startYear ?year]])
+(def return-map-find-query '[:find ?artist-name ?release-name :keys artist release :in $ ?artist-name :where [?release :release/name ?release-name] [?release :release/artists ?artist] [?artist :artist/name ?artist-name]])
+(def function-expression-query '[:find ?track-name ?minutes :in $ ?artist-name :where [?artist :artist/name ?artist-name] [?track :track/artists ?artist] [?track :track/duration ?millis] [(quot ?millis 60000) ?minutes] [?track :track/name ?track-name]])
+(def artist-type-gender-query '[:find ?id ?type ?gender :in $ ?name :where [?e :artist/name ?name] [?e :artist/gid ?id] [?e :artist/type ?teid] [?teid :db/ident ?type] [?e :artist/gender ?geid] [?geid :db/ident ?gender]])
+(def min-track-duration-query '[:find [(min ?dur)] :where [?e :track/duration ?dur]])
+(def sum-medium-track-count-query '[:find (sum ?count) . :with ?medium :where [?medium :medium/trackCount ?count]])
+(def artist-name-count-query '[:find (count ?name) (count-distinct ?name) :with ?artist :where [?artist :artist/name ?name]])
+(def tracks-by-artist-name-query '[:find ?title :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?t :track/artists ?a] [?t :track/name ?title]])
+(def pre-1970-release-names-query '[:find ?name :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [(< ?year 1970)] [?r :release/name ?name]])
+(def pre-1970-release-names-switched-query '[:find ?name :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [?r :release/name ?name] [(< ?year 1970)]])
+(def pre-1970-track-titles-broad-query '[:find ?title :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [?r :release/name ?name] [(< ?year 1970)] [?t :track/artists ?a] [?t :track/name ?title]])
+(def pre-1970-track-titles-with-release-name-query '[:find ?title :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [?r :release/name ?name] [(< ?year 1970)] [?r :release/media ?m] [?m :medium/tracks ?t] [?t :track/name ?title]])
+(def pre-1970-track-titles-query '[:find ?title :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [(< ?year 1970)] [?r :release/media ?m] [?m :medium/tracks ?t] [?t :track/name ?title]])
 
-(def track-release-rules "[[(track-release ?t ?r) [?m :medium/tracks ?t] [?r :release/media ?m]]]")
-(def track-release-rule-query "[:find ?title ?album ?year :in $ % ?artist-name :where [?a :artist/name ?artist-name] [?t :track/artists ?a] [?t :track/name ?title] (track-release ?t ?r) [?r :release/name ?album] [?r :release/year ?year]]")
-(def mbrainz-track-release-rule-query "[:find ?title ?album ?year :in $ % ?artist-name :where [?a :artist/name ?artist-name] [?t :track/artists ?a] [?t :track/name ?title] (track-release ?t ?r) [?r :release/name ?album] [?r :release/year ?year]]")
-(def mbrainz-track-search-info-query "[:find ?title ?artist ?album ?year :in $ % ?search :where (track-search ?search ?track) (track-info ?track ?title ?artist ?album ?year)]")
-(def mbrainz-collab-query "[:find ?aname ?aname2 :in $ % [?aname ...] :where (collab ?aname ?aname2)]")
-(def mbrainz-collab-net-2-query "[:find ?aname ?aname2 :in $ % [?aname ...] :where (collab-net-2 ?aname ?aname2)]")
-(def mbrainz-collab-nested-query "[:find ?aname2 :in $ % [[?aname]] :where (collab ?aname ?aname2)]")
-(def mbrainz-bill-withers-collaboration-query "[:find ?aname ?tname :in $ ?artist-name :where [?a :artist/name ?artist-name] [?t :track/artists ?a] [?t :track/name ?tname] [(!= \"Outro\" ?tname)] [(!= \"[outro]\" ?tname)] [(!= \"Intro\" ?tname)] [(!= \"[intro]\" ?tname)] [?t2 :track/name ?tname] [?t2 :track/artists ?a2] [(!= ?a2 ?a)] [?a2 :artist/name ?aname]]")
-(def track-exercise-rules "[[(track-artist ?t ?artist-name) [?t :track/artists ?a] [?a :artist/name ?artist-name]] [(track-release ?t ?release-name ?release-year) [?m :medium/tracks ?t] [?r :release/media ?m] [?r :release/name ?release-name] [?r :release/year ?release-year]]]")
-(def track-rules-exercise-query "[:find ?track-name ?artist-name ?release-name ?release-year :in $ % ?track-name :where [?t :track/name ?track-name] (track-artist ?t ?artist-name) (track-release ?t ?release-name ?release-year)]")
-(def track-info-rules "[[(track-artist ?t ?artist-name) [?t :track/artists ?a] [?a :artist/name ?artist-name]] [(track-release ?t ?release-name ?release-year) [?m :medium/tracks ?t] [?r :release/media ?m] [?r :release/name ?release-name] [?r :release/year ?release-year]] [(track-info ?t ?artist-name ?release-name ?release-year) (track-artist ?t ?artist-name) (track-release ?t ?release-name ?release-year)]]")
-(def track-info-rule-query "[:find ?track-name ?artist-name ?release-name ?release-year :in $ % ?track-name :where [?t :track/name ?track-name] (track-info ?t ?artist-name ?release-name ?release-year)]")
+(def track-release-rules '[[(track-release ?t ?r) [?m :medium/tracks ?t] [?r :release/media ?m]]])
+(def track-release-rule-query '[:find ?title ?album ?year :in $ % ?artist-name :where [?a :artist/name ?artist-name] [?t :track/artists ?a] [?t :track/name ?title] (track-release ?t ?r) [?r :release/name ?album] [?r :release/year ?year]])
+(def mbrainz-track-release-rule-query '[:find ?title ?album ?year :in $ % ?artist-name :where [?a :artist/name ?artist-name] [?t :track/artists ?a] [?t :track/name ?title] (track-release ?t ?r) [?r :release/name ?album] [?r :release/year ?year]])
+(def mbrainz-track-search-info-query '[:find ?title ?artist ?album ?year :in $ % ?search :where (track-search ?search ?track) (track-info ?track ?title ?artist ?album ?year)])
+(def mbrainz-collab-query '[:find ?aname ?aname2 :in $ % [?aname ...] :where (collab ?aname ?aname2)])
+(def mbrainz-collab-net-2-query '[:find ?aname ?aname2 :in $ % [?aname ...] :where (collab-net-2 ?aname ?aname2)])
+(def mbrainz-collab-nested-query '[:find ?aname2 :in $ % [[?aname]] :where (collab ?aname ?aname2)])
+(def mbrainz-bill-withers-collaboration-query '[:find ?aname ?tname :in $ ?artist-name :where [?a :artist/name ?artist-name] [?t :track/artists ?a] [?t :track/name ?tname] [(!= "Outro" ?tname)] [(!= "[outro]" ?tname)] [(!= "Intro" ?tname)] [(!= "[intro]" ?tname)] [?t2 :track/name ?tname] [?t2 :track/artists ?a2] [(!= ?a2 ?a)] [?a2 :artist/name ?aname]])
+(def track-exercise-rules '[[(track-artist ?t ?artist-name) [?t :track/artists ?a] [?a :artist/name ?artist-name]] [(track-release ?t ?release-name ?release-year) [?m :medium/tracks ?t] [?r :release/media ?m] [?r :release/name ?release-name] [?r :release/year ?release-year]]])
+(def track-rules-exercise-query '[:find ?track-name ?artist-name ?release-name ?release-year :in $ % ?track-name :where [?t :track/name ?track-name] (track-artist ?t ?artist-name) (track-release ?t ?release-name ?release-year)])
+(def track-info-rules '[[(track-artist ?t ?artist-name) [?t :track/artists ?a] [?a :artist/name ?artist-name]] [(track-release ?t ?release-name ?release-year) [?m :medium/tracks ?t] [?r :release/media ?m] [?r :release/name ?release-name] [?r :release/year ?release-year]] [(track-info ?t ?artist-name ?release-name ?release-year) (track-artist ?t ?artist-name) (track-release ?t ?release-name ?release-year)]])
+(def track-info-rule-query '[:find ?track-name ?artist-name ?release-name ?release-year :in $ % ?track-name :where [?t :track/name ?track-name] (track-info ?t ?artist-name ?release-name ?release-year)])
 
-(def pull-release-name-query "[:find (pull ?e [:release/name]) :in $ ?artist-name :where [?a :artist/name ?artist-name] [?e :release/artists ?a]]")
-(def pull-release-name-dynamic-pattern-query "[:find (pull ?e pattern) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]]")
-(def pull-release-and-artist-query "[:find (pull ?e [:release/name]) (pull ?a [*]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]]")
-(def pull-release-name-and-artists-query "[:find (pull ?e [:release/name :release/artists]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]]")
-(def duplicate-pull-release-query "[:find (pull ?e [:release/name]) (pull ?e [:release/artists]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]]")
-(def nested-pull-release-artists-query "[:find (pull ?e [:release/name {:release/artists [*]}]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]]")
-(def nested-pull-release-artists-country-query "[:find (pull ?e [:release/name {:release/artists [*]} {:release/country [*]}]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]]")
-(def deep-pull-release-artists-country-query "[:find (pull ?e [:release/name {:release/artists [* {:artist/country [*]}]} {:release/country [*]}]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]]")
-(def direct-pull-expression-in-query-query "[:find [(pull ?e [:release/name]) ...] :in $ ?artist :where [?e :release/artists ?artist]]")
-(def direct-dynamic-pattern-input-query "[:find [(pull ?e pattern) ...] :in $ ?artist pattern :where [?e :release/artists ?artist]]")
+(def pull-release-name-query '[:find (pull ?e [:release/name]) :in $ ?artist-name :where [?a :artist/name ?artist-name] [?e :release/artists ?a]])
+(def pull-release-name-dynamic-pattern-query '[:find (pull ?e pattern) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]])
+(def pull-release-and-artist-query '[:find (pull ?e [:release/name]) (pull ?a [*]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]])
+(def pull-release-name-and-artists-query '[:find (pull ?e [:release/name :release/artists]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]])
+(def duplicate-pull-release-query '[:find (pull ?e [:release/name]) (pull ?e [:release/artists]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]])
+(def nested-pull-release-artists-query '[:find (pull ?e [:release/name {:release/artists [*]}]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]])
+(def nested-pull-release-artists-country-query '[:find (pull ?e [:release/name {:release/artists [*]} {:release/country [*]}]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]])
+(def deep-pull-release-artists-country-query '[:find (pull ?e [:release/name {:release/artists [* {:artist/country [*]}]} {:release/country [*]}]) :in $ ?artist-name pattern :where [?a :artist/name ?artist-name] [?e :release/artists ?a]])
+(def direct-pull-expression-in-query-query '[:find [(pull ?e [:release/name]) ...] :in $ ?artist :where [?e :release/artists ?artist]])
+(def direct-dynamic-pattern-input-query '[:find [(pull ?e pattern) ...] :in $ ?artist pattern :where [?e :release/artists ?artist]])
 
-(def dylan-harrison-cd-query "[:find ?medium . :in $ ?release :where [?release :release/media ?medium]]")
-(def ghost-riders-query "[:find ?track . :in $ ?release ?trackno :where [?release :release/media ?medium] [?medium :medium/tracks ?track] [?track :track/position ?trackno]]")
-(def nested-release-media-tracks-pattern "[{:release/media [{:medium/tracks [:track/name {:track/artists [:artist/name]}]}]}]")
+(def dylan-harrison-cd-query '[:find ?medium . :in $ ?release :where [?release :release/media ?medium]])
+(def ghost-riders-query '[:find ?track . :in $ ?release ?trackno :where [?release :release/media ?medium] [?medium :medium/tracks ?track] [?track :track/position ?trackno]])
+(def nested-release-media-tracks-pattern '[{:release/media [{:medium/tracks [:track/name {:track/artists [:artist/name]}]}]}])
 
 (defn value-map-get [value: d.Value, key: string] -> [found: d.Value, ok: bool]
   (when (not (= value.kind .Map))
@@ -152,8 +152,8 @@
             [artists artists-ok] (value-map-get first-track ":track/artists")]
         (and track-name-ok (= track-name.kind .String) (= track-name.text "Jumpin' Jack Flash / Youngblood") artists-ok (value-vector-has-map-string? artists ":artist/name" "Leon Russell"))))))
 
-(defn query-scalar-entity! [snapshot: d.DB, query: string, inputs: string] -> [entity: u64, ok: bool]
-  (let [result (d.try-q-text query snapshot inputs)]
+(defn query-scalar-entity! [snapshot: d.DB, query: Data, inputs: string] -> [entity: u64, ok: bool]
+  (let [result (d.try-q-data query snapshot inputs)]
     (defer (d.close result))
     (when (not (and result.ok (= (count result.rows) 1) (= (count result.rows[0].values) 1)))
       (return 0 false))
@@ -169,13 +169,13 @@
     (when (not ok)
       (set! passed^ false))))
 
-(defn validate-query! [snapshot: d.DB, label: string, query: string, inputs: string, expected: int, passed: ^bool]
-  (let [result (d.try-q-text query snapshot inputs)]
+(defn validate-query! [snapshot: d.DB, label: string, query: Data, inputs: string, expected: int, passed: ^bool]
+  (let [result (d.try-q-data query snapshot inputs)]
     (check-result! label result expected passed)
     (d.close result)))
 
-(defn validate-query-no-input! [snapshot: d.DB, label: string, query: string, expected: int, passed: ^bool]
-  (let [result (d.try-q-text query snapshot)]
+(defn validate-query-no-input! [snapshot: d.DB, label: string, query: Data, expected: int, passed: ^bool]
+  (let [result (d.try-q-data query snapshot)]
     (check-result! label result expected passed)
     (d.close result)))
 
@@ -303,7 +303,7 @@
           (set! passed^ false))
         (when (= read-err nil)
           (defer (delete rules-data))
-          (let [first-result (d.try-q-rules
+          (let [first-result (d.try-q-data-rules-text
                                mbrainz-collab-nested-query
                                snapshot
                                (string rules-data)
@@ -311,7 +311,7 @@
                 second-input (query-result-relation-input-text first-result)]
             (defer (delete second-input))
             (defer (d.close first-result))
-            (validate-rule-query! snapshot
+            (validate-rule-query-text! snapshot
               "mbrainz-collab-nested"
               mbrainz-collab-nested-query
               (string rules-data)
@@ -419,8 +419,8 @@
       (set! passed^ false))
     (d.close result)))
 
-(defn validate-query-error! [snapshot: d.DB, label: string, query: string, inputs: string, expected-error: string, passed: ^bool]
-  (let [result (d.try-q-text query snapshot inputs)
+(defn validate-query-error! [snapshot: d.DB, label: string, query: Data, inputs: string, expected-error: string, passed: ^bool]
+  (let [result (d.try-q-data query snapshot inputs)
         ok (and (not result.ok)
                 (strings.contains result.error expected-error))]
     (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=%d error=%s\n" label ok (if ok 1 0) 1 result.error)
@@ -428,19 +428,24 @@
       (set! passed^ false))
     (d.close result)))
 
-(defn validate-rule-query! [snapshot: d.DB, label: string, query: string, rules: string, inputs: string, expected: int, passed: ^bool]
-  (let [result (d.try-q-rules query snapshot rules inputs)]
+(defn validate-rule-query! [snapshot: d.DB, label: string, query: Data, rules: Data, inputs: string, expected: int, passed: ^bool]
+  (let [result (d.try-q-data-rules query snapshot rules inputs)]
     (check-result! label result expected passed)
     (d.close result)))
 
-(defn validate-rule-query-file! [snapshot: d.DB, label: string, query: string, rules-path: string, inputs: string, expected: int, passed: ^bool]
+(defn validate-rule-query-text! [snapshot: d.DB, label: string, query: Data, rules: string, inputs: string, expected: int, passed: ^bool]
+  (let [result (d.try-q-data-rules-text query snapshot rules inputs)]
+    (check-result! label result expected passed)
+    (d.close result)))
+
+(defn validate-rule-query-file! [snapshot: d.DB, label: string, query: Data, rules-path: string, inputs: string, expected: int, passed: ^bool]
   (let [[data read-err] (os.read_entire_file rules-path context.allocator)]
     (when (!= read-err nil)
       (fmt.printf "source=kvist section=%s ok=false rows=0 expected=%d error=failed to read rules\n" label expected)
       (set! passed^ false)
       (return))
     (defer (delete data))
-    (validate-rule-query! snapshot label query (string data) inputs expected passed)))
+    (validate-rule-query-text! snapshot label query (string data) inputs expected passed)))
 
 (defn check-pull! [label: string, ok: bool, passed: ^bool]
   (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=%d error=%s\n" label ok (if ok 1 0) 1 "")
@@ -463,8 +468,8 @@
       (return true)))
   false)
 
-(defn validate-pull-query! [snapshot: d.DB, label: string, query: string, inputs: string, expected: int, expected-name: string, passed: ^bool]
-  (let [result (d.try-q-text query snapshot inputs)
+(defn validate-pull-query! [snapshot: d.DB, label: string, query: Data, inputs: string, expected: int, expected-name: string, passed: ^bool]
+  (let [result (d.try-q-data query snapshot inputs)
         rows (count result.rows)
         ok (and result.ok
                 (= rows expected)
@@ -503,7 +508,7 @@
             [artists artists-ok] (value-map-get track-pull ":track/artists")]
         (check-pull! "pull-map-specifications" (and track-pull-ok (= track-pull-error "") track-name-ok (= track-name.text "Ghost Riders in the Sky") artists-ok (= (value-vector-count artists) 2) (value-vector-has-map-string? artists ":artist/name" "George Harrison") (value-vector-has-map-string? artists ":artist/name" "Bob Dylan")) passed))
       (check-pull! "pull-map-specifications" false passed)))
-  (let [[nested nested-ok nested-error] (d.try-pull-lookup-text snapshot nested-release-media-tracks-pattern ":release/gid" (d.value-uuid "f3bdff34-9a85-4adc-a014-922eef9cdaa5"))
+  (let [[nested nested-ok nested-error] (d.try-pull-lookup-data snapshot nested-release-media-tracks-pattern ":release/gid" (d.value-uuid "f3bdff34-9a85-4adc-a014-922eef9cdaa5"))
         [media-count track-count] (nested-media-track-count nested)]
     (check-pull! "pull-nested-map-specifications" (and nested-ok (= nested-error "") (= media-count 6) (= track-count 19) (nested-first-track-ok? nested)) passed))
   (let [[wildcard wildcard-ok wildcard-error] (d.try-pull-lookup-text snapshot "[*]" ":release/gid" (d.value-uuid "f3bdff34-9a85-4adc-a014-922eef9cdaa5"))
@@ -827,7 +832,7 @@
           (set! passed false))
         (when (= read-err nil)
           (defer (delete rules-data))
-          (let [first-result (d.try-q-rules
+          (let [first-result (d.try-q-data-rules-text
                                mbrainz-collab-nested-query
                                snapshot
                                (string rules-data)
@@ -835,7 +840,7 @@
                 second-input (query-result-relation-input-text first-result)]
             (defer (delete second-input))
             (defer (d.close first-result))
-            (validate-rule-query! snapshot
+            (validate-rule-query-text! snapshot
               "mbrainz-collab-nested"
               mbrainz-collab-nested-query
               (string rules-data)

@@ -2927,19 +2927,19 @@
   (let [conn (vev.create-conn)
         [tx-text tx-text-err] (strings.clone "[{:db/id 77 :user/name \"Source Buffer Name\"}]")]
     (t.is (= tx-text-err nil))
-    (let [prepared (vev.prepare-tx-text tx-text)
-          report (vev.transact-prepared (addr conn) prepared)]
-      (t.is report.ok)
-      (vev.delete-live-tx-report-shallow report)
-      (vev.delete-prepared-tx-data-shallow prepared))
-    (delete tx-text)
-    (let [[noise noise-err] (strings.clone "[{:db/id 88 :user/name \"Different Allocated Text\"}]")
-          result (vev.q-text conn.db "[:find ?name :where [77 :user/name ?name]]")]
-      (t.is (= noise-err nil))
-      (t.is (= (count result.rows) 1))
-      (t.is (row-text? result.rows[0] 0 "Source Buffer Name"))
-      (delete noise)
-      (vev.delete-result-set-shallow result))))
+    (let [prepared (vev.prepare-tx-text tx-text)]
+      (delete tx-text)
+      (let [[noise noise-err] (strings.clone "[{:db/id 88 :user/name \"Different Allocated Text\"}]")]
+        (t.is (= noise-err nil))
+        (let [report (vev.transact-prepared (addr conn) prepared)]
+          (t.is report.ok)
+          (vev.delete-live-tx-report-shallow report))
+        (delete noise))
+      (let [result (vev.q-text conn.db "[:find ?name :where [77 :user/name ?name]]")]
+        (t.is (= (count result.rows) 1))
+        (t.is (row-text? result.rows[0] 0 "Source Buffer Name"))
+        (vev.delete-result-set-shallow result))
+      (vev.delete-prepared-tx-data-shallow prepared))))
 
 (t.deftest datascript-parser-tx-text-subset
   (defer (free_all context.allocator))

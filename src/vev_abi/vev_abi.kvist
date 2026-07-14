@@ -4893,10 +4893,12 @@ abi_free_stmt :: proc(stmt: rawptr) {
     (return (c-string-owned "nil")))
   (let [prepared (vev.parse-clause-text (text-from-c clause-text))
         value (vev.prepared-clause-value prepared)
-        text (vev.value-serializable-text value)]
-    (defer (delete text))
+        text (vev.value-serializable-text value)
+        out (c-string-owned text)]
+    (delete text)
     (vev.delete-value-containers-shallow value)
-    (c-string-owned text)))
+    (vev.delete-prepared-clause-shallow prepared)
+    out))
 
 @export
 (defn vev_prepare_pull_pattern_edn :abi "c" [pattern-text: cstring] -> Vev-Prepared-Pull-Pattern
@@ -4915,7 +4917,7 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (when (= (rawptr pattern) nil)
     (return))
   (let [ptr (prepared-pull-pattern-ptr pattern)]
-    (delete ptr^.pattern)
+    (vev.delete-prepared-pull-pattern-shallow ptr^)
     (when (> (count ptr^.error) 0)
       (delete ptr^.error))
     (abi-free-prepared-pull-pattern (rawptr pattern))))

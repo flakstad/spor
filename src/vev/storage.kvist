@@ -8625,26 +8625,23 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (when (not loaded-ok)
       (return (make [dynamic]SQLite-Tx-Meta-Row) false loaded-error))
     (defer (delete text))
-    (let [doc (empty-edn-doc)
-          [read-ok read-error] (read-edn-text! (addr doc) text)]
+    (let [[value read-error read-ok] (edn.try-read text)]
       (when (not read-ok)
-        (delete doc.nodes)
-        (return (make [dynamic]SQLite-Tx-Meta-Row) false read-error))
-      (when (not (= doc.nodes[doc.root].kind .Vector))
-        (delete doc.nodes)
-        (return (make [dynamic]SQLite-Tx-Meta-Row) false "expected serialized tx metadata vector"))
-      (let [out (make [dynamic]SQLite-Tx-Meta-Row)
-            child doc.nodes[doc.root].first-child]
-        (while (not (= child -1))
-          (let [[row row-ok row-error] (sqlite-tx-meta-row-from-edn-node doc child)]
-            (when (not row-ok)
-              (delete-sqlite-tx-meta-rows out)
-              (delete doc.nodes)
-              (return (make [dynamic]SQLite-Tx-Meta-Row) false row-error))
-            (arr.push! out row)
-            (set! child doc.nodes[child].next-sibling)))
-        (delete doc.nodes)
-        (return out true "")))))
+        (return (make [dynamic]SQLite-Tx-Meta-Row) false read-error.message))
+      (let [doc (edn-doc-from-data value)]
+        (defer (delete doc.nodes))
+        (when (not (= doc.nodes[doc.root].kind .Vector))
+          (return (make [dynamic]SQLite-Tx-Meta-Row) false "expected serialized tx metadata vector"))
+        (let [out (make [dynamic]SQLite-Tx-Meta-Row)
+              child doc.nodes[doc.root].first-child]
+          (while (not (= child -1))
+            (let [[row row-ok row-error] (sqlite-tx-meta-row-from-edn-node doc child)]
+              (when (not row-ok)
+                (delete-sqlite-tx-meta-rows out)
+                (return (make [dynamic]SQLite-Tx-Meta-Row) false row-error))
+              (arr.push! out row)
+              (set! child doc.nodes[child].next-sibling)))
+          (return out true ""))))))
 
 (defn create-sqlite-conn [path: string] -> SQLite-Conn
   (SQLite-Conn {path: (string-owned path)
@@ -9029,14 +9026,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (when (not loaded-ok)
       (return (Datom {}) false loaded-error))
     (defer (delete text))
-    (let [doc (empty-edn-doc)
-          [read-ok read-error] (read-edn-text! (addr doc) text)]
+    (let [[value read-error read-ok] (edn.try-read text)]
       (when (not read-ok)
-        (delete doc.nodes)
-        (return (Datom {}) false read-error))
-      (let [[parsed-datom parsed-ok parsed-error] (datom-from-edn-node doc doc.root)]
-        (delete doc.nodes)
-        (return parsed-datom parsed-ok parsed-error)))))
+        (return (Datom {}) false read-error.message))
+      (let [doc (edn-doc-from-data value)]
+        (defer (delete doc.nodes))
+        (datom-from-edn-node doc doc.root)))))
 
 (defn sqlite-latest-index-entry-pages-count-handle [handle: rawptr, index-name: string, page-size: int] -> [loaded-count: int, ok: bool, error: string]
   (when (<= page-size 0)
@@ -11145,14 +11140,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (when (not loaded-ok)
       (return (Datom {}) false loaded-error))
     (defer (delete text))
-    (let [doc (empty-edn-doc)
-          [read-ok read-error] (read-edn-text! (addr doc) text)]
+    (let [[value read-error read-ok] (edn.try-read text)]
       (when (not read-ok)
-        (delete doc.nodes)
-        (return (Datom {}) false read-error))
-      (let [[parsed-datom parsed-ok parsed-error] (datom-from-edn-node doc doc.root)]
-        (delete doc.nodes)
-        (return parsed-datom parsed-ok parsed-error)))))
+        (return (Datom {}) false read-error.message))
+      (let [doc (edn-doc-from-data value)]
+        (defer (delete doc.nodes))
+        (datom-from-edn-node doc doc.root)))))
 
 (defn sqlite-open-index-snapshot-handle [handle: rawptr, page-size: int] -> [snapshot: SQLite-Index-Snapshot, ok: bool, error: string]
   (when (<= page-size 0)
@@ -11255,14 +11248,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (sqlite-index-snapshot-view (addr snapshot^.indexes) order))
 
 (defn datom-from-owned-serial-text [text: string] -> [datom: Datom, ok: bool, error: string]
-  (let [doc (empty-edn-doc)
-        [read-ok read-error] (read-edn-text! (addr doc) text)]
+  (let [[value read-error read-ok] (edn.try-read text)]
     (when (not read-ok)
-      (delete doc.nodes)
-      (return (Datom {}) false read-error))
-    (let [[parsed-datom parsed-ok parsed-error] (datom-from-edn-node doc doc.root)]
-      (delete doc.nodes)
-      (return parsed-datom parsed-ok parsed-error))))
+      (return (Datom {}) false read-error.message))
+    (let [doc (edn-doc-from-data value)]
+      (defer (delete doc.nodes))
+      (datom-from-edn-node doc doc.root))))
 
 (defn serialized-simple-string-value [text: string] -> [value: Value, ok: bool, matched: bool, error: string]
   (let [n (kstr.count text)]
@@ -11340,19 +11331,17 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (let [[simple simple-ok simple-matched simple-error] (serialized-simple-value text)]
     (when simple-matched
       (return simple simple-ok simple-error)))
-  (let [doc (empty-edn-doc)
-        [read-ok read-error] (read-edn-text! (addr doc) text)]
+  (let [[parsed-data read-error read-ok] (edn.try-read text)]
     (when (not read-ok)
-      (delete doc.nodes)
-      (return (Value {}) false read-error))
-    (let [[parsed-value parsed-ok parsed-error] (serial-value-from-edn-node doc doc.root)]
-      (when (not parsed-ok)
-        (delete doc.nodes)
-        (return (Value {}) false parsed-error))
-      (let [owned-value (value-owned parsed-value)]
-        (delete-value-containers-shallow parsed-value)
-        (delete doc.nodes)
-        (return owned-value true "")))))
+      (return (Value {}) false read-error.message))
+    (let [doc (edn-doc-from-data parsed-data)]
+      (defer (delete doc.nodes))
+      (let [[parsed-value parsed-ok parsed-error] (serial-value-from-edn-node doc doc.root)]
+        (when (not parsed-ok)
+          (return (Value {}) false parsed-error))
+        (let [owned-value (value-owned parsed-value)]
+          (delete-value-containers-shallow parsed-value)
+          (return owned-value true ""))))))
 
 (defn sqlite-db-snapshot-datom-at-log-index [snapshot: ^SQLite-DB-Snapshot, log-index: int] -> [datom: Datom, ok: bool, error: string]
   (let [[cached cached?] (sqlite-db-snapshot-cache-find-datom snapshot log-index)]
@@ -12712,15 +12701,19 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 
 (defstruct Store-Tx-Data-Group {
   tx-data: [dynamic]Tx-Data
+  owns-items: bool
 })
 
 (defn store-tx-data-group [tx-data: []Tx-Data] -> Store-Tx-Data-Group
-  (Store-Tx-Data-Group {tx-data: (tx-data-slice-owned tx-data)}))
+  (Store-Tx-Data-Group {tx-data: (tx-data-slice-owned tx-data) owns-items: true}))
 
 (defn delete-store-tx-data-group [group: Store-Tx-Data-Group]
-  (for [data group.tx-data]
-    (delete-parser-tx-data-value-containers-shallow data))
-  (delete group.tx-data))
+  (if group.owns-items
+    (delete-owned-tx-data group.tx-data)
+    (do
+      (for [data group.tx-data]
+        (delete-parser-tx-data-value-containers-shallow data))
+      (delete group.tx-data))))
 
 (defn delete-store-tx-data-groups [groups: [dynamic]Store-Tx-Data-Group]
   (for [group groups]
@@ -12740,13 +12733,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn store-tx-data-groups-from-texts [texts: []string] -> [groups: [dynamic]Store-Tx-Data-Group, ok: bool, error: string]
   (let [out (make [dynamic]Store-Tx-Data-Group 0 (count texts))]
     (for [text text-index texts]
-      (let [tx-data (make [dynamic]Tx-Data)
-            [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-        (when (not parse-ok)
-          (delete tx-data)
+      (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+        (when (not prepared.ok)
           (delete-store-tx-data-groups out)
-          (return (make [dynamic]Store-Tx-Data-Group) false (fmt.tprintf "transaction group %d: %s" text-index parse-error)))
-        (arr.push! out (Store-Tx-Data-Group {tx-data: tx-data}))))
+          (return (make [dynamic]Store-Tx-Data-Group) false (fmt.tprintf "transaction group %d: %s" text-index prepared.error)))
+        (let [group (store-tx-data-group (slice prepared.tx-data 0))]
+          (arr.push! out group))))
     (return out true "")))
 
 (defn store-tx-report-value [report: Store-Tx-Report] -> Value
@@ -13818,26 +13810,23 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (return (failed-tx-report
               (build-db (make [dynamic]Datom))
               "with-store-db-text is resident-only; use with-store-db-report-text for source-backed Store-DB values")))
-  (let [tx-data (make [dynamic]Tx-Data) :defer
-        [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-    (when (not parse-ok)
+  (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+    (when (not prepared.ok)
       (let [[db db-ok _] (store-db-materialize-db snapshot)]
-        (return (failed-tx-report db parse-error))))
-    (with-store-db-tx-data snapshot (slice tx-data 0))))
+        (return (failed-tx-report db prepared.error))))
+    (with-store-db-tx-data snapshot (slice prepared.tx-data 0))))
 
 (defn with-store-db-report-text [snapshot: ^Store-DB, text: string] -> Store-Tx-Report
-  (let [tx-data (make [dynamic]Tx-Data) :defer
-        [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-    (if parse-ok
-      (with-store-db-report-tx-data snapshot (slice tx-data 0))
-      (failed-store-tx-report snapshot^ parse-error))))
+  (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+    (if prepared.ok
+      (with-store-db-report-tx-data snapshot (slice prepared.tx-data 0))
+      (failed-store-tx-report snapshot^ prepared.error))))
 
 (defn with-store-db-report-text-with-source-string-fns [snapshot: ^Store-DB, text: string, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
-  (let [tx-data (make [dynamic]Tx-Data) :defer
-        [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-    (if parse-ok
-      (with-store-db-report-tx-data-with-source-string-fns snapshot (slice tx-data 0) registry)
-      (failed-store-tx-report snapshot^ parse-error))))
+  (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+    (if prepared.ok
+      (with-store-db-report-tx-data-with-source-string-fns snapshot (slice prepared.tx-data 0) registry)
+      (failed-store-tx-report snapshot^ prepared.error))))
 
 (defn db-with-store-db-tx-data-with-source-string-fns [snapshot: ^Store-DB, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String] -> Store-DB
   (let [report (with-store-db-report-tx-data-with-source-string-fns snapshot tx-data registry)
@@ -13848,10 +13837,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     out))
 
 (defn db-with-store-db-text-with-source-string-fns [snapshot: ^Store-DB, text: string, registry: []Tx-Fn-Source-String] -> Store-DB
-  (let [tx-data (make [dynamic]Tx-Data) :defer
-        [parse-ok _] (parse-tx-text! (addr tx-data) text)]
-    (if parse-ok
-      (db-with-store-db-tx-data-with-source-string-fns snapshot (slice tx-data 0) registry)
+  (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+    (if prepared.ok
+      (db-with-store-db-tx-data-with-source-string-fns snapshot (slice prepared.tx-data 0) registry)
       (retain-store-db snapshot^))))
 
 (defn store-tx-report-source-append-modes [report: Store-Tx-Report] -> SQLite-Index-Append-Modes
@@ -13971,10 +13959,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (sqlite-commit-source-overlay-report-mode store overlay-report true))
 
 (defn db-with-store-db-text [snapshot: ^Store-DB, text: string] -> Store-DB
-  (let [tx-data (make [dynamic]Tx-Data) :defer
-        [parse-ok _] (parse-tx-text! (addr tx-data) text)]
-    (if parse-ok
-      (db-with-store-db-tx-data snapshot (slice tx-data 0))
+  (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+    (if prepared.ok
+      (db-with-store-db-tx-data snapshot (slice prepared.tx-data 0))
       (retain-store-db snapshot^))))
 
 (defn q-store-db-value-text-with-input-text [snapshot: ^Store-DB, text: string, inputs-text: string] -> [value: Value, ok: bool, error: string]
@@ -14154,13 +14141,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (pull-store-db-value-pattern snapshot (slice prepared.pattern 0) entity))
 
 (defn pull-store-db-value-text [snapshot: ^Store-DB, pattern-text: string, entity: u64] -> [value: Value, ok: bool, error: string]
-    (let [[pattern pattern-ok pattern-error] (parse-pull-pattern-text pattern-text)]
-      (when (not pattern-ok)
-        (delete pattern)
-        (return (Value {}) false pattern-error))
-    (let [[out out-ok out-error] (pull-store-db-value-pattern snapshot (slice pattern 0) entity)]
-      (delete pattern)
-      (return out out-ok out-error))))
+  (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
+    (pull-store-db-value-prepared snapshot prepared entity)))
 
 (defn pull-store-db-lookup-ref-value-pattern [snapshot: ^Store-DB, pattern: []Pull-Spec, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
@@ -14179,13 +14162,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (pull-store-db-lookup-ref-value-pattern snapshot (slice prepared.pattern 0) attr lookup-value))
 
 (defn pull-store-db-lookup-ref-value-text [snapshot: ^Store-DB, pattern-text: string, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
-  (let [[pattern pattern-ok pattern-error] (parse-pull-pattern-text pattern-text)]
-    (when (not pattern-ok)
-      (delete pattern)
-      (return (Value {}) false pattern-error))
-    (let [[out out-ok out-error] (pull-store-db-lookup-ref-value-pattern snapshot (slice pattern 0) attr lookup-value)]
-      (delete pattern)
-      (return out out-ok out-error))))
+  (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
+    (pull-store-db-lookup-ref-value-prepared snapshot prepared attr lookup-value)))
 
 (defn pull-many-store-db-value-pattern [snapshot: ^Store-DB, pattern: []Pull-Spec, entities: []u64] -> [value: Value, ok: bool, error: string]
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
@@ -14212,13 +14191,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (pull-many-store-db-value-pattern snapshot (slice prepared.pattern 0) entities))
 
 (defn pull-many-store-db-value-text [snapshot: ^Store-DB, pattern-text: string, entities: []u64] -> [value: Value, ok: bool, error: string]
-  (let [[pattern pattern-ok pattern-error] (parse-pull-pattern-text pattern-text)]
-    (when (not pattern-ok)
-      (delete pattern)
-      (return (Value {}) false pattern-error))
-    (let [[out out-ok out-error] (pull-many-store-db-value-pattern snapshot (slice pattern 0) entities)]
-      (delete pattern)
-      (return out out-ok out-error))))
+  (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
+    (pull-many-store-db-value-prepared snapshot prepared entities)))
 
 (defn pull-many-store-db-lookup-refs-value-prepared [snapshot: ^Store-DB, prepared: Prepared-Pull-Pattern, attrs: []string, lookup-values: []Value] -> [value: Value, ok: bool, error: string]
   (when (not prepared.ok)
@@ -14251,14 +14226,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (return rendered rendered-ok rendered-error)))))
 
 (defn pull-many-store-db-lookup-refs-value-text [snapshot: ^Store-DB, pattern-text: string, attrs: []string, lookup-values: []Value] -> [value: Value, ok: bool, error: string]
-  (let [[pattern pattern-ok pattern-error] (parse-pull-pattern-text pattern-text)]
-    (when (not pattern-ok)
-      (delete pattern)
-      (return (Value {}) false pattern-error))
-    (let [prepared (Prepared-Pull-Pattern {ok: true error: "" pattern: pattern})
-          [out out-ok out-error] (pull-many-store-db-lookup-refs-value-prepared snapshot prepared attrs lookup-values)]
-      (delete pattern)
-      (return out out-ok out-error))))
+  (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
+    (pull-many-store-db-lookup-refs-value-prepared snapshot prepared attrs lookup-values)))
 
 (defn sqlite-open-db-snapshot [path: string, page-size: int] -> [snapshot: SQLite-DB-Snapshot, ok: bool, error: string]
   (let [[handle open-ok open-error] (sqlite-open-live-raw path)]
@@ -14623,11 +14593,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     report))
 
 (defn transact-sqlite-text [store: ^SQLite-Conn, text: string] -> Tx-Report
-  (let [tx-data (make [dynamic]Tx-Data) :defer
-        [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-    (when (not parse-ok)
-      (return (failed-tx-report store^.conn.db parse-error)))
-    (transact-sqlite-tx-data store (slice tx-data 0))))
+  (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+    (when (not prepared.ok)
+      (return (failed-tx-report store^.conn.db prepared.error)))
+    (transact-sqlite-tx-data store (slice prepared.tx-data 0))))
 
 (defn transact-sqlite-store-report-tx-data [store: ^SQLite-Conn, tx-data: []Tx-Data] -> Store-Tx-Report
   (when store^.source-only
@@ -14645,11 +14614,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     out))
 
 (defn transact-sqlite-store-report-text [store: ^SQLite-Conn, text: string] -> Store-Tx-Report
-  (let [tx-data (make [dynamic]Tx-Data) :defer
-        [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-    (when (not parse-ok)
-      (return (failed-sqlite-store-tx-report store parse-error)))
-    (transact-sqlite-store-report-tx-data store (slice tx-data 0))))
+  (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+    (when (not prepared.ok)
+      (return (failed-sqlite-store-tx-report store prepared.error)))
+    (transact-sqlite-store-report-tx-data store (slice prepared.tx-data 0))))
 
 (defn transact-sqlite-store-report-tx-data-with-source-string-fns-mode [store: ^SQLite-Conn, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String, owns-sqlite-tx: bool] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (when store^.source-only
@@ -14707,11 +14675,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (store-tx-report-from-temp-resident-report (transact-sqlite-tx-data store tx-data)))
 
 (defn transact-sqlite-store-report-text-with-source-string-fns [store: ^SQLite-Conn, text: string, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
-  (let [tx-data (make [dynamic]Tx-Data) :defer
-        [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-    (when (not parse-ok)
-      (return (failed-sqlite-store-tx-report store parse-error)))
-    (transact-sqlite-store-report-tx-data-with-source-string-fns store (slice tx-data 0) registry)))
+  (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+    (when (not prepared.ok)
+      (return (failed-sqlite-store-tx-report store prepared.error)))
+    (transact-sqlite-store-report-tx-data-with-source-string-fns store (slice prepared.tx-data 0) registry)))
 
 (defn store-from-sqlite-conn [store: SQLite-Conn] -> Store-Conn
   (Store-Conn {kind: .SQLite
@@ -14997,11 +14964,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (case store^.kind
     .SQLite (transact-sqlite-text (addr store^.sqlite) text)
     .Shared
-      (let [tx-data (make [dynamic]Tx-Data) :defer
-            [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-        (when (not parse-ok)
-          (return (failed-tx-report (shared-write-state-before-db (addr store^.shared.write)) parse-error)))
-        (shared-conn-transact (addr store^.shared) (slice tx-data 0)))
+      (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+        (when (not prepared.ok)
+          (return (failed-tx-report (shared-write-state-before-db (addr store^.shared.write)) prepared.error)))
+        (shared-conn-transact (addr store^.shared) (slice prepared.tx-data 0)))
      (failed-tx-report (build-db (make [dynamic]Datom)) "store is not open")))
 
 (defn transact-store-report-tx-data [store: ^Store-Conn, tx-data: []Tx-Data] -> Store-Tx-Report
@@ -15402,31 +15368,27 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn transact-store-report-text [store: ^Store-Conn, text: string] -> Store-Tx-Report
   (case store^.kind
     .SQLite
-      (let [tx-data (make [dynamic]Tx-Data) :defer
-            [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-        (when (not parse-ok)
-          (return (failed-sqlite-store-tx-report (addr store^.sqlite) parse-error)))
-        (transact-store-report-tx-data store (slice tx-data 0)))
+      (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+        (when (not prepared.ok)
+          (return (failed-sqlite-store-tx-report (addr store^.sqlite) prepared.error)))
+        (transact-store-report-tx-data store (slice prepared.tx-data 0)))
     .Shared
-      (let [tx-data (make [dynamic]Tx-Data) :defer
-            [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-        (when (not parse-ok)
-          (return (failed-store-tx-report (shared-store-db (addr store^.shared)) parse-error)))
-        (transact-store-report-tx-data store (slice tx-data 0)))
+      (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+        (when (not prepared.ok)
+          (return (failed-store-tx-report (shared-store-db (addr store^.shared)) prepared.error)))
+        (transact-store-report-tx-data store (slice prepared.tx-data 0)))
      (failed-store-tx-report (Store-DB {}) "store is not open")))
 
 (defn transact-store-report-text-with-source-string-fns [store: ^Store-Conn, text: string, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
   (case store^.kind
     .SQLite
-      (let [tx-data (make [dynamic]Tx-Data) :defer
-            [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-        (when (not parse-ok)
-          (return (failed-sqlite-store-tx-report (addr store^.sqlite) parse-error)))
-        (transact-store-report-tx-data-with-source-string-fns store (slice tx-data 0) registry))
+      (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+        (when (not prepared.ok)
+          (return (failed-sqlite-store-tx-report (addr store^.sqlite) prepared.error)))
+        (transact-store-report-tx-data-with-source-string-fns store (slice prepared.tx-data 0) registry))
     .Shared
-      (let [tx-data (make [dynamic]Tx-Data) :defer
-            [parse-ok parse-error] (parse-tx-text! (addr tx-data) text)]
-        (when (not parse-ok)
-          (return (failed-store-tx-report (shared-store-db (addr store^.shared)) parse-error)))
-        (transact-store-report-tx-data-with-source-string-fns store (slice tx-data 0) registry))
+      (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+        (when (not prepared.ok)
+          (return (failed-store-tx-report (shared-store-db (addr store^.shared)) prepared.error)))
+        (transact-store-report-tx-data-with-source-string-fns store (slice prepared.tx-data 0) registry))
      (failed-store-tx-report (Store-DB {}) "store is not open")))

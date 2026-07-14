@@ -518,24 +518,34 @@
   ok: bool
   error: string
   query: Query
+  source-owner: Data
+  owns-source: bool
+  rules-source-owner: Data
+  owns-rules-source: bool
 })
 
 (defstruct Prepared-Binding {
   ok: bool
   error: string
   binding: Input-Binding
+  source-owner: Data
+  owns-source: bool
 })
 
 (defstruct Prepared-In {
   ok: bool
   error: string
   bindings: [dynamic]Input-Binding
+  source-owner: Data
+  owns-source: bool
 })
 
 (defstruct Prepared-With {
   ok: bool
   error: string
   vars: [dynamic]string
+  source-owner: Data
+  owns-source: bool
 })
 
 (defstruct Prepared-Clause {
@@ -551,12 +561,16 @@
   not-groups: [dynamic]Not-Group
   or-groups: [dynamic]Or-Group
   where-steps: [dynamic]Query-Step
+  source-owner: Data
+  owns-source: bool
 })
 
 (defstruct Prepared-Rules {
   ok: bool
   error: string
   rules: [dynamic]Rule
+  source-owner: Data
+  owns-source: bool
 })
 
 (defstruct Prepared-Tx-Data {
@@ -770,6 +784,8 @@
   ok: bool
   error: string
   pattern: [dynamic]Pull-Spec
+  source-owner: Data
+  owns-source: bool
 })
 
 (defenum Query-Input-Kind [
