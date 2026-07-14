@@ -31,9 +31,10 @@ scripts/contact_book.sh
 `Conn` and immutable `DB` values for both in-memory and durable operation, with
 literal `transact`, query-first `q`, `pull`, and `db-with` operations. The
 Kvist contact book uses only this surface; storage types and SQLite remain
-internal. Owning native handles have explicit close operations, while DB
-values can be passed through application code as ordinary values until their
-owner closes them.
+internal. These operations throw on failure, `q` exposes ordinary result rows,
+`pull` returns a Vev value directly, and every owning value uses the same
+overloaded `close` operation. DB values can be passed through application code
+as ordinary values until their owner closes them.
 
 Kvist `main` at `e8f3f9c` includes the complete core bootstrap and builds the
 facade, native ABI, and contact book without Vev source changes. The compiler

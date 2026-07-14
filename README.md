@@ -59,22 +59,27 @@ written as native data:
 (package main)
 
 (import fmt "core:fmt")
-(import d "../../src/vev")
+(import d "../../src/vev_app")
 
 (defn main []
-  (defer (free_all context.allocator))
   (let [conn (d.create-conn)
-        _ (d.transact (addr conn)                 ; 1
+        _ (d.transact conn                        ; 1
             [{:db/id 1 :user/name "Ada"}])
-        names (d.q                                 ; 2
+        db (d.db conn)                            ; 2
+        names (d.q                                ; 3
                 [:find ?name
                  :where [?e :user/name ?name]]
-                conn.db)]
+                db)]
     (fmt.println names.rows)))
 ```
 
 1. Transaction maps are Kvist data, not encoded text.
-2. The query is also data, with the immutable database value passed after it.
+2. `db` returns the connection's current immutable database value.
+3. The query is also data, with the database value passed after it.
+
+This minimal program exits immediately. Long-running applications close owning
+query results, DB values, and connections with `d.close`; the complete contact
+book below demonstrates those lifetimes.
 
 ### Clojure
 

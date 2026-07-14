@@ -183,36 +183,32 @@ pull patterns are Kvist data literals rather than EDN strings:
 
 (defn main []
   (let [conn (d.create-conn)]
-    (defer (d.close-conn! conn))
-    (let [report
-            (d.transact
-              conn
-              [{:db/id 1 :artist/name "John Lennon"}
-               {:db/id 2 :artist/name "Yoko Ono"}])]
-      (defer (d.close-report report)))
-    (let [[snapshot ok error] (d.db conn)]
-      (defer (d.close-db! snapshot))
-      (when (not ok)
-        (panic error))
+    (defer (d.close conn))
+    (d.transact conn
+      [{:db/id 1 :artist/name "John Lennon"}
+       {:db/id 2 :artist/name "Yoko Ono"}])
+    (let [snapshot (d.db conn)]
+      (defer (d.close snapshot))
       (let [result
               (d.q
                 [:find ?name
                  :where [?e :artist/name ?name]]
                 snapshot)]
-        (defer (d.close-result result))))))
+        (defer (d.close result))))))
 ```
 
 Durability changes only connection creation:
 
 ```clojure
-(let [[conn ok error] (d.connect "app.vev")]
+(let [conn (d.connect "app.vev")]
   ...)
 ```
 
 The database handle is an immutable snapshot and can be passed through normal
-Kvist code. Native handles own resources, so the owner closes each connection,
-DB snapshot, result, report, and pulled value exactly once. The complete
-in-memory and durable application is `examples/kvist/contact_book.kvist`.
+Kvist code. Native values own resources, so the owner closes each connection,
+DB snapshot, query result, and pulled value exactly once with `d.close`. The
+complete in-memory and durable application is
+`examples/kvist/contact_book.kvist`.
 
 ## Python
 
