@@ -138,6 +138,12 @@
     (delete-prepared-query-shallow prepared)
     result))
 
+(defn q-result-store-db-data-with-inputs-and-fns [snapshot: ^Store-DB, value: Data, inputs: []Query-Input, registry: []Native-Query-Fn] -> Query-Result
+  (let [prepared (prepare-query-data value)
+        result (q-result-store-db-prepared-with-inputs-and-fns snapshot prepared inputs registry)]
+    (delete-prepared-query-shallow prepared)
+    result))
+
 (defn q-result-store-db-data-with-input-text [snapshot: ^Store-DB, value: Data, inputs-text: string] -> Query-Result
   (let [prepared (prepare-query-data value)
         result (q-result-store-db-prepared-with-input-text snapshot prepared inputs-text)]

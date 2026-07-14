@@ -35,6 +35,12 @@ pull values pass directly to query-first `q`, `transact`, `pull`, and
 semantic parsers as the EDN text API; this is not an EDN serialization and
 reparse path. Embedded MusicBrainz queries, rules, and pull patterns now use
 quoted data; only rules actually loaded from `rules.edn` use the text path.
+The Kvist MusicBrainz, aggregate, query-decomposition, and contact-book
+tutorials now follow their Clojure counterparts by defining reusable queries,
+pull patterns, rules, and transaction data as top-level quoted values and
+passing the DB after the query. Static pull patterns no longer fall through
+the EDN text API. Serialized input text remains only in validation helpers
+that deliberately exercise parser/error boundaries.
 Runtime quasiquote also builds ordinary managed Data, and the Kvist contact
 book now uses an interpolated transaction map through both in-memory `db-with`
 and durable `transact`.
@@ -181,8 +187,14 @@ not use repository source classpaths, `VEV_LIB`, or SQLite APIs.
    remaining raw return shapes, retain their current diagnostics, and remove
    `read-edn-text!` only when its runtime call-site count reaches zero and
    parser/storage integration tests pass.
-2. Complete the ordinary Kvist `Data` API path so named quoted and runtime EDN
-   values use the same preparation and diagnostics as text inputs.
+2. Finish the remaining tutorial-level Clojure/Kvist alignment. The ordinary
+   named `Data` path now covers `q`, `transact`, `db-with`, direct pull, and
+   lookup-ref pull, including error-aware pull variants and native-function
+   query registries. Remaining work is to
+   replace serialized-input validation helpers with typed query inputs where
+   error inspection is not the point, and to expose result values through a
+   more data-oriented application surface so tutorial assertions need less
+   manual `Value` inspection and cleanup.
 3. Make release builds reproducible for each supported OS/architecture. At
    minimum, produce and smoke macOS arm64 first, then add Linux x86-64 before
    calling the release generally available.

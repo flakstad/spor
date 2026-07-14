@@ -2571,6 +2571,14 @@
         ([]Query-Input [(splice (emit-query-input-list-without-rules inputs))])
         (unquote registry)))))
 
+(defmacro q-result-store-db-data-with-fns [query-form snapshot registry & inputs]
+  (quasiquote
+    (q-result-store-db-data-with-inputs-and-fns
+      (unquote snapshot)
+      (unquote query-form)
+      ([]Query-Input [(splice (emit-query-input-list-without-rules inputs))])
+      (unquote registry))))
+
 (defmacro q-relation-db [query-form rows & inputs]
   (if (vector? query-form)
     (let [tail (rest query-form)

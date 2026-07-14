@@ -22,7 +22,13 @@
 (def default-uri "build/musicbrainz/vev-mbrainz-tutorial.sqlite")
 (def mbrainz-sample-rules-path "build/upstream/mbrainz-sample/resources/rules.edn")
 
-(def opening-release-pull-query '[:find [(pull $ ?release [*])] :in $ ?artist-name :where [?release :release/artists ?artist] [?artist :artist/name ?artist-name] [?release :release/name ?release-name]])
+(def john-lennon-release-pull-query
+  '[:find [(pull $ ?release [*])]
+    :in $ ?artist-name
+    :where
+    [?release :release/artists ?artist]
+    [?artist :artist/name ?artist-name]
+    [?release :release/name ?release-name]])
 (def tuple-binding-query '[:find [(pull $ ?release [*])] :in $ [?artist-name ?release-name] :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]])
 (def request-map-query '[:find (pull $ ?release [:release/name :release/artistCredit :release/year {:release/script [*]} {:release/media [{:medium/tracks [:track/name]}]}]) :in $ ?artist-name :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist]])
 (def collection-binding-query '[:find ?release-name :in $ [?artist-name ...] :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]])
@@ -32,13 +38,151 @@
 (def collection-find-query '[:find [?release-name ...] :in $ ?artist-name :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]])
 (def tuple-find-query '[:find [?year ?month ?day] :in $ ?name :where [?artist :artist/name ?name] [?artist :artist/startDay ?day] [?artist :artist/startMonth ?month] [?artist :artist/startYear ?year]])
 (def scalar-find-query '[:find ?year . :in $ ?name :where [?artist :artist/name ?name] [?artist :artist/startYear ?year]])
+(def artist-not-canada-count-query
+  '[:find (count ?eid) .
+    :where
+    [?eid :artist/name]
+    (not [?eid :artist/country :country/CA])])
+(def artist-not-release-1970-count-query
+  '[:find (count ?artist) .
+    :where
+    [?artist :artist/name]
+    (not-join [?artist]
+      [?release :release/artists ?artist]
+      [?release :release/year 1970])])
+(def live-at-carnegie-not-bill-withers-count-query
+  '[:find (count ?r) .
+    :where
+    [?r :release/name "Live at Carnegie Hall"]
+    (not-join [?r]
+      [?r :release/artists ?a]
+      [?a :artist/name "Bill Withers"])])
+(def artist-or-type-gender-count-query
+  '[:find (count ?artist) .
+    :where
+    (or [?artist :artist/type :artist.type/group]
+        (and [?artist :artist/type :artist.type/person]
+             [?artist :artist/gender :artist.gender/female]))])
+(def release-or-canada-artist-or-1970-count-query
+  '[:find (count ?release) .
+    :where
+    [?release :release/name]
+    (or-join [?release]
+      (and [?release :release/artists ?artist]
+           [?artist :artist/country :country/CA])
+      [?release :release/year 1970])])
+(def artist-start-before-1600-query
+  '[:find ?name ?year
+    :where
+    [?artist :artist/name ?name]
+    [?artist :artist/startYear ?year]
+    [(< ?year 1600)]])
 (def return-map-find-query '[:find ?artist-name ?release-name :keys artist release :in $ ?artist-name :where [?release :release/name ?release-name] [?release :release/artists ?artist] [?artist :artist/name ?artist-name]])
 (def function-expression-query '[:find ?track-name ?minutes :in $ ?artist-name :where [?artist :artist/name ?artist-name] [?track :track/artists ?artist] [?track :track/duration ?millis] [(quot ?millis 60000) ?minutes] [?track :track/name ?track-name]])
+(def get-else-artist-start-query
+  '[:find ?artist-name ?year
+    :in $ [?artist-name ...]
+    :where
+    [?artist :artist/name ?artist-name]
+    [(get-else $ ?artist :artist/startYear "N/A") ?year]])
+(def get-some-country-query
+  '[:find [?e ?attr ?name]
+    :in $ ?e
+    :where [(get-some $ ?e :country/name :artist/name) [?attr ?name]]])
+(def fulltext-artist-name-query
+  '[:find ?entity ?name ?tx ?score
+    :in $ ?search
+    :where [(fulltext $ :artist/name ?search) [[?entity ?name ?tx ?score]]]])
+(def missing-artist-start-query
+  '[:find ?name
+    :where
+    [?artist :artist/name ?name]
+    [(missing? $ ?artist :artist/startYear)]])
+(def attrs-with-value-42-query
+  '[:find [?aname ...]
+    :where
+    [?attr 42 _]
+    [?attr :db/ident ?aname]])
+(def attrs-with-property-query
+  '[:find [?aname ...]
+    :in $ [?property ...]
+    :where
+    [?attr ?property _]
+    [?attr :db/ident ?aname]])
+(def country-artists-query
+  '[:find [?artist-name ...]
+    :in $ ?country
+    :where
+    [?artist :artist/name ?artist-name]
+    [?artist :artist/country ?country]])
+(def dynamic-reference-country-query
+  '[:find [?artist-name ...]
+    :in $ ?country [?reference ...]
+    :where
+    [?artist :artist/name ?artist-name]
+    [?artist ?reference ?country]])
+(def dynamic-reference-country-entid-query
+  '[:find [?artist-name ...]
+    :in $ ?country [?reference ...]
+    :where
+    [(datomic.api/entid $ ?country) ?country-id]
+    [?artist :artist/name ?artist-name]
+    [?artist ?reference ?country-id]])
 (def artist-type-gender-query '[:find ?id ?type ?gender :in $ ?name :where [?e :artist/name ?name] [?e :artist/gid ?id] [?e :artist/type ?teid] [?teid :db/ident ?type] [?e :artist/gender ?geid] [?geid :db/ident ?gender]])
+(def monster-heads-sum-query
+  '[:find (sum ?heads) .
+    :in [[_ ?heads]]])
+(def monster-heads-sum-with-query
+  '[:find (sum ?heads) .
+    :with ?monster
+    :in [[?monster ?heads]]])
+(def distinct-values-query
+  '[:find (distinct ?v) .
+    :in [?v ...]])
 (def min-track-duration-query '[:find [(min ?dur)] :where [?e :track/duration ?dur]])
+(def top-track-duration-query
+  '[:find [(min 5 ?millis) (max 5 ?millis)]
+    :where [?track :track/duration ?millis]])
+(def random-artist-name-query
+  '[:find [(rand 2 ?name) (sample 2 ?name)]
+    :where [_ :artist/name ?name]])
 (def sum-medium-track-count-query '[:find (sum ?count) . :with ?medium :where [?medium :medium/trackCount ?count]])
 (def artist-name-count-query '[:find (count ?name) (count-distinct ?name) :with ?artist :where [?artist :artist/name ?name]])
+(def custom-mode-aggregate-query
+  '[:find (user/mode ?track-count) .
+    :with ?media
+    :where [?media :medium/trackCount ?track-count]])
 (def tracks-by-artist-name-query '[:find ?title :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?t :track/artists ?a] [?t :track/name ?title]])
+(def mbrainz-title-by-artist-query
+  '[:find ?title
+    :in $ ?artist-name
+    :where
+    [?a :artist/name ?artist-name]
+    [?t :track/artists ?a]
+    [?t :track/name ?title]])
+(def mbrainz-title-album-year-by-artist-query
+  '[:find ?title ?album ?year
+    :in $ ?artist-name
+    :where
+    [?a :artist/name ?artist-name]
+    [?t :track/artists ?a]
+    [?t :track/name ?title]
+    [?m :medium/tracks ?t]
+    [?r :release/media ?m]
+    [?r :release/name ?album]
+    [?r :release/year ?year]])
+(def mbrainz-pre-1970-title-album-year-query
+  '[:find ?title ?album ?year
+    :in $ ?artist-name
+    :where
+    [?a :artist/name ?artist-name]
+    [?t :track/artists ?a]
+    [?t :track/name ?title]
+    [?m :medium/tracks ?t]
+    [?r :release/media ?m]
+    [?r :release/name ?album]
+    [?r :release/year ?year]
+    [(< ?year 1970)]])
 (def pre-1970-release-names-query '[:find ?name :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [(< ?year 1970)] [?r :release/name ?name]])
 (def pre-1970-release-names-switched-query '[:find ?name :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [?r :release/name ?name] [(< ?year 1970)]])
 (def pre-1970-track-titles-broad-query '[:find ?title :in $ ?artist-name :where [?a :artist/name ?artist-name] [?r :release/artists ?a] [?r :release/year ?year] [?r :release/name ?name] [(< ?year 1970)] [?t :track/artists ?a] [?t :track/name ?title]])
@@ -214,50 +358,17 @@
     (when (selected-section? selected "mbrainz-title-by-artist")
       (set! ran true)
       (validate-query-result! "mbrainz-title-by-artist"
-        (d.q
-          [:find ?title
-           :in $ ?artist-name
-           :where
-           [?a :artist/name ?artist-name]
-           [?t :track/artists ?a]
-           [?t :track/name ?title]]
-          snapshot
-          "John Lennon")
+        (d.q mbrainz-title-by-artist-query snapshot "John Lennon")
         70 passed))
     (when (selected-section? selected "mbrainz-title-album-year-by-artist")
       (set! ran true)
       (validate-query-result! "mbrainz-title-album-year-by-artist"
-        (d.q
-          [:find ?title ?album ?year
-           :in $ ?artist-name
-           :where
-           [?a :artist/name ?artist-name]
-           [?t :track/artists ?a]
-           [?t :track/name ?title]
-           [?m :medium/tracks ?t]
-           [?r :release/media ?m]
-           [?r :release/name ?album]
-           [?r :release/year ?year]]
-          snapshot
-          "John Lennon")
+        (d.q mbrainz-title-album-year-by-artist-query snapshot "John Lennon")
         93 passed))
     (when (selected-section? selected "mbrainz-pre-1970-title-album-year")
       (set! ran true)
       (validate-query-result! "mbrainz-pre-1970-title-album-year"
-        (d.q
-          [:find ?title ?album ?year
-           :in $ ?artist-name
-           :where
-           [?a :artist/name ?artist-name]
-           [?t :track/artists ?a]
-           [?t :track/name ?title]
-           [?m :medium/tracks ?t]
-           [?r :release/media ?m]
-           [?r :release/name ?album]
-           [?r :release/year ?year]
-           [(< ?year 1970)]]
-          snapshot
-          "John Lennon")
+        (d.q mbrainz-pre-1970-title-album-year-query snapshot "John Lennon")
         18 passed))
     (when (selected-section? selected "mbrainz-track-release-rule")
       (set! ran true)
@@ -481,29 +592,29 @@
 
 (defn validate-direct-pull! [snapshot: d.DB, passed: ^bool]
   (do
-  (let [[artist artist-ok artist-error] (d.try-pull-lookup-text snapshot "[:artist/name :artist/startYear]" ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
+  (let [[artist artist-ok artist-error] (d.try-pull-lookup-data snapshot '[:artist/name :artist/startYear] ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
         [artist-name artist-name-ok] (value-map-get artist ":artist/name")
         [artist-year artist-year-ok] (value-map-get artist ":artist/startYear")]
     (check-pull! "pull-attribute-name" (and artist-ok artist-name-ok artist-year-ok (= artist-error "") (= artist-name.text "Led Zeppelin") (= artist-year.int-value 1968)) passed))
-  (let [[country country-ok country-error] (d.try-pull-lookup-text snapshot "[:artist/country]" ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
+  (let [[country country-ok country-error] (d.try-pull-lookup-data snapshot '[:artist/country] ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
         [country-value country-value-ok] (value-map-get country ":artist/country")
         [country-id country-id-ok] (value-map-get country-value ":db/id")]
     (check-pull! "pull-artist-country" (and country-ok country-value-ok country-id-ok (= country-error "") (= country-id.entity 1000180)) passed))
-  (let [[reverse-country _ _] (d.try-pull-lookup-text snapshot "[:artist/_country]" ":db/ident" (d.value-keyword ":country/GB"))
+  (let [[reverse-country _ _] (d.try-pull-lookup-data snapshot '[:artist/_country] ":db/ident" (d.value-keyword ":country/GB"))
         [artists artists-ok] (value-map-get reverse-country ":artist/_country")]
     (check-pull! "pull-reverse-country" (and artists-ok (= (value-vector-count artists) 482)) passed))
-  (let [[release-media release-media-ok release-media-error] (d.try-pull-lookup-text snapshot "[:release/media]" ":release/gid" (d.value-uuid "24824319-9bb8-3d1e-a2c5-b8b864dafd1b"))
+  (let [[release-media release-media-ok release-media-error] (d.try-pull-lookup-data snapshot '[:release/media] ":release/gid" (d.value-uuid "24824319-9bb8-3d1e-a2c5-b8b864dafd1b"))
         [media media-ok] (value-map-get release-media ":release/media")]
     (check-pull! "pull-release-media-default" (and release-media-ok media-ok (= release-media-error "") (= (value-vector-count media) 1)) passed))
   (let [[medium medium-ok] (query-scalar-entity! snapshot dylan-harrison-cd-query "[[:release/gid #uuid \"67bbc160-ac45-4caf-baae-a7e9f5180429\"]]")]
     (if medium-ok
-      (let [[reverse-media reverse-media-ok reverse-media-error] (d.try-pull-text snapshot "[:release/_media]" medium)
+      (let [[reverse-media reverse-media-ok reverse-media-error] (d.try-pull-data snapshot '[:release/_media] medium)
             [releases releases-ok] (value-map-get reverse-media ":release/_media")]
         (check-pull! "pull-reverse-component" (and reverse-media-ok releases-ok (= reverse-media-error "") (= (value-pull-ref-count releases) 1)) passed))
       (check-pull! "pull-reverse-component" false passed)))
   (let [[track track-ok] (query-scalar-entity! snapshot ghost-riders-query "[[:release/gid #uuid \"67bbc160-ac45-4caf-baae-a7e9f5180429\"] 11]")]
     (if track-ok
-      (let [[track-pull track-pull-ok track-pull-error] (d.try-pull-text snapshot "[:track/name {:track/artists [:db/id :artist/name]}]" track)
+      (let [[track-pull track-pull-ok track-pull-error] (d.try-pull-data snapshot '[:track/name {:track/artists [:db/id :artist/name]}] track)
             [track-name track-name-ok] (value-map-get track-pull ":track/name")
             [artists artists-ok] (value-map-get track-pull ":track/artists")]
         (check-pull! "pull-map-specifications" (and track-pull-ok (= track-pull-error "") track-name-ok (= track-name.text "Ghost Riders in the Sky") artists-ok (= (value-vector-count artists) 2) (value-vector-has-map-string? artists ":artist/name" "George Harrison") (value-vector-has-map-string? artists ":artist/name" "Bob Dylan")) passed))
@@ -511,50 +622,50 @@
   (let [[nested nested-ok nested-error] (d.try-pull-lookup-data snapshot nested-release-media-tracks-pattern ":release/gid" (d.value-uuid "f3bdff34-9a85-4adc-a014-922eef9cdaa5"))
         [media-count track-count] (nested-media-track-count nested)]
     (check-pull! "pull-nested-map-specifications" (and nested-ok (= nested-error "") (= media-count 6) (= track-count 19) (nested-first-track-ok? nested)) passed))
-  (let [[wildcard wildcard-ok wildcard-error] (d.try-pull-lookup-text snapshot "[*]" ":release/gid" (d.value-uuid "f3bdff34-9a85-4adc-a014-922eef9cdaa5"))
+  (let [[wildcard wildcard-ok wildcard-error] (d.try-pull-lookup-data snapshot '[*] ":release/gid" (d.value-uuid "f3bdff34-9a85-4adc-a014-922eef9cdaa5"))
         [release-name release-name-ok] (value-map-get wildcard ":release/name")
         [release-year release-year-ok] (value-map-get wildcard ":release/year")
         [release-gid release-gid-ok] (value-map-get wildcard ":release/gid")]
     (check-pull! "pull-wildcard-specification" (and wildcard-ok (= wildcard-error "") (= (value-map-count wildcard) 13) release-name-ok (= release-name.kind .String) (= release-name.text "The Concert for Bangla Desh") release-year-ok (= release-year.kind .Int) (= release-year.int-value 1971) release-gid-ok (= release-gid.kind .Uuid) (= release-gid.text "f3bdff34-9a85-4adc-a014-922eef9cdaa5")) passed))
   (let [[track track-ok] (query-scalar-entity! snapshot ghost-riders-query "[[:release/gid #uuid \"67bbc160-ac45-4caf-baae-a7e9f5180429\"] 11]")]
     (if track-ok
-      (let [[track-pull track-pull-ok track-pull-error] (d.try-pull-text snapshot "[* {:track/artists [:artist/name]}]" track)
+      (let [[track-pull track-pull-ok track-pull-error] (d.try-pull-data snapshot '[* {:track/artists [:artist/name]}] track)
             [track-name track-name-ok] (value-map-get track-pull ":track/name")
             [track-position track-position-ok] (value-map-get track-pull ":track/position")
             [track-duration track-duration-ok] (value-map-get track-pull ":track/duration")
             [artists artists-ok] (value-map-get track-pull ":track/artists")]
         (check-pull! "pull-wildcard-map-specification" (and track-pull-ok (= track-pull-error "") (= (value-map-count track-pull) 6) track-name-ok (= track-name.kind .String) (= track-name.text "Ghost Riders in the Sky") track-position-ok (= track-position.kind .Int) (= track-position.int-value 11) track-duration-ok (= track-duration.kind .Int) (= track-duration.int-value 218506) artists-ok (= (value-vector-count artists) 2) (value-vector-has-map-string? artists ":artist/name" "George Harrison") (value-vector-has-map-string? artists ":artist/name" "Bob Dylan")) passed))
       (check-pull! "pull-wildcard-map-specification" false passed)))
-  (let [[artist artist-ok artist-error] (d.try-pull-lookup-text snapshot "[:artist/name (:artist/endYear :default 0)]" ":artist/gid" (d.value-uuid "ba550d0e-adac-4864-b88b-407cab5e76af"))
+  (let [[artist artist-ok artist-error] (d.try-pull-lookup-data snapshot '[:artist/name (:artist/endYear :default 0)] ":artist/gid" (d.value-uuid "ba550d0e-adac-4864-b88b-407cab5e76af"))
         [artist-name artist-name-ok] (value-map-get artist ":artist/name")
         [artist-end artist-end-ok] (value-map-get artist ":artist/endYear")]
     (check-pull! "pull-default-option" (and artist-ok (= artist-error "") artist-name-ok (= artist-name.kind .String) (= artist-name.text "Paul McCartney") artist-end-ok (= artist-end.kind .Int) (= artist-end.int-value 0)) passed))
-  (let [[artist artist-ok artist-error] (d.try-pull-lookup-text snapshot "[:artist/name (:artist/endYear :default \"N/A\")]" ":artist/gid" (d.value-uuid "ba550d0e-adac-4864-b88b-407cab5e76af"))
+  (let [[artist artist-ok artist-error] (d.try-pull-lookup-data snapshot '[:artist/name (:artist/endYear :default "N/A")] ":artist/gid" (d.value-uuid "ba550d0e-adac-4864-b88b-407cab5e76af"))
         [artist-name artist-name-ok] (value-map-get artist ":artist/name")
         [artist-end artist-end-ok] (value-map-get artist ":artist/endYear")]
     (check-pull! "pull-default-option-string" (and artist-ok (= artist-error "") artist-name-ok (= artist-name.kind .String) (= artist-name.text "Paul McCartney") artist-end-ok (= artist-end.kind .String) (= artist-end.text "N/A")) passed))
-  (let [[artist artist-ok artist-error] (d.try-pull-lookup-text snapshot "[:artist/name :died-in-1966?]" ":artist/gid" (d.value-uuid "ba550d0e-adac-4864-b88b-407cab5e76af"))
+  (let [[artist artist-ok artist-error] (d.try-pull-lookup-data snapshot '[:artist/name :died-in-1966?] ":artist/gid" (d.value-uuid "ba550d0e-adac-4864-b88b-407cab5e76af"))
         [artist-name artist-name-ok] (value-map-get artist ":artist/name")
         [_ died-ok] (value-map-get artist ":died-in-1966?")]
     (check-pull! "pull-absent-attribute" (and artist-ok (= artist-error "") artist-name-ok (= artist-name.kind .String) (= artist-name.text "Paul McCartney") (not died-ok)) passed))
-  (let [[artist artist-ok artist-error] (d.try-pull-lookup-text snapshot "[(:track/_artists :limit 10)]" ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
+  (let [[artist artist-ok artist-error] (d.try-pull-lookup-data snapshot '[(:track/_artists :limit 10)] ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
         [tracks tracks-ok] (value-map-get artist ":track/_artists")]
     (check-pull! "pull-explicit-limit" (and artist-ok (= artist-error "") tracks-ok (= (value-vector-count tracks) 10)) passed))
-  (let [[artist artist-ok artist-error] (d.try-pull-lookup-text snapshot "[{(:track/_artists :limit 10) [:track/name]}]" ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
+  (let [[artist artist-ok artist-error] (d.try-pull-lookup-data snapshot '[{(:track/_artists :limit 10) [:track/name]}] ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
         [tracks tracks-ok] (value-map-get artist ":track/_artists")]
     (check-pull! "pull-limit-subspec" (and artist-ok (= artist-error "") tracks-ok (= (value-vector-count tracks) 10) (value-vector-has-map-string? tracks ":track/name" "Whole Lotta Love") (value-vector-has-map-string? tracks ":track/name" "Stairway to Heaven")) passed))
-  (let [[artist artist-ok artist-error] (d.try-pull-lookup-text snapshot "[{(:track/_artists :limit 10 :as \"Tracks\") [:track/name]}]" ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
+  (let [[artist artist-ok artist-error] (d.try-pull-lookup-data snapshot '[{(:track/_artists :limit 10 :as "Tracks") [:track/name]}] ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
         [tracks tracks-ok] (d.map-get-value artist (d.value-string "Tracks"))
         [_ attr-ok] (value-map-get artist ":track/_artists")]
     (check-pull! "pull-limit-subspec-as" (and artist-ok (= artist-error "") tracks-ok (not attr-ok) (= (value-vector-count tracks) 10) (value-vector-has-map-string? tracks ":track/name" "Whole Lotta Love") (value-vector-has-map-string? tracks ":track/name" "Stairway to Heaven")) passed))
-  (let [[artist artist-ok artist-error] (d.try-pull-lookup-text snapshot "[(:track/_artists :limit nil)]" ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
+  (let [[artist artist-ok artist-error] (d.try-pull-lookup-data snapshot '[(:track/_artists :limit nil)] ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
         [tracks tracks-ok] (value-map-get artist ":track/_artists")]
     (check-pull! "pull-no-limit" (and artist-ok (= artist-error "") tracks-ok (= (value-vector-count tracks) 128)) passed))
-  (let [[artist artist-ok artist-error] (d.try-pull-lookup-text snapshot "[:penguins]" ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))]
+  (let [[artist artist-ok artist-error] (d.try-pull-lookup-data snapshot '[:penguins] ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))]
     (check-pull! "pull-empty-results" (and artist-ok (= artist-error "") (= artist.kind .Map) (= (value-map-count artist) 0)) passed))
   (let [[track track-ok] (query-scalar-entity! snapshot ghost-riders-query "[[:release/gid #uuid \"67bbc160-ac45-4caf-baae-a7e9f5180429\"] 11]")]
     (if track-ok
-      (let [[track-pull track-pull-ok track-pull-error] (d.try-pull-text snapshot "[{:track/artists [:penguins]}]" track)
+      (let [[track-pull track-pull-ok track-pull-error] (d.try-pull-data snapshot '[{:track/artists [:penguins]}] track)
             [artists artists-ok] (value-map-get track-pull ":track/artists")]
         (check-pull! "pull-empty-results-in-collection" (and track-pull-ok (= track-pull-error "") artists-ok (= (value-vector-count artists) 2) (= artists.items[0].kind .Map) (= (value-map-count artists.items[0]) 0) (= artists.items[1].kind .Map) (= (value-map-count artists.items[1]) 0)) passed))
       (check-pull! "pull-empty-results-in-collection" false passed)))))
@@ -576,227 +687,65 @@
           (fmt.printf "source=kvist section=summary ok=%v\n" passed)
           (return)))
       (validate-query-result! "opening-release-pulls"
-        (d.q
-          [:find [(pull $ ?release [*])]
-           :in $ ?artist-name
-           :where
-           [?release :release/artists ?artist]
-           [?artist :artist/name ?artist-name]
-           [?release :release/name ?release-name]]
-          snapshot
-          "John Lennon")
+        (d.q john-lennon-release-pull-query snapshot "John Lennon")
         21 (addr passed))
       (validate-query-result! "tuple-binding-release-pulls"
-        (d.q
-          [:find [(pull $ ?release [*])]
-           :in $ [?artist-name ?release-name]
-           :where
-           [?artist :artist/name ?artist-name]
-           [?release :release/artists ?artist]
-           [?release :release/name ?release-name]]
-          snapshot
-          ["John Lennon" "Mind Games"])
+        (d.q tuple-binding-query snapshot ["John Lennon" "Mind Games"])
         4 (addr passed))
       (validate-query-result! "request-map-release-pulls"
-        (d.q
-          [:find (pull $ ?release [:release/name :release/artistCredit :release/year {:release/script [*]} {:release/media [{:medium/tracks [:track/name]}]}])
-           :in $ ?artist-name
-           :where
-           [?artist :artist/name ?artist-name]
-           [?release :release/artists ?artist]]
-          snapshot
-          "Elis Regina")
+        (d.q request-map-query snapshot "Elis Regina")
         10 (addr passed))
       (validate-query-result! "collection-binding-releases"
-        (d.q
-          [:find ?release-name
-           :in $ [?artist-name ...]
-           :where
-           [?artist :artist/name ?artist-name]
-           [?release :release/artists ?artist]
-           [?release :release/name ?release-name]]
-          snapshot
-          ["Paul McCartney" "George Harrison"])
+        (d.q collection-binding-query snapshot ["Paul McCartney" "George Harrison"])
         14 (addr passed))
       (validate-query-result! "relation-binding-releases"
-        (d.q
-          [:find ?release
-           :in $ [[?artist-name ?release-name]]
-           :where
-           [?artist :artist/name ?artist-name]
-           [?release :release/artists ?artist]
-           [?release :release/name ?release-name]]
-          snapshot
-          [["John Lennon" "Mind Games"] ["Paul McCartney" "Ram"]])
+        (d.q relation-binding-query snapshot [["John Lennon" "Mind Games"] ["Paul McCartney" "Ram"]])
         5 (addr passed))
       (validate-query-error! snapshot "relation-find-missing-db" relation-find-missing-db-query "[\"elvis presley\"]" ":in does not include $" (addr passed))
       (validate-query-result! "relation-find-releases"
-        (d.q
-          [:find ?artist-name ?release-name
-           :in $ ?artist-name
-           :where
-           [?release :release/name ?release-name]
-           [?release :release/artists ?artist]
-           [?artist :artist/name ?artist-name]]
-          snapshot
-          "Elvis Presley")
+        (d.q relation-find-query snapshot "Elvis Presley")
         29 (addr passed))
       (validate-query-result! "collection-find-releases"
-        (d.q
-          [:find [?release-name ...]
-           :in $ ?artist-name
-           :where
-           [?artist :artist/name ?artist-name]
-           [?release :release/artists ?artist]
-           [?release :release/name ?release-name]]
-          snapshot
-          "John Lennon")
+        (d.q collection-find-query snapshot "John Lennon")
         12 (addr passed))
       (validate-query-result! "tuple-find-artist-start"
-        (d.q
-          [:find [?year ?month ?day]
-           :in $ ?name
-           :where
-           [?artist :artist/name ?name]
-           [?artist :artist/startDay ?day]
-           [?artist :artist/startMonth ?month]
-           [?artist :artist/startYear ?year]]
-          snapshot
-          "John Lennon")
+        (d.q tuple-find-query snapshot "John Lennon")
         1 (addr passed))
       (validate-query-result! "scalar-find-artist-start"
-        (d.q
-          [:find ?year .
-           :in $ ?name
-           :where
-           [?artist :artist/name ?name]
-           [?artist :artist/startYear ?year]]
-          snapshot
-          "John Lennon")
+        (d.q scalar-find-query snapshot "John Lennon")
         1 (addr passed))
       (validate-scalar-int-result! "artist-not-canada-count"
-        (d.q
-          [:find (count ?eid) .
-           :where
-           [?eid :artist/name]
-           (not [?eid :artist/country :country/CA])]
-          snapshot)
+        (d.q artist-not-canada-count-query snapshot)
         4538 (addr passed))
       (validate-scalar-int-result! "artist-not-release-1970-count"
-        (d.q
-          [:find (count ?artist) .
-           :where
-           [?artist :artist/name]
-           (not-join [?artist]
-             [?release :release/artists ?artist]
-             [?release :release/year 1970])]
-          snapshot)
+        (d.q artist-not-release-1970-count-query snapshot)
         3263 (addr passed))
       (validate-scalar-int-result! "live-at-carnegie-not-bill-withers-count"
-        (d.q
-          [:find (count ?r) .
-           :where
-           [?r :release/name "Live at Carnegie Hall"]
-           (not-join [?r]
-             [?r :release/artists ?a]
-             [?a :artist/name "Bill Withers"])]
-          snapshot)
+        (d.q live-at-carnegie-not-bill-withers-count-query snapshot)
         2 (addr passed))
       (validate-scalar-int-result! "artist-or-type-gender-count"
-        (d.q
-          [:find (count ?artist) .
-           :where
-           (or [?artist :artist/type :artist.type/group]
-               (and [?artist :artist/type :artist.type/person]
-                    [?artist :artist/gender :artist.gender/female]))]
-          snapshot)
+        (d.q artist-or-type-gender-count-query snapshot)
         2323 (addr passed))
       (validate-scalar-int-result! "release-or-canada-artist-or-1970-count"
-        (d.q
-          [:find (count ?release) .
-           :where
-           [?release :release/name]
-           (or-join [?release]
-             (and [?release :release/artists ?artist]
-                  [?artist :artist/country :country/CA])
-             [?release :release/year 1970])]
-          snapshot)
+        (d.q release-or-canada-artist-or-1970-count-query snapshot)
         2124 (addr passed))
       (validate-query-result! "artist-start-before-1600"
-        (d.q
-          [:find ?name ?year
-           :where
-           [?artist :artist/name ?name]
-           [?artist :artist/startYear ?year]
-           [(< ?year 1600)]]
-          snapshot)
+        (d.q artist-start-before-1600-query snapshot)
         2 (addr passed))
       (validate-query-result! "return-map-releases"
-        (d.q
-          [:find ?artist-name ?release-name
-           :keys artist release
-           :in $ ?artist-name
-           :where
-           [?release :release/name ?release-name]
-           [?release :release/artists ?artist]
-           [?artist :artist/name ?artist-name]]
-          snapshot
-          "Paul McCartney")
+        (d.q return-map-find-query snapshot "Paul McCartney")
         3 (addr passed))
       (validate-query-result! "function-expression-track-minutes"
-        (d.q
-          [:find ?track-name ?minutes
-           :in $ ?artist-name
-           :where
-           [?artist :artist/name ?artist-name]
-           [?track :track/artists ?artist]
-           [?track :track/duration ?millis]
-           [(quot ?millis 60000) ?minutes]
-           [?track :track/name ?track-name]]
-          snapshot
-          "John Lennon")
+        (d.q function-expression-query snapshot "John Lennon")
         71 (addr passed))
       (validate-query-result! "mbrainz-title-by-artist"
-        (d.q
-          [:find ?title
-           :in $ ?artist-name
-           :where
-           [?a :artist/name ?artist-name]
-           [?t :track/artists ?a]
-           [?t :track/name ?title]]
-          snapshot
-          "John Lennon")
+        (d.q mbrainz-title-by-artist-query snapshot "John Lennon")
         70 (addr passed))
       (validate-query-result! "mbrainz-title-album-year-by-artist"
-        (d.q
-          [:find ?title ?album ?year
-           :in $ ?artist-name
-           :where
-           [?a :artist/name ?artist-name]
-           [?t :track/artists ?a]
-           [?t :track/name ?title]
-           [?m :medium/tracks ?t]
-           [?r :release/media ?m]
-           [?r :release/name ?album]
-           [?r :release/year ?year]]
-          snapshot
-          "John Lennon")
+        (d.q mbrainz-title-album-year-by-artist-query snapshot "John Lennon")
         93 (addr passed))
       (validate-query-result! "mbrainz-pre-1970-title-album-year"
-        (d.q
-          [:find ?title ?album ?year
-           :in $ ?artist-name
-           :where
-           [?a :artist/name ?artist-name]
-           [?t :track/artists ?a]
-           [?t :track/name ?title]
-           [?m :medium/tracks ?t]
-           [?r :release/media ?m]
-           [?r :release/name ?album]
-           [?r :release/year ?year]
-           [(< ?year 1970)]]
-          snapshot
-          "John Lennon")
+        (d.q mbrainz-pre-1970-title-album-year-query snapshot "John Lennon")
         18 (addr passed))
       (validate-rule-query-file! snapshot
         "mbrainz-track-release-rule"
@@ -854,194 +803,77 @@
         83
         (addr passed))
       (validate-query-result! "get-else-artist-starts"
-        (d.q
-          [:find ?artist-name ?year
-           :in $ [?artist-name ...]
-           :where
-           [?artist :artist/name ?artist-name]
-           [(get-else $ ?artist :artist/startYear "N/A") ?year]]
-          snapshot
-          ["Crosby, Stills & Nash" "Crosby & Nash"])
+        (d.q get-else-artist-start-query snapshot ["Crosby, Stills & Nash" "Crosby & Nash"])
         2 (addr passed))
       (validate-query-result! "get-some-country"
-        (d.q
-          [:find [?e ?attr ?name]
-           :in $ ?e
-           :where
-           [(get-some $ ?e :country/name :artist/name) [?attr ?name]]]
-          snapshot
-          :country/US)
+        (d.q get-some-country-query snapshot :country/US)
         1 (addr passed))
       (validate-query-result! "fulltext-artist-name"
-        (d.q
-          [:find ?entity ?name ?tx ?score
-           :in $ ?search
-           :where
-           [(fulltext $ :artist/name ?search) [[?entity ?name ?tx ?score]]]]
-          snapshot
-          "Jane")
+        (d.q fulltext-artist-name-query snapshot "Jane")
         3 (addr passed))
       (validate-query-result! "missing-artist-starts"
-        (d.q
-          [:find ?name
-           :where
-           [?artist :artist/name ?name]
-           [(missing? $ ?artist :artist/startYear)]]
-          snapshot)
+        (d.q missing-artist-start-query snapshot)
         1637 (addr passed))
       (validate-log! conn (addr passed))
       (validate-query-result! "attrs-with-value-42"
-        (d.q
-          [:find [?aname ...]
-           :where
-           [?attr 42 _]
-           [?attr :db/ident ?aname]]
-          snapshot)
+        (d.q attrs-with-value-42-query snapshot)
         0 (addr passed))
       (validate-query-result! "attrs-with-property"
-        (d.q
-          [:find [?aname ...]
-           :in $ [?property ...]
-           :where
-           [?attr ?property _]
-           [?attr :db/ident ?aname]]
-          snapshot
-          [:db/unique])
+        (d.q attrs-with-property-query snapshot [:db/unique])
         3 (addr passed))
       (validate-query-result! "country-artists-lookup-ref"
-        (d.q
-          [:find [?artist-name ...]
-           :in $ ?country
-           :where
-           [?artist :artist/name ?artist-name]
-           [?artist :artist/country ?country]]
-          snapshot
-          [:country/name "Belgium"])
+        (d.q country-artists-query snapshot [:country/name "Belgium"])
         10 (addr passed))
       (validate-query-result! "country-artists-ident"
-        (d.q
-          [:find [?artist-name ...]
-           :in $ ?country
-           :where
-           [?artist :artist/name ?artist-name]
-           [?artist :artist/country ?country]]
-          snapshot
-          :country/BE)
+        (d.q country-artists-query snapshot :country/BE)
         10 (addr passed))
       (validate-query-result! "country-artists-entity"
-        (d.q
-          [:find [?artist-name ...]
-           :in $ ?country
-           :where
-           [?artist :artist/name ?artist-name]
-           [?artist :artist/country ?country]]
-          snapshot
-          1000162)
+        (d.q country-artists-query snapshot 1000162)
         10 (addr passed))
       (validate-query-result! "dynamic-reference-country"
-        (d.q
-          [:find [?artist-name ...]
-           :in $ ?country [?reference ...]
-           :where
-           [?artist :artist/name ?artist-name]
-           [?artist ?reference ?country]]
-          snapshot
-          :country/BE
-          [:artist/country])
+        (d.q dynamic-reference-country-query snapshot :country/BE [:artist/country])
         0 (addr passed))
       (validate-query-result! "dynamic-reference-country-entid"
-        (d.q
-          [:find [?artist-name ...]
-           :in $ ?country [?reference ...]
-           :where
-           [(datomic.api/entid $ ?country) ?country-id]
-           [?artist :artist/name ?artist-name]
-           [?artist ?reference ?country-id]]
-          snapshot
-          :country/BE
-          [:artist/country])
+        (d.q dynamic-reference-country-entid-query snapshot :country/BE [:artist/country])
         10 (addr passed))
       (validate-query-result! "artist-type-gender"
-        (d.q
-          [:find ?id ?type ?gender
-           :in $ ?name
-           :where
-           [?e :artist/name ?name]
-           [?e :artist/gid ?id]
-           [?e :artist/type ?teid]
-           [?teid :db/ident ?type]
-           [?e :artist/gender ?geid]
-           [?geid :db/ident ?gender]]
-          snapshot
-          "Janis Joplin")
+        (d.q artist-type-gender-query snapshot "Janis Joplin")
         1 (addr passed))
       (let [empty-conn (d.create-conn)
             empty-db (d.db empty-conn)]
         (defer (d.close empty-db))
         (defer (d.close empty-conn))
         (validate-scalar-int-result! "monster-heads-sum"
-          (d.q
-            [:find (sum ?heads) .
-             :in [[_ ?heads]]]
-            empty-db
+          (d.q monster-heads-sum-query empty-db
             [["Cerberus" 3] ["Medusa" 1] ["Cyclops" 1] ["Chimera" 1]])
           4 (addr passed))
         (validate-scalar-int-result! "monster-heads-sum-with"
-          (d.q
-            [:find (sum ?heads) .
-             :with ?monster
-             :in [[?monster ?heads]]]
-            empty-db
+          (d.q monster-heads-sum-with-query empty-db
             [["Cerberus" 3] ["Medusa" 1] ["Cyclops" 1] ["Chimera" 1]])
           6 (addr passed))
         (validate-scalar-int-vector-result! "distinct-values"
-          (d.q
-            [:find (distinct ?v) .
-             :in [?v ...]]
-            empty-db
-            [1 1 2 2 2 3])
+          (d.q distinct-values-query empty-db [1 1 2 2 2 3])
           ([]i64 [1 2 3]) (addr passed)))
       (validate-query-result! "min-track-duration"
-        (d.q
-          [:find [(min ?dur)]
-           :where [?e :track/duration ?dur]]
-          snapshot)
+        (d.q min-track-duration-query snapshot)
         1 (addr passed))
       (validate-two-int-vector-result! "top-track-duration"
-        (d.q
-          [:find [(min 5 ?millis) (max 5 ?millis)]
-           :where [?track :track/duration ?millis]]
-          snapshot)
+        (d.q top-track-duration-query snapshot)
         ([]i64 [3000 4000 5000 6000 7000])
         ([]i64 [3894000 3407000 2928000 2802000 2775000])
         (addr passed))
       (validate-two-string-vector-size-result! "random-artist-names"
-        (d.q
-          [:find [(rand 2 ?name) (sample 2 ?name)]
-           :where [_ :artist/name ?name]]
-          snapshot)
+        (d.q random-artist-name-query snapshot)
         2 (addr passed))
       (validate-query-result! "sum-medium-track-count"
-        (d.q
-          [:find (sum ?count) .
-           :with ?medium
-           :where [?medium :medium/trackCount ?count]]
-          snapshot)
+        (d.q sum-medium-track-count-query snapshot)
         1 (addr passed))
       (validate-scalar-int-result! "custom-mode-aggregate"
-        (d.q-with-fns
-          [:find (user/mode ?track-count) .
-           :with ?media
-           :where [?media :medium/trackCount ?track-count]]
-          snapshot
+        (d.q-with-fns custom-mode-aggregate-query snapshot
           ([]d.Native-Query-Fn [(d.query-aggregate-fn "user/mode" mode-track-count)]))
         2 (addr passed))
       (validate-query-result! "artist-name-counts"
-        (d.q
-          [:find (count ?name) (count-distinct ?name)
-           :with ?artist
-           :where [?artist :artist/name ?name]]
-          snapshot)
+        (d.q artist-name-count-query snapshot)
         1 (addr passed))
       (validate-query! snapshot "tracks-by-artist-name" tracks-by-artist-name-query "[\"John Lennon\"]" 70 (addr passed))
       (validate-query! snapshot "pre-1970-release-names" pre-1970-release-names-query "[\"John Lennon\"]" 3 (addr passed))

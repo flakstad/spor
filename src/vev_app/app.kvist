@@ -229,8 +229,11 @@
       (db-ptr db) query rules inputs)))
 
 (defmacro q-with-fns [query db fns & inputs]
-  `(result-value
-     (vev.q-result-store-db-with-fns ~query (db-ptr ~db) ~fns ~@inputs)))
+  (if (vector? query)
+    `(result-value
+       (vev.q-result-store-db-with-fns ~query (db-ptr ~db) ~fns ~@inputs))
+    `(result-value
+       (vev.q-result-store-db-data-with-fns ~query (db-ptr ~db) ~fns ~@inputs))))
 
 (defmacro q-relation [query relation & inputs]
   `(result-value
@@ -272,6 +275,14 @@
 (defn try-pull-text [db: DB, pattern: string, entity: u64] -> [value: Value, ok: bool, error: string]
   (vev.pull-store-db-value-text (db-ptr db) pattern entity))
 
+(defn pull-data [db: DB, pattern: Data, entity: u64] -> Value
+  (let [[value ok error]
+          (vev.pull-store-db-value-data (db-ptr db) pattern entity)]
+    (pulled-value value ok error)))
+
+(defn try-pull-data [db: DB, pattern: Data, entity: u64] -> [value: Value, ok: bool, error: string]
+  (vev.pull-store-db-value-data (db-ptr db) pattern entity))
+
 (defn pull-lookup-text [db: DB, pattern: string, attr: string, lookup-value: Value] -> Value
   (let [[value ok error]
           (vev.pull-store-db-lookup-ref-value-text
@@ -285,6 +296,12 @@
 (defn try-pull-lookup-data [db: DB, pattern: Data, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
   (vev.pull-store-db-lookup-ref-value-data
     (db-ptr db) pattern attr lookup-value))
+
+(defn pull-lookup-data [db: DB, pattern: Data, attr: string, lookup-value: Value] -> Value
+  (let [[value ok error]
+          (vev.pull-store-db-lookup-ref-value-data
+            (db-ptr db) pattern attr lookup-value)]
+    (pulled-value value ok error)))
 
 (defn close-value [value: Value]
   (vev.delete-owned-value value))

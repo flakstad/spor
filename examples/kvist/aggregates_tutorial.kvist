@@ -17,6 +17,83 @@
 
 (def default-uri "build/day-of-datomic/vev-aggregates.sqlite")
 
+(def object-count-query
+  '[:find (count ?e) .
+    :where [?e :object/name ?n]])
+
+(def object-names-query
+  '[:find ?name
+    :where [?e :object/name ?name]])
+
+(def largest-radius-query
+  '[:find (max ?radius) .
+    :where [_ :object/meanRadius ?radius]])
+
+(def smallest-radius-query
+  '[:find (min ?radius) .
+    :where [_ :object/meanRadius ?radius]])
+
+(def average-radius-query
+  '[:find (avg ?radius) .
+    :with ?e
+    :where [?e :object/meanRadius ?radius]])
+
+(def median-radius-query
+  '[:find (median ?radius) .
+    :with ?e
+    :where [?e :object/meanRadius ?radius]])
+
+(def stddev-radius-query
+  '[:find (stddev ?radius) .
+    :with ?e
+    :where [?e :object/meanRadius ?radius]])
+
+(def random-object-name-query
+  '[:find (rand ?name) .
+    :where [?e :object/name ?name]])
+
+(def smallest-three-radii-query
+  '[:find (min 3 ?radius) .
+    :with ?e
+    :where [?e :object/meanRadius ?radius]])
+
+(def largest-three-radii-query
+  '[:find (max 3 ?radius) .
+    :with ?e
+    :where [?e :object/meanRadius ?radius]])
+
+(def five-random-object-names-query
+  '[:find (rand 5 ?name) .
+    :with ?e
+    :where [?e :object/name ?name]])
+
+(def five-sampled-object-names-query
+  '[:find (sample 5 ?name) .
+    :with ?e
+    :where [?e :object/name ?name]])
+
+(def schema-name-average-length-query
+  '[:find (avg ?length) .
+    :with ?e
+    :where
+    [?e :db/ident ?ident]
+    [(name ?ident) ?name]
+    [(count ?name) ?length]])
+
+(def schema-name-modes-query
+  '[:find (datomic.samples.repl/modes ?length) .
+    :with ?e
+    :where
+    [?e :db/ident ?ident]
+    [(name ?ident) ?name]
+    [(count ?name) ?length]])
+
+(def schema-attribute-value-type-query
+  '[:find (count ?a) (count-distinct ?vt)
+    :where
+    [?a :db/ident ?ident]
+    [?a :db/valueType ?vt]])
+
 (defn validate-scalar-int-result! [label: string, result: d.Result, expected: i64, passed: ^bool]
   (let [ok (and result.ok
                 (= (count result.rows) 1)
@@ -198,123 +275,55 @@
     (defer (d.close snapshot))
     (do
       (validate-scalar-int-result! "aggregate-object-count"
-        (d.q
-          [:find (count ?e) .
-           :where [?e :object/name ?n]]
-          snapshot)
+        (d.q object-count-query snapshot)
         17 (addr passed))
       (validate-scalar-float-result! "aggregate-largest-radius"
-        (d.q
-          [:find (max ?radius) .
-           :where [_ :object/meanRadius ?radius]]
-          snapshot)
+        (d.q largest-radius-query snapshot)
         696000.0 (addr passed))
       (validate-scalar-float-result! "aggregate-smallest-radius"
-        (d.q
-          [:find (min ?radius) .
-           :where [_ :object/meanRadius ?radius]]
-          snapshot)
+        (d.q smallest-radius-query snapshot)
         1163.0 (addr passed))
       (validate-scalar-float-close-result! "aggregate-average-radius"
-        (d.q
-          [:find (avg ?radius) .
-           :with ?e
-           :where [?e :object/meanRadius ?radius]]
-          snapshot)
+        (d.q average-radius-query snapshot)
         53390.17647058824 0.0000001 (addr passed))
       (validate-scalar-float-result! "aggregate-median-radius"
-        (d.q
-          [:find (median ?radius) .
-           :with ?e
-           :where [?e :object/meanRadius ?radius]]
-          snapshot)
+        (d.q median-radius-query snapshot)
         2631.2 (addr passed))
       (validate-scalar-float-close-result! "aggregate-stddev-radius"
-        (d.q
-          [:find (stddev ?radius) .
-           :with ?e
-           :where [?e :object/meanRadius ?radius]]
-          snapshot)
+        (d.q stddev-radius-query snapshot)
         161902.52780945456 0.0000001 (addr passed))
       (validate-random-name-result! "aggregate-random-object-name"
-        (d.q
-          [:find (rand ?name) .
-           :where [?e :object/name ?name]]
-          snapshot)
-        (d.q
-          [:find ?name
-           :where [?e :object/name ?name]]
-          snapshot)
+        (d.q random-object-name-query snapshot)
+        (d.q object-names-query snapshot)
         (addr passed))
       (validate-float-vector-result! "aggregate-smallest-three-radii"
-        (d.q
-          [:find (min 3 ?radius) .
-           :with ?e
-           :where [?e :object/meanRadius ?radius]]
-          snapshot)
+        (d.q smallest-three-radii-query snapshot)
         ([]f64 [1163.0 1353.4 1561.0])
         (addr passed))
       (validate-float-vector-result! "aggregate-largest-three-radii"
-        (d.q
-          [:find (max 3 ?radius) .
-           :with ?e
-           :where [?e :object/meanRadius ?radius]]
-          snapshot)
+        (d.q largest-three-radii-query snapshot)
         ([]f64 [696000.0 69911.0 58232.0])
         (addr passed))
       (validate-random-name-vector-result! "aggregate-five-random-object-names"
-        (d.q
-          [:find (rand 5 ?name) .
-           :with ?e
-           :where [?e :object/name ?name]]
-          snapshot)
-        (d.q
-          [:find ?name
-           :where [?e :object/name ?name]]
-          snapshot)
+        (d.q five-random-object-names-query snapshot)
+        (d.q object-names-query snapshot)
         5
         (addr passed))
       (validate-sampled-name-vector-result! "aggregate-five-sampled-object-names"
-        (d.q
-          [:find (sample 5 ?name) .
-           :with ?e
-           :where [?e :object/name ?name]]
-          snapshot)
-        (d.q
-          [:find ?name
-           :where [?e :object/name ?name]]
-          snapshot)
+        (d.q five-sampled-object-names-query snapshot)
+        (d.q object-names-query snapshot)
         5
         (addr passed))
       (validate-scalar-float-close-result! "aggregate-schema-name-average-length"
-        (d.q
-          [:find (avg ?length) .
-           :with ?e
-           :where
-           [?e :db/ident ?ident]
-           [(name ?ident) ?name]
-           [(count ?name) ?length]]
-          snapshot)
+        (d.q schema-name-average-length-query snapshot)
         6.666666666666667 0.0000001
         (addr passed))
       (validate-empty-set-result! "aggregate-schema-name-modes"
-        (d.q-with-fns
-          [:find (datomic.samples.repl/modes ?length) .
-           :with ?e
-           :where
-           [?e :db/ident ?ident]
-           [(name ?ident) ?name]
-           [(count ?name) ?length]]
-          snapshot
+        (d.q-with-fns schema-name-modes-query snapshot
           ([]d.Native-Query-Fn [(d.query-aggregate-fn "datomic.samples.repl/modes" schema-name-modes)]))
         (addr passed))
       (validate-int-int-row-result! "aggregate-schema-attribute-value-types"
-        (d.q
-          [:find (count ?a) (count-distinct ?vt)
-           :where
-           [?a :db/ident ?ident]
-           [?a :db/valueType ?vt]]
-          snapshot)
+        (d.q schema-attribute-value-type-query snapshot)
         3 2
         (addr passed)))
     (fmt.printf "source=kvist section=summary ok=%v\n" passed)))

@@ -13,6 +13,44 @@
 // Section: opening in-memory `kvs` relation and first slow-query
 // decomposition examples.
 
+(def slow-query
+  '[:find ?e1 ?e2
+    :where
+    [?e1 :a ?v1]
+    [?e2 :a ?v2]
+    [?e1 :a 10]
+    [?e2 :a ?e1]])
+
+(def drop-last-clause-query
+  '[:find ?e1 ?e2
+    :where
+    [?e1 :a ?v1]
+    [?e2 :a ?v2]
+    [?e1 :a 10]])
+
+(def cross-product-query
+  '[:find ?e1 ?e2
+    :where
+    [?e1 :a ?v1]
+    [?e2 :a ?v2]])
+
+(def single-clause-query
+  '[:find ?e1
+    :where [?e1 :a ?v1]])
+
+(def reordered-query
+  '[:find ?e1 ?e2
+    :where
+    [?e1 :a ?v1]
+    [?e1 :a 10]
+    [?e2 :a ?e1]
+    [?e2 :a ?v2]])
+
+(def better-query
+  '[:find ?e1 ?e2
+    :in $ ?e1
+    :where [?e2 :a ?e1]])
+
 (defn kvs-relation [] -> d.Value
   (let [rows (make [dynamic]d.Value)]
     (for [e (arr.range 0 2000)]
@@ -31,12 +69,7 @@
     (d.close result)))
 
 (defn validate-better-query! [rows: d.Value, passed: ^bool]
-  (let [result (d.q-relation
-                 [:find ?e1 ?e2
-                  :in $ ?e1
-                  :where [?e2 :a ?e1]]
-                 rows
-                 10)
+  (let [result (d.q-relation better-query rows 10)
         ok (and result.ok
                 (= (count result.rows) 1)
                 (= (count result.rows[0].values) 2)
@@ -59,48 +92,19 @@
         rows)
       10000 (addr passed))
     (validate-count! "slow-query"
-      (d.q-relation
-        [:find ?e1 ?e2
-         :where
-         [?e1 :a ?v1]
-         [?e2 :a ?v2]
-         [?e1 :a 10]
-         [?e2 :a ?e1]]
-        rows)
+      (d.q-relation slow-query rows)
       1 (addr passed))
     (validate-count! "drop-last-clause"
-      (d.q-relation
-        [:find ?e1 ?e2
-         :where
-         [?e1 :a ?v1]
-         [?e2 :a ?v2]
-         [?e1 :a 10]]
-        rows)
+      (d.q-relation drop-last-clause-query rows)
       2000 (addr passed))
     (validate-count! "cross-product"
-      (d.q-relation
-        [:find ?e1 ?e2
-         :where
-         [?e1 :a ?v1]
-         [?e2 :a ?v2]]
-        rows)
+      (d.q-relation cross-product-query rows)
       4000000 (addr passed))
     (validate-count! "single-clause"
-      (d.q-relation
-        [:find ?e1
-         :where
-         [?e1 :a ?v1]]
-        rows)
+      (d.q-relation single-clause-query rows)
       2000 (addr passed))
     (validate-count! "reordered-query"
-      (d.q-relation
-        [:find ?e1 ?e2
-         :where
-         [?e1 :a ?v1]
-         [?e1 :a 10]
-         [?e2 :a ?e1]
-         [?e2 :a ?v2]]
-        rows)
+      (d.q-relation reordered-query rows)
       1 (addr passed))
     (validate-better-query! rows (addr passed))
     (fmt.printf "source=kvist section=summary ok=%v\n" passed)
