@@ -1,0 +1,50 @@
+(package main)
+
+(import os "core:os")
+(import test "kvist:test")
+(import kdata "kvist:data")
+(import d "../vev_app")
+
+(def app-test-path "/tmp/vev-app-durable-test.sqlite")
+
+(def ref-join-query
+  '[:find ?workspace-id .
+    :in $ ?project-id
+    :where [?project :entity/id ?project-id]
+           [?project :project/workspace ?workspace]
+           [?workspace :entity/id ?workspace-id]])
+
+(defn remove-app-test-db []
+  (os.remove app-test-path)
+  (os.remove "/tmp/vev-app-durable-test.sqlite-wal")
+  (os.remove "/tmp/vev-app-durable-test.sqlite-shm"))
+
+(test.deftest durable-app-query-input-joins-through-ref
+  (remove-app-test-db)
+  (let [conn (d.connect app-test-path)]
+    (d.transact conn
+      '[[:db/add 10 :db/ident :entity/id]
+        [:db/add 10 :db/valueType :db.type/string]
+        [:db/add 10 :db/unique :db.unique/identity]
+        [:db/add 11 :db/ident :project/workspace]
+        [:db/add 11 :db/valueType :db.type/ref]])
+    (d.transact conn
+      '[{:db/id "workspace" :entity/id "workspace-main"}])
+    ;; Materialize and close a snapshot before the next transaction. Durable
+    ;; connection reads must advance after a successful write.
+    (let [before (d.db conn)
+          workspace (d.q '[:find ?id .
+                           :where [?e :entity/id ?id]] before)]
+      (test.is (= (kdata.string workspace) "workspace-main"))
+      (d.close before))
+    (d.transact conn
+      '[{:db/id "project"
+         :entity/id "project-main"
+         :project/workspace [:entity/id "workspace-main"]}])
+    (let [db (d.db conn)
+          result (d.q ref-join-query db "project-main")]
+      (test.is (kdata.string? result))
+      (test.is (= (kdata.string result) "workspace-main"))
+      (d.close db))
+    (d.close conn))
+  (remove-app-test-db))
