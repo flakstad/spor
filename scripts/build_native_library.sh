@@ -10,6 +10,7 @@ VERSION="$(vev_version "$ROOT")"
 KVIST_BIN="${KVIST_BIN:-kvist}"
 GENERATED_DIR="$ROOT/build/generated/vev_abi"
 LIB_DIR="$ROOT/build/lib"
+INCLUDE_DIR="$ROOT/build/include"
 PKGCONFIG_DIR="$LIB_DIR/pkgconfig"
 IF_NEEDED="false"
 KVIST_PATH="$(command -v "$KVIST_BIN" 2>/dev/null || true)"
@@ -32,7 +33,7 @@ case "$(uname -s)" in
 esac
 
 LIB_PATH="$LIB_DIR/$LIB_NAME"
-mkdir -p "$GENERATED_DIR" "$LIB_DIR" "$PKGCONFIG_DIR"
+mkdir -p "$GENERATED_DIR" "$LIB_DIR" "$INCLUDE_DIR" "$PKGCONFIG_DIR"
 
 if [[ "$IF_NEEDED" == "true" && -f "$LIB_PATH" ]]; then
   SOURCES_CURRENT="true"
@@ -43,6 +44,9 @@ if [[ "$IF_NEEDED" == "true" && -f "$LIB_PATH" ]]; then
     SOURCES_CURRENT="false"
   fi
   if [[ "$ROOT/scripts/build_native_library.sh" -nt "$LIB_PATH" ]]; then
+    SOURCES_CURRENT="false"
+  fi
+  if [[ ! -f "$INCLUDE_DIR/vev.h" || "$ROOT/include/vev.h" -nt "$INCLUDE_DIR/vev.h" ]]; then
     SOURCES_CURRENT="false"
   fi
   if [[ -n "$KVIST_PATH" && "$KVIST_PATH" -nt "$LIB_PATH" ]]; then
@@ -64,6 +68,7 @@ else
 fi
 
 odin build "$GENERATED_DIR" -build-mode:dll -out:"$LIB_PATH"
+cp "$ROOT/include/vev.h" "$INCLUDE_DIR/vev.h"
 
 cat > "$PKGCONFIG_DIR/vev.pc" <<EOF
 prefix=\${pcfiledir}/../..

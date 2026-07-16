@@ -4,7 +4,7 @@
 (package main)
 
 (import arr "kvist:arr")
-(import cli "kvist:cli")
+(import cli "../deps/cli")
 (import fmt "core:fmt")
 (import os "core:os")
 (import strconv "core:strconv")
@@ -301,22 +301,28 @@
               persist-us
               persist-error)
             (when persist-ok
-              (let [[reopened reopen-ok reopen-error] (vev.open-conn-sqlite sqlite-output)]
+              (let [[reopened reopen-ok reopen-error] (vev.open-store sqlite-output)]
                 (if reopen-ok
-                  (let [input ([]vev.Query-Input [(vev.query-input-scalar (vev.value-string "The Beatles"))])
-                        query-start (time.now)
-                        profiled (vev.q-text-profiled-with-inputs reopened.db release-first-query input)
-                        query-us (elapsed-us query-start)]
-                    (fmt.printf
-                      "engine=vev workload=musicbrainz-import-reopened-release-first ok=%v rows=%d query_us=%.0f steps=%d clauses=%d candidates=%d max_bindings=%d output_rows=%d\n"
-                      profiled.result.ok
-                      (count profiled.result.rows)
-                      query-us
-                      profiled.stats.steps
-                      profiled.stats.clauses
-                      profiled.stats.clause-candidates
-                      profiled.stats.max-intermediate-bindings
-                      profiled.stats.output-rows)
-                    (vev.delete-profiled-result-set-shallow profiled)
-                    (delete-conn-shallow reopened))
+                  (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (addr reopened))]
+                    (if snapshot-ok
+                      (let [query-start (time.now)
+                            profiled (vev.q-profiled-store-db-text-with-input-text
+                                       (addr snapshot)
+                                       release-first-query
+                                       "[\"The Beatles\"]")
+                            query-us (elapsed-us query-start)]
+                        (fmt.printf
+                          "engine=vev workload=musicbrainz-import-reopened-release-first ok=%v rows=%d query_us=%.0f steps=%d clauses=%d candidates=%d max_bindings=%d output_rows=%d\n"
+                          profiled.result.ok
+                          (count profiled.result.rows)
+                          query-us
+                          profiled.stats.steps
+                          profiled.stats.clauses
+                          profiled.stats.clause-candidates
+                          profiled.stats.max-intermediate-bindings
+                          profiled.stats.output-rows)
+                        (vev.delete-profiled-result-set-shallow profiled)
+                        (vev.close-store-db! (addr snapshot)))
+                      (fmt.printf "engine=vev workload=musicbrainz-import-reopen ok=false path=%s error=%s\n" sqlite-output snapshot-error))
+                    (vev.close-store reopened))
                   (fmt.printf "engine=vev workload=musicbrainz-import-reopen ok=false path=%s error=%s\n" sqlite-output reopen-error)))))))))

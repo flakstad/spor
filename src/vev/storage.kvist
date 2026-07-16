@@ -306,6 +306,33 @@ INSERT OR REPLACE INTO vev_meta (key, value) VALUES ('format', 'vev-snapshot-tex
 INSERT OR REPLACE INTO vev_meta (key, value) VALUES ('storage-architecture', 'vev-sqlite-chunked-index-v0');
 `
 
+SQLITE_SCHEMA_VERSION :: \"1\"
+
+sqlite_schema_version_current :: proc(db: ^SQLite3) -> bool {
+    stmt: ^SQLite3_Stmt
+    sql := \"SELECT 1 FROM vev_meta WHERE key = 'schema-version' AND value = ? LIMIT 1\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return false
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return false
+    }
+    defer _ = sqlite3_finalize(stmt)
+    if sqlite_bind_text_borrowed(stmt, 1, SQLITE_SCHEMA_VERSION) != SQLITE_OK {
+        return false
+    }
+    return sqlite3_step(stmt) == SQLITE_ROW
+}
+
+sqlite_mark_schema_current :: proc(db: ^SQLite3) -> (bool, string) {
+    return sqlite_exec_ok(
+        db,
+        \"INSERT OR REPLACE INTO vev_meta (key, value) VALUES ('schema-version', '1')\",
+    )
+}
+
 sqlite_open_initialized :: proc(path: string) -> (^SQLite3, bool, string) {
     db: ^SQLite3
     path_c, path_c_ok := sqlite_cstring(path)
@@ -324,6 +351,9 @@ sqlite_open_initialized :: proc(path: string) -> (^SQLite3, bool, string) {
     if !ok {
         _ = sqlite3_close(db)
         return nil, false, err
+    }
+    if sqlite_schema_version_current(db) {
+        return db, true, \"\"
     }
     log_index_ok, log_index_error := sqlite_ensure_datom_log_index_column(db)
     if !log_index_ok {
@@ -372,6 +402,11 @@ sqlite_open_initialized :: proc(path: string) -> (^SQLite3, bool, string) {
     }
     fulltext_ok, _ := sqlite_ensure_fulltext_table(db)
     _ = fulltext_ok
+    version_ok, version_error := sqlite_mark_schema_current(db)
+    if !version_ok {
+        _ = sqlite3_close(db)
+        return nil, false, version_error
+    }
     return db, true, \"\"
 }
 

@@ -18,8 +18,12 @@ The current workshop covers executable material from:
 - `build/upstream/day-of-datomic/tutorial/decomposing_a_query.clj`
 
 The data source is Datomic's 1968-1973 MusicBrainz sample backup. Vev's local
-export contains 763,274 transaction items split into a schema file and eight
+export contains 763,299 datoms split into a schema file and eight
 bounded value chunks.
+
+`scripts/fetch_workshop_sources.sh` checks out pinned revisions of all three
+upstream repositories under `build/upstream`. The validation setup runs it
+automatically, so the workshop does not rely on manually prepared source trees.
 
 ## Requirements
 
@@ -71,7 +75,7 @@ run the source-conversion path:
 
 ```sh
 DATOMIC_HOME=/path/to/datomic-pro \
-  scripts/musicbrainz_workshop_setup.sh --from-datomic
+  scripts/musicbrainz_workshop_setup.sh --from-datomic --validate
 ```
 
 Datomic is only needed to read its backup format and produce the portable EDN
@@ -102,7 +106,7 @@ The Kvist examples use Vev's literal data DSL with the database after the query
 form:
 
 ```clojure
-(vev.q [:find ?name :where [?e :artist/name ?name]] db)
+(d.q '[:find ?name :where [?e :artist/name ?name]] db)
 ```
 
 EDN strings remain available where the workshop intentionally exercises the
@@ -130,10 +134,12 @@ measured runs; use `--help` for the current options.
 
 ## Current Result
 
-- Full store refresh succeeds with 763,274 datoms.
+- Full store refresh succeeds with 763,299 datoms.
 - The refreshed store closes, reopens, and answers the import smoke queries.
 - The complete Clojure workshop validation passes.
 - The parallel Kvist workshop validation reports `summary ok=true`.
+- Versioned schema migrations keep an already-current durable connection open
+  near constant-time instead of rebuilding fulltext state on every open.
 - Covered Datomic comparisons match row counts and portable fingerprints.
 - Covered persistent Vev performance is accepted for the current usability
   gate. Further tuning starts from a measured application blocker, not a

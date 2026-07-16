@@ -108,6 +108,7 @@ echo "Clojure validation: scripts/musicbrainz_workshop_clojure.sh"
 echo "Kvist validation:   scripts/musicbrainz_workshop_kvist.sh"
 
 if [[ "$VALIDATE" == "true" ]]; then
+  "$ROOT/scripts/fetch_workshop_sources.sh"
   VEV_MUSICBRAINZ_STORE="$STORE" "$ROOT/scripts/musicbrainz_workshop_clojure.sh"
   "$ROOT/scripts/musicbrainz_workshop_kvist.sh" "$STORE"
 fi

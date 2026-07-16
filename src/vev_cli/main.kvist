@@ -3,7 +3,7 @@
 
 (package main)
 
-(import cli "kvist:cli")
+(import cli "../../deps/cli")
 (import fmt "core:fmt")
 (import os "core:os")
 (import strconv "core:strconv")

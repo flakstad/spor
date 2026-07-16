@@ -8,6 +8,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 JAVA_OUT="$ROOT/build/examples/java"
 STORE="${VEV_MUSICBRAINZ_STORE:-$ROOT/build/musicbrainz/vev-mbrainz-tutorial.sqlite}"
 
+cd "$ROOT"
+
 if [[ ! -f "$STORE" ]]; then
   echo "missing persistent MusicBrainz Vev store: $STORE" >&2
   echo "build it with scripts/musicbrainz_workshop_setup.sh" >&2

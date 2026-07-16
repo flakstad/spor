@@ -34,6 +34,9 @@ scripts/musicbrainz_workshop_kvist.sh
 See `docs/musicbrainz.md` for sample export conversion, optional Datomic
 comparison, path overrides, and runtime requirements.
 
+The validation command fetches the exact pinned upstream tutorial sources into
+`build/upstream`; no separate clone or copied tutorial fixture is required.
+
 ## Application Example
 
 The contact book is a small non-workshop application implemented in Python,
