@@ -764,13 +764,6 @@
     :else
     nil))
 
-(def ^:private aggregate-symbols
-  '#{count count-distinct distinct min max sum avg median variance stddev rand sample aggregate})
-
-(defn- aggregate-form? [form]
-  (and (seq? form)
-       (contains? aggregate-symbols (first form))))
-
 (defn- query-find-shape [query]
   (let [find-forms (vec (or (query-find-forms query) []))
         first-form (first find-forms)]
@@ -787,9 +780,7 @@
 
       (and (= 1 (count find-forms))
            (vector? first-form)
-           (not= '... (second first-form))
-           (or (every? symbol? first-form)
-               (every? aggregate-form? first-form)))
+           (not= '... (second first-form)))
       :tuple
 
       :else
@@ -867,7 +858,7 @@
                   (coerce-limited-rand-aggregates query))]
     (case (query-find-shape query)
       :scalar (first-row-value rows)
-      :collection (set (map first rows))
+      :collection (vec (distinct (map first rows)))
       :tuple (first rows)
       :relation (set rows))))
 
@@ -1432,6 +1423,9 @@
     (= kind Vev/COLUMN_BOOL) :bool
     (= kind Vev/COLUMN_FLOAT) :float
     (= kind Vev/COLUMN_VALUE) :value
+    (= kind Vev/COLUMN_KEYWORD) :keyword
+    (= kind Vev/COLUMN_SYMBOL) :symbol
+    (= kind Vev/COLUMN_UUID) :uuid
     :else :unknown))
 
 (defn- column-result->map [^Vev$ColumnResult result]
@@ -1677,6 +1671,15 @@
 
       (= kind Vev/COLUMN_STRING)
       (aget ^objects values row)
+
+      (= kind Vev/COLUMN_KEYWORD)
+      (keyword (subs (aget ^objects values row) 1))
+
+      (= kind Vev/COLUMN_SYMBOL)
+      (symbol (aget ^objects values row))
+
+      (= kind Vev/COLUMN_UUID)
+      (java.util.UUID/fromString (aget ^objects values row))
 
       (= kind Vev/COLUMN_BOOL)
       (boolean (aget ^booleans values row))

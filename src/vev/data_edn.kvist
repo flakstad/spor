@@ -3,7 +3,200 @@
 
 (package vev)
 
+(import kdata "kvist:data")
 (import edn "kvist:edn")
+
+(defenum Query-Data-Find-Shape [
+  Relation
+  Collection
+  Tuple
+  Scalar
+])
+
+(defn delete-data-items [items: [dynamic]Data]
+  (for [item items]
+    (kdata.release item))
+  (delete items))
+
+(defn append-data-item! [items: ^[dynamic]Data, item: Data]
+  (kdata.append-retained! items item))
+
+(defn query-data-collection-find? [item: Data] -> bool
+  (and (data.vector? item)
+       (= (count item) 2)
+       (data.symbol? (kdata.nth item 1))
+       (= (data.symbol (kdata.nth item 1)) "...")))
+
+(defn query-data-find-shape-from [find: Data, start: int] -> Query-Data-Find-Shape
+  (when (>= start (count find))
+    (return .Relation))
+  (let [first (kdata.nth find start)]
+    (when (data.vector? first)
+      (return (if (query-data-collection-find? first) .Collection .Tuple))))
+  (when (and (< (+ start 1) (count find))
+             (data.symbol? (kdata.nth find (+ start 1)))
+             (= (data.symbol (kdata.nth find (+ start 1))) "."))
+    (return .Scalar))
+  .Relation)
+
+(defn query-data-find-shape [query: Data] -> Query-Data-Find-Shape
+  (if (data.map? query)
+    (let [find (get query :find)]
+      (if (data.vector? find)
+        (query-data-find-shape-from find 0)
+        .Relation))
+    (if (and (data.vector? query)
+             (> (count query) 1)
+             (data.keyword? (kdata.nth query 0))
+             (= (data.keyword (kdata.nth query 0)) ":find"))
+      (query-data-find-shape-from query 1)
+      .Relation)))
+
+(defn value-data [value: Value] -> Data
+  (case value.kind
+    .Nil (kdata.from-nil)
+    .Entity (kdata.from-int (i64 value.entity))
+    .String (kdata.from-string value.text)
+    .Int (kdata.from-int value.int-value)
+    .Float (kdata.from-float value.float-value)
+    .Bool (kdata.from-bool value.bool-value)
+    .Keyword (kdata.from-keyword value.text)
+    .Symbol (kdata.from-symbol value.text)
+    .Uuid (kdata.tagged "uuid" (kdata.from-string value.text))
+    .Vector
+      (let [items (make [dynamic]Data) :defer-with delete-data-items]
+        (for [item value.items]
+          (append-data-item! (addr items) (value-data item)))
+        (kdata.vector (slice items 0)))
+    .Set
+      (let [items (make [dynamic]Data) :defer-with delete-data-items]
+        (for [item value.items]
+          (append-data-item! (addr items) (value-data item)))
+        (kdata.set (slice items 0)))
+    .Map
+      (let [items (make [dynamic]Data) :defer-with delete-data-items]
+        (for [item value.items]
+          (append-data-item! (addr items) (value-data item)))
+        (kdata.map (slice items 0)))
+    (kdata.from-nil)))
+
+(defn query-result-row-data [source: DB-Read-Source, row: Result-Row] -> [value: Data, ok: bool, error: string]
+  (let [items (make [dynamic]Data) :defer-with delete-data-items]
+    (for [value row.values]
+      (append-data-item! (addr items) (value-data value)))
+    (for [pulled row.pulls]
+      (let [[rendered rendered-ok rendered-error] (db-read-source-pull-result-value source pulled)]
+        (when (not rendered-ok)
+          (delete-owned-value rendered)
+          (return (kdata.from-nil) false rendered-error))
+        (append-data-item! (addr items) (value-data rendered))
+        (delete-owned-value rendered)))
+    (return (kdata.vector (slice items 0)) true "")))
+
+(defn query-result-map-key-data [marker: string, key: string] -> Data
+  (cond
+    (= marker ":keys") (kdata.from-keyword (strings.concatenate ([]string [":" key])))
+    (= marker ":syms") (kdata.from-symbol key)
+    :else (kdata.from-string key)))
+
+(defn query-data-return-map-marker [query: Data] -> string
+  (if (data.map? query)
+    (cond
+      (contains? query :keys) ":keys"
+      (contains? query :strs) ":strs"
+      (contains? query :syms) ":syms"
+      :else "")
+    (if (data.vector? query)
+      (do
+        (for [i (arr.range 0 (count query))]
+          (let [item (kdata.nth query i)]
+            (when (and (data.keyword? item)
+                       (contains? [":keys" ":strs" ":syms"] (data.keyword item)))
+              (return (data.keyword item)))))
+        "")
+      "")))
+
+(defn append-query-result-return-map-entry! [items: ^[dynamic]Data, marker: string, key: Data, row: Data, index: int]
+  (append-data-item! items (query-result-map-key-data marker (data.text key)))
+  (append-data-item! items (kdata.nth row index)))
+
+(defn query-result-return-map-data [query: Data, marker: string, row: Data] -> Data
+  (let [items (make [dynamic]Data) :defer-with delete-data-items]
+    (if (data.map? query)
+      (let [keys (cond
+                   (= marker ":keys") (get query :keys)
+                   (= marker ":strs") (get query :strs)
+                   :else (get query :syms))]
+        (for [i (arr.range 0 (count keys))]
+          (append-query-result-return-map-entry!
+            (addr items) marker (kdata.nth keys i) row i)))
+      (let [start -1]
+        (for [i (arr.range 0 (count query))]
+          (let [item (kdata.nth query i)]
+            (when (and (data.keyword? item)
+                       (= (data.keyword item) marker))
+              (set! start (+ i 1)))))
+        (let [index 0
+              i start]
+          (while (and (< i (count query))
+                      (data.symbol? (kdata.nth query i)))
+            (append-query-result-return-map-entry!
+              (addr items) marker (kdata.nth query i) row index)
+            (set! index (+ index 1))
+            (set! i (+ i 1))))))
+    (kdata.map (slice items 0))))
+
+(defn query-result-shaped-data [shape: Query-Data-Find-Shape, rows: []Data] -> Data
+  (case shape
+    .Collection
+      (let [items (make [dynamic]Data) :defer-with delete-data-items]
+        (for [row rows]
+          (append-data-item! (addr items) (kdata.nth row 0)))
+        (kdata.vector (slice items 0)))
+    .Tuple
+      (if (> (count rows) 0) (kdata.retain rows[0]) (kdata.from-nil))
+    .Scalar
+      (if (and (> (count rows) 0) (> (count rows[0]) 0))
+        (kdata.retain (kdata.nth rows[0] 0))
+        (kdata.from-nil))
+    .Relation
+      (kdata.set rows)
+    (kdata.set rows)))
+
+(defn query-result-data-value [source: DB-Read-Source, query-source: Data, result: Result-Set] -> [value: Data, ok: bool, error: string]
+  (let [rows (make [dynamic]Data) :defer-with delete-data-items
+        return-map-marker (query-data-return-map-marker query-source)]
+    (for [row result.rows]
+      (let [[row-data row-ok row-error] (query-result-row-data source row)]
+        (when (not row-ok)
+          (return (kdata.from-nil) false row-error))
+        (append-data-item! (addr rows)
+          (if (!= return-map-marker "")
+            (query-result-return-map-data query-source return-map-marker row-data)
+            row-data))))
+    (return (query-result-shaped-data
+              (query-data-find-shape query-source)
+              (slice rows 0))
+            true
+            "")))
+
+(defn query-result-data [snapshot: ^Store-DB, query-source: Data, result: Query-Result] -> [value: Data, ok: bool, error: string]
+  (when (not result.result.ok)
+    (let [error result.result.error]
+      (delete-query-result result)
+      (return (kdata.from-nil) false error)))
+  (let [[source source-ok source-error] (store-db-read-source snapshot)]
+    (when (not source-ok)
+      (delete-query-result result)
+      (return (kdata.from-nil) false source-error))
+    (let [[out-data out-ok out-error] (query-result-data-value source query-source result.result)]
+      (delete-query-result result)
+      (return out-data out-ok out-error))))
+
+(defn data-edn-uuid? [value: Data] -> bool
+  (and (data.tagged? value)
+       (= (data.tag value) "uuid")
+       (data.string? (data.tagged-value value))))
 
 (defn data-edn-kind [value: Data] -> EDN-Kind
   (cond
@@ -14,6 +207,7 @@
     (data.string? value) .String
     (data.symbol? value) .Symbol
     (data.keyword? value) .Keyword
+    (data-edn-uuid? value) .Uuid
     (data.vector? value) .Vector
     (data.list? value) .List
     (data.map? value) .Map
@@ -22,11 +216,14 @@
 
 (defn data-edn-atom [value: Data] -> EDN-Node
   (let [node (edn-node (data-edn-kind value)
-                       (if (or (data.string? value)
-                               (data.symbol? value)
-                               (data.keyword? value))
-                         (data.text value)
-                         ""))]
+                       (cond
+                         (or (data.string? value)
+                             (data.symbol? value)
+                             (data.keyword? value))
+                           (data.text value)
+                         (data-edn-uuid? value)
+                           (data.string (data.tagged-value value))
+                         :else ""))]
     (cond
       (data.bool? value) (set! node.bool-value (data.bool value))
       (data.int? value) (set! node.int-value (data.int value))
@@ -54,7 +251,7 @@
       (or (data.vector? value) (data.list? value) (data.set? value))
         (let [previous -1]
           (for [i (arr.range 0 (count value))]
-            (let [child (append-data-edn-node! doc (get value i))]
+            (let [child (append-data-edn-node! doc (data.item-at value i))]
               (set! previous (data-edn-link-child! doc parent previous child))))))
     parent))
 
@@ -132,11 +329,66 @@
         (delete parsed)
         (Prepared-Tx-Data {ok: false error: error tx-data: (make [dynamic]Tx-Data)})))))
 
+(defn query-input-data-owned [source: Data] -> Query-Input
+  (let [doc (edn-doc-from-data source)]
+    (defer (delete doc.nodes))
+    (let [[value ok error] (edn-value-from-node doc doc.root)]
+      (when (not ok)
+        (panic error))
+      (if (and (data.vector? source)
+               (= (count source) 2)
+               (data.keyword? (get source 0)))
+        (let [lookup-attr (string-owned (data.keyword (get source 0)))
+              lookup-value (get value.items 1)]
+          (delete-owned-value (get value.items 0))
+          (delete value.items)
+          (Query-Input {kind: .Scalar
+                        owns-values: true
+                        has-lookup-ref: true
+                        lookup-attr: lookup-attr
+                        lookup-value: lookup-value}))
+        (if (and (or (data.vector? source) (data.set? source))
+                 (> (count source) 0)
+                 (data.vector? (data.item-at source 0)))
+          (let [flat (make [dynamic]Value)
+                width (count (data.item-at source 0))]
+            (for [row value.items]
+              (if (= row.kind .Vector)
+                (do
+                  (for [item row.items]
+                    (arr.push! flat item))
+                  (delete row.items))
+                (arr.push! flat row)))
+            (delete value.items)
+            (Query-Input {kind: .Relation owns-values: true values: (slice flat 0) width: width}))
+          (if (or (data.vector? source) (data.set? source))
+            (let [input (query-input-collection-from-value value)]
+              (set! input.owns-values true)
+              input)
+            (Query-Input {kind: .Scalar owns-values: true value: value})))))))
+
 (defn q-result-store-db-data-with-inputs [snapshot: ^Store-DB, value: Data, inputs: []Query-Input] -> Query-Result
   (let [prepared (prepare-query-data value)
         result (q-result-store-db-prepared-with-inputs snapshot prepared inputs)]
     (delete-prepared-query-shallow prepared)
     result))
+
+(defn q-result-store-db-data-with-first-data-and-inputs [snapshot: ^Store-DB, query-value: Data, first-value: Data, inputs: []Query-Input] -> Query-Result
+  (let [prepared-query (prepare-query-data query-value)]
+    (defer (delete-prepared-query-shallow prepared-query))
+    (if prepared-query.query.has-rules-input
+      (let [prepared-rules (prepare-rules-data first-value)]
+        (defer (delete-prepared-rules-shallow prepared-rules))
+        (q-result-store-db-prepared-with-rules snapshot prepared-query prepared-rules inputs))
+      (let [first-input (query-input-data-owned first-value)
+            all-inputs (make [dynamic]Query-Input 0 (+ (count inputs) 1))]
+        (arr.push! all-inputs first-input)
+        (for [input inputs]
+          (arr.push! all-inputs input))
+        (let [result (q-result-store-db-prepared-with-inputs snapshot prepared-query (slice all-inputs 0))]
+          (delete-owned-query-input first-input)
+          (delete all-inputs)
+          result)))))
 
 (defn q-result-store-db-data-with-inputs-and-fns [snapshot: ^Store-DB, value: Data, inputs: []Query-Input, registry: []Native-Query-Fn] -> Query-Result
   (let [prepared (prepare-query-data value)

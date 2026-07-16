@@ -4,6 +4,7 @@
 (package vev-abi)
 
 (import arr "kvist:arr")
+(import edn "kvist:edn")
 (import runtime "base:runtime")
 (import set "kvist:set")
 (import strings "core:strings")
@@ -133,6 +134,9 @@ ABI_COLUMN_KIND_MIXED :: 4
 ABI_COLUMN_KIND_BOOL :: 5
 ABI_COLUMN_KIND_FLOAT :: 6
 ABI_COLUMN_KIND_VALUE :: 7
+ABI_COLUMN_KIND_KEYWORD :: 8
+ABI_COLUMN_KIND_SYMBOL :: 9
+ABI_COLUMN_KIND_UUID :: 10
 
 ABI_Column_Batch :: struct {
     kind: int,
@@ -200,7 +204,6 @@ abi_query_value_used: [ABI_QUERY_FN_SLOT_COUNT]bool
 ABI_Stmt :: struct {
     query: rawptr,
     inputs: [dynamic]vev__Query_Input,
-    pull_pattern_sources: [dynamic]string,
     sources: [dynamic]vev__DB_Read_Named_Source,
     source_handles: [dynamic]rawptr,
     last_error: string,
@@ -1258,6 +1261,13 @@ abi_free_string_string_pairs :: proc(array: rawptr) {
     free(wrapper)
 }
 
+abi_column_kind_is_text :: proc(kind: int) -> bool {
+    return kind == ABI_COLUMN_KIND_STRING ||
+           kind == ABI_COLUMN_KIND_KEYWORD ||
+           kind == ABI_COLUMN_KIND_SYMBOL ||
+           kind == ABI_COLUMN_KIND_UUID
+}
+
 abi_generic_column_empty :: proc(kind: int, capacity: int) -> ABI_Generic_Column {
     column: ABI_Generic_Column
     column.kind = kind
@@ -1269,7 +1279,7 @@ abi_generic_column_empty :: proc(kind: int, capacity: int) -> ABI_Generic_Column
         column.bools = make([dynamic]bool, 0, capacity)
     } else if kind == ABI_COLUMN_KIND_FLOAT {
         column.floats = make([dynamic]f64, 0, capacity)
-    } else if kind == ABI_COLUMN_KIND_STRING {
+    } else if abi_column_kind_is_text(kind) {
         column.strings = make([dynamic]string, 0, capacity)
         column.string_data = make([dynamic]rawptr, 0, capacity)
         column.string_lengths = make([dynamic]i32, 0, capacity)
@@ -1390,7 +1400,7 @@ abi_generic_column_batch_append_float :: proc(batch: rawptr, column: int, value:
 
 abi_generic_column_batch_append_string_owned :: proc(batch: rawptr, column: int, value: string) -> bool {
     wrapper := (^ABI_Generic_Column_Batch)(batch)
-    if wrapper == nil || column < 0 || column >= len(wrapper.columns) || wrapper.columns[column].kind != ABI_COLUMN_KIND_STRING {
+    if wrapper == nil || column < 0 || column >= len(wrapper.columns) || !abi_column_kind_is_text(wrapper.columns[column].kind) {
         delete(value)
         return false
     }
@@ -2311,7 +2321,6 @@ abi_alloc_stmt :: proc(query: rawptr) -> rawptr {
     wrapper := new(ABI_Stmt)
     wrapper.query = query
     wrapper.inputs = make([dynamic]vev__Query_Input)
-    wrapper.pull_pattern_sources = make([dynamic]string)
     wrapper.sources = make([dynamic]vev__DB_Read_Named_Source)
     wrapper.source_handles = make([dynamic]rawptr)
     return rawptr(wrapper)
@@ -2323,10 +2332,6 @@ abi_stmt_query :: proc(stmt: rawptr) -> rawptr {
 
 abi_stmt_inputs_ptr :: proc(stmt: rawptr) -> ^[dynamic]vev__Query_Input {
     return &((^ABI_Stmt)(stmt))^.inputs
-}
-
-abi_stmt_pull_pattern_sources_ptr :: proc(stmt: rawptr) -> ^[dynamic]string {
-    return &((^ABI_Stmt)(stmt))^.pull_pattern_sources
 }
 
 abi_stmt_sources_ptr :: proc(stmt: rawptr) -> ^[dynamic]vev__DB_Read_Named_Source {
@@ -2373,7 +2378,6 @@ abi_rawptr_at :: proc(values: rawptr, index: int) -> rawptr {
 abi_free_stmt :: proc(stmt: rawptr) {
     wrapper := (^ABI_Stmt)(stmt)
     delete(wrapper.inputs)
-    delete(wrapper.pull_pattern_sources)
     delete(wrapper.sources)
     delete(wrapper.source_handles)
     if len(wrapper.last_error) > 0 {
@@ -2510,12 +2514,6 @@ abi_free_stmt :: proc(stmt: rawptr) {
 (defn- entity-string-int-triples-from-column-batch [batch: Vev-Column-Batch] -> Vev-Entity-String-Int-Triples
   (Vev-Entity-String-Int-Triples (abi-column-batch-copy-entity-string-int-triples (rawptr batch))))
 
-(defn- column-batch-text-like-value? [value: vev.Value] -> bool
-  (or (= value.kind .String)
-      (= value.kind .Keyword)
-      (= value.kind .Symbol)
-      (= value.kind .Uuid)))
-
 (defn- column-kind-for-relation-column-kind [kind: vev.Relation-Column-Kind] -> int
   (case kind
     .Entity 1
@@ -2523,9 +2521,9 @@ abi_free_stmt :: proc(stmt: rawptr) {
     .Bool 5
     .Float 6
     .String 2
-    .Keyword 2
-    .Symbol 2
-    .Uuid 2
+    .Keyword 8
+    .Symbol 9
+    .Uuid 10
     .Mixed 4
     0))
 
@@ -2585,7 +2583,19 @@ abi_free_stmt :: proc(stmt: rawptr) {
         (abi-generic-column-batch-append-float handle column value.float-value)
         false)
     2
-      (if (column-batch-text-like-value? value)
+      (if (= value.kind .String)
+        (column-batch-append-string-copy! handle column value.text)
+        false)
+    8
+      (if (= value.kind .Keyword)
+        (column-batch-append-string-copy! handle column value.text)
+        false)
+    9
+      (if (= value.kind .Symbol)
+        (column-batch-append-string-copy! handle column value.text)
+        false)
+    10
+      (if (= value.kind .Uuid)
         (column-batch-append-string-copy! handle column value.text)
         false)
     4
@@ -2623,11 +2633,20 @@ abi_free_stmt :: proc(stmt: rawptr) {
         (abi-generic-column-batch-append-float handle out-column relation-column.floats[row])
         false)
     2
-      (case relation-column.kind
-        .String (column-batch-append-string-copy! handle out-column relation-column.texts[row])
-        .Keyword (column-batch-append-string-copy! handle out-column relation-column.texts[row])
-        .Symbol (column-batch-append-string-copy! handle out-column relation-column.texts[row])
-        .Uuid (column-batch-append-string-copy! handle out-column relation-column.texts[row])
+      (if (= relation-column.kind .String)
+        (column-batch-append-string-copy! handle out-column relation-column.texts[row])
+        false)
+    8
+      (if (= relation-column.kind .Keyword)
+        (column-batch-append-string-copy! handle out-column relation-column.texts[row])
+        false)
+    9
+      (if (= relation-column.kind .Symbol)
+        (column-batch-append-string-copy! handle out-column relation-column.texts[row])
+        false)
+    10
+      (if (= relation-column.kind .Uuid)
+        (column-batch-append-string-copy! handle out-column relation-column.texts[row])
         false)
     4
       (let [[value value-ok] (vev.typed-relation-column-value relation-column row)]
@@ -2898,9 +2917,9 @@ abi_free_stmt :: proc(stmt: rawptr) {
     .Bool 5
     .Float 6
     .String 2
-    .Keyword 2
-    .Symbol 2
-    .Uuid 2
+    .Keyword 8
+    .Symbol 9
+    .Uuid 10
     .Vector 7
     .Map 7
     0))
@@ -3245,9 +3264,6 @@ abi_free_stmt :: proc(stmt: rawptr) {
 (defn- stmt-inputs-ptr [stmt: Vev-Stmt] -> ^[dynamic]vev.Query-Input
   (abi-stmt-inputs-ptr (rawptr stmt)))
 
-(defn- stmt-pull-pattern-sources-ptr [stmt: Vev-Stmt] -> ^[dynamic]string
-  (abi-stmt-pull-pattern-sources-ptr (rawptr stmt)))
-
 (defn- stmt-sources-ptr [stmt: Vev-Stmt] -> ^[dynamic]vev.DB-Read-Named-Source
   (abi-stmt-sources-ptr (rawptr stmt)))
 
@@ -3434,19 +3450,17 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (Vev-Value-Handle (abi-alloc-value-handle value)))
 
 (defn- value-from-edn-text [text: string] -> [value: vev.Value, ok: bool, error: string]
-  (let [doc (vev.empty-edn-doc)
-        [read-ok read-error] (vev.read-edn-text! (addr doc) text)]
+  (let [[source read-error read-ok] (edn.try-read text)]
     (when (not read-ok)
-      (delete doc.nodes)
-      (return (vev.Value {}) false read-error))
-    (let [[parsed parsed-ok parsed-error] (vev.edn-value-from-node doc doc.root)]
-      (when (not parsed-ok)
-        (delete doc.nodes)
-        (return (vev.Value {}) false parsed-error))
-      (let [owned (vev.value-owned parsed)]
-        (vev.delete-value-containers-shallow parsed)
-        (delete doc.nodes)
-        (return owned true "")))))
+      (return (vev.Value {}) false read-error.message))
+    (let [doc (vev.edn-doc-from-data source)]
+      (defer (delete doc.nodes))
+      (let [[parsed parsed-ok parsed-error] (vev.edn-value-from-node doc doc.root)]
+        (when (not parsed-ok)
+          (return (vev.Value {}) false parsed-error))
+        (let [owned (vev.value-owned parsed)]
+          (vev.delete-value-containers-shallow parsed)
+          (return owned true ""))))))
 
 (defn- entity-handle-from-owned-entity [entity: vev.Store-Entity] -> Vev-Entity
   (Vev-Entity (abi-alloc-entity entity)))
@@ -3488,15 +3502,11 @@ abi_free_stmt :: proc(stmt: rawptr) {
 
 (defn- stmt-clear-owned [stmt: Vev-Stmt]
   (let [inputs (stmt-inputs-ptr stmt)
-        pattern-sources (stmt-pull-pattern-sources-ptr stmt)
         sources (stmt-sources-ptr stmt)
         source-handles (stmt-source-handles-ptr stmt)]
     (for [input inputs^]
       (delete-query-input-owned input))
     (resize inputs 0)
-    (for [source pattern-sources^]
-      (delete source))
-    (resize pattern-sources 0)
     (for [source sources^]
       (delete source.name))
     (resize sources 0)
@@ -3562,12 +3572,14 @@ abi_free_stmt :: proc(stmt: rawptr) {
     (when (= result-c nil)
       (return (vev.tx-fn-error "transaction callback returned null")))
     (let [result-text (text-from-c result-c)
-          tx-data (make [dynamic]vev.Tx-Data) :defer
-          [ok error] (vev.parse-tx-text! (addr tx-data) result-text)]
-      (when (not ok)
-        (delete result-text)
-        (return (vev.tx-fn-error error)))
-      (let [out (vev.tx-fn-ok (slice tx-data 0))]
+          prepared (vev.prepare-tx-text result-text)]
+      (when (not prepared.ok)
+        (let [error prepared.error]
+          (vev.delete-prepared-tx-data-shallow prepared)
+          (delete result-text)
+          (return (vev.tx-fn-error error))))
+      (let [out (vev.tx-fn-ok (slice prepared.tx-data 0))]
+        (vev.delete-prepared-tx-data-shallow prepared)
         (delete result-text)
         out))))
 
@@ -3597,12 +3609,14 @@ abi_free_stmt :: proc(stmt: rawptr) {
         (when (= result-c nil)
           (return (vev.tx-fn-source-error "transaction callback returned null")))
         (let [result-text (text-from-c result-c)
-              tx-data (make [dynamic]vev.Tx-Data) :defer
-              [ok error] (vev.parse-tx-text! (addr tx-data) result-text)]
-          (when (not ok)
-            (delete result-text)
-            (return (vev.tx-fn-source-error error)))
-          (let [out (vev.tx-fn-source-ok (slice tx-data 0))]
+              prepared (vev.prepare-tx-text result-text)]
+          (when (not prepared.ok)
+            (let [error prepared.error]
+              (vev.delete-prepared-tx-data-shallow prepared)
+              (delete result-text)
+              (return (vev.tx-fn-source-error error))))
+          (let [out (vev.tx-fn-source-ok (slice prepared.tx-data 0))]
+            (vev.delete-prepared-tx-data-shallow prepared)
             (delete result-text)
             (return out))))))
   (vev.tx-fn-source-error "transaction callback DB source cannot be exposed as a retained Vev DB handle"))
@@ -5312,15 +5326,15 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (when (or (= (rawptr stmt) nil) (= pattern-text nil))
     (return false))
   (let [pattern-source (text-from-c pattern-text)
-        [pattern ok _] (vev.parse-pull-pattern-text pattern-source)]
-    (when (not ok)
-      (delete-pull-spec-containers (slice pattern 0))
-      (delete pattern)
+        prepared (vev.prepare-pull-pattern-text pattern-source)]
+    (when (not prepared.ok)
+      (vev.delete-prepared-pull-pattern-shallow prepared)
       (delete pattern-source)
       (return false))
-    (let [sources (stmt-pull-pattern-sources-ptr stmt)]
-      (arr.push! sources^ pattern-source))
-    (stmt-push-pull-pattern! stmt pattern)
+    (let [pattern (vev.pull-pattern-owned (slice prepared.pattern 0))]
+      (stmt-push-pull-pattern! stmt pattern))
+    (vev.delete-prepared-pull-pattern-shallow prepared)
+    (delete pattern-source)
     true))
 
 @export

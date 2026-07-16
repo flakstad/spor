@@ -532,11 +532,7 @@
       :else (error "tx-data expects vector forms like [:db/add e :attr value] or map forms"))))
 
 (defmacro- emit-tx-data-items [forms]
-  (if (= (count forms) 0)
-    (forms)
-    (concat
-      (emit-tx-data-item (first forms))
-      (emit-tx-data-items (rest forms)))))
+  (map emit-tx-data-item forms))
 
 (defmacro tx-data [& forms]
   (quasiquote ([]Tx-Data [(splice (emit-tx-data-items forms))])))

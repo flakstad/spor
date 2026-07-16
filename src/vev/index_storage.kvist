@@ -1457,8 +1457,11 @@
 (defn shared-write-state-source-should-split-map-collection? [source: DB-Read-Source, tx-data: []Tx-Data, data: Tx-Data] -> [split: bool, ok: bool, error: string]
   (when (not (and data.from-map-collection
                   (= data.op ":db/add")
-                  (= data.v.kind .Vector)))
+                  (or (= data.v.kind .Vector)
+                      (= data.v.kind .Set))))
     (return false true ""))
+  (when (= data.v.kind .Set)
+    (return true true ""))
   (when (reverse-attr? data.a)
     (let [schema-attr (forward-attr-for-reverse data.a)]
       (defer (delete schema-attr))
@@ -1485,7 +1488,8 @@
   (db-read-source-schema-cardinality-many? source data.a))
 
 (defn shared-write-state-source-append-map-collection-items! [state: ^Shared-Write-State, tx-data: []Tx-Data, pending: ^[dynamic]Tx-Data, data: Tx-Data]
-  (when (not (= data.v.kind .Vector))
+  (when (not (or (= data.v.kind .Vector)
+                 (= data.v.kind .Set)))
     (return))
   (let [entity (tx-entity-ref-from-data data)
         ref-attr (shared-write-state-schema-ref-target-for-tx? state tx-data data.a)]

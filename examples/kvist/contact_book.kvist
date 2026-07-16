@@ -5,6 +5,7 @@
 
 (import fmt "core:fmt")
 (import os "core:os")
+(import kdata "kvist:data")
 (import d "../../src/vev_app")
 
 (def default-store "/tmp/vev-contact-book-kvist.vev")
@@ -45,6 +46,48 @@
     :where [?e :contact/email ?email]
            [?e :contact/name ?name]])
 
+(def contact-name-collection-query
+  '[:find [?name ...]
+    :where [?e :contact/name ?name]])
+
+(def contact-by-email-tuple-query
+  '[:find [?name ?company]
+    :in $ ?email
+    :where [?e :contact/email ?email]
+           [?e :contact/name ?name]
+           [?e :contact/company ?company]])
+
+(def contact-by-email-scalar-query
+  '[:find ?name .
+    :in $ ?email
+    :where [?e :contact/email ?email]
+           [?e :contact/name ?name]])
+
+(def contact-by-email-map-query
+  '[:find ?name ?company
+    :keys name company
+    :in $ ?email
+    :where [?e :contact/email ?email]
+           [?e :contact/name ?name]
+           [?e :contact/company ?company]])
+
+(def contacts-by-emails-query
+  '[:find ?name
+    :in $ [?email ...]
+    :where [?e :contact/email ?email]
+           [?e :contact/name ?name]])
+
+(def contact-emails '["ada@example.com" "grace@example.com"])
+
+(def known-contact-query
+  '[:find ?name
+    :in $ %
+    :where (known-contact ?e ?name)])
+
+(def known-contact-rules
+  '[[(known-contact ?e ?name)
+     [?e :contact/name ?name]]])
+
 (def contact-profile-pattern
   '[:contact/name :contact/email {:contact/knows [:contact/name]}])
 
@@ -61,34 +104,59 @@
   (d.transact conn contact-schema)
   (d.transact conn initial-contacts))
 
-(defn contact-names [db: d.DB] -> d.Result
+(defn contact-names [db: d.DB] -> Data
   (d.q contact-names-query db))
 
-(defn assert-contact-names! [result: d.Result, expected-count: int, require-katherine: bool]
-  (when (not (and result.ok
-                  (= (d.result-count result) expected-count)
-                  (d.result-has-string? result 0 "Ada Lovelace")
-                  (d.result-has-string? result 0 "Grace Hopper")
-                  (= (d.result-has-string? result 0 "Katherine Johnson") require-katherine)))
-    (fail! (fmt.tprintf "unexpected contact names: %s" result.error))))
+(defn has-name? [result: Data, name: string] -> bool
+  (contains? result `[~name]))
+
+(defn assert-contact-names! [result: Data, expected-count: int, require-katherine: bool]
+  (when (not (and (= (count result) expected-count)
+                  (has-name? result "Ada Lovelace")
+                  (has-name? result "Grace Hopper")
+                  (= (has-name? result "Katherine Johnson") require-katherine)))
+    (fail! "unexpected contact names")))
 
 (defn assert-base-contacts! [db: d.DB]
   (let [names (contact-names db)
         email-result (d.q contact-by-email-query db "ada@example.com")
+        collection-find (d.q contact-name-collection-query db)
+        tuple-find (d.q contact-by-email-tuple-query db "ada@example.com")
+        scalar-find (d.q contact-by-email-scalar-query db "ada@example.com")
+        map-find (d.q contact-by-email-map-query db "ada@example.com")
+        collection-result (d.q contacts-by-emails-query db contact-emails)
+        rule-result (d.q known-contact-query db known-contact-rules)
         profile (d.pull db contact-profile-pattern 1)]
     (assert-contact-names! names 2 false)
-    (when (not (and (= (d.result-count email-result) 1)
-                    (d.result-has-string? email-result 0 "Ada Lovelace")))
+    (when (not (and (= (count email-result) 1)
+                    (has-name? email-result "Ada Lovelace")))
       (fail! "email lookup returned the wrong contact"))
-    (let [name (d.get profile :contact/name)
-          knows (d.get profile :contact/knows)
-          friend (d.get knows :contact/name)]
-      (when (not (and (= (d.as-string name) "Ada Lovelace")
-                      (= (d.as-string friend) "Grace Hopper")))
-        (fail! "pull returned the wrong contact")))
-    (d.close profile)
-    (d.close email-result)
-    (d.close names)))
+    (when (not (and (= (count rule-result) 2)
+                    (has-name? rule-result "Ada Lovelace")
+                    (has-name? rule-result "Grace Hopper")))
+      (fail! "rule query returned the wrong contacts"))
+    (when (not (= (count collection-result) 2))
+      (fail! "collection Data input returned the wrong contacts"))
+    (when (not (and (= (count collection-find) 2)
+                    (contains? collection-find "Ada Lovelace")
+                    (contains? collection-find "Grace Hopper")))
+      (fail! "collection find returned the wrong contacts"))
+    (when (not (and (= (count tuple-find) 2)
+                    (= (kdata.string (kdata.nth tuple-find 0)) "Ada Lovelace")
+                    (= (kdata.string (kdata.nth tuple-find 1)) "Analytical Engines")))
+      (fail! "tuple find returned the wrong contact"))
+    (when (not (= (kdata.string scalar-find) "Ada Lovelace"))
+      (fail! "scalar find returned the wrong contact"))
+    (let [contact (kdata.item-at map-find 0)]
+      (when (not (and (= (kdata.string (get contact :name)) "Ada Lovelace")
+                      (= (kdata.string (get contact :company)) "Analytical Engines")))
+        (fail! "return map find returned the wrong contact")))
+    (let [name (get profile :contact/name)
+          knows (get profile :contact/knows)
+          friend (get knows :contact/name)]
+      (when (not (and (= (kdata.string name) "Ada Lovelace")
+                      (= (kdata.string friend) "Grace Hopper")))
+        (fail! "pull returned the wrong contact")))))
 
 (defn run-in-memory! []
   (let [conn (d.create-conn)]
@@ -100,8 +168,6 @@
             original-names (contact-names db)]
         (assert-contact-names! next-names 3 true)
         (assert-contact-names! original-names 2 false)
-        (d.close original-names)
-        (d.close next-names)
         (d.close next-db))
       (d.close db))
     (d.close conn)))
@@ -121,20 +187,17 @@
         db (d.db conn)
         names (contact-names db)]
     (assert-contact-names! names 2 false)
-    (d.close names)
     (d.close db)
     (transact-katherine! conn)
     (let [updated (d.db conn)
           updated-names (contact-names updated)]
       (assert-contact-names! updated-names 3 true)
-      (d.close updated-names)
       (d.close updated))
     (d.close conn))
   (let [conn (d.connect path)
         db (d.db conn)
         names (contact-names db)]
     (assert-contact-names! names 3 true)
-    (d.close names)
     (d.close db)
     (d.close conn))
   (remove-store! path))

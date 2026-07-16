@@ -798,6 +798,7 @@
 
 (defstruct Query-Input {
   kind: Query-Input-Kind
+  owns-values: bool
   value: Value
   values: []Value
   pattern: [dynamic]Pull-Spec

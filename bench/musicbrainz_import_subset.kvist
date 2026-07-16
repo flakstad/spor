@@ -36,7 +36,7 @@
       (let [report (vev.transact-prepared conn prepared)
             tx-elapsed-us (elapsed-us tx-start)]
         (when (not report.ok)
-          (let [error report.error]
+          (let [error (vev.string-owned report.error)]
             (vev.delete-tx-report-shallow report)
             (return false error tx-elapsed-us)))
         (vev.delete-live-tx-report-shallow report)
@@ -49,7 +49,7 @@
             (when progress
               (fmt.printf "progress stage=%s event=chunk start=%d end=%d ok=%v chunk_us=%.0f datoms=%d current=%d\n" label start end report.ok (elapsed-us chunk-start) (count conn^.db.datoms) (count conn^.db.current)))
             (when (not report.ok)
-              (let [error report.error
+              (let [error (vev.string-owned report.error)
                     tx-elapsed-us (elapsed-us tx-start)]
                 (vev.delete-tx-report-shallow report)
                 (return false error tx-elapsed-us)))

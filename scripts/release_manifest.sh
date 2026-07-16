@@ -23,6 +23,7 @@ case "$(uname -m)" in
 esac
 
 PLATFORM="$OS-$ARCH"
+SOURCE_DIR="$ROOT/build/release/source"
 
 metadata_version() {
   case "$1" in
@@ -43,6 +44,28 @@ done
 
 git_commit="$(git -C "$ROOT" rev-parse HEAD)"
 mkdir -p "$(dirname "$OUT")"
+
+required_artifacts=(
+  "$ROOT/build/lib/$LIB_NAME"
+  "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"
+  "$ROOT/include/vev.h"
+  "$ROOT/build/jvm/vev-java-$VERSION.jar"
+  "$ROOT/build/jvm/vev-native-$PLATFORM-$VERSION.jar"
+  "$ROOT/build/jvm/vev-clj-$VERSION.jar"
+  "$SOURCE_DIR/vev-python-$VERSION.tar.gz"
+  "$SOURCE_DIR/vev-rust-$VERSION.tar.gz"
+  "$SOURCE_DIR/vev-node-$VERSION.tar.gz"
+  "$SOURCE_DIR/vev-go-$VERSION.tar.gz"
+  "$SOURCE_DIR/vev-odin-$VERSION.tar.gz"
+  "$SOURCE_DIR/vev-kvist-$VERSION.tar.gz"
+)
+
+for path in "${required_artifacts[@]}"; do
+  if [[ ! -f "$path" ]]; then
+    echo "missing release artifact: ${path#"$ROOT/"}" >&2
+    exit 1
+  fi
+done
 
 sha256() {
   if [[ -f "$1" ]]; then
@@ -77,17 +100,17 @@ artifact() {
   printf '  "platform": "%s",\n' "$PLATFORM"
   printf '  "artifacts": [\n'
   artifact "vev-native-$PLATFORM" "native-library" "$ROOT/build/lib/$LIB_NAME"; printf ',\n'
+  artifact "vev-native-$PLATFORM-bundle" "native-bundle" "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"; printf ',\n'
   artifact "vev-c-header" "c-header" "$ROOT/include/vev.h"; printf ',\n'
   artifact "vev-java" "jvm-jar" "$ROOT/build/jvm/vev-java-$VERSION.jar"; printf ',\n'
   artifact "vev-native-$PLATFORM-jvm" "jvm-native-jar" "$ROOT/build/jvm/vev-native-$PLATFORM-$VERSION.jar"; printf ',\n'
   artifact "vev-clj" "clojure-jar" "$ROOT/build/jvm/vev-clj-$VERSION.jar"; printf ',\n'
-  artifact "vev-python" "python-source" "$ROOT/clients/python"; printf ',\n'
-  artifact "vev-rust" "rust-source" "$ROOT/clients/rust"; printf ',\n'
-  artifact "vev-node" "node-source" "$ROOT/clients/node"; printf ',\n'
-  artifact "vev-go" "go-source" "$ROOT/clients/go"; printf ',\n'
-  artifact "vev-odin" "odin-source" "$ROOT/clients/odin"; printf ',\n'
-  artifact "vev-kvist-core" "kvist-source" "$ROOT/src/vev"; printf ',\n'
-  artifact "vev-kvist-app" "kvist-source" "$ROOT/src/vev_app"; printf '\n'
+  artifact "vev-python" "python-source-archive" "$SOURCE_DIR/vev-python-$VERSION.tar.gz"; printf ',\n'
+  artifact "vev-rust" "rust-source-archive" "$SOURCE_DIR/vev-rust-$VERSION.tar.gz"; printf ',\n'
+  artifact "vev-node" "node-source-archive" "$SOURCE_DIR/vev-node-$VERSION.tar.gz"; printf ',\n'
+  artifact "vev-go" "go-source-archive" "$SOURCE_DIR/vev-go-$VERSION.tar.gz"; printf ',\n'
+  artifact "vev-odin" "odin-source-archive" "$SOURCE_DIR/vev-odin-$VERSION.tar.gz"; printf ',\n'
+  artifact "vev-kvist" "kvist-source-archive" "$SOURCE_DIR/vev-kvist-$VERSION.tar.gz"; printf '\n'
   printf '  ]\n'
   printf '}\n'
 } > "$OUT"

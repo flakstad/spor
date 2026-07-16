@@ -42,6 +42,9 @@ if [[ "$IF_NEEDED" == "true" && -f "$LIB_PATH" ]]; then
   if [[ "$ROOT/VERSION" -nt "$LIB_PATH" ]]; then
     SOURCES_CURRENT="false"
   fi
+  if [[ "$ROOT/scripts/build_native_library.sh" -nt "$LIB_PATH" ]]; then
+    SOURCES_CURRENT="false"
+  fi
   if [[ -n "$KVIST_PATH" && "$KVIST_PATH" -nt "$LIB_PATH" ]]; then
     SOURCES_CURRENT="false"
   fi
@@ -63,10 +66,10 @@ fi
 odin build "$GENERATED_DIR" -build-mode:dll -out:"$LIB_PATH"
 
 cat > "$PKGCONFIG_DIR/vev.pc" <<EOF
-prefix=$ROOT/build
+prefix=\${pcfiledir}/../..
 exec_prefix=\${prefix}
 libdir=\${prefix}/lib
-includedir=$ROOT/include
+includedir=\${prefix}/include
 
 Name: Vev
 Description: Embedded native Datalog database

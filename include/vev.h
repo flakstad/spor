@@ -79,6 +79,9 @@ enum {
     VEV_COLUMN_KIND_BOOL = 5,
     VEV_COLUMN_KIND_FLOAT = 6,
     VEV_COLUMN_KIND_VALUE = 7,
+    VEV_COLUMN_KIND_KEYWORD = 8,
+    VEV_COLUMN_KIND_SYMBOL = 9,
+    VEV_COLUMN_KIND_UUID = 10,
 };
 
 typedef bool (*vev_value_visit_fn)(void *user, int event, vev_value_t value);

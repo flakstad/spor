@@ -46,6 +46,9 @@ VEV_COLUMN_MIXED = 4
 VEV_COLUMN_BOOL = 5
 VEV_COLUMN_FLOAT = 6
 VEV_COLUMN_VALUE = 7
+VEV_COLUMN_KEYWORD = 8
+VEV_COLUMN_SYMBOL = 9
+VEV_COLUMN_UUID = 10
 
 RESULT_VISIT_FN = ctypes.CFUNCTYPE(
     ctypes.c_bool,
@@ -1013,6 +1016,21 @@ class Library:
                 elif kind == VEV_COLUMN_STRING:
                     kinds.append(kind)
                     columns.append(self._string_column_at(handle, column, count))
+                elif kind == VEV_COLUMN_KEYWORD:
+                    kinds.append(kind)
+                    columns.append(
+                        [Keyword(value) for value in self._string_column_at(handle, column, count)]
+                    )
+                elif kind == VEV_COLUMN_SYMBOL:
+                    kinds.append(kind)
+                    columns.append(
+                        [Symbol(value) for value in self._string_column_at(handle, column, count)]
+                    )
+                elif kind == VEV_COLUMN_UUID:
+                    kinds.append(kind)
+                    columns.append(
+                        [uuid.UUID(value) for value in self._string_column_at(handle, column, count)]
+                    )
                 elif kind == VEV_COLUMN_INT:
                     kinds.append(kind)
                     columns.append(

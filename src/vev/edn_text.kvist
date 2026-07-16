@@ -329,6 +329,9 @@
   (cond
     (= error "") (value-keyword ":none")
     (or (strings.contains error "EDN")
+        (strings.contains error "unexpected end")
+        (strings.contains error "unterminated")
+        (strings.contains error "closing delimiter")
         (strings.contains error "#uuid")) (value-keyword ":edn-read")
     (strings.contains error "unknown") (value-keyword ":unknown")
     (or (strings.contains error "duplicate")
@@ -978,18 +981,6 @@
                       attrs: ([]string [])
                       pattern: pattern}))
         (return true "")))))
-
-(defn parse-pull-pattern-text [text: string] -> [pattern: [dynamic]Pull-Spec, ok: bool, error: string]
-  (let [doc (empty-edn-doc)
-        [read-ok read-error] (read-edn-text! (addr doc) text)]
-    (defer (delete doc.nodes))
-    (when (not read-ok)
-      (return (make [dynamic]Pull-Spec) false read-error))
-    (when (or (= doc.root -1)
-              (not (= doc.nodes[doc.root].kind .Vector)))
-      (return (make [dynamic]Pull-Spec) false "pull text pattern must be an EDN vector"))
-    (let [[out out-ok out-error] (edn-pull-specs doc doc.root)]
-      (return out out-ok out-error))))
 
 (defn prepare-pull-pattern-text [text: string] -> Prepared-Pull-Pattern
   (let [[value read-error read-ok] (edn.try-read text)]
@@ -2025,16 +2016,6 @@
       (set! cursor doc.nodes[cursor].next-sibling))
     (return true "")))
 
-(defn parse-rules-text! [out: ^[dynamic]Rule, text: string] -> [ok: bool, error: string]
-  (let [doc (empty-edn-doc)
-        [read-ok read-error] (read-edn-text! (addr doc) text)]
-    (when (not read-ok)
-      (delete doc.nodes)
-      (return false read-error))
-    (let [[parsed-ok parsed-error] (parse-rules-edn! out doc)]
-      (delete doc.nodes)
-      (return parsed-ok parsed-error))))
-
 (defn parsed-rule-params-have-duplicate? [params: []string] -> bool
   (for [param index params]
     (for [other-index (arr.range (+ index 1) (count params))]
@@ -2070,12 +2051,6 @@
       (Prepared-Rules {ok: false
                        error: read-error.message
                        rules: (make [dynamic]Rule)}))))
-
-(defn parse-rules-text-checked! [out: ^[dynamic]Rule, text: string] -> [ok: bool, error: string]
-  (let [[parsed-ok parsed-error] (parse-rules-text! out text)]
-    (when (not parsed-ok)
-      (return false parsed-error))
-    (validate-parsed-rules (slice out^ 0))))
 
 (defn edn-query-vector-section-rank [doc: EDN-Doc, node: int] -> int
   (cond
@@ -2540,31 +2515,22 @@
 (defn parse-query-edn! [out: ^Query, doc: EDN-Doc] -> [ok: bool, error: string]
   (parse-query-edn-with-sources! out doc ([]DB-Source [])))
 
-(defn parse-query-text-with-sources! [out: ^Query, text: string, db-sources: []DB-Source] -> [ok: bool, error: string]
-  (let [doc (empty-edn-doc)
-        [read-ok read-error] (read-edn-text! (addr doc) text)]
-    (when (not read-ok)
-      (delete doc.nodes)
-      (return false read-error))
-    (let [[parsed-ok parsed-error] (parse-query-edn-with-sources! out doc db-sources)]
-      (delete doc.nodes)
-      (return parsed-ok parsed-error))))
-
-(defn parse-query-text! [out: ^Query, text: string] -> [ok: bool, error: string]
-  (let [doc (empty-edn-doc)
-        [read-ok read-error] (read-edn-text! (addr doc) text)]
-    (when (not read-ok)
-      (delete doc.nodes)
-      (return false read-error))
-    (let [[parsed-ok parsed-error] (parse-query-edn! out doc)]
-      (delete doc.nodes)
-      (return parsed-ok parsed-error))))
+(defn query-read-error-message [read-error: edn.Read-Error] -> string
+  (if (= read-error.message "duplicate map key")
+    (case read-error.form
+      ":find" "query map has duplicate :find section"
+      ":with" "query map has duplicate :with section"
+      ":in" "query map has duplicate :in section"
+      ":where" "query map has duplicate :where section"
+      ":rules" "query map has duplicate :rules section"
+      read-error.message)
+    read-error.message))
 
 (defn prepare-query-text-with-sources [text: string, sources: []DB-Source] -> Prepared-Query
   (let [[value read-error read-ok] (edn.try-read text)]
     (if read-ok
       (prepare-query-data-with-sources value sources)
-      (Prepared-Query {ok: false error: read-error.message query: (empty-query)}))))
+      (Prepared-Query {ok: false error: (query-read-error-message read-error) query: (empty-query)}))))
 
 (defn prepare-query-text [text: string] -> Prepared-Query
   (prepare-query-text-with-sources text ([]DB-Source [])))
@@ -2606,6 +2572,7 @@
   (if prepared.ok
     (let [[typed-result typed-stats typed-used] (db-read-source-q-query-relation-value-typed-with-sources-inputs-and-fns source sources prepared.query inputs registry)]
       (when typed-used
+        (set! typed-stats.clauses (query-logical-clause-count prepared.query))
         (return (profiled-result-set typed-result typed-stats)))
       (delete-result-rows-owned-values typed-result.rows)
       (let [result (db-read-source-q-query-with-sources-inputs-and-fns source sources prepared.query inputs registry)
@@ -3527,27 +3494,29 @@
       (set! cursor doc.nodes[cursor].next-sibling))
     false))
 
-(defn query-text-return-keys [text: string, marker: string] -> [dynamic]string
-  (let [out (make [dynamic]string)
-        doc (empty-edn-doc)
-        keys-ok false
-        [read-ok _] (read-edn-text! (addr doc) text)]
-    (when read-ok
-      (set! keys-ok (append-edn-return-keys! (addr out) doc marker)))
-    (delete doc.nodes)
+(defn q-text-keys [db: DB, text: string] -> [dynamic]Keyed-Row
+  (let [prepared (prepare-query-text text)
+        result (q-result-prepared db prepared)
+        out (result-keys result.result .Keyword (slice prepared.query.return-map-keys 0))]
+    (delete-query-result result)
+    (delete-prepared-query-shallow prepared)
     out))
 
-(defn q-text-keys [db: DB, text: string] -> [dynamic]Keyed-Row
-  (let [keys (query-text-return-keys text ":keys") :defer]
-    (return (result-keys (q-text db text) .Keyword (slice keys 0)))))
-
 (defn q-text-strs [db: DB, text: string] -> [dynamic]Keyed-Row
-  (let [keys (query-text-return-keys text ":strs") :defer]
-    (return (result-keys (q-text db text) .String (slice keys 0)))))
+  (let [prepared (prepare-query-text text)
+        result (q-result-prepared db prepared)
+        out (result-keys result.result .String (slice prepared.query.return-map-keys 0))]
+    (delete-query-result result)
+    (delete-prepared-query-shallow prepared)
+    out))
 
 (defn q-text-syms [db: DB, text: string] -> [dynamic]Keyed-Row
-  (let [keys (query-text-return-keys text ":syms") :defer]
-    (return (result-keys (q-text db text) .Symbol (slice keys 0)))))
+  (let [prepared (prepare-query-text text)
+        result (q-result-prepared db prepared)
+        out (result-keys result.result .Symbol (slice prepared.query.return-map-keys 0))]
+    (delete-query-result result)
+    (delete-prepared-query-shallow prepared)
+    out))
 
 (defn edn-attr-text [doc: EDN-Doc, node-index: int] -> [attr: string, ok: bool]
   (when (= node-index -1)
@@ -3650,7 +3619,8 @@
     .String (edn-escaped-string-text value.text)
     .Keyword (string-owned value.text)
     .Symbol (string-owned value.text)
-    .Uuid (string-owned value.text)
+    .Uuid (let [escaped (edn-escaped-string-text value.text) :defer]
+            (strings.concatenate ([]string ["#uuid " escaped])))
     .Entity (string-owned (fmt.tprintf "[:vev/entity %d]" value.entity))
     .Vector
       (let [parts (make [dynamic]string) :defer
@@ -4356,20 +4326,13 @@
         (set! child doc.nodes[child].next-sibling)))
     (return true "")))
 
-(defn parse-tx-text! [out: ^[dynamic]Tx-Data, text: string] -> [ok: bool, error: string]
-  (let [doc (empty-edn-doc)
-        [read-ok read-error] (read-edn-text! (addr doc) text)]
-    (defer (delete doc.nodes))
-    (when (not read-ok)
-      (return false read-error))
-    (when (or (= doc.root -1) (not (= doc.nodes[doc.root].kind .Vector)))
-      (return false "tx text must be an EDN vector"))
-    (parse-tx-data-edn! out doc)))
-
 (defn prepare-tx-text [text: string] -> Prepared-Tx-Data
   (let [[value read-error read-ok] (edn.try-read text)]
     (if read-ok
-      (prepare-tx-data value)
+      (let [prepared (prepare-tx-data value)]
+        (when (= prepared.error "tx data must be a vector")
+          (set! prepared.error "tx text must be an EDN vector"))
+        prepared)
       (Prepared-Tx-Data {ok: false
                          error: read-error.message
                          tx-data: (make [dynamic]Tx-Data)}))))

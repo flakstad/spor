@@ -38,6 +38,9 @@ public final class Vev {
     public static final int COLUMN_BOOL = 5;
     public static final int COLUMN_FLOAT = 6;
     public static final int COLUMN_VALUE = 7;
+    public static final int COLUMN_KEYWORD = 8;
+    public static final int COLUMN_SYMBOL = 9;
+    public static final int COLUMN_UUID = 10;
 
     @FunctionalInterface
     public interface TxFunction {
@@ -946,7 +949,7 @@ public final class Vev {
                 kinds[column] = kind;
                 columns[column] = switch (kind) {
                     case COLUMN_ENTITY -> columnLongs((MemorySegment) columnBatchColumnEntitiesData.invoke(raw, column), count);
-                    case COLUMN_STRING -> columnStrings(raw, column, count);
+                    case COLUMN_STRING, COLUMN_KEYWORD, COLUMN_SYMBOL, COLUMN_UUID -> columnStrings(raw, column, count);
                     case COLUMN_INT -> columnLongs((MemorySegment) columnBatchColumnIntsData.invoke(raw, column), count);
                     case COLUMN_BOOL -> columnBools((MemorySegment) columnBatchColumnBoolsData.invoke(raw, column), count);
                     case COLUMN_FLOAT -> columnDoubles((MemorySegment) columnBatchColumnFloatsData.invoke(raw, column), count);
@@ -1179,6 +1182,9 @@ public final class Vev {
                 case COLUMN_ENTITY -> new Entity(((long[]) values)[row]);
                 case COLUMN_INT -> ((long[]) values)[row];
                 case COLUMN_STRING -> ((String[]) values)[row];
+                case COLUMN_KEYWORD -> new Keyword(((String[]) values)[row]);
+                case COLUMN_SYMBOL -> new Symbol(((String[]) values)[row]);
+                case COLUMN_UUID -> UUID.fromString(((String[]) values)[row]);
                 case COLUMN_BOOL -> ((boolean[]) values)[row];
                 case COLUMN_FLOAT -> ((double[]) values)[row];
                 case COLUMN_MIXED -> ((Object[]) values)[row];
@@ -2331,7 +2337,8 @@ public final class Vev {
                         case COLUMN_ENTITY -> longColumn(
                             (MemorySegment) columnBatchColumnEntitiesData.invoke(raw, column),
                             count);
-                        case COLUMN_STRING -> columnBatchStringColumn(raw, column, count);
+                        case COLUMN_STRING, COLUMN_KEYWORD, COLUMN_SYMBOL, COLUMN_UUID ->
+                            columnBatchStringColumn(raw, column, count);
                         case COLUMN_INT -> longColumn(
                             (MemorySegment) columnBatchColumnIntsData.invoke(raw, column),
                             count);

@@ -5,6 +5,7 @@
 
 (import arr "kvist:arr")
 (import fmt "core:fmt")
+(import kdata "kvist:data")
 (import math "core:math")
 (import os "core:os")
 (import d "../../src/vev_app")
@@ -94,157 +95,98 @@
     [?a :db/ident ?ident]
     [?a :db/valueType ?vt]])
 
-(defn validate-scalar-int-result! [label: string, result: d.Result, expected: i64, passed: ^bool]
-  (let [ok (and result.ok
-                (= (count result.rows) 1)
-                (= (count result.rows[0].values) 1)
-                (= result.rows[0].values[0].kind .Int)
-                (= result.rows[0].values[0].int-value expected))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
-    (when (not ok)
-      (set! passed^ false))
-    (d.close result)))
+(defn report! [label: string, ok: bool, passed: ^bool]
+  (fmt.printf "source=kvist section=%s ok=%v\n" label ok)
+  (when (not ok)
+    (set! passed^ false)))
 
-(defn validate-scalar-float-result! [label: string, result: d.Result, expected: f64, passed: ^bool]
-  (let [ok (and result.ok
-                (= (count result.rows) 1)
-                (= (count result.rows[0].values) 1)
-                (= result.rows[0].values[0].kind .Float)
-                (= result.rows[0].values[0].float-value expected))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
-    (when (not ok)
-      (set! passed^ false))
-    (d.close result)))
+(defn validate-scalar-int! [label: string, result: Data, expected: i64, passed: ^bool]
+  (report! label
+    (and (kdata.int? result) (= (kdata.int result) expected))
+    passed))
 
-(defn validate-scalar-float-close-result! [label: string, result: d.Result, expected: f64, tolerance: f64, passed: ^bool]
-  (let [actual (if (and result.ok
-                        (= (count result.rows) 1)
-                        (= (count result.rows[0].values) 1)
-                        (= result.rows[0].values[0].kind .Float))
-                 result.rows[0].values[0].float-value
-                 0.0)
-        ok (and result.ok
-                (= (count result.rows) 1)
-                (= (count result.rows[0].values) 1)
-                (= result.rows[0].values[0].kind .Float)
-                (<= (math.abs (- actual expected)) tolerance))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
-    (when (not ok)
-      (set! passed^ false))
-    (d.close result)))
+(defn validate-scalar-float! [label: string, result: Data, expected: f64, passed: ^bool]
+  (report! label
+    (and (kdata.float? result) (= (kdata.float result) expected))
+    passed))
 
-(defn validate-empty-set-result! [label: string, result: d.Result, passed: ^bool]
-  (let [ok (and result.ok
-                (= (count result.rows) 1)
-                (= (count result.rows[0].values) 1)
-                (= result.rows[0].values[0].kind .Set)
-                (= (count result.rows[0].values[0].items) 0))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
-    (when (not ok)
-      (set! passed^ false))
-    (d.close result)))
+(defn validate-scalar-float-close! [label: string, result: Data, expected: f64, tolerance: f64, passed: ^bool]
+  (report! label
+    (and (kdata.float? result)
+         (<= (math.abs (- (kdata.float result) expected)) tolerance))
+    passed))
 
-(defn validate-int-int-row-result! [label: string, result: d.Result, expected-left: i64, expected-right: i64, passed: ^bool]
-  (let [ok (and result.ok
-                (= (count result.rows) 1)
-                (= (count result.rows[0].values) 2)
-                (= result.rows[0].values[0].kind .Int)
-                (= result.rows[0].values[1].kind .Int)
-                (= result.rows[0].values[0].int-value expected-left)
-                (= result.rows[0].values[1].int-value expected-right))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
-    (when (not ok)
-      (set! passed^ false))
-    (d.close result)))
+(defn validate-empty-set! [label: string, result: Data, passed: ^bool]
+  (report! label
+    (and (kdata.set? result) (= (count result) 0))
+    passed))
 
-(defn result-has-string? [result: d.Result, text: string] -> bool
-  (when (not result.ok)
-    (return false))
-  (for [row result.rows]
-    (when (and (= (count row.values) 1)
-               (= row.values[0].kind .String)
-               (= row.values[0].text text))
-      (return true)))
+(defn validate-int-int-row! [label: string, result: Data, expected-left: i64, expected-right: i64, passed: ^bool]
+  (let [row (if (= (count result) 1)
+              (kdata.item-at result 0)
+              (kdata.from-nil))]
+    (report! label
+      (and (kdata.vector? row)
+           (= (count row) 2)
+           (kdata.int? (kdata.nth row 0))
+           (kdata.int? (kdata.nth row 1))
+           (= (kdata.int (kdata.nth row 0)) expected-left)
+           (= (kdata.int (kdata.nth row 1)) expected-right))
+      passed)))
+
+(defn validate-random-name! [label: string, random-result: Data, names-result: Data, passed: ^bool]
+  (report! label
+    (and (kdata.string? random-result)
+         (relation-has-name? names-result random-result))
+    passed))
+
+(defn relation-has-name? [names: Data, expected: Data] -> bool
+  (for [i (arr.range 0 (count names))]
+    (let [row (kdata.item-at names i)]
+      (when (and (kdata.vector? row)
+                 (= (count row) 1)
+                 (= (kdata.nth row 0) expected))
+        (return true))))
   false)
 
-(defn validate-random-name-result! [label: string, random-result: d.Result, names-result: d.Result, passed: ^bool]
-  (let [actual (if (and random-result.ok
-                        (= (count random-result.rows) 1)
-                        (= (count random-result.rows[0].values) 1)
-                        (= random-result.rows[0].values[0].kind .String))
-                 random-result.rows[0].values[0].text
-                 "")
-        ok (and random-result.ok
-                names-result.ok
-                (= (count random-result.rows) 1)
-                (= (count random-result.rows[0].values) 1)
-                (= random-result.rows[0].values[0].kind .String)
-                (result-has-string? names-result actual))]
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count random-result.rows) random-result.error)
-    (when (not ok)
-      (set! passed^ false))
-    (d.close random-result)
-    (d.close names-result)))
-
-(defn validate-float-vector-result! [label: string, result: d.Result, expected: []f64, passed: ^bool]
-  (let [ok-base (and result.ok
-                     (= (count result.rows) 1)
-                     (= (count result.rows[0].values) 1)
-                     (= result.rows[0].values[0].kind .Vector)
-                     (= (count result.rows[0].values[0].items) (count expected)))
+(defn validate-float-vector! [label: string, result: Data, expected: []f64, passed: ^bool]
+  (let [ok-base (and (kdata.vector? result)
+                     (= (count result) (count expected)))
         ok ok-base]
     (when ok-base
       (for [i (arr.range 0 (count expected))]
-        (when (or (not (= result.rows[0].values[0].items[i].kind .Float))
-                  (not (= result.rows[0].values[0].items[i].float-value expected[i])))
-          (set! ok false))))
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count result.rows) result.error)
-    (when (not ok)
-      (set! passed^ false))
-    (d.close result)))
+        (let [item (kdata.nth result i)]
+          (when (or (not (kdata.float? item))
+                    (not (= (kdata.float item) expected[i])))
+            (set! ok false)))))
+    (report! label ok passed)))
 
-(defn validate-random-name-vector-result! [label: string, random-result: d.Result, names-result: d.Result, expected-count: int, passed: ^bool]
-  (let [ok-base (and random-result.ok
-                     names-result.ok
-                     (= (count random-result.rows) 1)
-                     (= (count random-result.rows[0].values) 1)
-                     (= random-result.rows[0].values[0].kind .Vector)
-                     (= (count random-result.rows[0].values[0].items) expected-count))
+(defn validate-random-name-vector! [label: string, random-result: Data, names-result: Data, expected-count: int, passed: ^bool]
+  (let [ok-base (and (kdata.vector? random-result)
+                     (= (count random-result) expected-count))
         ok ok-base]
     (when ok-base
-      (for [item random-result.rows[0].values[0].items]
-        (when (or (not (= item.kind .String))
-                  (not (result-has-string? names-result item.text)))
-          (set! ok false))))
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count random-result.rows) random-result.error)
-    (when (not ok)
-      (set! passed^ false))
-    (d.close random-result)
-    (d.close names-result)))
+      (for [i (arr.range 0 (count random-result))]
+        (let [item (kdata.nth random-result i)]
+          (when (or (not (kdata.string? item))
+                    (not (relation-has-name? names-result item)))
+            (set! ok false)))))
+    (report! label ok passed)))
 
-(defn validate-sampled-name-vector-result! [label: string, sample-result: d.Result, names-result: d.Result, expected-count: int, passed: ^bool]
-  (let [ok-base (and sample-result.ok
-                     names-result.ok
-                     (= (count sample-result.rows) 1)
-                     (= (count sample-result.rows[0].values) 1)
-                     (= sample-result.rows[0].values[0].kind .Vector)
-                     (= (count sample-result.rows[0].values[0].items) expected-count))
+(defn validate-sampled-name-vector! [label: string, sample-result: Data, names-result: Data, expected-count: int, passed: ^bool]
+  (let [ok-base (and (kdata.vector? sample-result)
+                     (= (count sample-result) expected-count))
         ok ok-base]
     (when ok-base
-      (let [items sample-result.rows[0].values[0].items]
-        (for [i (arr.range 0 (count items))]
-          (let [item items[i]]
-            (when (or (not (= item.kind .String))
-                      (not (result-has-string? names-result item.text)))
-              (set! ok false))
-            (for [j (arr.range (+ i 1) (count items))]
-              (when (= item.text items[j].text)
-                (set! ok false)))))))
-    (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=%s\n" label ok (count sample-result.rows) sample-result.error)
-    (when (not ok)
-      (set! passed^ false))
-    (d.close sample-result)
-    (d.close names-result)))
+      (for [i (arr.range 0 (count sample-result))]
+        (let [item (kdata.nth sample-result i)]
+          (when (or (not (kdata.string? item))
+                    (not (relation-has-name? names-result item)))
+            (set! ok false))
+          (for [j (arr.range (+ i 1) (count sample-result))]
+            (when (= item (kdata.nth sample-result j))
+              (set! ok false))))))
+    (report! label ok passed)))
 
 (defn schema-name-modes [values: []d.Value] -> d.Native-Query-Function-Result
   (let [modes (make [dynamic]d.Value)
@@ -274,55 +216,55 @@
     (defer (d.close conn))
     (defer (d.close snapshot))
     (do
-      (validate-scalar-int-result! "aggregate-object-count"
+      (validate-scalar-int! "aggregate-object-count"
         (d.q object-count-query snapshot)
         17 (addr passed))
-      (validate-scalar-float-result! "aggregate-largest-radius"
+      (validate-scalar-float! "aggregate-largest-radius"
         (d.q largest-radius-query snapshot)
         696000.0 (addr passed))
-      (validate-scalar-float-result! "aggregate-smallest-radius"
+      (validate-scalar-float! "aggregate-smallest-radius"
         (d.q smallest-radius-query snapshot)
         1163.0 (addr passed))
-      (validate-scalar-float-close-result! "aggregate-average-radius"
+      (validate-scalar-float-close! "aggregate-average-radius"
         (d.q average-radius-query snapshot)
         53390.17647058824 0.0000001 (addr passed))
-      (validate-scalar-float-result! "aggregate-median-radius"
+      (validate-scalar-float! "aggregate-median-radius"
         (d.q median-radius-query snapshot)
         2631.2 (addr passed))
-      (validate-scalar-float-close-result! "aggregate-stddev-radius"
+      (validate-scalar-float-close! "aggregate-stddev-radius"
         (d.q stddev-radius-query snapshot)
         161902.52780945456 0.0000001 (addr passed))
-      (validate-random-name-result! "aggregate-random-object-name"
+      (validate-random-name! "aggregate-random-object-name"
         (d.q random-object-name-query snapshot)
         (d.q object-names-query snapshot)
         (addr passed))
-      (validate-float-vector-result! "aggregate-smallest-three-radii"
+      (validate-float-vector! "aggregate-smallest-three-radii"
         (d.q smallest-three-radii-query snapshot)
         ([]f64 [1163.0 1353.4 1561.0])
         (addr passed))
-      (validate-float-vector-result! "aggregate-largest-three-radii"
+      (validate-float-vector! "aggregate-largest-three-radii"
         (d.q largest-three-radii-query snapshot)
         ([]f64 [696000.0 69911.0 58232.0])
         (addr passed))
-      (validate-random-name-vector-result! "aggregate-five-random-object-names"
+      (validate-random-name-vector! "aggregate-five-random-object-names"
         (d.q five-random-object-names-query snapshot)
         (d.q object-names-query snapshot)
         5
         (addr passed))
-      (validate-sampled-name-vector-result! "aggregate-five-sampled-object-names"
+      (validate-sampled-name-vector! "aggregate-five-sampled-object-names"
         (d.q five-sampled-object-names-query snapshot)
         (d.q object-names-query snapshot)
         5
         (addr passed))
-      (validate-scalar-float-close-result! "aggregate-schema-name-average-length"
+      (validate-scalar-float-close! "aggregate-schema-name-average-length"
         (d.q schema-name-average-length-query snapshot)
         6.666666666666667 0.0000001
         (addr passed))
-      (validate-empty-set-result! "aggregate-schema-name-modes"
+      (validate-empty-set! "aggregate-schema-name-modes"
         (d.q-with-fns schema-name-modes-query snapshot
           ([]d.Native-Query-Fn [(d.query-aggregate-fn "datomic.samples.repl/modes" schema-name-modes)]))
         (addr passed))
-      (validate-int-int-row-result! "aggregate-schema-attribute-value-types"
+      (validate-int-int-row! "aggregate-schema-attribute-value-types"
         (d.q schema-attribute-value-type-query snapshot)
         3 2
         (addr passed)))

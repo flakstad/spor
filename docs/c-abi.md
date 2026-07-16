@@ -1129,8 +1129,9 @@ that already know the expected result shape.
 
 New host adapters should prefer the generic column metadata accessors:
 `vev_column_batch_column_count`, `vev_column_batch_column_kind`, and the
-per-column data accessors. Column kinds are `VEV_COLUMN_KIND_ENTITY`,
-`VEV_COLUMN_KIND_STRING`, `VEV_COLUMN_KIND_INT`, or `VEV_COLUMN_KIND_NONE`.
+per-column data accessors. Scalar column kinds distinguish entities, strings,
+integers, booleans, floats, keywords, symbols, and UUIDs; text-like columns use
+the same string data and length accessors while retaining their semantic kind.
 These accessors are the stable API for both legacy fixed-shape wrappers and the
 new arbitrary-width primitive column batch backing. Arbitrary-width batches may
 report `VEV_COLUMN_BATCH_NONE` from the older batch-kind accessor, so generic

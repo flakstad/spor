@@ -157,16 +157,21 @@
     (vev.q-prepared-db-read-source-with-inputs source prepared inputs)))
 
 (defn mb-source-q-text-keys [source: vev.DB-Read-Source, text: string] -> [dynamic]vev.Keyed-Row
-  (let [keys (vev.query-text-return-keys text ":keys") :defer]
-    (vev.result-keys (vev.q-text-db-read-source source text) .Keyword (slice keys 0))))
+  (let [prepared (vev.prepare-query-text text)
+        out (vev.result-keys
+              (vev.q-prepared-db-read-source source prepared)
+              .Keyword
+              (slice prepared.query.return-map-keys 0))]
+    (vev.delete-prepared-query-shallow prepared)
+    out))
 
 (defn mb-source-pull-text [source: vev.DB-Read-Source, text: string, entity: u64] -> vev.Pull-Result
-  (let [[pattern pattern-ok _] (vev.parse-pull-pattern-text text)]
-    (when (not pattern-ok)
-      (delete pattern)
+  (let [prepared (vev.prepare-pull-pattern-text text)]
+    (when (not prepared.ok)
+      (vev.delete-prepared-pull-pattern-shallow prepared)
       (return (vev.Pull-Result {})))
-    (let [[result result-ok _] (vev.db-read-source-pull-result-for-pattern source entity (slice pattern 0))]
-      (delete pattern)
+    (let [[result result-ok _] (vev.db-read-source-pull-result-for-pattern source entity (slice prepared.pattern 0))]
+      (vev.delete-prepared-pull-pattern-shallow prepared)
       (if result-ok
         result
         (vev.Pull-Result {})))))
@@ -183,16 +188,16 @@
         track-count (vev.q-text-db-read-source source
                       "[:find (count ?track) :where [?track :track/name]]")
         prepared (vev.prepare-query-text
-                   "[:find ?release-name :in ?artist-name :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]]")
+                   "[:find ?release-name :in $ ?artist-name :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]]")
         prepared-result (mb-source-q-prepared-with-input-text source prepared "[\"Miles Davis\"]")
         collection-binding (vev.q-text-db-read-source-with-inputs source
-                             "[:find ?artist-name ?release-name :in [?artist-name ...] :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]]"
+                             "[:find ?artist-name ?release-name :in $ [?artist-name ...] :where [?artist :artist/name ?artist-name] [?release :release/artists ?artist] [?release :release/name ?release-name]]"
                              ([]vev.Query-Input [(vev.query-input-collection ([]vev.Value [(vev.value-string "The Beatles") (vev.value-string "Miles Davis")]))]))
         tuple-binding (vev.q-text-db-read-source-with-inputs source
-                        "[:find ?track-name ?minutes :in [?artist-name ?release-name] :where [?artist :artist/name ?artist-name] [?release :release/name ?release-name] [?release :release/artists ?artist] [?release :release/media ?medium] [?medium :medium/tracks ?track] [?track :track/name ?track-name] [?track :track/duration ?millis] [(quot ?millis 60000) ?minutes]]"
+                        "[:find ?track-name ?minutes :in $ [?artist-name ?release-name] :where [?artist :artist/name ?artist-name] [?release :release/name ?release-name] [?release :release/artists ?artist] [?release :release/media ?medium] [?medium :medium/tracks ?track] [?track :track/name ?track-name] [?track :track/duration ?millis] [(quot ?millis 60000) ?minutes]]"
                         ([]vev.Query-Input [(vev.query-input-collection ([]vev.Value [(vev.value-string "The Beatles") (vev.value-string "Abbey Road")]))]))
         relation-binding (vev.q-text-db-read-source-with-inputs source
-                           "[:find ?artist-name ?release-name :in [[?artist-name ?release-name]] :where [?artist :artist/name ?artist-name] [?release :release/name ?release-name] [?release :release/artists ?artist]]"
+                           "[:find ?artist-name ?release-name :in $ [[?artist-name ?release-name]] :where [?artist :artist/name ?artist-name] [?release :release/name ?release-name] [?release :release/artists ?artist]]"
                            ([]vev.Query-Input [(vev.query-input-relation ([]vev.Value [(vev.value-string "The Beatles") (vev.value-string "Abbey Road") (vev.value-string "Miles Davis") (vev.value-string "Kind of Blue")]) 2)]))
         [scalar-start scalar-start-ok] (mb-source-q-text-scalar
                                          source

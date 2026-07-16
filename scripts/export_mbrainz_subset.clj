@@ -75,10 +75,31 @@
                      (assoc-in [:ids eid] mapped))))
         mapped))))
 
+(defn preserve-eid! [state eid]
+  (swap! state assoc-in [:ids eid] eid)
+  eid)
+
+(defn schema-attr-idents [db]
+  (set
+    (concat
+      value-attrs
+      (d/q '[:find [?ident ...]
+             :where
+             [?attr :db/ident ?ident]
+             [?attr :db/unique _]]
+           db))))
+
+(defn prepare-schema-identities! [db remap]
+  (doseq [ident (concat (schema-attr-idents db) schema-props)
+          :let [eid (d/entid db ident)]
+          :when eid]
+    (preserve-eid! remap eid))
+  remap)
+
 (defn tx-value-text [x]
   (cond
     (keyword? x) (str x)
-    (uuid? x) (str x)
+    (uuid? x) (str "#uuid " (pr-str (str x)))
     (string? x) (pr-str x)
     (integer? x) (str x)
     (boolean? x) (str x)
@@ -91,13 +112,19 @@
   (:db/ident (d/entity db e)))
 
 (defn schema-tx [db remap]
-  (for [attr value-attrs
+  (for [attr (schema-attr-idents db)
         :let [e (d/entid db attr)]
         :when e
         prop schema-props
         :let [v (get (d/entity db e) prop)]
         :when (some? v)]
     (tx-add-text remap e prop (if (keyword? v) v (or (entity-ident db v) v)))))
+
+(defn built-in-schema-ident-tx [db remap]
+  (for [ident schema-props
+        :let [e (d/entid db ident)]
+        :when e]
+    (tx-add-text remap e :db/ident ident)))
 
 (defn ref-attr-ids [db]
   (set
@@ -121,7 +148,8 @@
 (defn ident-tx [db remap]
   (for [e (referenced-ident-entity-ids db)
         :let [ident (entity-ident db e)]
-        :when ident]
+        :when ident
+        :let [_ (preserve-eid! remap e)]]
     (tx-add-text remap e :db/ident ident)))
 
 (defn value-tx [db remap]
@@ -157,14 +185,21 @@
 
 (defn write-export! [db out-path limit]
   (let [remap (make-remapper)
-        items (limited (concat (schema-tx db remap) (ident-tx db remap) (value-tx db remap)) limit)]
+        _ (prepare-schema-identities! db remap)
+        items (limited (concat (built-in-schema-ident-tx db remap)
+                               (schema-tx db remap)
+                               (ident-tx db remap)
+                               (value-tx db remap)) limit)]
     (write-items! out-path items)))
 
 (defn write-split-export! [db out-prefix value-limit]
   (let [remap (make-remapper)
+        _ (prepare-schema-identities! db remap)
         schema-path (str out-prefix "-schema.edn")
         values-path (str out-prefix "-values.edn")
-        schema-result (write-items! schema-path (concat (schema-tx db remap) (ident-tx db remap)))
+        schema-result (write-items! schema-path (concat (built-in-schema-ident-tx db remap)
+                                                        (schema-tx db remap)
+                                                        (ident-tx db remap)))
         values-result (write-items! values-path (limited (value-tx db remap) value-limit))]
     {:path out-prefix
      :schema-path schema-path
@@ -189,8 +224,11 @@
 
 (defn write-split-chunked-export! [db out-prefix value-limit chunk-size]
   (let [remap (make-remapper)
+        _ (prepare-schema-identities! db remap)
         schema-path (str out-prefix "-schema.edn")
-        schema-result (write-items! schema-path (concat (schema-tx db remap) (ident-tx db remap)))
+        schema-result (write-items! schema-path (concat (built-in-schema-ident-tx db remap)
+                                                        (schema-tx db remap)
+                                                        (ident-tx db remap)))
         values-result (write-chunked-items! out-prefix (limited (value-tx db remap) value-limit) chunk-size)]
     {:path out-prefix
      :schema-path schema-path

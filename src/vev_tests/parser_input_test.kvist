@@ -14,34 +14,34 @@
   (defer (free_all context.allocator))
   (let [conn (vev.create-conn)
         flat-input (vev.value-map
-                     ([dynamic]vev.Value
+                     ([]vev.Value
                        [(vev.value-keyword ":a") (vev.value-int 1)
                         (vev.value-keyword ":b") (vev.value-int 2)
                         (vev.value-keyword ":c") (vev.value-int 3)]))
         nested-tuple-input (vev.value-map
-                             ([dynamic]vev.Value
-                               [(vev.value-keyword ":a") (vev.value-vector ([dynamic]vev.Value [(vev.value-int 1) (vev.value-int 7)]))
-                                (vev.value-keyword ":b") (vev.value-vector ([dynamic]vev.Value [(vev.value-int 4) (vev.value-int 2)]))]))
+                             ([]vev.Value
+                               [(vev.value-keyword ":a") (vev.value-vector ([]vev.Value [(vev.value-int 1) (vev.value-int 7)]))
+                                (vev.value-keyword ":b") (vev.value-vector ([]vev.Value [(vev.value-int 4) (vev.value-int 2)]))]))
         nested-collection-input (vev.value-map
-                                  ([dynamic]vev.Value
-                                    [(vev.value-keyword ":a") (vev.value-vector ([dynamic]vev.Value [(vev.value-int 1) (vev.value-int 2) (vev.value-int 3)]))
-                                     (vev.value-keyword ":b") (vev.value-vector ([dynamic]vev.Value [(vev.value-int 0) (vev.value-int 4)]))]))
+                                  ([]vev.Value
+                                    [(vev.value-keyword ":a") (vev.value-vector ([]vev.Value [(vev.value-int 1) (vev.value-int 2) (vev.value-int 3)]))
+                                     (vev.value-keyword ":b") (vev.value-vector ([]vev.Value [(vev.value-int 0) (vev.value-int 4)]))]))
         flat (vev.q-text-with-inputs
                conn.db
                "[:find ?k ?v :in [[?k ?v] ...] :where [(> ?v 1)]]"
-               ([dynamic]vev.Query-Input [(vev.query-input-map-relation flat-input)]))
+               ([]vev.Query-Input [(vev.query-input-map-relation flat-input)]))
         nested-tuple (vev.q-text-with-inputs
                        conn.db
                        "[:find ?k ?min ?max :in [[?k [?min ?max]] ...] :where [(> ?max ?min)]]"
-                       ([dynamic]vev.Query-Input [(vev.query-input-map-relation nested-tuple-input)]))
+                       ([]vev.Query-Input [(vev.query-input-map-relation nested-tuple-input)]))
         nested-collection (vev.q-text-with-inputs
                             conn.db
                             "[:find ?k ?x :in [[?k [?x ...]] ...] :where [(> ?x 1)]]"
-                            ([dynamic]vev.Query-Input [(vev.query-input-map-relation nested-collection-input)]))
+                            ([]vev.Query-Input [(vev.query-input-map-relation nested-collection-input)]))
         ground-scalar (vev.q-text-with-inputs
                         conn.db
                         "[:find ?in :in ?in :where [(ground ?in) _]]"
-                        ([dynamic]vev.Query-Input [(vev.query-input-scalar (vev.value-keyword ":ok"))]))
+                        ([]vev.Query-Input [(vev.query-input-scalar (vev.value-keyword ":ok"))]))
         ground-collection (vev.q-text-collection
                             conn.db
                             "[:find [?vowel ...] :where [(ground [:a :e :i :o :u]) [?vowel ...]]]")
@@ -54,17 +54,18 @@
         ground-relation (vev.q-text-with-inputs
                           conn.db
                           "[:find ?x ?z :in ?rows :where [(ground ?rows) [[?x _ ?z] ...]]]"
-                          ([dynamic]vev.Query-Input
+                          ([]vev.Query-Input
                             [(vev.query-input-scalar
                                (vev.value-vector
-                                 ([dynamic]vev.Value
-                                   [(vev.value-vector ([dynamic]vev.Value [(vev.value-keyword ":a") (vev.value-keyword ":b") (vev.value-keyword ":c")]))
-                                    (vev.value-vector ([dynamic]vev.Value [(vev.value-keyword ":d") (vev.value-keyword ":e") (vev.value-keyword ":f")]))])))]))]
+                                 ([]vev.Value
+                                   [(vev.value-vector ([]vev.Value [(vev.value-keyword ":a") (vev.value-keyword ":b") (vev.value-keyword ":c")]))
+                                    (vev.value-vector ([]vev.Value [(vev.value-keyword ":d") (vev.value-keyword ":e") (vev.value-keyword ":f")]))])))]))]
     (t.is (= (count flat.rows) 2))
     (t.is (= flat.rows[0].values[0].text ":b"))
     (t.is (= flat.rows[0].values[1].int-value 2))
     (t.is (= flat.rows[1].values[0].text ":c"))
     (t.is (= flat.rows[1].values[1].int-value 3))
+    (t.is nested-tuple.ok nested-tuple.error)
     (t.is (= (count nested-tuple.rows) 1))
     (t.is (= nested-tuple.rows[0].values[0].text ":a"))
     (t.is (= nested-tuple.rows[0].values[1].int-value 1))
@@ -93,17 +94,13 @@
     (t.is (= ground-relation.rows[1].values[0].text ":d"))
     (t.is (= ground-relation.rows[1].values[1].text ":f"))))
 
-(t.deftest parser-tx-text-failure-rolls-back-output
+(t.deftest prepared-tx-text-failure-has-no-partial-output
   (defer (free_all context.allocator))
-  (let [tx-data (make [dynamic]vev.Tx-Data)
-        _ (arr.push! tx-data (vev.add 99 ":kept" (vev.value-int 1)))
-        [ok error] (vev.parse-tx-text! (addr tx-data) "[[:db/add 1 :name \"Ada\"] [:db/add 2 :bad]]")]
-    (defer (delete tx-data))
-    (t.is (not ok))
-    (t.is (= error ":db/add expects [op e a v]"))
-    (t.is (= (count tx-data) 1))
-    (t.is (= tx-data[0].e 99))
-    (t.is (= tx-data[0].a ":kept"))))
+  (let [prepared (vev.prepare-tx-text "[[:db/add 1 :name \"Ada\"] [:db/add 2 :bad]]")]
+    (t.is (not prepared.ok))
+    (t.is (= prepared.error ":db/add expects [op e a v]"))
+    (t.is (= (count prepared.tx-data) 0))
+    (vev.delete-prepared-tx-data-shallow prepared)))
 
 (t.deftest parser-values-classify-edn-reader-errors
   (defer (free_all context.allocator))
@@ -120,7 +117,7 @@
     (t.is rules-code-ok)
     (t.is (= rules-code.text ":edn-read"))
     (t.is pull-code-ok)
-    (t.is (= pull-code.text ":edn-read"))
+    (t.is (= pull-code.text ":pull-shape"))
     (t.is tx-code-ok)
     (t.is (= tx-code.text ":edn-read"))))
 

@@ -4,233 +4,275 @@ This is the current Vev execution plan, not a changelog.
 
 ## Active Gate
 
-Make first-class Kvist `Data` and EDN text converge on one lifetime-safe Vev
-semantic representation. Prepared queries, rules, pull patterns, and
-transactions must remain valid after their source Data or text is released.
-Once that boundary is sound, replace Vev's duplicate EDN reader with
-`kvist:edn`, complete literal/text parity, and return to publishable packages.
+Package the canonical Kvist application API and existing engine for
+dependency-based use. The complete main regression gate passes 377 of 377
+tests, the shared resident/durable MusicBrainz mini gate passes 2 of 2, and the
+complete Kvist MusicBrainz workshop is green.
+The canonical Kvist `q` and `pull` operations now return ordinary immutable
+`Data`; callers do not inspect or close engine-owned result rows and values.
+The macOS arm64 release command now produces repeatable checksummed artifacts
+and passes extracted native C plus staged Java/Clojure package smoke tests. The
+active product gate is the equivalent Linux build plus published-coordinate
+consumption.
 
-## Current Status
+Parser convergence is complete. Quoted Kvist `Data` and EDN text use the same
+`kvist:edn` reader, semantic parsers, and lifetime-safe prepared objects for
+queries, rules, pull patterns, transaction data, and query inputs. The old Vev
+reader and raw borrowed-result parser wrappers are gone.
 
-`examples/python/contact_book.py` is now the shared application source for
-parallel Clojure and Kvist implementations. Both host versions exercise:
+## Current Product Surface
 
-- in-memory operation without SQLite
-- schema and data transactions
-- immutable DB values passed to query and pull
-- `db-with` isolation from the original DB value
-- durable create, close, reopen, transact, and second reopen
+- `src/vev_app` provides Datomic-shaped `q`, `transact`, `db`, `pull`, and
+  `db-with` operations over opaque connections and immutable DB values.
+- Kvist applications can define reusable queries, rules, pull patterns, and
+  transactions as ordinary quoted `Data`; no serialization round trip is
+  involved.
+- Canonical Kvist `q` results have Datomic-shaped immutable data: relation
+  sets, collection vectors, tuple vectors, scalars, and keyed maps. Canonical
+  `pull` returns an immutable map.
+- The same EDN text surface serves C, Java, Clojure, Python, Rust, Node, Go,
+  Odin, and other native-ABI consumers.
+- In-memory operation requires no SQLite. Durable operation uses system SQLite
+  behind Vev store paths and Vev APIs.
+- Prepared objects retain their immutable source tree. Canonical Kvist query
+  and pull data, transaction data, ABI values, pull patterns, and keyed return
+  maps remain valid after parser input and prepared owners are released.
+- Clojure and Kvist contact-book examples cover in-memory transactions,
+  immutable DB values, `db-with`, pull, durable reopen, and subsequent writes.
+- MusicBrainz workshop queries, rules, aggregates, and pull examples use named
+  data in Kvist and Datomic-style forms in Clojure.
+- The complete upstream Day-of-Datomic aggregate lesson uses canonical Kvist
+  `q` data, including scalar and vector aggregates, relation results, and a
+  host-registered custom aggregate. Its portable results match Datomic.
+- The opening bindings and find-specification sequence from
+  `day-of-datomic-conj/src/music_brainz.clj` and
+  `day-of-datomic/tutorial/query.clj` uses canonical `q` values in both
+  Clojure and Kvist. Pull tuples, collection inputs, relation inputs, relation
+  finds, collection finds, tuple finds, and scalar finds have Datomic-shaped
+  results. Raw result access remains only for the intentional missing-`$`
+  diagnostic.
+- The five negation and disjunction examples from
+  `day-of-datomic/tutorial/query.clj` use canonical scalar `Data` in Kvist.
+  Their `not`, `not-join`, `or`, and `or-join` results match the Clojure
+  workshop path across the durable MusicBrainz store.
+- The immediately following predicate and function-expression examples use
+  canonical query data in both hosts. Artists starting before 1600 and John
+  Lennon track durations match at 2 and 71 rows. Source-less canonical `q`
+  accepts a scalar input, so the upstream Fahrenheit conversion reads
+  `(d.q fahrenheit-to-celsius-query 212)` in Kvist and returns `100.0`, as it
+  does through Clojure and Datomic.
+- The `get-else`, `get-some`, `fulltext`, and `missing?` sequence uses
+  canonical query data in both hosts. Kvist validates the same returned tuples,
+  keyword values, fulltext names and scores, and missing-attribute count as the
+  Clojure workshop over the durable MusicBrainz sample.
+- Durable connections expose a Datomic-shaped transaction-log value in both
+  hosts. The upstream `tx-ids` and `tx-data` queries run through ordinary
+  query-first `q` calls; the local fixture returns the same 9 transaction IDs
+  and 214 entity values for transaction 1 in Clojure and Kvist.
+- The portable collection-function example runs unchanged in meaning in both
+  hosts: `subs` maps the collection input to `["hello" "antid"]`. Clojure
+  collection finds now match Datomic by returning distinct vectors rather than
+  sets; relation finds remain sets.
+- Numeric entity IDs in attribute position resolve through `:db/ident` in the
+  literal, EDN, resident, and lazy durable query paths. The exact upstream
+  `[?attr 42 _]` query returns keyword values through typed native columns;
+  Datomic returns the same eight MusicBrainz attributes. The following dynamic
+  attribute query accepts `[:db/unique]` through `:in $ [?property ...]` and
+  returns keyword data through resident and reopened durable regressions. The
+  Clojure and Kvist workshop validators require Datomic's same eight keywords.
+  MusicBrainz exports preserve source schema entity IDs and include schema for
+  the bounded data-attribute subset plus every source `:db/unique` attribute
+  exercised by these workshop queries.
+- Lookup refs, idents, and raw entity IDs are equivalent query inputs across
+  Clojure and canonical Kvist `Data`. MusicBrainz exports preserve every
+  referenced ident entity's source ID, so the raw-ID example executes against
+  the same identity in Datomic and Vev. The installed sample assigns Belgium
+  `17592186045669`; the older upstream tutorial snapshot used
+  `17592186045516`.
+- Dynamic reference attributes follow Datomic's distinction between values and
+  entity identifiers. A keyword ident supplied through `:in` is not implicitly
+  resolved when the attribute position is dynamic; `datomic.api/entid` performs
+  the explicit conversion. Explicit lookup-ref inputs continue to resolve.
+  The paired Clojure and Kvist workshop forms return 0 unresolved rows and the
+  same 10 Belgian artists after conversion, matching the local Datomic sample.
+- The artist UUID/type/gender enum query from
+  `day-of-datomic-conj/src/music_brainz.clj` uses ordinary canonical `q` data
+  in both hosts. This completes the portable query sequence currently present
+  in that upstream file and in `day-of-datomic/tutorial/query.clj`.
+- Set-backed canonical relation results can be passed directly back into `q`
+  as relation inputs. The upstream Diana Ross collaboration-network query now
+  composes two ordinary Kvist `d.q` calls exactly like the Datomic example,
+  without converting an internal result through EDN text.
+- Source-less relation aggregates run through Datomic-shaped `d.q query data`
+  calls without constructing an empty database. The typed engine handles flat
+  relation bindings, and nested or wildcard relation bindings fall back to the
+  semantics-complete binder; the upstream monster-head examples return `4`
+  without `:with` and `6` with it.
+- Transaction-log queries retain the upstream `tx-ids` and `tx-data` forms in
+  Clojure and Kvist. The restored Datomic sample starts at `t=1000`; its first
+  transaction projects 59 distinct entities. The Vev subset importer creates
+  new Vev transactions while separating schema and chunking selected values,
+  so Vev transaction 1 is a 318-datom schema batch projecting 214 entities.
+  Both Vev hosts match that persisted transaction; source Datomic transaction
+  IDs and counts are intentionally not claimed to survive subset migration.
+- Transactions accept Datomic-scale entity IDs through literal vectors, maps,
+  ref values, and EDN text up to SQLite's signed 64-bit storage limit. The
+  MusicBrainz exporter emits UUIDs as standard tagged EDN and retains compact
+  remapped IDs for ordinary graph entities.
+- `VERSION` is the shared package version. `scripts/build_release.sh` builds
+  the native library and relocatable native bundle, deterministic JVM jars, and
+  deterministic source archives; runs extracted C and staged Java/Clojure
+  package smoke tests; and writes a manifest in which every artifact is a
+  regular file with a SHA-256 checksum.
 
-The combined source-tree check is:
+## Current Regression Status
 
-```sh
-scripts/contact_book.sh
-```
+- Main engine suite: 377/377 passing.
+- SQLite reopen coverage now exercises the intended lazy durable model: open
+  metadata, acquire immutable store snapshots for queries, and append through
+  the durable transaction path. It no longer requires eager reconstruction of
+  the resident in-memory cache.
+- Logical clause profiling now remains accurate when the physical engine fuses
+  bound clauses into fewer operators. Typed, materialized, and indexed
+  relation-source hash joins preserve source row order within equal-key
+  buckets without giving up indexed joins.
+- The shared Kvist EDN reader rejects duplicate map keys without collapsing
+  them, and Vev reports DataScript-compatible duplicate query-map section
+  diagnostics for `:find`, `:with`, `:in`, `:where`, and `:rules`.
+- EDN `#uuid` values retain their UUID type through the shared `Data` bridge,
+  transactions, indexed queries, lookup refs, and serialization round trips.
+- Typed scalar pushdown now applies string `contains?`, `includes?`,
+  `starts-with?`, and `ends-with?` predicates with the same semantics as the
+  normal predicate evaluator across resident and durable operator paths.
+- Function expressions use one shared numeric evaluator in typed and binding
+  execution. Mixed integer and floating-point arithmetic promotes to a float,
+  while integer-only `quot`, `rem`, and `mod` retain integer semantics.
+- Canonical Kvist `q` dispatches over immutable DB values, source-less inputs,
+  and durable log values without exposing the underlying SQLite transaction
+  helpers. Existing scalar, collection, relation, and rules inputs continue to
+  use the shared query-input conversion path.
+- Lookup refs supplied through scalar and collection query inputs resolve in
+  both entity and ref-value positions while remaining lookup-ref values in the
+  result, matching DataScript input semantics.
+- Variable attribute terms now use the bound runtime attribute's schema.
+  Dynamic ref attributes resolve lookup-ref inputs in both resident and lazy
+  durable index scans, while ordinary keyword inputs retain raw value equality.
+  Source-dependent query functions use the shared read-source operator path for
+  resident and durable DB values rather than the source-blind resident executor.
+- Pull rendering now matches the upstream DataScript result model for absent
+  attributes and lookup-ref `pull-many`. The direct and nested absent-only pull
+  examples return `nil`, matching the local Datomic sample. Resident typed
+  aggregate queries group on both scalar find vars and pull entity vars, so
+  aggregate values and pull maps remain associated without imposing row order
+  on set results.
+- Parser-input suite: 5/5 passing. Flat inputs stay on typed columns; nested
+  tuple and collection input patterns use the recursive binding engine.
+- Source-qualified rule calls now follow DataScript call-site source semantics
+  through Kvist literals, EDN vectors, EDN maps, resident DBs, and relation
+  sources. Direct source scans retain the typed path; compound source rules,
+  `not`, and `or` use the semantics-complete binding path.
+- Relation-value sources support DataScript's one- through five-position
+  patterns, including transaction and operation terms. Source validation uses
+  actual bound sources, and source `or` results retain set semantics without
+  imposing an artificial row order.
+- MusicBrainz mini suite: 2/2 passing across resident and SQLite-reopened
+  snapshots. Its input forms now match upstream Day-of-Datomic by declaring
+  the `$` source explicitly whenever `:in` is present.
+- The complete Kvist workshop is green. It covers the canonical artist UUID/type/gender,
+  nested collaboration, source-less relation aggregate, transaction-log, and
+  direct pull sections. Datomic and Vev return the same nested artist-country
+  map and the same `nil` values for the two absent-only pull examples. The full
+  application-level run passes before release packaging.
+- Native ABI build and both Clojure/Kvist contact-book applications pass.
+- The macOS arm64 release gate passes from one command using the pinned Kvist
+  branch compiler. Consecutive JVM package builds and source archive builds are
+  byte-identical. Temporary Java and Clojure projects consume the staged Maven
+  artifacts successfully, and the release manifest has no missing or unhashed
+  entries.
+- The versioned native bundle contains `vev.h`, the platform library, license,
+  and relocatable pkg-config metadata. Its archive is byte-identical when
+  repackaging the same library. The full existing C ABI smoke compiles and runs
+  using only paths inside an extracted temporary bundle.
+- Typed native result columns preserve keyword, symbol, and UUID kinds instead
+  of collapsing them to strings. Java, Clojure, and Python reconstruct the
+  corresponding host values while sharing the compact text-column storage.
+- The Kvist contact book validates relation, collection, tuple, scalar, and
+  keyed-map find shapes plus pull through the canonical immutable-`Data` API.
+- Canonical result rendering derives find shape and keyed-map metadata directly
+  from immutable query data. It does not reparse queries after execution, so
+  host-registered aggregate functions and prepared semantics remain intact.
+- The focused Kvist runtime-Data example passes. The broader compiler suite has
+  eight failures in editor-symbol path discovery and now-accepted untyped block
+  expression expectations; those are outside this Vev API change and must be
+  reconciled before claiming a fully green compiler gate.
+- The rebuilt 763,299-datom MusicBrainz store returns the same ten Belgian
+  artists for lookup-ref, ident, and raw-ID inputs through Clojure and canonical
+  Kvist `q`. The importer's optional post-persist reopened smoke currently
+  stalls after persistence; process samples point at canonical `Data`
+  append/release work. That smoke must be separated or fixed so
+  `musicbrainz_workshop_setup.sh --validate` completes unattended.
 
-`src/vev_app` is the normal Kvist application surface. It presents opaque
-`Conn` and immutable `DB` values for both in-memory and durable operation.
-Quoted Kvist forms are first-class `Data`, so named query, transaction, and
-pull values pass directly to query-first `q`, `transact`, `pull`, and
-`db-with`. Vev converts `Data` to its canonical EDN tree and then uses the same
-semantic parsers as the EDN text API; this is not an EDN serialization and
-reparse path. Embedded MusicBrainz queries, rules, and pull patterns now use
-quoted data; only rules actually loaded from `rules.edn` use the text path.
-The Kvist MusicBrainz, aggregate, query-decomposition, and contact-book
-tutorials now follow their Clojure counterparts by defining reusable queries,
-pull patterns, rules, and transaction data as top-level quoted values and
-passing the DB after the query. Static pull patterns no longer fall through
-the EDN text API. Serialized input text remains only in validation helpers
-that deliberately exercise parser/error boundaries.
-Runtime quasiquote also builds ordinary managed Data, and the Kvist contact
-book now uses an interpolated transaction map through both in-memory `db-with`
-and durable `transact`.
-Runtime EDN and rule files use `q-text` and `q-rules`. Storage types and SQLite
-remain internal. DB values can be passed through application code as ordinary
-values until their owner closes them.
-
-Kvist `main` at `e8f3f9c` includes the complete core bootstrap and builds the
-facade, native ABI, and contact book without Vev source changes. The compiler
-binary is rebuilt at `/Users/andreas/Projects/kvist/kvist`; the normal
-`~/.local/bin/kvist` command points to it. A forced native rebuild and the
-combined Clojure/Kvist contact-book check pass with this compiler.
-
-Vev has been migrated to the current package model: set types use their
-canonical map representation, source macros define their own literal/string
-classifiers, and owned values passed into ABI storage helpers are transferred
-explicitly. A fresh native-library build followed by `scripts/contact_book.sh`
-passes for both Clojure and Kvist.
-
-`VERSION` is the canonical release version for every package surface. Client
-metadata and packaging scripts use `0.1.0`; `scripts/release_manifest.sh`
-rejects Java, Python, Rust, or Node metadata that diverges. The complete local
-release command is:
-
-```sh
-scripts/build_release.sh
-```
-
-It builds the native library and JVM artifacts, then writes a hashed,
-machine-readable platform manifest to `build/release/manifest.json`. The
-manifest also identifies the source-distributed Python, Rust, Node, Go, Odin,
-and Kvist package surfaces. Native freshness checks include the Kvist compiler
-binary and release version, preventing either change from leaving stale native
-metadata or code.
-
-Prepared transaction data now deep-owns every string and nested value. A
-focused regression releases and overwrites the source EDN buffer before using
-the prepared transaction. Stored transaction groups now state whether their
-items are owned, so cloned durable groups receive deep cleanup without making
-borrowed native groups invalid.
-
-Data-backed prepared queries retain their immutable source tree. A focused
-regression constructs a query with `edn.read` inside a helper, returns only the
-prepared query, and executes it after the helper's managed Data binding has
-been released. This establishes the shared-owner alternative to deep-copying
-the full semantic query graph.
-
-Text-backed prepared queries now parse through `kvist:edn` and retain that same
-Data representation. Their source-buffer lifetime regression and the combined
-Clojure/Kvist contact-book gate pass. Every one-shot query variant now creates
-a prepared query and delegates to the same semantic representation, including
-profiled, result, relation-source, named-source, rule, and query-with-input-text
-entry points. Query and rule text therefore have one EDN parser path across
-prepared, C ABI, Clojure, and direct Kvist calls.
-
-Query inputs encoded as EDN text now use `kvist:edn` as well. The shared
-semantic conversion covers scalar, collection, tuple, relation, pull-pattern,
-and lookup-ref inputs without changing their owned runtime representation. A
-focused persisted lookup-ref input test and the combined Clojure/Kvist contact
-book pass through this path.
-
-Standalone binding, `:in`, `:with`, and clause parser objects also parse from
-first-class Data now. They retain their source tree because their semantic
-objects contain borrowed symbol and keyword text, and explicit destructors
-release both the parser containers and source owner. A focused regression
-constructs each object from a temporary mutable text buffer, destroys that
-buffer, and verifies the parsed object afterwards.
-
-Prepared rules and pull patterns now use the same retained Data owner for both
-Kvist values and EDN text. Prepared queries with attached rules retain both
-source trees. Focused regressions release rule, pull, query, and attached-rule
-source buffers before execution; all prepared lifetime cases pass.
-
-All one-shot pull text entry points now delegate to prepared pull patterns.
-This includes in-memory and durable pull, pull-many, entity-id and lookup-ref
-variants. Pull text therefore has one `kvist:edn` parser and prepared execution
-path across storage modes.
-
-The shared EDN reader now preserves Datalog's `_` wildcard as a symbol. Its
-numeric classifier requires an actual decimal digit instead of trusting the
-host integer parser's acceptance of a bare underscore. The Kvist EDN
-round-trip regression and all five Vev rule-engine tests pass with this fix.
-
-Transaction text now parses through `kvist:edn` into the same deep-owned
-`Prepared-Tx-Data` used by first-class Kvist Data. In-memory transact,
-immutable `with`/`db-with`, shared connections, and transaction-function
-variants all delegate to prepared execution. The prepared lifetime suite and
-the combined Clojure/Kvist contact book pass across in-memory and durable use.
-Shared and SQLite storage wrappers now use that prepared transaction boundary
-too, including bulk logical text groups, source transaction functions, and
-source-backed immutable `db-with`. The legacy raw transaction parser has no
-runtime caller. Focused storage tests cover grouped commits, parse rollback,
-and source-backed DB-value behavior.
-
-Serialized in-memory DB values now read through `kvist:edn` before building
-their fully owned datom/index representation. This removes another independent
-reader path without coupling the resulting DB lifetime to the parsed Data.
-Durable tx-metadata rows, datom-log rows, index-snapshot datoms, and complex
-serialized values have moved to the same path. All storage-layer uses of the
-duplicate reader are gone; metadata and retracted-datom source tests pass.
-
-JVM jars use the source commit timestamp for archive entries and are verified
-byte-for-byte by `scripts/verify_jvm_reproducibility.sh`. Repeated Kvist
-compilation produces identical generated Odin, but Odin 2026-05 currently
-emits different native binaries from that identical input even with a single
-checker thread and reproducible Apple linker mode. Native byte reproducibility
-therefore remains the blocker for completing the current item; runtime and
-dependency-only package verification are already green on macOS arm64.
-
-The Clojure contact book also passes from a temporary project with only this
-dependency:
-
-```clojure
-dev.vevdb/vev-clj {:mvn/version "0.1.0"}
-```
-
-`scripts/contact_book_package_clojure.sh` builds the local Java, Clojure, and
-platform-native artifacts and verifies that dependency-only path. The app does
-not use repository source classpaths, `VEV_LIB`, or SQLite APIs.
+Vev's regression gate currently uses the compiler built from Kvist's
+`codex-runtime-def` worktree. Kvist commit `3336e8e3` supplies
+`data.from-nil` and `data.append-retained!`, but is not yet on Kvist `main`.
+That commit and the remaining runtime `def` and quoted-`Data` changes must land
+and the installed compiler must be rebuilt before this Vev branch lands.
 
 ## Hard Constraints
 
 - In-memory mode remains first-class and must not require SQLite.
-- Durable mode may require system SQLite, but application code only sees Vev
-  store paths and Vev APIs.
-- Clojure and Kvist APIs should remain Datomic-like, including query-first
-  `q` calls with the DB value after the query.
-- Reusable Kvist queries, pull patterns, and transaction data must be ordinary
-  named data values, not strings or macro-only forms.
+- Durable storage details must not leak into normal application code.
+- Clojure and Kvist APIs remain Datomic-like, including query-first `q` calls
+  with the DB value after the query.
+- Reusable Kvist database forms are named data values, not strings or
+  macro-only forms.
 - Non-Kvist consumers are primary product surfaces.
-- Published coordinates must not be documented as available until publication
-  has actually succeeded.
-- Performance changes must be generic engine/storage work, never
-  application-specific benchmark handling.
+- Performance work must improve general engine or storage behavior, never one
+  benchmark query.
+- Published coordinates are documented as available only after publication
+  succeeds.
 
 ## Remaining Work
 
-1. Finish replacing the duplicate Vev EDN reader. Primary query, query-input,
-   rule, pull, and transaction entry points are complete. Remaining call sites
-   are raw query/rule/pull/transaction parser compatibility helpers and the
-   return-map key compatibility helper. Storage has no remaining call site.
-   Standalone binding, `:in`, `:with`, clause objects, serialized DB values,
-   and all runtime transaction wrappers are complete. Redesign or deep-own the
-   remaining raw return shapes, retain their current diagnostics, and remove
-   `read-edn-text!` only when its runtime call-site count reaches zero and
-   parser/storage integration tests pass.
-2. Finish the remaining tutorial-level Clojure/Kvist alignment. The ordinary
-   named `Data` path now covers `q`, `transact`, `db-with`, direct pull, and
-   lookup-ref pull, including error-aware pull variants and native-function
-   query registries. Remaining work is to
-   replace serialized-input validation helpers with typed query inputs where
-   error inspection is not the point, and to expose result values through a
-   more data-oriented application surface so tutorial assertions need less
-   manual `Value` inspection and cleanup.
-3. Make release builds reproducible for each supported OS/architecture. At
-   minimum, produce and smoke macOS arm64 first, then add Linux x86-64 before
-   calling the release generally available.
-4. Publish or stage the native platform artifact first, then Java and Clojure
-   artifacts that depend on it. Verify fresh temporary Clojure and Maven
-   projects using normal coordinates and no repository-local Maven path.
-5. Define Kvist package installation explicitly. Until Kvist has a registry,
-   document a stable source dependency/vendor workflow that does not require
-   copying arbitrary internal files.
-6. Extend the dependency-only application smoke to every packaged host before
-   publishing that host as supported.
+1. Land the required Kvist runtime `def`, quoted-`Data`, and ownership-helper
+   commits on Kvist `main`, rebuild the installed compiler, and rerun the full
+   Vev and MusicBrainz gates with that installed binary.
+2. Run the same release gate on Linux x86-64. Identical generated Odin is
+   required; byte-identical native output is desirable but is not a release
+   blocker with the current Odin toolchain.
+3. Stage or publish the platform-native artifact, then Java and Clojure
+   artifacts that depend on it. Verify fresh Clojure and Maven projects using
+   normal coordinates and no repository-local paths.
+4. Define a stable Kvist source dependency/vendor workflow until Kvist has a
+   package registry.
+5. Add dependency-only smoke tests for each host before advertising that host
+   as supported.
 
 ## Exit Criteria
 
-The packaging gate is done when:
+The current gate is done when:
 
-- the installed Kvist compiler builds the normal application API and contact
-  book
-- one version command builds a manifest of all artifacts for a release
-- macOS arm64 and Linux x86-64 native artifacts are reproducible and tested
-- Clojure users can add one real published dependency and run the contact book
-- Java users can add one real Maven dependency and run the equivalent smoke
-- Kvist users have a documented stable package/source dependency path
-- package consumers never need repository build paths or SQLite application
+- the installed Kvist compiler passes the complete Vev regression suite
+- the Clojure and Kvist contact books run through the canonical application API
+- canonical Kvist query tests cover relation, collection, tuple, scalar, keyed
+  map, rules, inputs, and pull result shapes without manual result cleanup
+- a single versioned command produces a checksummed artifact manifest
+- macOS arm64 and Linux x86-64 native artifacts pass package smoke tests
+- fresh Clojure and Java projects run using published or staged coordinates
+- Kvist has a documented stable source dependency path
+- package consumers need neither repository build paths nor SQLite application
   code
 
 ## Regression Commands
 
+- `kvist test src/vev_tests/vev_test.kvist`
+- `kvist test src/vev_tests/parser_input_test.kvist`
+- `kvist test src/vev_tests/musicbrainz_test.kvist`
+- `kvist build src/vev_abi/vev_abi.kvist`
 - `scripts/contact_book.sh`
 - `scripts/build_release.sh`
+- `scripts/smoke_native_bundle.sh`
 - `scripts/verify_jvm_reproducibility.sh`
 - `scripts/contact_book_package_clojure.sh`
 - `scripts/smoke_jvm_package.sh`
 - `scripts/musicbrainz_workshop_setup.sh --validate`
-- `scripts/compare_musicbrainz_workshop.sh --skip-datomic`
-
-Performance is not the active workstream. Resume it only for a measured real
-application blocker or a regression in an already covered workload, and consult
-Datalevin before changing durable query execution.

@@ -4,9 +4,13 @@
 (package vev-app)
 
 (import vev "../vev")
+(import arr "kvist:arr")
+(import edn "kvist:edn")
+(import kdata "kvist:data")
 
 (def Conn (distinct rawptr))
 (def DB (distinct rawptr))
+(def Log (distinct rawptr))
 (def Value vev.Value)
 (def Row vev.Result-Row)
 (def Native-Query-Fn vev.Native-Query-Fn)
@@ -47,6 +51,9 @@
 (defn- db-ptr [db: DB] -> ^vev.Store-DB
   (transmute ^vev.Store-DB (rawptr db)))
 
+(defn- log-conn [log-value: Log] -> Conn
+  (Conn (rawptr log-value)))
+
 (defn- conn-handle [conn: vev.Store-Conn] -> Conn
   (let [ptr (alloc vev.Store-Conn)]
     (set! ptr^ conn)
@@ -67,6 +74,23 @@
            rows: result.result.rows
            owns-values: result.ownsValues}))
 
+(defn- data-result-value [db: DB, query: Data, result: vev.Query-Result] -> Data
+  (let [[value ok error] (vev.query-result-data (db-ptr db) query result)]
+    (when (not ok)
+      (panic error))
+    value))
+
+(defn- q-data-value [query: Data, db: DB, inputs: []vev.Query-Input] -> Data
+  (data-result-value
+    db query
+    (vev.q-result-store-db-data-with-inputs (db-ptr db) query inputs)))
+
+(defn- q-data-with-fns-value [query: Data, db: DB, fns: []vev.Native-Query-Fn, inputs: []vev.Query-Input] -> Data
+  (data-result-value
+    db query
+    (vev.q-result-store-db-data-with-inputs-and-fns
+      (db-ptr db) query inputs fns)))
+
 (defn- unchecked-result-value [result: vev.Query-Result] -> Result
   (Result {ok: result.result.ok
            error: result.result.error
@@ -86,6 +110,14 @@
   (when (not ok)
     (panic error))
   value)
+
+(defn- pulled-data [value: Value, ok: bool, error: string] -> Data
+  (when (not ok)
+    (vev.delete-owned-value value)
+    (panic error))
+  (let [out (vev.value-data value)]
+    (vev.delete-owned-value value)
+    out))
 
 (defn create-conn [] -> Conn
   (conn-handle (vev.create-shared-store 128)))
@@ -125,6 +157,12 @@
     (vev.close-store ptr^)
     (free (rawptr conn))))
 
+(defn log [conn: Conn] -> Log
+  (let [store (conn-ptr conn)]
+    (when (not (= store^.kind .SQLite))
+      (panic "transaction log requires a durable connection"))
+    (Log (rawptr conn))))
+
 (defn log-tx-ids [conn: Conn] -> [tx-ids: [dynamic]u64, ok: bool, error: string]
   (let [store (conn-ptr conn)]
     (when (not (= store^.kind .SQLite))
@@ -136,6 +174,75 @@
     (when (not (= store^.kind .SQLite))
       (return "" false "transaction log requires a durable connection"))
     (vev.sqlite-conn-tx-data-text (addr store^.sqlite) tx)))
+
+(defn- log-query-function-call [query: Data] -> Data #borrowed
+  (when (not (kdata.vector? query))
+    (panic "log query must be a vector"))
+  (let [in-where false]
+    (for [index (arr.range 0 (count query))]
+      (let [item (kdata.nth query index)]
+        (if (and (kdata.keyword? item)
+                 (= (kdata.keyword item) ":where"))
+          (set! in-where true)
+          (when (and in-where
+                     (kdata.vector? item)
+                     (> (count item) 0)
+                     (kdata.list? (kdata.nth item 0)))
+            (return (kdata.nth item 0))))))
+  'nil))
+
+(defn- log-query-term-int [term: Data, input: Data, has-input: bool] -> [value: i64, ok: bool]
+  (if (kdata.int? term)
+    (return (kdata.int term) true)
+    (when (and has-input (kdata.symbol? term) (kdata.int? input))
+      (return (kdata.int input) true)))
+  (return 0 false))
+
+(defn- log-query-data [query: Data, log-value: Log, input: Data, has-input: bool] -> Data
+  (let [call (log-query-function-call query)]
+    (when (or (= (count call) 0)
+              (not (kdata.symbol? (kdata.nth call 0))))
+      (panic "log query requires a named function"))
+    (let [op (kdata.symbol (kdata.nth call 0))]
+      (when (not (or (= op "tx-ids") (= op "tx-data")))
+        (panic "unsupported Vev log query function"))
+      (cond
+        (= op "tx-ids")
+          (do
+            (when (not (= (count call) 4))
+              (panic "tx-ids expects log, start, and end arguments"))
+            (let [[start start-ok] (log-query-term-int (kdata.nth call 2) input has-input)
+                  [end end-ok] (log-query-term-int (kdata.nth call 3) input has-input)
+                  [ids ok error] (log-tx-ids (log-conn log-value))
+                  out '#{}]
+              (defer (delete ids))
+              (when (not (and start-ok end-ok))
+                (panic "tx-ids expects integer range arguments"))
+              (when (not ok)
+                (panic error))
+              (for [tx ids]
+                (when (and (>= (i64 tx) start) (< (i64 tx) end))
+                  (set! out (kdata.conj out (kdata.from-int (i64 tx))))))
+              out))
+        (= op "tx-data")
+          (do
+            (when (not (= (count call) 3))
+              (panic "tx-data expects log and transaction arguments"))
+            (let [[tx tx-ok] (log-query-term-int (kdata.nth call 2) input has-input)]
+              (when (or (not tx-ok) (< tx 0))
+                (panic "transaction id must be non-negative"))
+              (let [[text ok error] (log-tx-data (log-conn log-value) (u64 tx))]
+                (defer (delete text))
+                (when (not ok)
+                  (panic error))
+                (let [datoms (edn.read text) :defer-with kdata.release
+                      out '#{}]
+                  (for [index (arr.range 0 (count datoms))]
+                    (let [datom (kdata.nth datoms index)]
+                      (when (and (kdata.vector? datom) (> (count datom) 0))
+                        (set! out (kdata.conj out (kdata.nth datom 0))))))
+                  out))))
+        :else 'nil))))
 
 (defn try-db [conn: Conn] -> [db: DB, ok: bool, error: string]
   (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (conn-ptr conn))]
@@ -168,9 +275,268 @@
                  {ok: result.ok error: result.error rows: result.rows})
        ownsValues: result.owns-values})))
 
+(defn- q-input-string [value: string] -> vev.Query-Input
+  (vev.query-input-scalar (vev.value-string value)))
+
+(defn- q-input-int [value: int] -> vev.Query-Input
+  (vev.query-input-scalar (vev.value-int (i64 value))))
+
+(defn- q-input-i64 [value: i64] -> vev.Query-Input
+  (vev.query-input-scalar (vev.value-int value)))
+
+(defn- q-input-f64 [value: f64] -> vev.Query-Input
+  (vev.query-input-scalar (vev.value-float value)))
+
+(defn- q-input-bool [value: bool] -> vev.Query-Input
+  (vev.query-input-scalar (vev.value-bool value)))
+
+(defn- q-input-value [value: Value] -> vev.Query-Input
+  (vev.query-input-scalar value))
+
+(defn- q-input-data [value: Data] -> vev.Query-Input
+  (vev.query-input-data-owned value))
+
+(defn- q-input-keyword [value: keyword] -> vev.Query-Input
+  (vev.query-input-scalar (vev.value-keyword (vev.keyword-text value))))
+
+(def- q-input
+  (overload q-input-data q-input-string q-input-int q-input-i64 q-input-f64 q-input-bool q-input-value q-input-keyword))
+
+(defn- q-data-input-data [value: Data] -> Data #borrowed
+  value)
+
+(defn- q-data-input-string [value: string] -> Data
+  (kdata.from-string value))
+
+(defn- q-data-input-int [value: int] -> Data
+  (kdata.from-int (i64 value)))
+
+(defn- q-data-input-i64 [value: i64] -> Data
+  (kdata.from-int value))
+
+(defn- q-data-input-f64 [value: f64] -> Data
+  (kdata.from-float value))
+
+(defn- q-data-input-bool [value: bool] -> Data
+  (kdata.from-bool value))
+
+(defn- q-data-input-value [value: Value] -> Data
+  (vev.value-data value))
+
+(defn- q-data-input-keyword [value: keyword] -> Data
+  (kdata.from-keyword (vev.keyword-text value)))
+
+(def- q-data-input
+  (overload q-data-input-data
+            q-data-input-string
+            q-data-input-int
+            q-data-input-i64
+            q-data-input-f64
+            q-data-input-bool
+            q-data-input-value
+            q-data-input-keyword))
+
+(defmacro- q-literal-int? [form]
+  (and (number? form)
+       (not (contains? (source form) "."))
+       (not (contains? (source form) "e"))
+       (not (contains? (source form) "E"))))
+
+(defmacro- q-value-form [form]
+  (cond
+    (= form nil) `(vev.value-nil)
+    (string? form) `(vev.value-string ~form)
+    (q-literal-int? form) `(vev.value-int ~form)
+    (keyword? form) `(vev.value-keyword ~(source form))
+    (vector? form) `(vev.value-vector ([]Value [~@(q-value-forms form)]))
+    :else form))
+
+(defmacro- q-value-forms [forms]
+  (if (= (count forms) 0)
+    (forms)
+    (forms
+      (q-value-form (first forms))
+      (q-value-forms (rest forms)))))
+
+(defmacro- q-relation-value-forms [rows]
+  (if (= (count rows) 0)
+    (forms)
+    (concat (q-value-forms (first rows))
+            (q-relation-value-forms (rest rows)))))
+
+(defmacro- q-input-form [form]
+  (cond
+    (vector? form)
+      (if (and (> (count form) 0) (vector? (first form)))
+        `(vev.query-input-relation
+           ([]Value [~@(q-relation-value-forms form)])
+           ~(count (first form)))
+        `(vev.query-input-collection ([]Value [~@(q-value-forms form)])))
+    (keyword? form) `(vev.query-input-scalar (vev.value-keyword ~(source form)))
+    (q-literal-int? form) `(vev.query-input-scalar (vev.value-int ~form))
+    :else `(q-input ~form)))
+
+(defmacro- q-first-form [form]
+  (if (or (vector? form) (keyword? form) (q-literal-int? form))
+    (q-input-form form)
+    form))
+
+(defmacro- q-first-data-form [form]
+  (cond
+    (vector? form) `(quote ~form)
+    (keyword? form) `(kdata.from-keyword ~(source form))
+    (q-literal-int? form) `(kdata.from-int (i64 ~form))
+    (string? form) `(q-data-input-string ~form)
+    :else `(q-data-input ~form)))
+
+(defmacro- q-input-forms [forms]
+  (if (= (count forms) 0)
+    (forms)
+    (forms
+      (q-input-form (first forms))
+      (q-input-forms (rest forms)))))
+
+(defn- q-result-with-first-input [query: Data, db: DB, first: vev.Query-Input, rest: []vev.Query-Input] -> vev.Query-Result
+  (let [inputs (make [dynamic]vev.Query-Input 0 (+ (count rest) 1))]
+    (arr.push! inputs first)
+    (for [input rest]
+      (arr.push! inputs input))
+    (let [result (vev.q-result-store-db-data-with-inputs (db-ptr db) query (slice inputs 0))]
+      (for [input inputs]
+        (when input.owns-values
+          (vev.delete-owned-query-input input)))
+      (delete inputs)
+      result)))
+
+(defn- q-result-first-data [query: Data, db: DB, rules: Data, inputs: []vev.Query-Input] -> vev.Query-Result
+  (let [result (vev.q-result-store-db-data-with-first-data-and-inputs (db-ptr db) query rules inputs)]
+    (for [input inputs]
+      (when input.owns-values
+        (vev.delete-owned-query-input input)))
+    result))
+
+(defn- q-result-first-query-input [query: Data, db: DB, first: vev.Query-Input, inputs: []vev.Query-Input] -> vev.Query-Result
+  (q-result-with-first-input query db first inputs))
+
+(defn- q-result-first-string [query: Data, db: DB, first: string, inputs: []vev.Query-Input] -> vev.Query-Result
+  (q-result-with-first-input query db (q-input-string first) inputs))
+
+(defn- q-result-first-int [query: Data, db: DB, first: int, inputs: []vev.Query-Input] -> vev.Query-Result
+  (q-result-with-first-input query db (q-input-int first) inputs))
+
+(defn- q-result-first-i64 [query: Data, db: DB, first: i64, inputs: []vev.Query-Input] -> vev.Query-Result
+  (q-result-with-first-input query db (q-input-i64 first) inputs))
+
+(defn- q-result-first-f64 [query: Data, db: DB, first: f64, inputs: []vev.Query-Input] -> vev.Query-Result
+  (q-result-with-first-input query db (q-input-f64 first) inputs))
+
+(defn- q-result-first-bool [query: Data, db: DB, first: bool, inputs: []vev.Query-Input] -> vev.Query-Result
+  (q-result-with-first-input query db (q-input-bool first) inputs))
+
+(defn- q-result-first-value [query: Data, db: DB, first: Value, inputs: []vev.Query-Input] -> vev.Query-Result
+  (q-result-with-first-input query db (q-input-value first) inputs))
+
+(def- q-result-first
+  (overload q-result-first-data
+            q-result-first-query-input
+            q-result-first-string
+            q-result-first-int
+            q-result-first-i64
+            q-result-first-f64
+            q-result-first-bool
+            q-result-first-value))
+
+(defn- q-data-source-db [query: Data, source: DB] -> Data
+  (q-data-value query source ([]vev.Query-Input [])))
+
+(defn- q-data-source-log [query: Data, source: Log] -> Data
+  (log-query-data query source 'nil false))
+
+(defn- q-data-source-query-input [query: Data, first: vev.Query-Input] -> Data
+  (let [conn (create-conn)
+        snapshot (db conn)
+        out (data-result-value
+              snapshot query
+              (q-result-with-first-input query snapshot first ([]vev.Query-Input [])))]
+    (close-db snapshot)
+    (close-conn conn)
+    out))
+
+(defn- q-data-source-data [query: Data, first: Data] -> Data
+  (let [conn (create-conn)
+        snapshot (db conn)
+        out (data-result-value
+              snapshot query
+              (q-result-first-data query snapshot first ([]vev.Query-Input [])))]
+    (close-db snapshot)
+    (close-conn conn)
+    out))
+
+(defn- q-data-source-string [query: Data, first: string] -> Data
+  (q-data-source-query-input query (q-input-string first)))
+
+(defn- q-data-source-int [query: Data, first: int] -> Data
+  (q-data-source-query-input query (q-input-int first)))
+
+(defn- q-data-source-i64 [query: Data, first: i64] -> Data
+  (q-data-source-query-input query (q-input-i64 first)))
+
+(defn- q-data-source-f64 [query: Data, first: f64] -> Data
+  (q-data-source-query-input query (q-input-f64 first)))
+
+(defn- q-data-source-bool [query: Data, first: bool] -> Data
+  (q-data-source-query-input query (q-input-bool first)))
+
+(defn- q-data-source-value [query: Data, first: Value] -> Data
+  (q-data-source-query-input query (q-input-value first)))
+
+(defn- q-data-source-keyword [query: Data, first: keyword] -> Data
+  (q-data-source-query-input query (q-input-keyword first)))
+
+(def- q-data-source
+  (overload q-data-source-db
+            q-data-source-log
+            q-data-source-data
+            q-data-source-query-input
+            q-data-source-string
+            q-data-source-int
+            q-data-source-i64
+            q-data-source-f64
+            q-data-source-bool
+            q-data-source-value
+            q-data-source-keyword))
+
+(defn- q-data-with-first-db [query: Data, source: DB, first: Data, rest: []vev.Query-Input] -> Data
+  (data-result-value source query (q-result-first-data query source first rest)))
+
+(defn- q-data-with-first-log [query: Data, source: Log, first: Data, rest: []vev.Query-Input] -> Data
+  (when (> (count rest) 0)
+    (panic "log queries currently accept one value input"))
+  (log-query-data query source first true))
+
+(def- q-data-with-first
+  (overload q-data-with-first-db q-data-with-first-log))
+
 (defmacro q [query db & inputs]
-  `(result-value
-     (vev.q-result-store-db ~query (db-ptr ~db) ~@inputs)))
+  (let [query-form (if (vector? query) `(quote ~query) query)]
+    (if (= (count inputs) 0)
+      `(q-data-source ~query-form ~(q-first-form db))
+      `(q-data-with-first
+         ~query-form ~db ~(q-first-data-form (first inputs))
+         ([]vev.Query-Input [~@(q-input-forms (rest inputs))])))))
+
+(defmacro try-q [query db & inputs]
+  (if (vector? query)
+    `(unchecked-result-value
+       (vev.q-result-store-db ~query (db-ptr ~db) ~@inputs))
+    (if (= (count inputs) 0)
+      `(unchecked-result-value
+         (vev.q-result-store-db-data-with-inputs
+           (db-ptr ~db) ~query ([]vev.Query-Input [])))
+      `(unchecked-result-value
+         (q-result-first
+           ~query ~db ~(q-first-form (first inputs))
+           ([]vev.Query-Input [~@(q-input-forms (rest inputs))]))))))
 
 (defn try-q-text-inputs [query: string, db: DB, inputs: string] -> Result
   (unchecked-result-value
@@ -203,37 +569,14 @@
 
 (def q-text (overload q-text-inputs q-text-no-input))
 
-(defn try-q-rules [query: string, db: DB, rules: string, inputs: string] -> Result
-  (unchecked-result-value
-    (vev.q-result-store-db-text-with-rules-input-text
-      (db-ptr db) query rules inputs)))
-
-(defn q-rules [query: string, db: DB, rules: string, inputs: string] -> Result
-  (result-value
-    (vev.q-result-store-db-text-with-rules-input-text
-      (db-ptr db) query rules inputs)))
-
-(defn try-q-data-rules [query: Data, db: DB, rules: Data, inputs: string] -> Result
-  (unchecked-result-value
-    (vev.q-result-store-db-data-with-rules-input-text
-      (db-ptr db) query rules inputs)))
-
-(defn q-data-rules [query: Data, db: DB, rules: Data, inputs: string] -> Result
-  (result-value
-    (vev.q-result-store-db-data-with-rules-input-text
-      (db-ptr db) query rules inputs)))
-
-(defn try-q-data-rules-text [query: Data, db: DB, rules: string, inputs: string] -> Result
-  (unchecked-result-value
-    (vev.q-result-store-db-data-with-rules-text-input-text
-      (db-ptr db) query rules inputs)))
-
 (defmacro q-with-fns [query db fns & inputs]
   (if (vector? query)
-    `(result-value
-       (vev.q-result-store-db-with-fns ~query (db-ptr ~db) ~fns ~@inputs))
-    `(result-value
-       (vev.q-result-store-db-data-with-fns ~query (db-ptr ~db) ~fns ~@inputs))))
+    `(q-data-with-fns-value
+       '~query ~db ~fns
+       ([]vev.Query-Input [~@(q-input-forms inputs)]))
+    `(q-data-with-fns-value
+       ~query ~db ~fns
+       ([]vev.Query-Input [~@(q-input-forms inputs)]))))
 
 (defmacro q-relation [query relation & inputs]
   `(result-value
@@ -265,7 +608,7 @@
 (defmacro pull [db pattern entity]
   `(let [[value ok error]
           (vev.pull-store-db (db-ptr ~db) ~pattern ~entity)]
-     (pulled-value value ok error)))
+     (pulled-data value ok error)))
 
 (defn pull-text [db: DB, pattern: string, entity: u64] -> Value
   (let [[value ok error]
