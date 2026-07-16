@@ -1,5 +1,5 @@
-// Copyright (c) Andreas Flakstad and Vev contributors
-// SPDX-License-Identifier: EPL-2.0
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
 
 (package main)
 
@@ -10,11 +10,11 @@
 (import os "core:os")
 (import d "../../src/vev_app")
 
-// Port source of truth:
-// build/upstream/day-of-datomic/tutorial/aggregates.clj
-// Section: file top through schema attribute/value-type aggregate query.
-// Fixture:
-// build/upstream/day-of-datomic/resources/day-of-datomic/bigger-than-pluto.edn
+; Port source of truth:
+; build/upstream/day-of-datomic/tutorial/aggregates.clj
+; Section: file top through schema attribute/value-type aggregate query.
+; Fixture:
+; build/upstream/day-of-datomic/resources/day-of-datomic/bigger-than-pluto.edn
 
 (def default-uri "build/day-of-datomic/vev-aggregates.sqlite")
 

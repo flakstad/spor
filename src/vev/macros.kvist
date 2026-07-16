@@ -1,5 +1,5 @@
-// Copyright (c) Andreas Flakstad and Vev contributors
-// SPDX-License-Identifier: EPL-2.0
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
 
 (package vev)
 
@@ -741,7 +741,6 @@
     false))
 
 (defmacro- input-db-source? [spec]
-  // ponytail: $1..$9 covers DataScript tests; replace with digit parsing if users need more sources.
   (and (symbol? spec)
        (contains? ["$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"] (source spec))))
 

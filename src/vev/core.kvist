@@ -1,5 +1,5 @@
-// Copyright (c) Andreas Flakstad and Vev contributors
-// SPDX-License-Identifier: EPL-2.0
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
 
 (package vev)
 
@@ -1876,7 +1876,6 @@
     (build-db owned-datoms)))
 
 (defn filter-db [db: DB, pred: (fn [db: DB, datom: Datom] -> bool)] -> DB
-  // ponytail: materialize filtered DBs for now; replace with predicate-wrapped indexes only if benchmarks require it.
   (let [datoms (make [dynamic]Datom)]
     (for [datom-index db.eavt]
       (when (datom-current-at? db datom-index)

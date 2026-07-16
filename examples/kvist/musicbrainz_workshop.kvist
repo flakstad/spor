@@ -1,5 +1,5 @@
-// Copyright (c) Andreas Flakstad and Vev contributors
-// SPDX-License-Identifier: EPL-2.0
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
 
 (package main)
 
@@ -12,15 +12,15 @@
 (import kdata "kvist:data")
 (import d "../../src/vev_app")
 
-// Port source of truth:
-// build/upstream/day-of-datomic-conj/src/music_brainz.clj
-// Sections: file top through Pattern inputs.
-// build/upstream/day-of-datomic/tutorial/query.clj
-// Sections: negation/disjunction count examples, predicate/function expressions,
-// get-else, get-some, fulltext, missing?, transaction-log examples,
-// collection function examples, dynamic attribute specs, and aggregate examples.
-// build/upstream/day-of-datomic/tutorial/pull.clj
-// Sections: setup through dynamic pattern input.
+; Port source of truth:
+; build/upstream/day-of-datomic-conj/src/music_brainz.clj
+; Sections: file top through Pattern inputs.
+; build/upstream/day-of-datomic/tutorial/query.clj
+; Sections: negation/disjunction count examples, predicate/function expressions,
+; get-else, get-some, fulltext, missing?, transaction-log examples,
+; collection function examples, dynamic attribute specs, and aggregate examples.
+; build/upstream/day-of-datomic/tutorial/pull.clj
+; Sections: setup through dynamic pattern input.
 
 (def default-uri "build/musicbrainz/vev-mbrainz-tutorial.sqlite")
 (def mbrainz-sample-rules-path "build/upstream/mbrainz-sample/resources/rules.edn")
@@ -830,8 +830,8 @@
   (let [[country country-ok country-error] (d.try-pull-lookup-data snapshot '[:artist/country] ":artist/gid" (d.value-uuid "678d88b2-87b0-403b-b63d-5da7465aecc3"))
         [country-value country-value-ok] (value-map-get country ":artist/country")
         [country-id country-id-ok] (value-map-get country-value ":db/id")]
-    // Entity ids belong to the database value, not the import source's local
-    // numbering. Datomic and Vev both expose the referenced entity here.
+    ; Entity ids belong to the database value, not the import source's local
+    ; numbering. Datomic and Vev both expose the referenced entity here.
     (check-pull! "pull-artist-country" (and country-ok country-value-ok country-id-ok (= country-error "") (> country-id.entity 0)) passed))
   (let [[reverse-country _ _] (d.try-pull-lookup-data snapshot '[:artist/_country] ":db/ident" (d.value-keyword ":country/GB"))
         [artists artists-ok] (value-map-get reverse-country ":artist/_country")]
