@@ -322,7 +322,7 @@
     (if ok
       (let [owned (tx-data-slice-owned (slice parsed 0))]
         (for [data parsed]
-          (delete-parser-tx-data-value-containers-shallow data))
+          (delete-parser-tx-data-owned-values data))
         (delete parsed)
         (Prepared-Tx-Data {ok: true error: "" tx-data: owned}))
       (do

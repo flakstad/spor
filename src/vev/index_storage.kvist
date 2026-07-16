@@ -727,7 +727,13 @@
   (let [out (set.empty string)]
     (for [attr db.schema-unique]
       (when (schema-unique-identity? db attr)
-        (set.add! out attr)))
+        (set.add! out (string-owned attr))))
+    out))
+
+(defn shared-write-state-clone-schema-set [values: (map string (struct {}))] -> (map string (struct {}))
+  (let [out (set.empty string)]
+    (for [value values]
+      (set.add! out (string-owned value)))
     out))
 
 (defn retain-shared-db-snapshot [snapshot: Shared-DB-Snapshot] -> Shared-DB-Snapshot
@@ -744,8 +750,8 @@
     (Shared-Conn {write: (Shared-Write-State {conn: conn
                                               owns-resident-db: true
                                               has-tuple-schema: (db-has-tuple-schema? conn.db)
-                                              schema-ref: (clone-schema-ref conn.db.schema-ref)
-                                              schema-unique: (clone-schema-unique conn.db.schema-unique)
+                                              schema-ref: (shared-write-state-clone-schema-set conn.db.schema-ref)
+                                              schema-unique: (shared-write-state-clone-schema-set conn.db.schema-unique)
                                               schema-unique-identity: (shared-write-state-clone-schema-unique-identity conn.db)
                                               next-entity-id: (next-entity-id (slice conn.db.datoms 0))
                                               source-resolves: 0
@@ -819,18 +825,25 @@
              (not (set.contains? state^.schema-unique-identity attr)))
     (set.add! state^.schema-unique-identity (string-owned attr))))
 
+(defn shared-write-state-remove-schema-key! [values: (ptr (map string (struct {}))), attr: string]
+  (for [key values^]
+    (when (= key attr)
+      (delete key)
+      (set.remove! values^ attr)
+      (return))))
+
 (defn shared-write-state-sync-schema-attr-from-after! [state: ^Shared-Write-State, after: DB, attr: string]
   (if (schema-ref? after attr)
     (shared-write-state-add-schema-ref! state attr)
-    (set.remove! state^.schema-ref attr))
+    (shared-write-state-remove-schema-key! (addr state^.schema-ref) attr))
   (if (schema-unique? after attr)
     (shared-write-state-add-schema-unique! state attr (schema-unique-identity? after attr))
     (do
-      (set.remove! state^.schema-unique attr)
-      (set.remove! state^.schema-unique-identity attr)))
+      (shared-write-state-remove-schema-key! (addr state^.schema-unique) attr)
+      (shared-write-state-remove-schema-key! (addr state^.schema-unique-identity) attr)))
   (when (and (schema-unique? after attr)
              (not (schema-unique-identity? after attr)))
-    (set.remove! state^.schema-unique-identity attr)))
+    (shared-write-state-remove-schema-key! (addr state^.schema-unique-identity) attr)))
 
 (defn shared-write-state-apply-schema-datom-incremental! [state: ^Shared-Write-State, source: DB-Read-Source, after: DB, datoms: []Datom, datom: Datom] -> bool
   (when (not (datom-modifies-validation-schema? datom))
@@ -900,11 +913,11 @@
 
 (defn shared-write-state-refresh-from-current! [state: ^Shared-Write-State]
   (let [after state^.conn.db]
-    (delete state^.schema-ref)
-    (set! state^.schema-ref (clone-schema-ref after.schema-ref))
-    (delete state^.schema-unique)
-    (set! state^.schema-unique (clone-schema-unique after.schema-unique))
-    (delete state^.schema-unique-identity)
+    (delete-owned-string-set state^.schema-ref)
+    (set! state^.schema-ref (shared-write-state-clone-schema-set after.schema-ref))
+    (delete-owned-string-set state^.schema-unique)
+    (set! state^.schema-unique (shared-write-state-clone-schema-set after.schema-unique))
+    (delete-owned-string-set state^.schema-unique-identity)
     (set! state^.schema-unique-identity (shared-write-state-clone-schema-unique-identity after))
     (set! state^.has-tuple-schema (db-has-tuple-schema? after))
     (set! state^.next-entity-id (next-entity-id (slice after.datoms 0)))))
@@ -2509,9 +2522,9 @@
         schema-unique-identity (set.empty string)
         [idents idents-ok idents-error] (db-read-source-datoms-by-attr source ":db/ident")]
     (when (not idents-ok)
-      (delete schema-ref)
-      (delete schema-unique)
-      (delete schema-unique-identity)
+      (delete-owned-string-set schema-ref)
+      (delete-owned-string-set schema-unique)
+      (delete-owned-string-set schema-unique-identity)
       (return (set.empty string) (set.empty string) (set.empty string) false idents-error))
     (for [ident idents]
       (when (= ident.v.kind .Keyword)
@@ -2519,27 +2532,27 @@
               [ref ref-ok ref-error] (db-read-source-schema-ref? source attr-name)]
           (when (not ref-ok)
             (delete-owned-datoms idents)
-            (delete schema-ref)
-            (delete schema-unique)
-            (delete schema-unique-identity)
+            (delete-owned-string-set schema-ref)
+            (delete-owned-string-set schema-unique)
+            (delete-owned-string-set schema-unique-identity)
             (return (set.empty string) (set.empty string) (set.empty string) false ref-error))
           (when ref
             (set.add! schema-ref (string-owned attr-name)))
           (let [[unique unique-ok unique-error] (db-read-source-schema-unique? source attr-name)]
             (when (not unique-ok)
               (delete-owned-datoms idents)
-              (delete schema-ref)
-              (delete schema-unique)
-              (delete schema-unique-identity)
+              (delete-owned-string-set schema-ref)
+              (delete-owned-string-set schema-unique)
+              (delete-owned-string-set schema-unique-identity)
               (return (set.empty string) (set.empty string) (set.empty string) false unique-error))
             (when unique
               (set.add! schema-unique (string-owned attr-name))
               (let [[unique-kind unique-kind-ok unique-kind-error] (db-read-source-schema-keyword source attr-name ":db/unique")]
                 (when (not unique-kind-ok)
                   (delete-owned-datoms idents)
-                  (delete schema-ref)
-                  (delete schema-unique)
-                  (delete schema-unique-identity)
+                  (delete-owned-string-set schema-ref)
+                  (delete-owned-string-set schema-unique)
+                  (delete-owned-string-set schema-unique-identity)
                   (return (set.empty string) (set.empty string) (set.empty string) false unique-kind-error))
                 (when (= unique-kind ":db.unique/identity")
                   (set.add! schema-unique-identity (string-owned attr-name)))
@@ -2553,21 +2566,21 @@
       (return (Shared-Write-State {}) false schema-error))
     (let [[has-tuple has-tuple-ok has-tuple-error] (db-read-source-has-tuple-schema? source)]
       (when (not has-tuple-ok)
-        (delete schema-ref)
-        (delete schema-unique)
-        (delete schema-unique-identity)
+        (delete-owned-string-set schema-ref)
+        (delete-owned-string-set schema-unique)
+        (delete-owned-string-set schema-unique-identity)
         (return (Shared-Write-State {}) false has-tuple-error))
       (let [[next-tx next-tx-ok next-tx-error] (db-read-source-next-tx source)]
         (when (not next-tx-ok)
-          (delete schema-ref)
-          (delete schema-unique)
-          (delete schema-unique-identity)
+          (delete-owned-string-set schema-ref)
+          (delete-owned-string-set schema-unique)
+          (delete-owned-string-set schema-unique-identity)
           (return (Shared-Write-State {}) false next-tx-error))
         (let [[next-entity next-entity-ok next-entity-error] (db-read-source-next-entity-id source)]
           (when (not next-entity-ok)
-            (delete schema-ref)
-            (delete schema-unique)
-            (delete schema-unique-identity)
+            (delete-owned-string-set schema-ref)
+            (delete-owned-string-set schema-unique)
+            (delete-owned-string-set schema-unique-identity)
             (return (Shared-Write-State {}) false next-entity-error))
           (return (Shared-Write-State {conn: (Conn {next-tx: next-tx
                                                      listeners: (make [dynamic]Tx-Listener)})
@@ -2596,12 +2609,12 @@
       (return out-state true ""))))
 
 (defn delete-shared-write-state-metadata [state: Shared-Write-State]
-  (delete state.schema-ref)
-  (delete state.schema-unique)
-  (delete state.schema-unique-identity)
+  (delete-owned-string-set state.schema-ref)
+  (delete-owned-string-set state.schema-unique)
+  (delete-owned-string-set state.schema-unique-identity)
   (delete state.conn.listeners)
   (when state.owns-resident-db
-    (delete-owned-db state.conn.db)))
+    (delete-resident-db state.conn.db)))
 
 (defn shared-write-state-owns-resident-db? [state: Shared-Write-State] -> bool
   state.owns-resident-db)

@@ -360,6 +360,12 @@
   (delete query.return-map-keys))
 
 (defn delete-prepared-query-shallow [prepared: Prepared-Query]
+  (for [predicate prepared.query.predicates]
+    (delete predicate.terms))
+  (for [function prepared.query.function-clauses]
+    (delete function.terms)
+    (delete function.out-vars)
+    (delete-input-binding-shallow function.out-binding))
   (delete-query-shallow prepared.query)
   (when prepared.owns-source
     (data.release prepared.source-owner))
@@ -796,9 +802,11 @@
                     values: (make [dynamic]Value 0 row-capacity)}))
 
 (defn delete-relation-column [column: Relation-Column]
-  (when (= column.kind .Mixed)
+  (if (= column.kind .Mixed)
     (for [value column.values]
-      (delete-owned-value value)))
+      (delete-owned-value value))
+    (for [text column.texts]
+      (delete text)))
   (delete column.entities)
   (delete column.texts)
   (delete column.ints)
@@ -921,6 +929,8 @@
       (let [[value value-ok] (typed-relation-column-value column^ row)]
         (when value-ok
           (arr.push! values (value-owned value)))))
+    (for [text column^.texts]
+      (delete text))
     (delete column^.entities)
     (delete column^.texts)
     (delete column^.ints)
@@ -1920,6 +1930,8 @@
                                       seen: (set.empty string)}))
 
 (defn delete-typed-flat-materialization-cursor [cursor: Typed-Flat-Materialization-Cursor]
+  (for [key cursor.seen]
+    (delete key))
   (delete cursor.seen))
 
 (defn typed-materialized-batch-empty [] -> Typed-Materialized-Batch
@@ -2379,6 +2391,7 @@
     (when (not key-ok)
       (return false false))
     (when (set.contains? seen^ key)
+      (delete key)
       (return false true))
     (set.add! seen^ key)
     (return true true)))
@@ -2446,8 +2459,9 @@
           (return (make [dynamic]Result-Row) false))
         (defer (delete with-indexes))
     (let [out (make [dynamic]Result-Row 0 rel.typed-rows)
-          seen (set.empty string) :defer
+          seen (set.empty string)
           trust-unique-bindings (query-can-trust-unique-bindings? query)]
+      (defer (delete-owned-string-set seen))
       (for [row (arr.range 0 rel.typed-rows)]
         (let [values (make [dynamic]Value 0 (count query.find))
               [pulls pulls-ok] (pulls-for-typed-row-with-sources-and-fns db sources query inputs rel row registry)
@@ -2477,7 +2491,9 @@
                     (when (not already-seen)
                       (set.add! seen key)
                       (arr.push! out (Result-Row {values: values pulls: pulls}))
-                      (set! pushed true)))
+                      (set! pushed true))
+                    (when already-seen
+                      (delete key)))
                   (when (not (row-values-exist? (slice out 0) (slice dedupe-values 0)))
                     (arr.push! out (Result-Row {values: values pulls: pulls}))
                     (set! pushed true))))
@@ -4232,6 +4248,11 @@
           (return "" false))
         (arr.push! parts (fmt.tprintf "%d:%s;" (count part) part))))
     (return (core-strings.concatenate (slice parts 0)) true)))
+
+(defn delete-owned-string-set [values: (map string (struct {}))]
+  (for [value values]
+    (delete value))
+  (delete values))
 
 (defn pull-attrs-dedupe-key [attrs: []Pull-Attr] -> [key: string, ok: bool]
   (let [parts (make [dynamic]string 0 (count attrs))]
@@ -8688,8 +8709,9 @@
   (when (> (count query-value.aggregates) 0)
     (return (db-read-source-aggregate-result-rows-for-bindings-with-sources-and-fns source sources query-value inputs bindings registry)))
   (let [rows (make [dynamic]Result-Row)
-        seen (set.empty string) :defer
+        seen (set.empty string)
         trust-unique-bindings (query-can-trust-unique-bindings? query-value)]
+    (defer (delete-owned-string-set seen))
     (for [binding bindings]
       (let [values (make [dynamic]Value 0 (count query-value.find))
             dedupe-values (make [dynamic]Value)
@@ -8735,7 +8757,9 @@
                     (when (not already-seen)
                       (set.add! seen key)
                       (arr.push! rows (Result-Row {values: values pulls: pulls}))
-                      (set! pushed true)))
+                      (set! pushed true))
+                    (when already-seen
+                      (delete key)))
                   (when (not (row-values-exist? (slice rows 0) (slice dedupe-values 0)))
                     (arr.push! rows (Result-Row {values: values pulls: pulls}))
                     (set! pushed true)))))
@@ -9469,7 +9493,7 @@
         current-entity: u64 0
         has-current false
         i low]
-    (defer (delete seen))
+    (defer (delete-owned-string-set seen))
     (when (not range-ok)
       (delete values)
       (delete-relation-columns columns)
@@ -11053,7 +11077,7 @@
       (discard (relation-column-add! (addr builder^.typed-columns[index]) value))))
   (for [attr index attrs]
     (when (not (query-relation-has-attr? rel attr))
-      (let [[value _] (db-read-source-direct-clause-var-value rel row scan clause-value datom attr)]
+      (let [[value _] (db-read-source-direct-clause-var-borrowed-value rel row scan clause-value datom attr)]
         (discard (relation-column-add! (addr builder^.typed-columns[index]) value)))))
   (set! builder^.typed-rows (+ builder^.typed-rows 1))
   true)
@@ -18160,6 +18184,14 @@
   (delete db.schema-unique)
   (delete db.schema-ref)
   (delete db.datoms))
+
+;; Resident connections own the strings and nested values in their final
+;; datom log. Intermediate DB values share those datoms and therefore use the
+;; shallow container cleanup above.
+(defn delete-resident-db [db: DB]
+  (for [datom db.datoms]
+    (delete-owned-datom datom))
+  (delete-owned-db db))
 
 (defn serializable [db: DB] -> Serializable-DB
   (let [datoms (clone-datom-slice (slice db.datoms 0))]
@@ -25475,7 +25507,9 @@
                   (let [already-seen (set.contains? seen key)]
                     (when (not already-seen)
                       (set.add! seen key)
-                      (arr.push! rows (Result-Row {values: values pulls: pulls}))))
+                      (arr.push! rows (Result-Row {values: values pulls: pulls})))
+                    (when already-seen
+                      (delete key)))
                   (when (not (row-values-exist? (slice rows 0) (slice dedupe-values 0)))
                     (arr.push! rows (Result-Row {values: values pulls: pulls})))))
             (if (= (count dedupe-values) 1)
@@ -25518,7 +25552,9 @@
                   (let [already-seen (set.contains? seen key)]
                     (when (not already-seen)
                       (set.add! seen key)
-                      (arr.push! rows (Result-Row {values: values pulls: pulls}))))
+                      (arr.push! rows (Result-Row {values: values pulls: pulls})))
+                    (when already-seen
+                      (delete key)))
                   (when (not (row-values-exist? (slice rows 0) (slice dedupe-values 0)))
                     (arr.push! rows (Result-Row {values: values pulls: pulls})))))))))))
     rows))
@@ -34783,6 +34819,7 @@
             (when (not advance-ok)
               (delete-source-index-datom-stream stream)
               (return false advance-error))))
+        (delete-source-index-datom-stream stream)
         (return true "")))
     (let [[projected-value projected-ok projected-error] (db-read-source-cardinality-one-value-fast-all-current source entity projection.value-attr)]
       (when (not (= projected-error ""))
@@ -34813,6 +34850,7 @@
           (delete-source-attr-value-match-stream filter-stream)
           (delete-result-rows-owned-values rows)
           (return (result-set-error advance-error)))))
+    (delete-source-attr-value-match-stream filter-stream)
     (result-set-ok rows)))
 
 (defn q-db-read-source-attr-value-entity-projection [source: DB-Read-Source, projection: Source-Attr-Value-Entity-Projection] -> Result-Set
@@ -34928,7 +34966,8 @@
                 (when (not advance-ok)
                   (delete-source-index-datom-stream stream)
                   (delete-result-rows-owned-values rows)
-                  (return (result-set-error advance-error))))))))
+                  (return (result-set-error advance-error)))))
+            (delete-source-index-datom-stream stream))))
       (if (db-read-source-has-overlay? source)
         (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source projection.attr)]
           (when (not datoms-ok)
@@ -34945,7 +34984,8 @@
               (when (not advance-ok)
                 (delete-source-index-datom-stream stream)
                 (delete-result-rows-owned-values rows)
-                (return (result-set-error advance-error))))))))
+                (return (result-set-error advance-error)))))
+          (delete-source-index-datom-stream stream))))
     (result-set-ok rows)))
 
 (defn q-db-read-source-attr-filtered-value-projection [source: DB-Read-Source, projection: Source-Attr-Filtered-Value-Projection] -> Result-Set
@@ -36304,7 +36344,8 @@
           (when (not advance-ok)
             (delete-source-index-datom-stream stream)
             (delete-result-rows-owned-values rows)
-            (return (result-set-error advance-error))))))
+            (return (result-set-error advance-error)))))
+      (delete-source-index-datom-stream stream))
     (result-set-ok rows)))
 
 (defn append-db-read-source-entity-get-else-row! [rows: ^[dynamic]Result-Row, query: Query, projection: Source-Entity-Get-Else-Projection, source-value: Value, get-else-value: Value]
@@ -36351,6 +36392,7 @@
           (delete-source-index-datom-stream stream)
           (delete-result-rows-owned-values rows)
           (return (result-set-error advance-error)))))
+    (delete-source-index-datom-stream stream)
     (result-set-ok rows)))
 
 (defn q-db-read-source-fixed-entity-get-else-projection [source: DB-Read-Source, projection: Source-Fixed-Entity-Get-Else-Projection] -> Result-Set
@@ -36413,7 +36455,8 @@
           (when (not advance-ok)
             (delete-source-index-datom-stream stream)
             (delete-result-rows-owned-values rows)
-            (return (result-set-error advance-error))))))
+            (return (result-set-error advance-error)))))
+      (delete-source-index-datom-stream stream))
     (result-set-ok rows)))
 
 (defn q-db-read-source-fixed-entity-get-some-projection [source: DB-Read-Source, query: Query, projection: Source-Fixed-Entity-Get-Some-Projection, get-some: Get-Some] -> Result-Set
@@ -36456,6 +36499,7 @@
           (delete-source-index-datom-stream stream)
           (delete-result-rows-owned-values rows)
           (return (result-set-error advance-error)))))
+    (delete-source-index-datom-stream stream)
     (result-set-ok rows)))
 
 (defn q-db-read-source-fixed-entity-attr-projection [source: DB-Read-Source, projection: Source-Fixed-Entity-Attr-Projection] -> Result-Set
@@ -39526,8 +39570,9 @@
   (return true ""))
 
 (defn source-index-datom-stream-for-clause-index-scan [source: DB-Read-Source, scan: Clause-Index-Scan] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
-  (let [values (make [dynamic]Value) :defer
+  (let [values (make [dynamic]Value)
         order: Public-Index-Order .EAVT]
+    (defer (delete-owned-values-array values))
     (if scan.reverse-attr
       (cond
         scan.e-ok

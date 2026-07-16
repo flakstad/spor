@@ -1273,6 +1273,23 @@
     (t.is (not latest-ok))
     (t.is (= latest-error "sqlite DB has no Vev index roots"))))
 
+(t.deftest fresh-sqlite-store-has-readable-empty-db
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.fresh-readable-store.sqlite")
+  (let [path "tmp.vev.fresh-readable-store.sqlite"
+        [store store-ok store-error] (vev.open-store path)]
+    (defer (remove-sqlite-files path))
+    (t.is store-ok store-error)
+    (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))]
+      (t.is snapshot-ok snapshot-error)
+      (t.is (= snapshot.kind .Shared-Snapshot))
+      (let [result (vev.q-result-store-db-text (addr snapshot) "[:find ?e :where [?e :item/name ?name]]")]
+        (t.is result.result.ok result.result.error)
+        (t.is (= (count result.result.rows) 0))
+        (vev.delete-query-result result))
+      (vev.close-store-db! (addr snapshot)))
+    (vev.close-store store)))
+
 (t.deftest sqlite-index-run-manifest-schema-stores-base-and-runs
   (defer (free_all context.allocator))
   (remove-sqlite-files "tmp.vev.storage-architecture-run-manifest.sqlite")

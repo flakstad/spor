@@ -415,6 +415,7 @@ sqlite_ensure_datom_log_index_column :: proc(db: ^SQLite3) -> (bool, string) {
     if !ok && !strings.contains(err, \"duplicate column name\") {
         return false, err
     }
+    if !ok { delete(err) }
     index_ok, index_error := sqlite_exec_ok(db, \"CREATE INDEX IF NOT EXISTS vev_datoms_log_index ON vev_datoms(log_index)\")
     if !index_ok {
         return false, index_error
@@ -427,6 +428,7 @@ sqlite_ensure_datom_value_entity_column :: proc(db: ^SQLite3) -> (bool, string) 
     if !ok && !strings.contains(err, \"duplicate column name\") {
         return false, err
     }
+    if !ok { delete(err) }
     backfill_ok, backfill_error := sqlite_exec_ok(db, \"UPDATE vev_datoms SET value_entity = CAST(substr(value_text, 14, length(value_text) - 14) AS INTEGER) WHERE value_entity = -1 AND value_text LIKE '[:vev/entity %]' AND substr(value_text, length(value_text), 1) = ']'\")
     if !backfill_ok {
         return false, backfill_error
@@ -443,6 +445,7 @@ sqlite_ensure_index_chunk_child_count_column :: proc(db: ^SQLite3) -> (bool, str
     if !ok && !strings.contains(err, \"duplicate column name\") {
         return false, err
     }
+    if !ok { delete(err) }
     return true, \"\"
 }
 
@@ -478,18 +481,22 @@ sqlite_ensure_index_root_manifest_columns :: proc(db: ^SQLite3) -> (bool, string
     if !eavt_ok && !strings.contains(eavt_err, \"duplicate column name\") {
         return false, eavt_err
     }
+    if !eavt_ok { delete(eavt_err) }
     aevt_ok, aevt_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_roots ADD COLUMN aevt_manifest_id INTEGER NOT NULL DEFAULT 0\")
     if !aevt_ok && !strings.contains(aevt_err, \"duplicate column name\") {
         return false, aevt_err
     }
+    if !aevt_ok { delete(aevt_err) }
     avet_ok, avet_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_roots ADD COLUMN avet_manifest_id INTEGER NOT NULL DEFAULT 0\")
     if !avet_ok && !strings.contains(avet_err, \"duplicate column name\") {
         return false, avet_err
     }
+    if !avet_ok { delete(avet_err) }
     vaet_ok, vaet_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_roots ADD COLUMN vaet_manifest_id INTEGER NOT NULL DEFAULT 0\")
     if !vaet_ok && !strings.contains(vaet_err, \"duplicate column name\") {
         return false, vaet_err
     }
+    if !vaet_ok { delete(vaet_err) }
     return true, \"\"
 }
 
@@ -498,6 +505,7 @@ sqlite_ensure_index_run_manifest_parent_column :: proc(db: ^SQLite3) -> (bool, s
     if !ok && !strings.contains(err, \"duplicate column name\") {
         return false, err
     }
+    if !ok { delete(err) }
     return true, \"\"
 }
 
@@ -506,42 +514,52 @@ sqlite_ensure_index_run_manifest_run_bound_columns :: proc(db: ^SQLite3) -> (boo
     if !first_e_ok && !strings.contains(first_e_err, \"duplicate column name\") {
         return false, first_e_err
     }
+    if !first_e_ok { delete(first_e_err) }
     first_a_ok, first_a_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_run_manifest_runs ADD COLUMN first_a TEXT NOT NULL DEFAULT ''\")
     if !first_a_ok && !strings.contains(first_a_err, \"duplicate column name\") {
         return false, first_a_err
     }
+    if !first_a_ok { delete(first_a_err) }
     first_value_ok, first_value_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_run_manifest_runs ADD COLUMN first_value_text TEXT NOT NULL DEFAULT ''\")
     if !first_value_ok && !strings.contains(first_value_err, \"duplicate column name\") {
         return false, first_value_err
     }
+    if !first_value_ok { delete(first_value_err) }
     first_tx_ok, first_tx_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_run_manifest_runs ADD COLUMN first_tx INTEGER NOT NULL DEFAULT 0\")
     if !first_tx_ok && !strings.contains(first_tx_err, \"duplicate column name\") {
         return false, first_tx_err
     }
+    if !first_tx_ok { delete(first_tx_err) }
     first_added_ok, first_added_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_run_manifest_runs ADD COLUMN first_added INTEGER NOT NULL DEFAULT 1\")
     if !first_added_ok && !strings.contains(first_added_err, \"duplicate column name\") {
         return false, first_added_err
     }
+    if !first_added_ok { delete(first_added_err) }
     last_e_ok, last_e_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_run_manifest_runs ADD COLUMN last_e INTEGER NOT NULL DEFAULT 0\")
     if !last_e_ok && !strings.contains(last_e_err, \"duplicate column name\") {
         return false, last_e_err
     }
+    if !last_e_ok { delete(last_e_err) }
     last_a_ok, last_a_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_run_manifest_runs ADD COLUMN last_a TEXT NOT NULL DEFAULT ''\")
     if !last_a_ok && !strings.contains(last_a_err, \"duplicate column name\") {
         return false, last_a_err
     }
+    if !last_a_ok { delete(last_a_err) }
     last_value_ok, last_value_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_run_manifest_runs ADD COLUMN last_value_text TEXT NOT NULL DEFAULT ''\")
     if !last_value_ok && !strings.contains(last_value_err, \"duplicate column name\") {
         return false, last_value_err
     }
+    if !last_value_ok { delete(last_value_err) }
     last_tx_ok, last_tx_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_run_manifest_runs ADD COLUMN last_tx INTEGER NOT NULL DEFAULT 0\")
     if !last_tx_ok && !strings.contains(last_tx_err, \"duplicate column name\") {
         return false, last_tx_err
     }
+    if !last_tx_ok { delete(last_tx_err) }
     last_added_ok, last_added_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_run_manifest_runs ADD COLUMN last_added INTEGER NOT NULL DEFAULT 1\")
     if !last_added_ok && !strings.contains(last_added_err, \"duplicate column name\") {
         return false, last_added_err
     }
+    if !last_added_ok { delete(last_added_err) }
     index_ok, index_err := sqlite_exec_ok(db, \"CREATE INDEX IF NOT EXISTS vev_index_run_manifest_runs_bounds ON vev_index_run_manifest_runs(manifest_id, first_a, last_a)\")
     if !index_ok {
         return false, index_err
@@ -558,10 +576,12 @@ sqlite_ensure_index_run_manifest_attr_ranges_table :: proc(db: ^SQLite3) -> (boo
     if !first_ordinal_ok && !strings.contains(first_ordinal_err, \"duplicate column name\") {
         return false, first_ordinal_err
     }
+    if !first_ordinal_ok { delete(first_ordinal_err) }
     last_ordinal_ok, last_ordinal_err := sqlite_exec_ok(db, \"ALTER TABLE vev_index_run_manifest_attr_ranges ADD COLUMN last_ordinal INTEGER NOT NULL DEFAULT -1\")
     if !last_ordinal_ok && !strings.contains(last_ordinal_err, \"duplicate column name\") {
         return false, last_ordinal_err
     }
+    if !last_ordinal_ok { delete(last_ordinal_err) }
     index_ok, index_err := sqlite_exec_ok(db, \"CREATE INDEX IF NOT EXISTS vev_index_run_manifest_attr_ranges_lookup ON vev_index_run_manifest_attr_ranges(manifest_id, attr, ordinal)\")
     if !index_ok {
         return false, index_err
@@ -12288,6 +12308,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (when (not advance-ok)
           (delete-source-index-datom-stream stream)
           (return false false advance-error))))
+    (delete-source-index-datom-stream stream)
     (return false true "")))
 
 (defn source-overlay-prior-unique-conflict? [ops: []Tx-Op, op: Tx-Op] -> bool
@@ -12325,6 +12346,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (when (not advance-ok)
           (delete-source-index-datom-stream stream)
           (return false false advance-error))))
+    (delete-source-index-datom-stream stream)
     (return false true "")))
 
 (defn remove-source-overlay-prior-fact-retractions! [ops: ^[dynamic]Tx-Op, op: Tx-Op]
@@ -12345,7 +12367,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn validate-source-overlay-unique-attr [source: DB-Read-Source, ops: []Tx-Op, attr: string] -> [ok: bool, error: string]
   (let [seen (mmap.empty string u64)
         [stream source-ok source-error] (source-index-datom-stream source attr)]
-    (defer (delete seen))
+    (defer (do
+             (for [key seen]
+               (delete key))
+             (delete seen)))
     (when (not source-ok)
       (return false source-error))
     (while stream.has-current
@@ -12358,12 +12383,15 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (when (and existing-ok (not (= existing fact.e)))
             (delete key)
             (delete-source-index-datom-stream stream)
-            (return false "schema unique conflict")))
-        (mmap.assoc! seen key fact.e))
+            (return false "schema unique conflict"))
+          (if existing-ok
+            (delete key)
+            (mmap.assoc! seen key fact.e))))
       (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not advance-ok)
           (delete-source-index-datom-stream stream)
           (return false advance-error))))
+    (delete-source-index-datom-stream stream)
     (for [op ops]
       (when (not (= op.a attr))
         (continue))
@@ -12374,19 +12402,28 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (do
             (let [[existing existing-ok] (mmap.get seen key)]
               (when (and existing-ok (= existing op.e))
-                (mmap.dissoc! seen key)))
+                (for [stored-key seen]
+                  (when (= stored-key key)
+                    (delete stored-key)
+                    (mmap.dissoc! seen key)
+                    (break)))))
             (delete key))
           (when (= op.kind .Add)
             (let [[existing existing-ok] (mmap.get seen key)]
               (when (and existing-ok (not (= existing op.e)))
                 (delete key)
-                (return false "schema unique conflict")))
-            (mmap.assoc! seen key op.e)))))
+                (return false "schema unique conflict"))
+              (if existing-ok
+                (delete key)
+                (mmap.assoc! seen key op.e)))))))
     (return true "")))
 
 (defn validate-source-overlay-new-unique-schemas [source: DB-Read-Source, ops: []Tx-Op] -> [ok: bool, error: string]
   (let [checked (mmap.empty string bool)]
-    (defer (delete checked))
+    (defer (do
+             (for [key checked]
+               (delete key))
+             (delete checked)))
     (for [op ops]
       (when (not (and (= op.kind .Add)
                       (= op.a ":db/unique")
@@ -12747,7 +12784,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (delete-owned-tx-data group.tx-data)
     (do
       (for [data group.tx-data]
-        (delete-parser-tx-data-value-containers-shallow data))
+        (delete-parser-tx-data-owned-values data))
       (delete group.tx-data))))
 
 (defn delete-store-tx-data-groups [groups: [dynamic]Store-Tx-Data-Group]
@@ -13759,9 +13796,20 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 
 (defn delete-store-db-temp-tx-report [report: Tx-Report]
   (if report.ok
-    (delete-tx-report-shallow report)
+    (do
+      ;; The temporary resident db-after is the last owner of the full datom
+      ;; log once its store snapshot has been built. db-before shares the old
+      ;; portion of that log, while tx-data owns a separate copy.
+      (delete-owned-db report.db-before)
+      (delete-resident-db report.db-after)
+      (delete report.error)
+      (delete-owned-datoms report.tx-data)
+      (delete report.tx-meta)
+      (delete report.tempids)
+      (delete-tx-publish-plan report.publish-plan))
     (do
       (delete-owned-db report.db-before)
+      (delete report.error)
       (delete report.tx-data)
       (delete report.tx-meta)
       (delete report.tempids)
@@ -14375,7 +14423,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (delete-shared-write-state-metadata store.write-state-cache))
   (delete-sqlite-direct-attr-cache store.direct-attr-cache)
   (delete store.conn.listeners)
-  (delete-owned-db store.conn.db))
+  (delete-resident-db store.conn.db))
 
 (defn delete-sqlite-direct-attr-cache [cache: [dynamic]SQLite-Direct-Attr-Info]
   (for [entry cache]
@@ -14772,7 +14820,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 
 (defn store-db [store: ^Store-Conn] -> [snapshot: Store-DB, ok: bool, error: string]
   (case store^.kind
-    .SQLite (sqlite-store-db-current-root-cached (addr store^.sqlite))
+    .SQLite (let [[snapshot snapshot-ok snapshot-error] (sqlite-store-db-current-root-cached (addr store^.sqlite))]
+              (when (and (not snapshot-ok)
+                         (= snapshot-error "sqlite DB has no Vev index roots"))
+                (delete snapshot-error)
+                (return (empty-shared-store-db-for-sqlite-bootstrap) true ""))
+              (return snapshot snapshot-ok snapshot-error))
     .Shared (return (shared-store-db (addr store^.shared)) true "")
      (return (Store-DB {}) false "store is not open")))
 

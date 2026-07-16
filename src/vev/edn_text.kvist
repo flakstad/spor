@@ -2657,19 +2657,12 @@
   true)
 
 (defn query-result-db-read-source-query-result [query-value: Query, result: Result-Set] -> Query-Result
-  (cond
-    (not result.ok) (query-result-owned-values result)
-    (query-source-result-shallow-safe? query-value) (query-result-shallow result)
-    :else (query-result-owned-values result)))
+  (discard query-value)
+  (query-result-owned-values result))
 
 (defn query-result-db-read-source-query-result-owned [query-value: Query, result: Result-Set] -> Query-Result
-  (cond
-    (not result.ok) (query-result-owned-values result)
-    (query-source-result-shallow-safe? query-value)
-      (let [owned (query-result-owned-values (result-set-owned result))]
-        (delete-result-set-shallow result)
-        owned)
-    :else (query-result-owned-values result)))
+  (discard query-value)
+  (query-result-owned-values result))
 
 (defn query-result-db-read-source-result [result: Result-Set] -> Query-Result
   (if result.ok
@@ -3787,17 +3780,17 @@
 (defn delete-parser-datom-value-containers-shallow [datom: Datom]
   (delete-value-containers-shallow datom.v))
 
-(defn delete-parser-tx-data-value-containers-shallow [data: Tx-Data]
-  (delete-value-containers-shallow data.lookup-value)
-  (delete-value-containers-shallow data.v)
-  (delete-value-containers-shallow data.expected)
-  (delete-value-containers-shallow data.expected-lookup-value)
-  (delete-value-containers-shallow data.value-lookup-value)
-  (delete-value-containers-shallow data.nested-map))
+(defn delete-parser-tx-data-owned-values [data: Tx-Data]
+  (delete-owned-value data.lookup-value)
+  (delete-owned-value data.v)
+  (delete-owned-value data.expected)
+  (delete-owned-value data.expected-lookup-value)
+  (delete-owned-value data.value-lookup-value)
+  (delete-owned-value data.nested-map))
 
-(defn delete-parser-tx-edn-entity-value-containers-shallow [ref: Tx-EDN-Entity]
+(defn delete-parser-tx-edn-entity-owned-values [ref: Tx-EDN-Entity]
   (when (= ref.kind .LookupRef)
-    (delete-value-containers-shallow ref.lookup-value)))
+    (delete-owned-value ref.lookup-value)))
 
 (defn datom-from-edn-node [doc: EDN-Doc, node-index: int] -> [datom: Datom, ok: bool, error: string]
   (when (or (= node-index -1)
@@ -4040,7 +4033,7 @@
   (if (and (= doc.nodes[value-node].kind .String)
            (not (edn-lookup-ref-node? doc value-node)))
     (do
-      (arr.push! out^ (tx-data-with-map-group (tx-add-from-ref ref a (value-string doc.nodes[value-node].text)) map-group))
+      (arr.push! out^ (tx-data-with-map-group (tx-add-from-ref ref a (value-string (string-owned doc.nodes[value-node].text))) map-group))
       (return true ""))
     (if (edn-lookup-ref-node? doc value-node)
       (let [[lookup-attr lookup-value lookup-ok lookup-error] (edn-lookup-ref-parts doc value-node)]
@@ -4107,7 +4100,7 @@
       (return false ref-error))
     (let [[items-ok items-error] (append-edn-tx-map-items! out doc map-node ref map-group)]
       (when (not items-ok)
-        (delete-parser-tx-edn-entity-value-containers-shallow ref)
+        (delete-parser-tx-edn-entity-owned-values ref)
         (return false items-error))
       (return true ""))))
 
@@ -4118,7 +4111,7 @@
             [arg arg-ok arg-error] (edn-value-from-node doc arg-node)]
         (when (not arg-ok)
           (for [parsed items]
-            (delete-value-containers-shallow parsed))
+            (delete-owned-value parsed))
           (delete items)
           (return (Value {}) false arg-error))
         (arr.push! items arg)))
@@ -4128,7 +4121,7 @@
 
 (defn delete-tx-data-value-containers-from! [items: ^[dynamic]Tx-Data, start: int]
   (for [index (arr.range start (count items^))]
-    (delete-parser-tx-data-value-containers-shallow items^[index]))
+    (delete-parser-tx-data-owned-values items^[index]))
   (while (> (count items^) start)
     (arr.remove-ordered-at! items^ (- (count items^) 1))))
 
@@ -4156,7 +4149,7 @@
               (when (not ref-ok)
                 (return false ref-error))
               (when (not attr-ok)
-                (delete-parser-tx-edn-entity-value-containers-shallow ref)
+                (delete-parser-tx-edn-entity-owned-values ref)
                 (return false "tx-data attributes must be keywords or strings"))
               (if (= v-node -1)
                 (do
@@ -4165,19 +4158,19 @@
                 (if (= op ":db/add")
                   (let [[add-ok add-error] (append-edn-tx-add-value! out doc ref attr v-node "")]
                     (when (not add-ok)
-                      (delete-parser-tx-edn-entity-value-containers-shallow ref)
+                      (delete-parser-tx-edn-entity-owned-values ref)
                       (return false add-error))
                     (return true ""))
                   (if (edn-lookup-ref-node? doc v-node)
                     (let [[lookup-attr lookup-value lookup-ok lookup-error] (edn-lookup-ref-parts doc v-node)]
                       (when (not lookup-ok)
-                        (delete-parser-tx-edn-entity-value-containers-shallow ref)
+                        (delete-parser-tx-edn-entity-owned-values ref)
                         (return false lookup-error))
                       (arr.push! out^ (tx-retract-value-lookup-ref-from-ref ref attr lookup-attr lookup-value))
                       (return true ""))
                     (let [[value value-ok value-error] (edn-value-from-node doc v-node)]
                       (when (not value-ok)
-                        (delete-parser-tx-edn-entity-value-containers-shallow ref)
+                        (delete-parser-tx-edn-entity-owned-values ref)
                         (return false value-error))
                       (arr.push! out^ (tx-retract-from-ref ref attr value))
                       (return true "")))))))
@@ -4201,7 +4194,7 @@
               (when (not ref-ok)
                 (return false ref-error))
               (when (not attr-ok)
-                (delete-parser-tx-edn-entity-value-containers-shallow ref)
+                (delete-parser-tx-edn-entity-owned-values ref)
                 (return false "tx-data attributes must be keywords or strings"))
               (arr.push! out^ (tx-retract-attr-from-ref ref attr))
               (return true "")))
@@ -4230,7 +4223,7 @@
               (when (not ref-ok)
                 (return false ref-error))
               (when (not attr-ok)
-                (delete-parser-tx-edn-entity-value-containers-shallow ref)
+                (delete-parser-tx-edn-entity-owned-values ref)
                 (return false "tx-data attributes must be keywords or strings"))
               (if (edn-lookup-ref-node? doc old-node)
                 (let [[lookup-attr lookup-value lookup-ok lookup-error] (edn-lookup-ref-parts doc old-node)]
@@ -4257,16 +4250,16 @@
               (when (not expected-ok)
                 (when value-ok
                   (if has-value-lookup
-                    (delete-value-containers-shallow value-lookup-value)
-                    (delete-value-containers-shallow value)))
-                (delete-parser-tx-edn-entity-value-containers-shallow ref)
+                    (delete-owned-value value-lookup-value)
+                    (delete-owned-value value)))
+                (delete-parser-tx-edn-entity-owned-values ref)
                 (return false expected-error))
               (when (not value-ok)
                 (when expected-ok
                   (if has-expected-lookup
-                    (delete-value-containers-shallow expected-lookup-value)
-                    (delete-value-containers-shallow expected)))
-                (delete-parser-tx-edn-entity-value-containers-shallow ref)
+                    (delete-owned-value expected-lookup-value)
+                    (delete-owned-value expected)))
+                (delete-parser-tx-edn-entity-owned-values ref)
                 (return false value-error))
               (arr.push! out^ (tx-cas-lookup-values-from-ref ref attr expected has-expected-lookup expected-lookup-attr expected-lookup-value value has-value-lookup value-lookup-attr value-lookup-value))
               (return true "")))
