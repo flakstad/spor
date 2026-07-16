@@ -14823,7 +14823,8 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     .SQLite (let [[snapshot snapshot-ok snapshot-error] (sqlite-store-db-current-root-cached (addr store^.sqlite))]
               (when (and (not snapshot-ok)
                          (= snapshot-error "sqlite DB has no Vev index roots"))
-                (delete snapshot-error)
+                ;; SQLite root lookup errors are borrowed literals. The fresh
+                ;; durable-store bootstrap path must not free this sentinel.
                 (return (empty-shared-store-db-for-sqlite-bootstrap) true ""))
               (return snapshot snapshot-ok snapshot-error))
     .Shared (return (shared-store-db (addr store^.shared)) true "")
