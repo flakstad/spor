@@ -12012,6 +12012,10 @@
       (return false false))
     (when (not supported)
       (return false false)))
+  (when (sqlite-merge-index-view? (db-read-source-index-view source .AVET))
+    ;; Exact per-value ranges preserve bound-input semantics across merged
+    ;; durable runs; the sequential merge path is only preferred for flat roots.
+    (return false true))
   (let [source-clause (if clause-value.has-source
                         (unsourced-clause clause-value)
                         clause-value)

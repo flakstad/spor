@@ -42,7 +42,16 @@
          :entity/id "project-main"
          :project/workspace [:entity/id "workspace-main"]}])
     (let [db (d.db conn)
+          project-with-input (d.q '[:find ?project .
+                                     :in $ ?project-id
+                                     :where [?project :entity/id ?project-id]] db "project-main")
+          project-workspace-with-input (d.q '[:find ?workspace .
+                                               :in $ ?project-id
+                                               :where [?project :entity/id ?project-id]
+                                                      [?project :project/workspace ?workspace]] db "project-main")
           result (d.q ref-join-query db "project-main")]
+      (test.is (not (kdata.nil? project-with-input)))
+      (test.is (not (kdata.nil? project-workspace-with-input)))
       (test.is (kdata.string? result))
       (test.is (= (kdata.string result) "workspace-main"))
       (d.close db))
