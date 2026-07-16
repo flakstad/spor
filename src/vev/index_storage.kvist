@@ -2483,30 +2483,32 @@
 (defn db-read-source-next-tx [source: DB-Read-Source] -> [tx: u64, ok: bool, error: string]
   (let [[latest latest-ok latest-error] (db-read-source-latest-tx source)]
     (if latest-ok
-      (return (+ latest 1) true "")
+      (return (next-transaction-id latest) true "")
       (return 0 false latest-error))))
 
 (defn shared-db-snapshot-next-tx [snapshot: Shared-DB-Snapshot] -> [tx: u64, ok: bool, error: string]
   (when (= snapshot.datoms.count 0)
-    (return 1 true ""))
+    (return tx-partition-base true ""))
   (let [[datom datom-ok] (shared-datom-log-at snapshot.datoms (- snapshot.datoms.count 1))]
     (when (not datom-ok)
       (return 0 false "shared snapshot datom log was missing last datom"))
-    (let [out (+ datom.tx 1)]
+    (let [out (next-transaction-id datom.tx)]
       (delete-owned-datom datom)
       (return out true ""))))
 
 (defn db-read-source-next-entity-id [source: DB-Read-Source] -> [entity: u64, ok: bool, error: string]
   (let [view (db-read-source-index-view source .EAVT)
-        n (db-index-view-count view)]
-    (when (= n 0)
-      (return 1 true ""))
-    (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source (- n 1))]
-      (when (not datom-ok)
-        (return 0 false datom-error))
-      (let [out (+ datom.e 1)]
-        (delete-owned-datom datom)
-        (return out true "")))))
+        position (- (db-index-view-count view) 1)]
+    (while (>= position 0)
+      (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source position)]
+        (when (not datom-ok)
+          (return 0 false datom-error))
+        (let [entity datom.e]
+          (delete-owned-datom datom)
+          (when (< entity tx-partition-base)
+            (return (+ entity 1) true ""))))
+      (mut! position -= 1))
+    (return 1 true "")))
 
 (defn db-read-source-has-tuple-schema? [source: DB-Read-Source] -> [has-tuple: bool, ok: bool, error: string]
   (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source ":db/tupleAttrs")]

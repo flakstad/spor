@@ -434,6 +434,8 @@
       (= node.kind .Keyword) (if attr-position (term-keyword node.text) (term-value (value-keyword node.text)))
       (= node.kind .Symbol) (term-symbol node.text)
       (= node.kind .Uuid) (term-value (value-uuid node.text))
+      (= node.kind .Instant) (let [[instant ok] (instant-from-text node.text)]
+                               (if ok (term-value instant) (term-wildcard)))
       (= node.kind .Bool) (term-value (value-bool node.bool-value))
       (= node.kind .Int) (if attr-position (term-value (value-int node.int-value)) (term-entity (u64 node.int-value)))
       (= node.kind .Float) (term-value (value-float node.float-value))
@@ -456,6 +458,8 @@
       (= node.kind .Keyword) (term-value (value-keyword node.text))
       (= node.kind .Symbol) (term-symbol node.text)
       (= node.kind .Uuid) (term-value (value-uuid node.text))
+      (= node.kind .Instant) (let [[instant ok] (instant-from-text node.text)]
+                               (if ok (term-value instant) (term-wildcard)))
       (= node.kind .Bool) (term-value (value-bool node.bool-value))
       (= node.kind .Int) (term-value (value-int node.int-value))
       (= node.kind .Float) (term-value (value-float node.float-value))

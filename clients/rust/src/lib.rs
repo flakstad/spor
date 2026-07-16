@@ -33,6 +33,7 @@ const VEV_VALUE_SYMBOL: c_int = 7;
 const VEV_VALUE_VECTOR: c_int = 8;
 const VEV_VALUE_MAP: c_int = 9;
 const VEV_VALUE_UUID: c_int = 10;
+const VEV_VALUE_INSTANT: c_int = 12;
 
 const VEV_COLUMN_BATCH_ENTITY: c_int = 1;
 const VEV_COLUMN_BATCH_STRING: c_int = 2;
@@ -294,6 +295,7 @@ pub enum Value {
     Keyword(String),
     Symbol(String),
     Uuid(String),
+    Instant(i64),
     Vector(Vec<Value>),
     Map(Vec<(Value, Value)>),
 }
@@ -399,6 +401,7 @@ impl Library {
             }
             VEV_VALUE_SYMBOL => Value::Symbol(unsafe { Self::owned_string(vev_value_text(value)) }),
             VEV_VALUE_UUID => Value::Uuid(unsafe { Self::owned_string(vev_value_text(value)) }),
+            VEV_VALUE_INSTANT => Value::Instant(unsafe { vev_value_int(value) }),
             VEV_VALUE_VECTOR => {
                 let count = unsafe { vev_value_item_count(value) };
                 let mut out = Vec::with_capacity(count as usize);

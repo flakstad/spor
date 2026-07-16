@@ -137,6 +137,7 @@ ABI_COLUMN_KIND_VALUE :: 7
 ABI_COLUMN_KIND_KEYWORD :: 8
 ABI_COLUMN_KIND_SYMBOL :: 9
 ABI_COLUMN_KIND_UUID :: 10
+ABI_COLUMN_KIND_INSTANT :: 11
 
 ABI_Column_Batch :: struct {
     kind: int,
@@ -1273,7 +1274,7 @@ abi_generic_column_empty :: proc(kind: int, capacity: int) -> ABI_Generic_Column
     column.kind = kind
     if kind == ABI_COLUMN_KIND_ENTITY {
         column.entities = make([dynamic]u64, 0, capacity)
-    } else if kind == ABI_COLUMN_KIND_INT {
+    } else if kind == ABI_COLUMN_KIND_INT || kind == ABI_COLUMN_KIND_INSTANT {
         column.ints = make([dynamic]i64, 0, capacity)
     } else if kind == ABI_COLUMN_KIND_BOOL {
         column.bools = make([dynamic]bool, 0, capacity)
@@ -1380,6 +1381,15 @@ abi_generic_column_batch_append_int :: proc(batch: rawptr, column: int, value: i
     return true
 }
 
+abi_generic_column_batch_append_instant :: proc(batch: rawptr, column: int, value: i64) -> bool {
+    wrapper := (^ABI_Generic_Column_Batch)(batch)
+    if wrapper == nil || column < 0 || column >= len(wrapper.columns) || wrapper.columns[column].kind != ABI_COLUMN_KIND_INSTANT {
+        return false
+    }
+    append(&wrapper.columns[column].ints, value)
+    return true
+}
+
 abi_generic_column_batch_append_bool :: proc(batch: rawptr, column: int, value: bool) -> bool {
     wrapper := (^ABI_Generic_Column_Batch)(batch)
     if wrapper == nil || column < 0 || column >= len(wrapper.columns) || wrapper.columns[column].kind != ABI_COLUMN_KIND_BOOL {
@@ -1452,6 +1462,22 @@ abi_generic_column_batch_append_mixed_int :: proc(batch: rawptr, column: int, va
         return false
     }
     append(&wrapper.columns[column].value_kinds, 3)
+    append(&wrapper.columns[column].entities, 0)
+    append(&wrapper.columns[column].ints, value)
+    append(&wrapper.columns[column].floats, 0)
+    append(&wrapper.columns[column].bools, false)
+    append(&wrapper.columns[column].strings, \"\")
+    append(&wrapper.columns[column].string_data, nil)
+    append(&wrapper.columns[column].string_lengths, 0)
+    return true
+}
+
+abi_generic_column_batch_append_mixed_instant :: proc(batch: rawptr, column: int, value: i64) -> bool {
+    wrapper := (^ABI_Generic_Column_Batch)(batch)
+    if wrapper == nil || column < 0 || column >= len(wrapper.columns) || wrapper.columns[column].kind != ABI_COLUMN_KIND_MIXED {
+        return false
+    }
+    append(&wrapper.columns[column].value_kinds, 12)
     append(&wrapper.columns[column].entities, 0)
     append(&wrapper.columns[column].ints, value)
     append(&wrapper.columns[column].floats, 0)
@@ -2524,6 +2550,7 @@ abi_free_stmt :: proc(stmt: rawptr) {
     .Keyword 8
     .Symbol 9
     .Uuid 10
+    .Instant 11
     .Mixed 4
     0))
 
@@ -2598,6 +2625,10 @@ abi_free_stmt :: proc(stmt: rawptr) {
       (if (= value.kind .Uuid)
         (column-batch-append-string-copy! handle column value.text)
         false)
+    11
+      (if (= value.kind .Instant)
+        (abi-generic-column-batch-append-instant handle column value.int-value)
+        false)
     4
       (case value.kind
         .Nil (abi-generic-column-batch-append-mixed-nil handle column)
@@ -2609,6 +2640,7 @@ abi_free_stmt :: proc(stmt: rawptr) {
         .Keyword (column-batch-append-mixed-string-copy! handle column 6 value.text)
         .Symbol (column-batch-append-mixed-string-copy! handle column 7 value.text)
         .Uuid (column-batch-append-mixed-string-copy! handle column 10 value.text)
+        .Instant (abi-generic-column-batch-append-mixed-instant handle column value.int-value)
         false)
     7
       (column-batch-append-value-copy! handle column value)
@@ -2647,6 +2679,10 @@ abi_free_stmt :: proc(stmt: rawptr) {
     10
       (if (= relation-column.kind .Uuid)
         (column-batch-append-string-copy! handle out-column relation-column.texts[row])
+        false)
+    11
+      (if (= relation-column.kind .Instant)
+        (abi-generic-column-batch-append-instant handle out-column relation-column.ints[row])
         false)
     4
       (let [[value value-ok] (vev.typed-relation-column-value relation-column row)]
@@ -6936,7 +6972,7 @@ abi_free_stmt :: proc(stmt: rawptr) {
 (defn vev_result_value_int :abi "c" [result: Vev-Result, row: int, column: int] -> i64
   (odin "context = runtime.default_context()")
   (let [value (result-value result row column)]
-    (if (= value.kind .Int) value.int-value 0)))
+    (if (or (= value.kind .Int) (= value.kind .Instant)) value.int-value 0)))
 
 @export
 (defn vev_result_value_bool :abi "c" [result: Vev-Result, row: int, column: int] -> bool
@@ -6996,7 +7032,7 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (when (= (rawptr value) nil)
     (return 0))
   (let [ptr (value-ptr value)]
-    (if (= ptr^.kind .Int) ptr^.int-value 0)))
+    (if (or (= ptr^.kind .Int) (= ptr^.kind .Instant)) ptr^.int-value 0)))
 
 @export
 (defn vev_value_float :abi "c" [value: Vev-Value] -> f64

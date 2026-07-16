@@ -154,6 +154,9 @@
 (defn keep-not-entity-2 [db: vev.DB, datom: vev.Datom] -> bool
   (not (= datom.e 2)))
 
+(defn keep-not-tx-instant [db: vev.DB, datom: vev.Datom] -> bool
+  (not (= datom.a ":db/txInstant")))
+
 (defn keep-long-akas [db: vev.DB, datom: vev.Datom] -> bool
   (when (not (= datom.a ":aka"))
     (return true))
@@ -344,12 +347,12 @@
                  ([]vev.Tx-Meta
                    [(vev.Tx-Meta {a: ":request/id" v: (vev.value-string "req-1")})
                     (vev.Tx-Meta {a: ":tx/reason" v: (vev.value-keyword ":profile-edit")})]))]
-    (t.is (= report.tx 1))
-    (t.is (= conn.next-tx 2))
+    (t.is (= report.tx vev.tx-partition-base))
+    (t.is (= conn.next-tx (+ vev.tx-partition-base 1)))
     (t.is (= (count report.db-before.datoms) 0))
-    (t.is (= (count report.db-after.datoms) 2))
-    (t.is (= (count report.tx-data) 2))
-    (t.is (= (count report.tx-meta) 2))
+    (t.is (= (count report.db-after.datoms) 3))
+    (t.is (= (count report.tx-data) 3))
+    (t.is (= (count report.tx-meta) 3))
     (t.is (= report.tx-meta[0].a ":request/id"))
     (let [meta-value report.tx-meta[0].v]
       (t.is (= meta-value.text "req-1")))
@@ -374,7 +377,7 @@
                     [?tx :request/id "req-1"]
                     [?tx ?a ?v]])]
     (t.is report.ok)
-    (t.is (= (count report.tx-data) 3))
+    (t.is (= (count report.tx-data) 4))
     (t.is (= report.tx-data[0].e tx-e))
     (t.is (= report.tx-data[1].e tx-e))
     (t.is (= tx-e report.tx))
@@ -382,12 +385,59 @@
     (t.is (= (count report.tempids) 2))
     (t.is current-tx-ok)
     (t.is (= current-tx report.tx))
-    (t.is (= (count tx-props.rows) 2))
-    (t.is (= (count report.tx-meta) 2))
+    (t.is (= (count tx-props.rows) 3))
+    (t.is (= (count report.tx-meta) 3))
     (t.is (= report.tx-meta[0].a ":request/id"))
     (t.is (= report.tx-meta[0].v.text "req-1"))
     (t.is (= report.tx-meta[1].a ":tx/reason"))
     (t.is (= report.tx-meta[1].v.text ":profile-edit"))))
+
+(t.deftest transactions-record-automatic-wall-clock-instants
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        before (vev.current-instant)
+        report (vev.transact (addr conn) [[:db/add 10 :user/name "Ada"]])
+        after (vev.current-instant)
+        tx-instant report.tx-data[1]
+        query-result (vev.q report.db-after
+                       [:find ?instant .
+                        :in $ ?tx
+                        :where
+                        [?tx :db/txInstant ?instant]]
+                       (vev.value-entity report.tx))
+        serialized (vev.value-serializable-text tx-instant.v)
+        [roundtrip roundtrip-ok roundtrip-error] (vev.value-from-owned-serial-text serialized)]
+    (t.is report.ok)
+    (t.is (= tx-instant.e report.tx))
+    (t.is (= tx-instant.tx report.tx))
+    (t.is (= tx-instant.a ":db/txInstant"))
+    (t.is tx-instant.added)
+    (t.is (= tx-instant.v.kind .Instant))
+    (t.is (>= tx-instant.v.int-value before.int-value))
+    (t.is (<= tx-instant.v.int-value after.int-value))
+    (t.is (= (count report.tx-meta) 1))
+    (t.is (= report.tx-meta[0].a ":db/txInstant"))
+    (t.is query-result.ok)
+    (t.is (= (count query-result.rows) 1))
+    (t.is (= query-result.rows[0].values[0].kind .Instant))
+    (t.is roundtrip-ok roundtrip-error)
+    (t.is (vev.value-equal? roundtrip tx-instant.v))))
+
+(t.deftest explicit-tx-instants-support-imports-and-monotonic-validation
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        first (vev.transact-text
+                (addr conn)
+                "[{:db/id \"datomic.tx\" :db/txInstant #inst \"2020-01-02T03:04:05.006Z\"} [:db/add 10 :user/name \"Ada\"]]")
+        older (vev.transact-text
+                (addr conn)
+                "[{:db/id \"datomic.tx\" :db/txInstant #inst \"2020-01-01T00:00:00.000Z\"} [:db/add 11 :user/name \"Grace\"]]")]
+    (t.is first.ok first.error)
+    (t.is (= first.tx-data[0].a ":db/txInstant"))
+    (t.is (= first.tx-data[0].v.kind .Instant))
+    (t.is (= (vev.instant-text first.tx-data[0].v.int-value) "2020-01-02T03:04:05.006Z"))
+    (t.is (not older.ok))
+    (t.is (= older.error ":db/txInstant must be monotonic"))))
 
 (t.deftest datascript-transaction-report-rendered-value-subset
   (defer (free_all context.allocator))
@@ -431,7 +481,7 @@
     (t.is (= tx.entity report.tx))
     (t.is tx-data-ok)
     (t.is (= tx-data.kind .Vector))
-    (t.is (= (count tx-data.items) 1))
+    (t.is (= (count tx-data.items) 2))
     (t.is first-datom-e-ok)
     (t.is (= first-datom-e.entity 1))
     (t.is first-datom-a-ok)
@@ -441,7 +491,7 @@
     (t.is first-datom-op-ok)
     (t.is (= first-datom-op.text ":db/add"))
     (t.is tx-meta-ok)
-    (t.is (= (count tx-meta.items) 1))
+    (t.is (= (count tx-meta.items) 2))
     (t.is first-meta-a-ok)
     (t.is (= first-meta-a.text ":request/id"))
     (t.is first-meta-v-ok)
@@ -559,7 +609,7 @@
     (t.is first.ok)
     (t.is second.ok)
     (t.is (= (count reports) 2))
-    (t.is (= (count reports[0].tx-data) 3))
+    (t.is (= (count reports[0].tx-data) 4))
     (t.is (= reports[0].tx-data[0].e 3))
     (t.is (= reports[0].tx-data[0].a ":name"))
     (t.is (= reports[0].tx-data[0].v.text "Dima"))
@@ -567,7 +617,7 @@
     (t.is (= reports[0].tx-data[1].v.int-value 19))
     (t.is (= reports[0].tx-meta[0].a ":some-metadata"))
     (t.is (= reports[0].tx-meta[0].v.int-value 1))
-    (t.is (= (count reports[1].tx-data) 4))
+    (t.is (= (count reports[1].tx-data) 5))
     (t.is (= reports[1].tx-data[0].e 5))
     (t.is reports[1].tx-data[0].added)
     (t.is (= reports[1].tx-data[1].e 1))
@@ -576,7 +626,8 @@
     (t.is reports[1].tx-data[2].added)
     (t.is (= reports[1].tx-data[3].e 4))
     (t.is (not reports[1].tx-data[3].added))
-    (t.is (= (count reports[1].tx-meta) 0))))
+    (t.is (= (count reports[1].tx-meta) 1))
+    (t.is (= reports[1].tx-meta[0].a ":db/txInstant"))))
 
 (t.deftest transact-defaults-unschematized-attrs-to-cardinality-one
   (defer (free_all context.allocator))
@@ -3273,8 +3324,8 @@
     (t.is (= (count db.avet) datom-count))
     (t.is (= (count db.vaet) datom-count))
     (t.is (= db.datoms[db.eavt[0]].e 1))
-    (t.is (= db.datoms[db.aevt[0]].a ":user/active"))
-    (t.is (= db.datoms[db.avet[0]].a ":user/active"))
+    (t.is (= db.datoms[db.aevt[0]].a ":db/txInstant"))
+    (t.is (= db.datoms[db.avet[0]].a ":db/txInstant"))
     (t.is (= db.datoms[db.vaet[0]].v.kind .Entity))))
 
 (t.deftest datascript-db-diff-subset
@@ -3286,7 +3337,9 @@
         right-conn (vev.create-conn)
         _ (vev.transact (addr right-conn) [{:db/id 1 :b 3 :d 5}])
         _ (vev.transact (addr right-conn) [{:db/id 1 :a 1}])
-        diff (vev.db-diff left-conn.db right-conn.db)]
+        left (vev.filter-db left-conn.db keep-not-tx-instant)
+        right (vev.filter-db right-conn.db keep-not-tx-instant)
+        diff (vev.db-diff left right)]
     (t.is (= (count diff.only-left) 3))
     (t.is (= diff.only-left[0].e 1))
     (t.is (= diff.only-left[0].a ":b"))
@@ -3319,7 +3372,9 @@
         _ (vev.transact (addr left-conn) [[:db/add 1 :attr :aa]])
         right-conn (vev.create-conn)
         _ (vev.transact (addr right-conn) [[:db/add 1 :attr "aa"]])
-        diff (vev.db-diff left-conn.db right-conn.db)]
+        left (vev.filter-db left-conn.db keep-not-tx-instant)
+        right (vev.filter-db right-conn.db keep-not-tx-instant)
+        diff (vev.db-diff left right)]
     (t.is (= (count vector-result.rows) 2))
     (t.is (= vector-result.rows[0].values[0].text "A"))
     (t.is (= vector-result.rows[0].values[1].kind .Vector))
@@ -3358,7 +3413,9 @@
         all-filtered-out (vev.filter-db db keep-none)
         retracted-ivan-conn (vev.conn-from-db db)
         retracted-ivan (vev.transact (addr retracted-ivan-conn) [[:db.fn/retractEntity 2]])
-        no-ivan-diff (vev.db-diff no-ivan retracted-ivan.db-after)
+        no-ivan-without-tx (vev.filter-db no-ivan keep-not-tx-instant)
+        retracted-without-tx (vev.filter-db retracted-ivan.db-after keep-not-tx-instant)
+        no-ivan-diff (vev.db-diff no-ivan-without-tx retracted-without-tx)
         empty-diff (vev.db-diff empty-conn.db empty-filtered)
         none-diff (vev.db-diff empty-conn.db all-filtered-out)
         passwords (vev.q-collection db [:find [?v ...] :where [_ :password ?v]])
@@ -3459,8 +3516,8 @@
     (t.is (= (count db.current) 2))
     (t.is (= (count ages) 1))
     (t.is (= ages[0].int-value 17))
-    (t.is (= conn.next-tx 4))
-    (t.is (= conn2.next-tx 4))
+    (t.is (= conn.next-tx vev.tx-partition-base))
+    (t.is (= conn2.next-tx vev.tx-partition-base))
     (t.is (= (count names) 1))
     (t.is (= names[0].text "Ivan"))
     (t.is (= (count names2) 1))
@@ -3539,7 +3596,7 @@
                   :where
                   [6 :name ?name]])]
     (t.is first.ok)
-    (t.is (= first.tx 1))
+    (t.is (= first.tx vev.tx-partition-base))
     (t.is (= (count original-names) 0))
     (t.is (= (count first-names) 1))
     (t.is (= first-names[0].text "Ivan"))
@@ -3633,7 +3690,7 @@
     (t.is (= current[0].tx 11))
     (t.is conn-report.ok)
     (t.is (= conn-report.tx 21))
-    (t.is (= conn.next-tx 22))
+    (t.is (= conn.next-tx vev.tx-partition-base))
     (t.is (= (count conn-report.tx-data) 2))
     (t.is (= conn-report.tx-data[0].tx 20))
     (t.is (= conn-report.tx-data[1].tx 21))
@@ -3759,8 +3816,8 @@
       (t.is (math.is_inf restored-neg-inf.float-value -1))
       (t.is (= restored-status.kind .Symbol))
       (t.is (= restored-status.text "active"))
-      (t.is (= restored-next-tx 5))
-      (t.is (= next.tx 5))
+      (t.is (= restored-next-tx (+ vev.tx-partition-base 4)))
+      (t.is (= next.tx (+ vev.tx-partition-base 4)))
       (t.is next.ok)
       (t.is (= (count next-names) 3))
       (t.is (= next-names[2].text "Ivan"))
@@ -3791,8 +3848,8 @@
       (t.is (not invalid-ok))
       (t.is (= invalid-error "expected serialized datom vector [e a v tx added]"))
       (t.is (= (count invalid-db.datoms) 0))
-      (t.is (= text-restored-next-tx 5))
-      (t.is (= text-next.tx 5))
+      (t.is (= text-restored-next-tx (+ vev.tx-partition-base 4)))
+      (t.is (= text-next.tx (+ vev.tx-partition-base 4)))
       (t.is text-next.ok)
       (t.is (= (count text-next-names) 3))
       (t.is (= text-next-names[2].text "Ivan")))))
@@ -3969,7 +4026,7 @@
       (t.is opened-ok)
       (t.is (= opened-error ""))
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 9))
+      (t.is (= (count report.tx-data) 10))
       (t.is (= (count live-result.rows) 1))
       (t.is (= live-result.rows[0].values[0].text "Frances"))
       (t.is (= live-result.rows[0].values[1].int-value 85))
@@ -3985,9 +4042,9 @@
       (t.is (= reopened-error ""))
       (t.is snapshot-ok snapshot-error)
       (t.is basis-ok basis-error)
-      (t.is (= basis 1))
+      (t.is (= basis vev.tx-partition-base))
       (t.is datom-count-ok datom-count-error)
-      (t.is (= datom-count 9))
+      (t.is (= datom-count 10))
       (t.is reopened-result.result.ok reopened-result.result.error)
       (t.is (= (count reopened-result.result.rows) 1))
       (t.is (= reopened-result.result.rows[0].values[0].text "grace@example.com"))
@@ -4047,8 +4104,8 @@
       (defer (vev.delete-sqlite-tx-meta-rows append-meta))
       (t.is append-meta-ok)
       (t.is (= append-meta-error ""))
-      (t.is (= (count append-meta) 1))
-      (t.is (= append-meta[0].tx 1))
+      (t.is (= (count append-meta) 2))
+      (t.is (= append-meta[0].tx vev.tx-partition-base))
       (t.is (= append-meta[0].a ":request/id"))
       (t.is (= append-meta[0].v.text "req-append")))))
 
@@ -4072,8 +4129,8 @@
                  :where
                  [1 ?a ?v]])]
     (t.is report.ok)
-    (t.is (= report.tx 1))
-    (t.is (= conn.next-tx 2))
+    (t.is (= report.tx vev.tx-partition-base))
+    (t.is (= conn.next-tx (+ vev.tx-partition-base 1)))
     (t.is (= (count report.tx-data) 4))
     (t.is (= report.tx-data[0].a ":age"))
     (t.is (not report.tx-data[0].added))
@@ -5144,23 +5201,24 @@
              [:db/add 2 :age 25]
              [:db/add 3 :name "Sergey"]
              [:db/add 3 :age 11]])
-        first (vev.find-datom conn.db :eavt)
-        first-e (vev.find-datom conn.db :eavt 1)
-        first-ea (vev.find-datom conn.db :eavt 1 :age)
-        first-name (vev.find-datom conn.db :eavt 1 :name)
-        petr (vev.find-datom conn.db :eavt 1 :name "Petr")
-        second-age (vev.find-datom conn.db :eavt 2 :age)
-        second-name (vev.find-datom conn.db :eavt 2 :name)
-        missing-entity (vev.find-datom conn.db :eavt 4)
-        missing (vev.find-datom conn.db :eavt 1 :name "Ivan")
-        seek (vev.seek-datoms conn.db :avet :name "Petr")
-        rseek-name (vev.rseek-datoms conn.db :avet :name "Petr")
-        rseek-age (vev.rseek-datoms conn.db :avet :age 26)
-        rseek-age-exact (vev.rseek-datoms conn.db :avet :age 25)
-        range-name (vev.index-range conn.db :name "I" "Sergey")
-        range-before (vev.index-range conn.db :name nil "P")
-        range-after (vev.index-range conn.db :name "R" nil)
-        range-age (vev.index-range conn.db :age 15 25)
+        data-db (vev.filter-db conn.db keep-not-tx-instant)
+        first (vev.find-datom data-db :eavt)
+        first-e (vev.find-datom data-db :eavt 1)
+        first-ea (vev.find-datom data-db :eavt 1 :age)
+        first-name (vev.find-datom data-db :eavt 1 :name)
+        petr (vev.find-datom data-db :eavt 1 :name "Petr")
+        second-age (vev.find-datom data-db :eavt 2 :age)
+        second-name (vev.find-datom data-db :eavt 2 :name)
+        missing-entity (vev.find-datom data-db :eavt 4)
+        missing (vev.find-datom data-db :eavt 1 :name "Ivan")
+        seek (vev.seek-datoms data-db :avet :name "Petr")
+        rseek-name (vev.rseek-datoms data-db :avet :name "Petr")
+        rseek-age (vev.rseek-datoms data-db :avet :age 26)
+        rseek-age-exact (vev.rseek-datoms data-db :avet :age 25)
+        range-name (vev.index-range data-db :name "I" "Sergey")
+        range-before (vev.index-range data-db :name nil "P")
+        range-after (vev.index-range data-db :name "R" nil)
+        range-age (vev.index-range data-db :age 15 25)
         empty-conn (vev.create-conn)
         empty-found (vev.find-datom empty-conn.db :eavt)]
     (t.is first.found)
@@ -5278,8 +5336,9 @@
              [:db/add 2 :age 25]
              [:db/add 3 :name "Sergey"]
              [:db/add 3 :age 11]])
-        aevt (vev.datoms conn.db :aevt)
-        eavt (vev.datoms conn.db :eavt)]
+        data-db (vev.filter-db conn.db keep-not-tx-instant)
+        aevt (vev.datoms data-db :aevt)
+        eavt (vev.datoms data-db :eavt)]
     (t.is (= (count aevt) 6))
     (t.is (= aevt[0].e 1))
     (t.is (= aevt[0].a ":age"))
@@ -8852,7 +8911,7 @@
                   [:db/add 1 :user/name "Ada"]
                   [:db/retract 1 :user/name "Ada"]])
         results (vev.q-strings report.db-after (vev.query-name-by-email "ada@example.com"))]
-    (t.is (= (count report.tx-data) 3))
+    (t.is (= (count report.tx-data) 4))
     (t.is (= report.tx-data[0].added true))
     (t.is (= report.tx-data[2].added false))
     (t.is (= (count results) 0))))
@@ -8870,7 +8929,7 @@
                   :where
                   [?e :attr ?v]])]
     (t.is report.ok)
-    (t.is (= (count report.tx-data) 2))
+    (t.is (= (count report.tx-data) 3))
     (t.is (= (count result.rows) 2))
     (t.is (= result.rows[0].values[0].entity 1))
     (t.is (= result.rows[0].values[1].int-value 2))
@@ -9146,7 +9205,7 @@
                    :where
                    [1 :user/name ?name]])]
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 1))
+      (t.is (= (count report.tx-data) 2))
       (t.is (= report.tx-data[0].a ":user/name"))
       (t.is (= report.tx-data[0].v.text "Ada"))
       (t.is (= (count result.rows) 1))
@@ -9354,7 +9413,7 @@
                    :where
                    [1 :user/name ?name]])]
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 1))
+      (t.is (= (count report.tx-data) 2))
       (t.is (= (count names) 0))))
 
 (t.deftest transact-data-supports-retract-without-value-lookup-ref
@@ -9372,7 +9431,7 @@
                    :where
                    [?e :user/name ?name]])]
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 1))
+      (t.is (= (count report.tx-data) 2))
       (t.is (= (count names) 1))
       (t.is (= names[0].text "Grace"))))
 
@@ -9389,7 +9448,7 @@
                    :where
                    [?e :user/name ?name]])]
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 1))
+      (t.is (= (count report.tx-data) 2))
       (t.is (= (count names) 0))))
 
 (t.deftest transact-data-supports-retract-entity
@@ -9402,7 +9461,7 @@
                     :where
                     [?e :user/name ?name]])]
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 5))
+      (t.is (= (count report.tx-data) 6))
       (t.is (= report.tx-data[0].added false))
       (t.is (= (count result.rows) 1))
       (t.is (= result.rows[0].values[0].entity 2))
@@ -9418,7 +9477,7 @@
                     :where
                     [?e :user/name ?name]])]
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 5))
+      (t.is (= (count report.tx-data) 6))
       (t.is (= (count result.rows) 1))
       (t.is (= result.rows[0].values[0].entity 2))))
 
@@ -9473,7 +9532,7 @@
                  :where
                  [3 ?a ?v]])]
     (t.is report.ok)
-    (t.is (= (count report.tx-data) 6))
+    (t.is (= (count report.tx-data) 7))
     (t.is (= report.tx-data[0].e 1))
     (t.is (= report.tx-data[0].a ":a1"))
     (t.is (= report.tx-data[0].v.int-value 1))
@@ -9517,7 +9576,7 @@
                    :where
                    [?e :user/name ?name]])]
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 5))
+      (t.is (= (count report.tx-data) 6))
       (t.is (= (count names) 1))
       (t.is (= names[0].text "Grace"))))
 
@@ -9534,7 +9593,7 @@
                    :where
                    [?e :user/name ?name]])]
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 2))
+      (t.is (= (count report.tx-data) 3))
       (t.is (= (count names) 0))))
 
 (t.deftest datascript-component-schema-requires-ref-subset
@@ -9983,7 +10042,7 @@
         bad-ref-value (vev.transact-text (addr conn) "[[:db/add \"x\" :profile {}]]")
         tempid-outside-add (vev.transact-text (addr conn) "[[:db/retract \"x\" :name \"Ivan\"]]")
         after-count (count conn.db.datoms)]
-    (t.is (= before-count 4))
+    (t.is (= before-count 5))
     (t.is (not bad-root.ok))
     (t.is (= bad-root.error "tx text must be an EDN vector"))
     (t.is (not unknown-op.ok))
@@ -10066,8 +10125,8 @@
     (t.is (= direct-names[0].text "Valerii"))
     (t.is (= (count ref-entities) 1))
     (t.is (= ref-entities[0].entity (u64 285873023227265)))
-    (t.is (= (count map-conn.db.current) 1))
-    (t.is (= (count text-conn.db.current) 1))))
+    (t.is (= (count map-conn.db.current) 2))
+    (t.is (= (count text-conn.db.current) 2))))
 
 (t.deftest data-query-input-recognizes-lookup-ref
   (defer (free_all context.allocator))
@@ -10247,9 +10306,9 @@
                                (vev.value-string "A")
                                (vev.value-nil)))]))]
     (t.is insert-ok.ok)
-    (t.is (= (count insert-ok.tx-data) 3))
+    (t.is (= (count insert-ok.tx-data) 4))
     (t.is ok.ok)
-    (t.is (= (count ok.tx-data) 0))
+    (t.is (= (count ok.tx-data) 1))
     (t.is (not stale-during-update.ok))
     (t.is (= stale-during-update.error "cannot modify tuple attrs directly"))
     (t.is update-b-ok.ok)
@@ -10298,9 +10357,9 @@
                         (addr conn)
                         "[[:db/add 1 :a-and-b [\"A\" nil]]]")]
     (t.is insert-ok.ok)
-    (t.is (= (count insert-ok.tx-data) 3))
+    (t.is (= (count insert-ok.tx-data) 4))
     (t.is ok.ok)
-    (t.is (= (count ok.tx-data) 0))
+    (t.is (= (count ok.tx-data) 1))
     (t.is (not stale-during-update.ok))
     (t.is (= stale-during-update.error "cannot modify tuple attrs directly"))
     (t.is update-b-ok.ok)
@@ -11292,7 +11351,7 @@
                    [(vev.add-tempid-value-tempid "parent" ":friend" "missing")]))]
     (t.is (not report.ok))
     (t.is (= report.error "tempid used only as value"))
-    (t.is (= (count conn.db.datoms) 2))))
+    (t.is (= (count conn.db.datoms) 3))))
 
 (t.deftest datascript-rejects-tempids-defined-only-by-empty-cardinality-many-subset
   (defer (free_all context.allocator))
@@ -11572,10 +11631,11 @@
     (t.is (>= (count report.tempids) 3))
     (for [tempid report.tempids]
       (t.is (= tempid.e tx.entity)))
-    (t.is (= (count props.rows) 3))
-    (t.is (= props.rows[0].values[0].text ":prop1"))
-    (t.is (= props.rows[1].values[0].text ":prop2"))
-    (t.is (= props.rows[2].values[0].text ":prop3"))))
+    (t.is (= (count props.rows) 4))
+    (t.is (= props.rows[0].values[0].text ":db/txInstant"))
+    (t.is (= props.rows[1].values[0].text ":prop1"))
+    (t.is (= props.rows[2].values[0].text ":prop2"))
+    (t.is (= props.rows[3].values[0].text ":prop3"))))
 
 (t.deftest datascript-current-tx-value-alias-tempids
   (defer (free_all context.allocator))
@@ -12158,7 +12218,7 @@
                   [?e :user/email "ada@example.com"]
                   [?e :user/name ?name]])]
     (t.is report.ok)
-    (t.is (= (count report.tx-data) 3))
+    (t.is (= (count report.tx-data) 4))
     (t.is (= (count report.tempids) 2))
     (t.is (= report.tempids[0].tempid "friend"))
     (t.is (= (count result.rows) 1))
@@ -12180,7 +12240,7 @@
                 :where
                 [1 :user/tag ?tag]])]
     (t.is report.ok)
-    (t.is (= (count report.tx-data) 3))
+    (t.is (= (count report.tx-data) 4))
     (t.is (= (count tags) 2))
     (t.is (= tags[0].text "engineer"))
     (t.is (= tags[1].text "lisp"))))
@@ -12205,7 +12265,7 @@
                    :where
                    [1 :user/name ?name]])]
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 1))
+      (t.is (= (count report.tx-data) 2))
       (t.is (= names[0].text "Ada"))))
 
 (t.deftest datascript-map-values-support-lookup-refs
@@ -12598,7 +12658,7 @@
                    :where
                    [10 :user/name ?name]])]
       (t.is report.ok)
-      (t.is (= (count report.tx-data) 1))
+      (t.is (= (count report.tx-data) 2))
       (t.is (= names[0].text "Ada"))))
 
 (t.deftest transact-data-supports-map-forms-with-db-id-last
@@ -12615,7 +12675,7 @@
                   [?e :user/email "ada@example.com"]
                   [?e :user/name ?name]])]
     (t.is report.ok)
-    (t.is (= (count report.tx-data) 2))
+    (t.is (= (count report.tx-data) 3))
     (t.is (= result.rows[0].values[0].text "Ada"))))
 
 (t.deftest transact-data-supports-map-forms-with-db-id-in-any-position
@@ -12638,7 +12698,7 @@
                   [?e :user/name ?name]
                   [?e :user/age ?age]])]
     (t.is report.ok)
-    (t.is (= (count report.tx-data) 6))
+    (t.is (= (count report.tx-data) 7))
     (t.is (= (count result.rows) 1))
     (t.is (= result.rows[0].values[0].text "Grace"))
     (t.is (= result.rows[0].values[1].int-value 41))))
@@ -12657,7 +12717,7 @@
                   [?e :user/name ?name]])]
     (t.is report.ok)
     (t.is (= (count report.tempids) 2))
-    (t.is (= (count report.tx-data) 2))
+    (t.is (= (count report.tx-data) 3))
     (t.is (= (count result.rows) 1))
     (t.is (= result.rows[0].values[0].kind .Entity))
     (t.is (= result.rows[0].values[1].text "Ada"))))
@@ -14328,8 +14388,8 @@
     (t.is (= (count old-results) 1))
     (t.is (= old-results[0] "Andreas"))
     (t.is (= (count current-results) 0))
-    (t.is (= (count retract-report.db-after.datoms) 3))
-    (t.is (= (count retract-report.db-after.current) 1))
+    (t.is (= (count retract-report.db-after.datoms) 5))
+    (t.is (= (count retract-report.db-after.current) 3))
     (t.is (= retract-report.tx-data[0].added false))))
 
 (t.deftest readd-after-retract-makes-fact-current-once
@@ -14351,8 +14411,8 @@
         results (vev.q-strings report.db-after (vev.query-name-by-email "a@example.com"))]
       (t.is (= (count results) 1))
       (t.is (= results[0] "Andreas"))
-      (t.is (= (count report.db-after.current) 2))
-      (t.is (= (count report.db-after.datoms) 4))))
+      (t.is (= (count report.db-after.current) 5))
+      (t.is (= (count report.db-after.datoms) 7))))
 
 (t.deftest edn-uuid-values-round-trip
   (defer (free_all context.allocator))

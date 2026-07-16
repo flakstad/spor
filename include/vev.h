@@ -44,6 +44,8 @@ enum {
     VEV_VALUE_VECTOR = 8,
     VEV_VALUE_MAP = 9,
     VEV_VALUE_UUID = 10,
+    VEV_VALUE_SET = 11,
+    VEV_VALUE_INSTANT = 12,
 };
 
 enum {

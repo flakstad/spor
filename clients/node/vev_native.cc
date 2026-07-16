@@ -149,6 +149,9 @@ napi_value js_value(napi_env env, vev_value_t value) {
   case VEV_VALUE_INT:
     ok(env, napi_create_int64(env, vev_value_int(value), &out));
     return out;
+  case VEV_VALUE_INSTANT:
+    ok(env, napi_create_date(env, static_cast<double>(vev_value_int(value)), &out));
+    return out;
   case VEV_VALUE_FLOAT:
     ok(env, napi_create_double(env, vev_value_float(value), &out));
     return out;

@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import java.lang.ref.Cleaner;
 import java.util.UUID;
+import java.util.Date;
 
 public final class Vev {
     private static final Linker LINKER = Linker.nativeLinker();
@@ -41,6 +42,7 @@ public final class Vev {
     public static final int COLUMN_KEYWORD = 8;
     public static final int COLUMN_SYMBOL = 9;
     public static final int COLUMN_UUID = 10;
+    public static final int COLUMN_INSTANT = 11;
 
     @FunctionalInterface
     public interface TxFunction {
@@ -813,6 +815,7 @@ public final class Vev {
             case 6 -> new Keyword(textOf(value));
             case 7 -> new Symbol(textOf(value));
             case 10 -> UUID.fromString(textOf(value));
+            case 12 -> new Date((long) valueInt.invoke(value));
             case 8 -> {
                 int count = (int) valueItemCount.invoke(value);
                 List<Object> items = new ArrayList<>(count);
@@ -851,6 +854,7 @@ public final class Vev {
             case 6 -> new Keyword(resultTextOf(result, row, column));
             case 7 -> new Symbol(resultTextOf(result, row, column));
             case 10 -> UUID.fromString(resultTextOf(result, row, column));
+            case 12 -> new Date((long) resultValueInt.invoke(result, row, column));
             case 3 -> (long) resultValueInt.invoke(result, row, column);
             case 5 -> (boolean) resultValueBool.invoke(result, row, column);
             default -> valueToJava((MemorySegment) resultValue.invoke(result, row, column));
@@ -917,6 +921,7 @@ public final class Vev {
                 case 6 -> new Keyword(strings[row]);
                 case 7 -> new Symbol(strings[row]);
                 case 10 -> UUID.fromString(strings[row]);
+                case 12 -> new Date(ints[row]);
                 default -> strings[row];
             };
         }
@@ -951,6 +956,7 @@ public final class Vev {
                     case COLUMN_ENTITY -> columnLongs((MemorySegment) columnBatchColumnEntitiesData.invoke(raw, column), count);
                     case COLUMN_STRING, COLUMN_KEYWORD, COLUMN_SYMBOL, COLUMN_UUID -> columnStrings(raw, column, count);
                     case COLUMN_INT -> columnLongs((MemorySegment) columnBatchColumnIntsData.invoke(raw, column), count);
+                    case COLUMN_INSTANT -> columnLongs((MemorySegment) columnBatchColumnIntsData.invoke(raw, column), count);
                     case COLUMN_BOOL -> columnBools((MemorySegment) columnBatchColumnBoolsData.invoke(raw, column), count);
                     case COLUMN_FLOAT -> columnDoubles((MemorySegment) columnBatchColumnFloatsData.invoke(raw, column), count);
                     case COLUMN_MIXED -> columnMixedValues(raw, column, count);
@@ -1041,6 +1047,8 @@ public final class Vev {
             out.append(keyword.text());
         } else if (value instanceof Entity entity) {
             out.append("[:vev/entity ").append(entity.id()).append("]");
+        } else if (value instanceof Date instant) {
+            out.append("#inst \"").append(instant.toInstant()).append("\"");
         } else if (value instanceof Number || value instanceof Boolean) {
             out.append(value);
         } else if (value instanceof List<?> items) {
@@ -1185,6 +1193,7 @@ public final class Vev {
                 case COLUMN_KEYWORD -> new Keyword(((String[]) values)[row]);
                 case COLUMN_SYMBOL -> new Symbol(((String[]) values)[row]);
                 case COLUMN_UUID -> UUID.fromString(((String[]) values)[row]);
+                case COLUMN_INSTANT -> new Date(((long[]) values)[row]);
                 case COLUMN_BOOL -> ((boolean[]) values)[row];
                 case COLUMN_FLOAT -> ((double[]) values)[row];
                 case COLUMN_MIXED -> ((Object[]) values)[row];
@@ -2286,6 +2295,7 @@ public final class Vev {
                     case 6 -> new Keyword(strings[row]);
                     case 7 -> new Symbol(strings[row]);
                     case 10 -> UUID.fromString(strings[row]);
+                    case 12 -> new Date(ints[row]);
                     default -> strings[row];
                 };
             }
@@ -2340,6 +2350,9 @@ public final class Vev {
                         case COLUMN_STRING, COLUMN_KEYWORD, COLUMN_SYMBOL, COLUMN_UUID ->
                             columnBatchStringColumn(raw, column, count);
                         case COLUMN_INT -> longColumn(
+                            (MemorySegment) columnBatchColumnIntsData.invoke(raw, column),
+                            count);
+                        case COLUMN_INSTANT -> longColumn(
                             (MemorySegment) columnBatchColumnIntsData.invoke(raw, column),
                             count);
                         case COLUMN_BOOL -> boolColumn(

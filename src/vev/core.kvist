@@ -11,6 +11,8 @@
 (import strings "core:strings")
 (import strconv "core:strconv")
 
+(def tx-partition-base (u64 4611686018427387904))
+
 (defenum Value-Kind [
   Nil
   Entity
@@ -24,6 +26,7 @@
   Map
   Uuid
   Set
+  Instant
 ])
 
 (defstruct Value {
@@ -599,6 +602,7 @@
   Symbol
   Uuid
   Mixed
+  Instant
 ])
 
 (defstruct Relation-Column {
@@ -701,6 +705,7 @@
   Map
   Set
   Uuid
+  Instant
 ])
 
 (defstruct EDN-Node {
@@ -852,6 +857,9 @@
 (defn value-uuid [text: string] -> Value
   (Value {kind: .Uuid text: text}))
 
+(defn value-instant [unix-millis: i64] -> Value
+  (Value {kind: .Instant int-value: unix-millis}))
+
 (defn value-nil [] -> Value
   (Value {kind: .Nil}))
 
@@ -929,9 +937,10 @@
     .Keyword 6
     .Symbol 7
     .Uuid 8
-    .Vector 9
-    .Map 10
-    .Set 11
+    .Instant 9
+    .Vector 10
+    .Map 11
+    .Set 12
      99))
 
 (defn slash-index [text: string] -> int
@@ -972,6 +981,7 @@
       .Keyword (keyword-less? left.text right.text)
       .Symbol (string-less? left.text right.text)
       .Uuid (string-less? left.text right.text)
+      .Instant (< left.int-value right.int-value)
       .Set (do
         (let [limit (min (count left.items) (count right.items))]
           (for [index 0..<limit]
@@ -1243,7 +1253,8 @@
 (defn next-entity-id [datoms: []Datom] -> u64
   (let [next: u64 1]
     (for [datom datoms]
-      (when (>= datom.e next)
+      (when (and (< datom.e tx-partition-base)
+                 (>= datom.e next))
         (set! next (+ datom.e 1))))
     next))
 
@@ -1259,6 +1270,7 @@
       .Keyword (= left.text right.text)
       .Symbol (= left.text right.text)
       .Uuid (= left.text right.text)
+      .Instant (= left.int-value right.int-value)
       .Vector (values-equal? (slice left.items 0) (slice right.items 0))
       .Set (do
         (when (not (= (count left.items) (count right.items)))
@@ -1891,9 +1903,14 @@
         (set! tx datom.tx)))
     tx))
 
+(defn next-transaction-id [latest: u64] -> u64
+  (if (< latest tx-partition-base)
+    tx-partition-base
+    (+ latest 1)))
+
 (defn conn-from-db [db: DB] -> Conn
   (Conn {db: (clone-db db)
-         next-tx: (+ (max-tx (slice db.datoms 0)) 1)
+         next-tx: (next-transaction-id (max-tx (slice db.datoms 0)))
          listeners: (make [dynamic]Tx-Listener)}))
 
 (defn conn-from-datoms [datoms: []Datom] -> Conn
@@ -2031,5 +2048,5 @@
 
 (defn create-conn [] -> Conn
   (Conn {db: (build-db (make [dynamic]Datom))
-         next-tx: 1
+         next-tx: tx-partition-base
          listeners: (make [dynamic]Tx-Listener)}))

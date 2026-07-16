@@ -62,9 +62,9 @@ semantics:
 - strings
 - keywords/idents
 - refs
-- maybe instants later
-- maybe UUIDs later
-- tuples later if justified
+- instants
+- UUIDs
+- vectors, sets, maps, and tuples
 
 The exact runtime representation can evolve, but value equality and ordering
 rules must be pinned down early because indexes and queries depend on them.
@@ -119,7 +119,13 @@ The engine supports:
 
 Supported value types are `:db.type/string`, `:db.type/long`,
 `:db.type/boolean`, `:db.type/ref`, `:db.type/keyword`,
-`:db.type/symbol`, `:db.type/tuple`, and `:db.type/uuid`.
+`:db.type/symbol`, `:db.type/tuple`, `:db.type/uuid`, and
+`:db.type/instant`.
+
+Instant values are stored as UTC Unix milliseconds, ordered chronologically in
+Vev indexes, and represented as EDN `#inst` values at text boundaries. Every
+successful transaction automatically records one on its transaction entity as
+`:db/txInstant`.
 
 ## Tempids
 

@@ -45,7 +45,32 @@ the transaction.
 
 ## Reified transactions
 
-Every successful transaction should have a transaction identity.
+Every successful transaction has a transaction identity and an automatic
+wall-clock instant:
+
+```clojure
+[:find ?instant .
+ :in $ ?tx
+ :where [?tx :db/txInstant ?instant]]
+```
+
+The transaction entity, the datoms' `tx` field, and the transaction report's
+`tx` field use the same entity id. Vev adds exactly one
+`[tx :db/txInstant instant]` datom to every successful transaction, including
+in-memory transactions, durable transactions, `with`, and transactions
+produced by transaction functions. The fact remains available through normal
+queries, immutable snapshots, history, and durable reopen.
+
+Instants are millisecond UTC values and use EDN `#inst` syntax at text
+boundaries. They are returned as native instant/date values by host bindings.
+An import may explicitly set `:db/txInstant` on `"datomic.tx"` or
+`:db/current-tx`. As in Datomic, an explicit value may not be newer than the
+current wall clock or older than an existing transaction instant.
+
+Transaction instants describe when facts were committed. Applications should
+query them through transaction history instead of adding mechanically updated
+`created-at` and `updated-at` attributes to every entity. Domain timestamps
+remain appropriate when they describe a distinct business event.
 
 Conceptually, each datom is associated with:
 
@@ -172,6 +197,9 @@ name the current transaction entity and resolve to the report `tx` id, not to
 a newly allocated entity id. Facts targeting that entity are written as datoms
 and are also mirrored into `tx-meta` for convenient transaction report
 inspection.
+
+The automatic `:db/txInstant` value is also present in `tx-meta`, alongside
+caller-supplied transaction metadata.
 
 In the embedded single-process case, this is usually enough:
 

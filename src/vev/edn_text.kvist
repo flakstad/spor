@@ -3533,6 +3533,10 @@
       .Symbol (return (value-symbol (string-owned node.text)) true "")
       .Keyword (return (value-keyword (string-owned node.text)) true "")
       .Uuid (return (value-uuid (string-owned node.text)) true "")
+      .Instant (let [[instant instant-ok] (instant-from-text node.text)]
+                 (if instant-ok
+                   (return instant true "")
+                   (return (Value {}) false "invalid #inst value")))
       .Vector (let [items (make [dynamic]Value) :defer]
                 (for [child (edn-children doc node-index)]
                   (let [[item item-ok item-error] (edn-value-from-node doc child)]
@@ -3614,6 +3618,8 @@
     .Symbol (string-owned value.text)
     .Uuid (let [escaped (edn-escaped-string-text value.text) :defer]
             (strings.concatenate ([]string ["#uuid " escaped])))
+    .Instant (let [escaped (edn-escaped-string-text (instant-text value.int-value)) :defer]
+               (strings.concatenate ([]string ["#inst " escaped])))
     .Entity (string-owned (fmt.tprintf "[:vev/entity %d]" value.entity))
     .Vector
       (let [parts (make [dynamic]string) :defer
@@ -3737,6 +3743,10 @@
       .Keyword (return (value-keyword node.text) true "")
       .Symbol (return (value-symbol node.text) true "")
       .Uuid (return (value-uuid node.text) true "")
+      .Instant (let [[instant instant-ok] (instant-from-text node.text)]
+                 (if instant-ok
+                   (return instant true "")
+                   (return (Value {}) false "invalid serialized instant")))
       .Vector (let [items (make [dynamic]Value) :defer]
                 (for [child (edn-children doc node-index)]
                   (let [[item item-ok item-error] (serial-value-from-edn-node doc child)]

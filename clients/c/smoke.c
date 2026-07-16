@@ -276,6 +276,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     vev_tx_builder_t bulk_a = NULL;
     vev_tx_builder_t bulk_b = NULL;
     vev_u64_array_t tx_ids = NULL;
+    unsigned long long first_basis = 0;
     vev_prepared_query_t source_column_query = NULL;
     vev_column_batch_t source_column_batch = NULL;
     vev_string_array_t source_string_column = NULL;
@@ -331,7 +332,8 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     }
     vev_tx_report_free(report);
     report = NULL;
-    if (vev_connection_basis_t(durable) != 1) {
+    first_basis = vev_connection_basis_t(durable);
+    if (first_basis == 0) {
         fprintf(stderr, "unexpected durable basis after first tx\n");
         goto cleanup;
     }
@@ -339,7 +341,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
         fprintf(stderr, "unexpected durable tx count after first tx\n");
         goto cleanup;
     }
-    unsigned long long first_tx_ids[] = {1};
+    unsigned long long first_tx_ids[] = {first_basis};
     tx_ids = vev_connection_tx_ids(durable);
     if (!expect_u64_array("first-tx-ids", tx_ids, first_tx_ids, 1)) {
         goto cleanup;
@@ -369,7 +371,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
         vev_string_free(error);
         goto cleanup;
     }
-    if (vev_connection_basis_t(durable) != 1) {
+    if (vev_connection_basis_t(durable) != first_basis) {
         fprintf(stderr, "unexpected reopened durable basis\n");
         goto cleanup;
     }
@@ -445,7 +447,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     }
     vev_tx_report_free(report);
     report = NULL;
-    if (vev_connection_basis_t(durable) != 4) {
+    if (vev_connection_basis_t(durable) != first_basis + 3) {
         fprintf(stderr, "unexpected durable basis after second tx\n");
         goto cleanup;
     }
@@ -453,7 +455,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
         fprintf(stderr, "unexpected durable tx count after second tx\n");
         goto cleanup;
     }
-    unsigned long long four_tx_ids[] = {1, 2, 3, 4};
+    unsigned long long four_tx_ids[] = {first_basis, first_basis + 1, first_basis + 2, first_basis + 3};
     tx_ids = vev_connection_tx_ids(durable);
     if (!expect_u64_array("second-tx-ids", tx_ids, four_tx_ids, 4)) {
         goto cleanup;
@@ -470,7 +472,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
         vev_string_free(error);
         goto cleanup;
     }
-    if (vev_connection_basis_t(durable) != 4) {
+    if (vev_connection_basis_t(durable) != first_basis + 3) {
         fprintf(stderr, "unexpected final reopened durable basis\n");
         goto cleanup;
     }
@@ -566,7 +568,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     report = NULL;
     vev_tx_free(builder);
     builder = NULL;
-    if (vev_connection_basis_t(durable) != 5) {
+    if (vev_connection_basis_t(durable) != first_basis + 4) {
         fprintf(stderr, "unexpected durable basis after typed builder tx\n");
         goto cleanup;
     }
@@ -607,7 +609,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     bulk_a = NULL;
     vev_tx_free(bulk_b);
     bulk_b = NULL;
-    if (vev_connection_basis_t(durable) != 6) {
+    if (vev_connection_basis_t(durable) != first_basis + 5) {
         fprintf(stderr, "unexpected durable basis after bulk typed builder tx\n");
         goto cleanup;
     }
@@ -683,7 +685,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     }
     vev_tx_report_array_free(reports);
     reports = NULL;
-    if (vev_connection_basis_t(durable) != 8) {
+    if (vev_connection_basis_t(durable) != first_basis + 7) {
         fprintf(stderr, "unexpected durable basis after logical group commit\n");
         goto cleanup;
     }
@@ -703,7 +705,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     }
     vev_tx_report_array_free(reports);
     reports = NULL;
-    if (vev_connection_basis_t(durable) != 10) {
+    if (vev_connection_basis_t(durable) != first_basis + 9) {
         fprintf(stderr, "unexpected durable basis after EDN logical group commit\n");
         goto cleanup;
     }
@@ -724,7 +726,7 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     }
     vev_tx_report_array_free(reports);
     reports = NULL;
-    if (vev_connection_basis_t(durable) != 10) {
+    if (vev_connection_basis_t(durable) != first_basis + 9) {
         fprintf(stderr, "malformed EDN logical group advanced durable basis\n");
         goto cleanup;
     }

@@ -8,6 +8,7 @@ import os
 import pathlib
 import sys
 import uuid
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +24,7 @@ VEV_VALUE_SYMBOL = 7
 VEV_VALUE_VECTOR = 8
 VEV_VALUE_MAP = 9
 VEV_VALUE_UUID = 10
+VEV_VALUE_INSTANT = 12
 
 VEV_RESULT_VISIT_ROW_BEGIN = 1
 VEV_RESULT_VISIT_VALUE = 2
@@ -49,6 +51,7 @@ VEV_COLUMN_VALUE = 7
 VEV_COLUMN_KEYWORD = 8
 VEV_COLUMN_SYMBOL = 9
 VEV_COLUMN_UUID = 10
+VEV_COLUMN_INSTANT = 11
 
 RESULT_VISIT_FN = ctypes.CFUNCTYPE(
     ctypes.c_bool,
@@ -843,6 +846,10 @@ class Library:
             return self.owned_text(self.lib.vev_value_text(value))
         if kind == VEV_VALUE_UUID:
             return uuid.UUID(self.owned_text(self.lib.vev_value_text(value)))
+        if kind == VEV_VALUE_INSTANT:
+            return datetime.fromtimestamp(
+                self.lib.vev_value_int(value) / 1000, tz=timezone.utc
+            )
         if kind == VEV_VALUE_VECTOR:
             return [
                 self.value_to_python(self.lib.vev_value_item(value, index))
@@ -980,6 +987,8 @@ class Library:
                 out.append(Symbol(strings[index]))
             elif kind == VEV_VALUE_UUID:
                 out.append(uuid.UUID(strings[index]))
+            elif kind == VEV_VALUE_INSTANT:
+                out.append(datetime.fromtimestamp(ints[index] / 1000, tz=timezone.utc))
             else:
                 out.append(strings[index])
         return out
@@ -1040,6 +1049,19 @@ class Library:
                             ),
                             count,
                         )
+                    )
+                elif kind == VEV_COLUMN_INSTANT:
+                    kinds.append(kind)
+                    columns.append(
+                        [
+                            datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+                            for value in self._int_column(
+                                self.lib.vev_column_batch_column_ints_data(
+                                    handle, column
+                                ),
+                                count,
+                            )
+                        ]
                     )
                 elif kind == VEV_COLUMN_BOOL:
                     kinds.append(kind)

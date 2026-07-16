@@ -12604,6 +12604,41 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn source-overlay-ops-from-resolved [source: DB-Read-Source, resolved: Resolved-Tx] -> [ops: [dynamic]Tx-Op, ok: bool, error: string]
   (source-overlay-ops-from-ops source (slice resolved.ops 0)))
 
+(defn finalize-source-transaction-instant! [source: DB-Read-Source, ops: ^[dynamic]Tx-Op, tx-meta: ^[dynamic]Tx-Meta, tx: u64] -> [ok: bool, error: string]
+  (let [clock-instant (current-instant)
+        tx-instant clock-instant
+        has-explicit false]
+    (for [op ops^]
+      (when (and (= op.e tx) (= op.a ":db/txInstant"))
+        (when (or has-explicit
+                  (not (= op.kind .Add))
+                  (not (= op.v.kind .Instant)))
+          (return false "invalid explicit :db/txInstant"))
+        (set! has-explicit true)
+        (set! tx-instant op.v)))
+    (when has-explicit
+      (when (> tx-instant.int-value clock-instant.int-value)
+        (return false ":db/txInstant cannot be newer than the wall clock"))
+      (let [[prior prior-ok prior-error] (db-read-source-datoms-by-attr source ":db/txInstant")]
+        (when (not prior-ok)
+          (return false prior-error))
+        (defer (delete-owned-datoms prior))
+        (for [datom prior]
+          (when (and datom.added
+                     (= datom.e datom.tx)
+                     (= datom.v.kind .Instant)
+                     (< tx-instant.int-value datom.v.int-value))
+            (return false ":db/txInstant must be monotonic")))))
+    (when (not has-explicit)
+      (arr.push! ops^ (tx-add tx ":db/txInstant" tx-instant)))
+    (let [has-meta false]
+      (for [meta tx-meta^]
+        (when (= meta.a ":db/txInstant")
+          (set! has-meta true)))
+      (when (not has-meta)
+        (arr.push! tx-meta^ (Tx-Meta {a: ":db/txInstant" v: tx-instant}))))
+    (return true "")))
+
 (defn source-overlay-ops-all-new-entity-adds? [next-entity-id: u64, ops: []Tx-Op] -> bool
   (for [op ops]
     (when (or (not (= op.kind .Add))
@@ -12665,6 +12700,11 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (delete-resolved-tx resolved)
         (delete-shared-write-state-metadata state)
         (return (Store-DB {}) false true ""))
+      (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state.conn.next-tx)]
+        (when (not instant-ok)
+          (delete-resolved-tx resolved)
+          (delete-shared-write-state-metadata state)
+          (return (Store-DB {}) false false instant-error)))
       (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved source resolved)]
         (when (not overlay-ok)
           (delete-resolved-tx resolved)
@@ -12741,6 +12781,11 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
           (return (Store-DB {}) false true ""))
+        (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state.conn.next-tx)]
+          (when (not instant-ok)
+            (delete-resolved-tx resolved)
+            (delete-shared-write-state-metadata state)
+            (return (Store-DB {}) false false instant-error)))
         (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved source resolved)]
           (when (not overlay-ok)
             (delete-resolved-tx resolved)
@@ -13073,6 +13118,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
             (delete-resolved-tx resolved)
             (close-store-db owned-before)
             (return failed true true "")))
+        (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state^.conn.next-tx)]
+          (when (not instant-ok)
+            (let [failed (failed-store-tx-report owned-before instant-error)]
+              (delete-resolved-tx resolved)
+              (close-store-db owned-before)
+              (return failed true true ""))))
         (let [overlay-start (time.now)
               [overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved-for-direct-write-cached store source resolved state^.next-entity-id)]
           (set! store^.direct-write-profile.overlay-us (+ store^.direct-write-profile.overlay-us (sqlite-profile-elapsed-us overlay-start)))
@@ -13222,6 +13273,11 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
           (return (Store-Tx-Report {}) false false error)))
+      (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state.conn.next-tx)]
+        (when (not instant-ok)
+          (delete-resolved-tx resolved)
+          (delete-shared-write-state-metadata state)
+          (return (Store-Tx-Report {}) false false instant-error)))
       (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved source resolved)]
         (when (not overlay-ok)
           (delete-resolved-tx resolved)
@@ -13246,6 +13302,11 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
             (delete-resolved-tx resolved)
             (delete-shared-write-state-metadata state)
             (return (Store-Tx-Report {}) false false error)))
+        (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state.conn.next-tx)]
+          (when (not instant-ok)
+            (delete-resolved-tx resolved)
+            (delete-shared-write-state-metadata state)
+            (return (Store-Tx-Report {}) false false instant-error)))
         (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved source resolved)]
           (when (not overlay-ok)
             (delete-resolved-tx resolved)
@@ -13300,6 +13361,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (when (not tail-ok)
         (return (failed-store-source-registered-tx snapshot^ ops tx-meta tempids segment tail-error))))
     (delete segment)
+    (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr ops) (addr tx-meta) tx)]
+      (when (not instant-ok)
+        (delete ops)
+        (delete tx-meta)
+        (delete tempids)
+        (return (failed-store-tx-report snapshot^ instant-error))))
     (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-ops source (slice ops 0))]
       (when (not overlay-ok)
         (delete ops)

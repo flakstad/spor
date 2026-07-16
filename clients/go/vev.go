@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 	"unsafe"
 )
 
@@ -885,6 +886,8 @@ func valueFromC(value C.vev_value_t) Value {
 		return Symbol(ownedString(C.vev_value_text(value)))
 	case C.VEV_VALUE_UUID:
 		return UUID(ownedString(C.vev_value_text(value)))
+	case C.VEV_VALUE_INSTANT:
+		return time.UnixMilli(int64(C.vev_value_int(value))).UTC()
 	case C.VEV_VALUE_VECTOR:
 		count := int(C.vev_value_item_count(value))
 		out := make([]Value, 0, count)
@@ -1511,7 +1514,8 @@ func Smoke() {
 		panic(err)
 	}
 	report.Close()
-	if durable.BasisT() != 1 || durable.TxCount() != 1 {
+	firstBasis := durable.BasisT()
+	if firstBasis == 0 || durable.TxCount() != 1 {
 		panic("unexpected durable metadata after transact")
 	}
 	bulkA, err := NewTxBuilder(3)
@@ -1544,7 +1548,7 @@ func Smoke() {
 	bulkReport.Close()
 	bulkOK, _ := mapGet(bulkValue, ":ok")
 	mustEqual("durable bulk ok", bulkOK, true)
-	if durable.BasisT() != 2 || durable.TxCount() != 2 {
+	if durable.BasisT() != firstBasis+1 || durable.TxCount() != 2 {
 		panic("unexpected durable metadata after bulk transact")
 	}
 	logicalA, err := NewTxBuilder(2)
@@ -1604,7 +1608,7 @@ func Smoke() {
 		ok, _ := mapGet(value, ":ok")
 		mustEqual("EDN logical group ok", ok, true)
 	}
-	if durable.BasisT() != 6 || durable.TxCount() != 6 {
+	if durable.BasisT() != firstBasis+5 || durable.TxCount() != 6 {
 		panic("unexpected durable metadata after logical transact")
 	}
 	durableDB, err := durable.DB()
@@ -1617,7 +1621,7 @@ func Smoke() {
 		panic(err)
 	}
 	defer reopened.Close()
-	if reopened.BasisT() != 6 || reopened.TxCount() != 6 {
+	if reopened.BasisT() != firstBasis+5 || reopened.TxCount() != 6 {
 		panic("unexpected reopened durable metadata")
 	}
 	reopenedDB, err := reopened.DB()

@@ -304,6 +304,7 @@ public final class Smoke {
 
             Path sqlitePath = Path.of("tmp.vev.java.sqlite");
             deleteSqliteFiles(sqlitePath);
+            long firstDurableBasis = 0;
             try {
                 try (Vev.DurableConnection durable = vev.connect(sqlitePath)) {
                     if (!"sqlite".equals(durable.backend()) || !sqlitePath.toString().equals(durable.path())) {
@@ -332,13 +333,14 @@ public final class Smoke {
                             throw new IllegalStateException("unexpected SQLite transaction report");
                         }
                     }
-                    if (durable.basisT() != 1) {
+                    firstDurableBasis = durable.basisT();
+                    if (firstDurableBasis == 0) {
                         throw new IllegalStateException("unexpected durable basis after first tx");
                     }
                     if (durable.txCount() != 1) {
                         throw new IllegalStateException("unexpected durable tx count after first tx");
                     }
-                    if (!Arrays.equals(durable.txIds(), new long[]{1})) {
+                    if (!Arrays.equals(durable.txIds(), new long[]{firstDurableBasis})) {
                         throw new IllegalStateException("unexpected durable tx ids after first tx");
                     }
                     try (Vev.TxBuilder bulkA = vev.txBuilder(1);
@@ -352,13 +354,13 @@ public final class Smoke {
                             }
                         }
                     }
-                    if (durable.basisT() != 2) {
+                    if (durable.basisT() != firstDurableBasis + 1) {
                         throw new IllegalStateException("unexpected durable basis after bulk builder tx");
                     }
                     if (durable.txCount() != 2) {
                         throw new IllegalStateException("unexpected durable tx count after bulk builder tx");
                     }
-                    if (!Arrays.equals(durable.txIds(), new long[]{1, 2})) {
+                    if (!Arrays.equals(durable.txIds(), new long[]{firstDurableBasis, firstDurableBasis + 1})) {
                         throw new IllegalStateException("unexpected durable tx ids after bulk builder tx");
                     }
                     try (Vev.TxBuilder logicalA = vev.txBuilder(1);
@@ -397,13 +399,13 @@ public final class Smoke {
                             }
                         }
                     }
-                    if (durable.basisT() != 6) {
+                    if (durable.basisT() != firstDurableBasis + 5) {
                         throw new IllegalStateException("unexpected durable basis after logical group tx");
                     }
                     if (durable.txCount() != 6) {
                         throw new IllegalStateException("unexpected durable tx count after logical group tx");
                     }
-                    if (!Arrays.equals(durable.txIds(), new long[]{1, 2, 3, 4, 5, 6})) {
+                    if (!Arrays.equals(durable.txIds(), new long[]{firstDurableBasis, firstDurableBasis + 1, firstDurableBasis + 2, firstDurableBasis + 3, firstDurableBasis + 4, firstDurableBasis + 5})) {
                         throw new IllegalStateException("unexpected durable tx ids after logical group tx");
                     }
                     if (!durable.compactIndexes()) {
@@ -423,13 +425,13 @@ public final class Smoke {
                      Vev.PreparedQuery durableQuery = vev.prepare("[:find ?e ?email :where [?e :user/email ?email]]");
                      Vev.DB durableDb = durable.db();
                      Vev.ResultSet rows = durableDb.query(durableQuery, "[]")) {
-                    if (durable.basisT() != 6) {
+                    if (durable.basisT() != firstDurableBasis + 5) {
                         throw new IllegalStateException("unexpected reopened durable basis");
                     }
                     if (durable.txCount() != 6) {
                         throw new IllegalStateException("unexpected reopened durable tx count");
                     }
-                    if (!Arrays.equals(durable.txIds(), new long[]{1, 2, 3, 4, 5, 6})) {
+                    if (!Arrays.equals(durable.txIds(), new long[]{firstDurableBasis, firstDurableBasis + 1, firstDurableBasis + 2, firstDurableBasis + 3, firstDurableBasis + 4, firstDurableBasis + 5})) {
                         throw new IllegalStateException("unexpected reopened durable tx ids");
                     }
                     System.out.println("sqlite-reopened rows: " + rows.rowCount());

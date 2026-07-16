@@ -152,7 +152,8 @@ try {
     throw new Error("unexpected durable metadata");
   }
   durable.transact(`[{:db/id 1 :user/name "Durable Ada" :user/email "durable-ada@example.com"}]`);
-  if (durable.basisT() !== 1 || durable.txCount() !== 1) {
+  const firstBasis = durable.basisT();
+  if (firstBasis === 0 || durable.txCount() !== 1) {
     throw new Error("unexpected durable metadata after transact");
   }
   const durableQuery = conn.prepare(`[:find ?e ?email :in $ ?needle :where [?e :user/email ?email] [(= ?email ?needle)]]`);

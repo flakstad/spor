@@ -63,6 +63,7 @@
     .Keyword (kdata.from-keyword value.text)
     .Symbol (kdata.from-symbol value.text)
     .Uuid (kdata.tagged "uuid" (kdata.from-string value.text))
+    .Instant (kdata.tagged "inst" (kdata.from-string (instant-text value.int-value)))
     .Vector
       (let [items (make [dynamic]Data) :defer-with delete-data-items]
         (for [item value.items]
@@ -198,6 +199,11 @@
        (= (data.tag value) "uuid")
        (data.string? (data.tagged-value value))))
 
+(defn data-edn-instant? [value: Data] -> bool
+  (and (data.tagged? value)
+       (= (data.tag value) "inst")
+       (data.string? (data.tagged-value value))))
+
 (defn data-edn-kind [value: Data] -> EDN-Kind
   (cond
     (data.nil? value) .Nil
@@ -208,6 +214,7 @@
     (data.symbol? value) .Symbol
     (data.keyword? value) .Keyword
     (data-edn-uuid? value) .Uuid
+    (data-edn-instant? value) .Instant
     (data.vector? value) .Vector
     (data.list? value) .List
     (data.map? value) .Map
@@ -222,6 +229,8 @@
                              (data.keyword? value))
                            (data.text value)
                          (data-edn-uuid? value)
+                           (data.string (data.tagged-value value))
+                         (data-edn-instant? value)
                            (data.string (data.tagged-value value))
                          :else ""))]
     (cond

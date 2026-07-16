@@ -14,6 +14,30 @@
       out
       "")))
 
+(defn current-instant [] -> Value
+  (value-instant (/ (time.to-unix-nanoseconds (time.now)) 1000000)))
+
+(defn instant-text [unix-millis: i64] -> string
+  (let [[datetime ok] (time.time-to-datetime (time.unix 0 (* unix-millis 1000000)))]
+    (when (not ok)
+      (return ""))
+    (fmt.tprintf "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ"
+                 datetime.year
+                 datetime.month
+                 datetime.day
+                 datetime.hour
+                 datetime.minute
+                 datetime.second
+                 (/ datetime.nano 1000000))))
+
+(defn instant-from-text [text: string] -> [value: Value, ok: bool]
+  (let [normalized text]
+    (when (= (count text) 10)
+      (set! normalized (fmt.tprintf "%sT00:00:00Z" text)))
+    (let [[parsed consumed] (time.iso8601-to-time-utc normalized)]
+      (return (value-instant (/ (time.to-unix-nanoseconds parsed) 1000000))
+              (= consumed (count normalized))))))
+
 (defn string-clojure-count [text: string] -> int
   (let [out 0
         index 0
@@ -871,6 +895,7 @@
     .Keyword (return .Keyword true)
     .Symbol (return .Symbol true)
     .Uuid (return .Uuid true)
+    .Instant (return .Instant true)
      (return .Nil false)))
 
 (defn relation-column-row-count [column: Relation-Column] -> int
@@ -887,6 +912,7 @@
     .Symbol (count column.texts)
     .Uuid (count column.texts)
     .Mixed (count column.values)
+    .Instant (count column.ints)
      0))
 
 (defn relation-column-append-existing-values! [out: ^[dynamic]Value, column: Relation-Column]
@@ -917,6 +943,9 @@
     .Uuid
       (for [item column.texts]
         (arr.push! out^ (value-uuid item)))
+    .Instant
+      (for [item column.ints]
+        (arr.push! out^ (value-instant item)))
     .Mixed
       (for [item column.values]
         (arr.push! out^ item))
@@ -978,6 +1007,7 @@
       .Keyword (arr.push! column^.texts (string-owned value.text))
       .Symbol (arr.push! column^.texts (string-owned value.text))
       .Uuid (arr.push! column^.texts (string-owned value.text))
+      .Instant (arr.push! column^.ints value.int-value)
       .Mixed (arr.push! column^.values value)
       (do))
     true))
@@ -1180,6 +1210,7 @@
     .Keyword (return (fmt.tprintf "k:%s" column.texts[row]) true)
     .Symbol (return (fmt.tprintf "y:%s" column.texts[row]) true)
     .Uuid (return (fmt.tprintf "u:%s" column.texts[row]) true)
+    .Instant (return (fmt.tprintf "t:%d" column.ints[row]) true)
     .Mixed (primitive-value-dedupe-key column.values[row])
     (return "" false))
   (return "" false))
@@ -1244,6 +1275,7 @@
     .Keyword (return (value-keyword column.texts[row]) true)
     .Symbol (return (value-symbol column.texts[row]) true)
     .Uuid (return (value-uuid column.texts[row]) true)
+    .Instant (return (value-instant column.ints[row]) true)
     .Mixed (return column.values[row] true)
     (return (Value {}) false))
   (return (Value {}) false))
@@ -4195,6 +4227,7 @@
     .String (return value.text true)
     .Keyword (return value.text true)
     .Uuid (return value.text true)
+    .Instant (return (instant-text value.int-value) true)
     .Int (return (fmt.tprintf "%d" value.int-value) true)
     .Float (return (fmt.tprintf "%v" value.float-value) true)
     .Bool (if value.bool-value
@@ -4216,6 +4249,7 @@
     .Keyword (return (fmt.tprintf "k:%s" value.text) true)
     .Symbol (return (fmt.tprintf "y:%s" value.text) true)
     .Uuid (return (fmt.tprintf "u:%s" value.text) true)
+    .Instant (return (fmt.tprintf "t:%d" value.int-value) true)
     .Nil (return "n:" true)
     .Vector
       (let [parts (make [dynamic]string 0 (count value.items))]
@@ -4530,6 +4564,7 @@
     .Keyword (return (= left.texts[left-row] right.texts[right-row]) true)
     .Symbol (return (= left.texts[left-row] right.texts[right-row]) true)
     .Uuid (return (= left.texts[left-row] right.texts[right-row]) true)
+    .Instant (return (= left.ints[left-row] right.ints[right-row]) true)
     (return false false))
   (return false false))
 
@@ -16034,6 +16069,7 @@
     (= schema-type ":db.type/symbol") (= value.kind .Symbol)
     (= schema-type ":db.type/tuple") (= value.kind .Vector)
     (= schema-type ":db.type/uuid") (= value.kind .Uuid)
+    (= schema-type ":db.type/instant") (= value.kind .Instant)
     :else true))
 
 (defn valid-tuple-attrs-value? [db: DB, value: Value] -> bool
@@ -17754,9 +17790,13 @@
 
 (defn db-next-entity-id-fast [db: DB] -> u64
   (let [view (db-index-view db .EAVT)]
-  (when (= (db-index-view-count view) 0)
-    (return 1))
-  (+ db.datoms[(db-index-view-at view (- (db-index-view-count view) 1))].e 1)))
+    (let [position (- (db-index-view-count view) 1)]
+      (while (>= position 0)
+        (let [entity db.datoms[(db-index-view-at view position)].e]
+          (when (< entity tx-partition-base)
+            (return (+ entity 1))))
+        (mut! position -= 1)))
+    1))
 
 (defn append-only-ops-all-new-entities? [db: DB, ops: []Tx-Op] -> bool
   (let [next-e (db-next-entity-id-fast db)]
@@ -17959,8 +17999,20 @@
   (delete-tx-publish-plan result.publish-plan))
 
 (defn tx-report-from-apply-result [before: DB, after: DB, applied: Tx-Apply-Result, tx-meta: []Tx-Meta, tempids: [dynamic]Tempid] -> Tx-Report
-  (let [report-tempids (arr.into [dynamic]Tempid (slice tempids 0))]
+  (let [report-tempids (arr.into [dynamic]Tempid (slice tempids 0))
+        report-meta (clone-tx-meta tx-meta)
+        has-tx-instant false]
     (delete tempids)
+    (for [meta report-meta]
+      (when (= meta.a ":db/txInstant")
+        (set! has-tx-instant true)))
+    (when (not has-tx-instant)
+      (for [datom applied.tx-data]
+        (when (and (= datom.e applied.tx)
+                   (= datom.a ":db/txInstant")
+                   datom.added)
+          (arr.push! report-meta (Tx-Meta {a: ":db/txInstant" v: datom.v}))
+          (break))))
     (let [[_ has-current-tx] (tempid-lookup (slice report-tempids 0) ":db/current-tx")]
       (when (not has-current-tx)
         (arr.push! report-tempids (Tempid {tempid: ":db/current-tx" e: applied.tx}))))
@@ -17970,7 +18022,7 @@
                 error: (string-owned "")
                 tx-data: applied.tx-data
                 tx: applied.tx
-                tx-meta: (clone-tx-meta tx-meta)
+                tx-meta: report-meta
                 tempids: report-tempids
                 datom-start-index: applied.start-index
                 append-only: applied.append-only
@@ -17979,6 +18031,33 @@
 
 (defn apply-resolved-ops-to-datoms [before: DB, ops: []Tx-Op, tx: u64] -> Tx-Apply-Result
   (let [expanded-ops (expand-tuple-ops before ops)
+        clock-instant (current-instant)
+        tx-instant clock-instant
+        has-explicit-tx-instant false]
+    (for [op expanded-ops]
+      (when (and (= op.e tx) (= op.a ":db/txInstant"))
+        (when (or has-explicit-tx-instant
+                  (not (= op.kind .Add))
+                  (not (= op.v.kind .Instant)))
+          (delete expanded-ops)
+          (return (failed-tx-apply-result "invalid explicit :db/txInstant")))
+        (set! has-explicit-tx-instant true)
+        (set! tx-instant op.v)))
+    (when has-explicit-tx-instant
+      (when (> tx-instant.int-value clock-instant.int-value)
+        (delete expanded-ops)
+        (return (failed-tx-apply-result ":db/txInstant cannot be newer than the wall clock")))
+      (for [datom before.datoms]
+        (when (and datom.added
+                   (= datom.e datom.tx)
+                   (= datom.a ":db/txInstant")
+                   (= datom.v.kind .Instant)
+                   (< tx-instant.int-value datom.v.int-value))
+          (delete expanded-ops)
+          (return (failed-tx-apply-result ":db/txInstant must be monotonic")))))
+    (when (not has-explicit-tx-instant)
+      (arr.push! expanded-ops (tx-add tx ":db/txInstant" tx-instant)))
+    (let [
         expanded-schema-changed (ops-modify-validation-schema? (slice expanded-ops 0))
         ordered-append-only-ok (and (not expanded-schema-changed)
                                     (append-only-ordered-new-entity-ops-eligible? before (slice expanded-ops 0)))
@@ -18038,7 +18117,7 @@
                           start-index: start-index
                           append-only: append-only-ok
                           new-entities-after-existing: new-entities-after-existing
-                          publish-plan: publish-plan})))))
+                          publish-plan: publish-plan}))))))
 
 (defn transact-ops-with-tempids-from-before [conn: ^Conn, before: DB, ops: []Tx-Op, tx-meta: []Tx-Meta, tempids: [dynamic]Tempid] -> Tx-Report
   (let [applied (apply-resolved-ops-to-datoms before ops conn^.next-tx)]
@@ -18103,7 +18182,7 @@
     (build-db-with-appended-datoms db out start-index datoms)))
 
 (defn next-tx-after-datoms [current-next-tx: u64, datoms: []Datom] -> u64
-  (let [candidate (+ (max-tx datoms) 1)]
+  (let [candidate (next-transaction-id (max-tx datoms))]
     (if (> candidate current-next-tx)
       candidate
       current-next-tx)))
@@ -18133,7 +18212,7 @@
                   db-before: before
                   db-after: after
                   tx-data: tx-data
-                  tx: (report-tx-for-datoms (+ (max-tx (slice db.datoms 0)) 1) datoms)
+                  tx: (report-tx-for-datoms (next-transaction-id (max-tx (slice db.datoms 0))) datoms)
                   tx-meta: (make [dynamic]Tx-Meta)
                   tempids: (make [dynamic]Tempid)
                   datom-start-index: start-index

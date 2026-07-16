@@ -285,7 +285,8 @@
               (throw (ex-info "unexpected snapshot row counts"
                               {:current current-rows :snapshot snapshot-rows})))))))
 
-    (let [sqlite-path "tmp.vev.clojure.sqlite"]
+    (let [sqlite-path "tmp.vev.clojure.sqlite"
+          first-basis (atom 0)]
       (delete-sqlite-files! sqlite-path)
       (try
         (with-open [durable (vev/connect lib-path sqlite-path)]
@@ -297,11 +298,12 @@
                                    :user/email "durable-ada@example.com"}])]
             (when-not (:ok tx)
               (throw (ex-info "unexpected SQLite transaction report" {:report tx}))))
-          (when (not= 1 (:basis-t (vev/connection-info durable)))
+          (reset! first-basis (:basis-t (vev/connection-info durable)))
+          (when (zero? @first-basis)
             (throw (ex-info "unexpected durable basis after first tx" {})))
           (when (not= 1 (:tx-count (vev/connection-info durable)))
             (throw (ex-info "unexpected durable tx count after first tx" {})))
-          (when (not= [1] (:tx-ids (vev/connection-info durable)))
+          (when (not= [@first-basis] (:tx-ids (vev/connection-info durable)))
             (throw (ex-info "unexpected durable tx ids after first tx" {})))
           (with-open [bulk-a (vev/tx-builder durable 1)
                       bulk-b (vev/tx-builder durable 1)]
@@ -311,11 +313,11 @@
               (when-not (:ok tx)
                 (throw (ex-info "unexpected durable bulk builder report"
                                 {:report tx})))))
-          (when (not= 2 (:basis-t (vev/connection-info durable)))
+          (when (not= (inc @first-basis) (:basis-t (vev/connection-info durable)))
             (throw (ex-info "unexpected durable basis after bulk builder tx" {})))
           (when (not= 2 (:tx-count (vev/connection-info durable)))
             (throw (ex-info "unexpected durable tx count after bulk builder tx" {})))
-          (when (not= [1 2] (:tx-ids (vev/connection-info durable)))
+          (when (not= [@first-basis (inc @first-basis)] (:tx-ids (vev/connection-info durable)))
             (throw (ex-info "unexpected durable tx ids after bulk builder tx" {})))
           (with-open [logical-a (vev/tx-builder durable 1)
                       logical-b (vev/tx-builder durable 1)]
@@ -338,11 +340,11 @@
                            (every? :ok reports))
               (throw (ex-info "unexpected durable logical EDN group reports"
                               {:reports reports}))))
-          (when (not= 6 (:basis-t (vev/connection-info durable)))
+          (when (not= (+ @first-basis 5) (:basis-t (vev/connection-info durable)))
             (throw (ex-info "unexpected durable basis after logical group tx" {})))
           (when (not= 6 (:tx-count (vev/connection-info durable)))
             (throw (ex-info "unexpected durable tx count after logical group tx" {})))
-          (when (not= [1 2 3 4 5 6] (:tx-ids (vev/connection-info durable)))
+          (when (not= (mapv #(+ @first-basis %) (range 6)) (:tx-ids (vev/connection-info durable)))
             (throw (ex-info "unexpected durable tx ids after logical group tx" {})))
           (when-not (vev/compact-indexes! durable)
             (throw (ex-info "durable index compaction failed" {})))
@@ -359,11 +361,11 @@
                     all-emails (vev/prepare durable
                                             '[:find ?e ?email
                                               :where [?e :user/email ?email]])]
-          (when (not= 6 (:basis-t (vev/connection-info durable)))
+          (when (not= (+ @first-basis 5) (:basis-t (vev/connection-info durable)))
             (throw (ex-info "unexpected reopened durable basis" {})))
           (when (not= 6 (:tx-count (vev/connection-info durable)))
             (throw (ex-info "unexpected reopened durable tx count" {})))
-          (when (not= [1 2 3 4 5 6] (:tx-ids (vev/connection-info durable)))
+          (when (not= (mapv #(+ @first-basis %) (range 6)) (:tx-ids (vev/connection-info durable)))
             (throw (ex-info "unexpected reopened durable tx ids" {})))
           (let [rows (vev/q db all-emails)]
             (println "sqlite-reopened rows:" rows)

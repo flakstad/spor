@@ -17,14 +17,20 @@ fn main() -> Result<(), String> {
     )?;
     println!("tx: {}", tx.edn());
     let tx_value = tx.value();
-    let tx_data_count = tx_value
-        .map_get(":tx-data")
-        .and_then(|value| match value {
-            Value::Vector(items) => Some(items.len()),
-            _ => None,
+    let tx_data = tx_value.map_get(":tx-data").and_then(|value| match value {
+        Value::Vector(items) => Some(items),
+        _ => None,
+    });
+    let has_tx_instant = tx_data.is_some_and(|items| {
+        items.iter().any(|datom| {
+            datom.map_get(":a") == Some(&Value::Keyword(":db/txInstant".to_string()))
+                && matches!(datom.map_get(":v"), Some(Value::Instant(_)))
         })
-        .unwrap_or(0);
-    if tx_value.map_get(":ok") != Some(&Value::Bool(true)) || tx_data_count != 4 {
+    });
+    if tx_value.map_get(":ok") != Some(&Value::Bool(true))
+        || tx_data.map_or(0, Vec::len) != 5
+        || !has_tx_instant
+    {
         return Err("unexpected typed transaction report".to_string());
     }
 
@@ -407,7 +413,8 @@ fn main() -> Result<(), String> {
         durable.transact(
             r#"[{:db/id 1 :user/name "Durable Ada" :user/email "durable-ada@example.com"}]"#,
         )?;
-        if durable.basis_t() != 1 {
+        let first_basis = durable.basis_t();
+        if first_basis == 0 {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected durable basis after simple tx".to_string());
         }
@@ -418,7 +425,7 @@ fn main() -> Result<(), String> {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected SQLite transaction report".to_string());
         }
-        if durable.basis_t() != 2 {
+        if durable.basis_t() != first_basis + 1 {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected durable basis after first tx".to_string());
         }
@@ -426,7 +433,7 @@ fn main() -> Result<(), String> {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected durable tx count after first tx".to_string());
         }
-        if durable.tx_ids() != vec![1, 2] {
+        if durable.tx_ids() != vec![first_basis, first_basis + 1] {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected durable tx ids after first tx".to_string());
         }
@@ -441,7 +448,7 @@ fn main() -> Result<(), String> {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected SQLite bulk transaction report".to_string());
         }
-        if durable.basis_t() != 3 {
+        if durable.basis_t() != first_basis + 2 {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected durable basis after bulk tx".to_string());
         }
@@ -449,7 +456,7 @@ fn main() -> Result<(), String> {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected durable tx count after bulk tx".to_string());
         }
-        if durable.tx_ids() != vec![1, 2, 3] {
+        if durable.tx_ids() != vec![first_basis, first_basis + 1, first_basis + 2] {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected durable tx ids after bulk tx".to_string());
         }
@@ -486,7 +493,7 @@ fn main() -> Result<(), String> {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected SQLite logical EDN group transaction reports".to_string());
         }
-        if durable.basis_t() != 7 {
+        if durable.basis_t() != first_basis + 6 {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected durable basis after logical group tx".to_string());
         }
@@ -494,7 +501,11 @@ fn main() -> Result<(), String> {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected durable tx count after logical group tx".to_string());
         }
-        if durable.tx_ids() != vec![1, 2, 3, 4, 5, 6, 7] {
+        if durable.tx_ids()
+            != (0..7)
+                .map(|offset| first_basis + offset)
+                .collect::<Vec<_>>()
+        {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected durable tx ids after logical group tx".to_string());
         }
@@ -515,7 +526,8 @@ fn main() -> Result<(), String> {
     }
     {
         let durable = DurableConn::open(sqlite_path)?;
-        if durable.basis_t() != 7 {
+        let first_basis = durable.tx_ids().first().copied().unwrap_or(0);
+        if first_basis == 0 || durable.basis_t() != first_basis + 6 {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected reopened durable basis".to_string());
         }
@@ -523,7 +535,11 @@ fn main() -> Result<(), String> {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected reopened durable tx count".to_string());
         }
-        if durable.tx_ids() != vec![1, 2, 3, 4, 5, 6, 7] {
+        if durable.tx_ids()
+            != (0..7)
+                .map(|offset| first_basis + offset)
+                .collect::<Vec<_>>()
+        {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected reopened durable tx ids".to_string());
         }

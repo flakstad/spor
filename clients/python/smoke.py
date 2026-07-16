@@ -4,6 +4,7 @@
 
 import pathlib
 import sys
+from datetime import datetime
 
 import vev
 
@@ -26,8 +27,18 @@ def main() -> int:
         ) as tx:
             tx_value = tx.value()
             print(f"tx: {tx.edn()}")
-            if not tx_value.get(":ok") or len(tx_value.get(":tx-data", [])) != 4:
+            tx_data = tx_value.get(":tx-data", [])
+            tx_instants = [
+                datom
+                for datom in tx_data
+                if datom.get(":a") == ":db/txInstant"
+            ]
+            if not tx_value.get(":ok") or len(tx_data) != 5:
                 raise RuntimeError("unexpected typed transaction report")
+            if len(tx_instants) != 1 or not isinstance(
+                tx_instants[0].get(":v"), datetime
+            ):
+                raise RuntimeError("transaction report did not expose a native instant")
 
         conn.transact(
             """
@@ -522,6 +533,7 @@ def main() -> int:
 
     sqlite_path = pathlib.Path("tmp.vev.python.sqlite")
     remove_sqlite_files(sqlite_path)
+    first_durable_basis = 0
     try:
         with vev.connect(sqlite_path) as durable:
             if durable.backend() != "sqlite" or durable.path() != str(sqlite_path):
@@ -544,11 +556,12 @@ def main() -> int:
             ) as report:
                 if not report.value().get(":ok"):
                     raise RuntimeError("unexpected SQLite transaction report")
-            if durable.basis_t() != 1:
+            first_durable_basis = durable.basis_t()
+            if first_durable_basis == 0:
                 raise RuntimeError("unexpected durable basis after first tx")
             if durable.tx_count() != 1:
                 raise RuntimeError("unexpected durable tx count after first tx")
-            if durable.tx_ids() != [1]:
+            if durable.tx_ids() != [first_durable_basis]:
                 raise RuntimeError("unexpected durable tx ids after first tx")
             with vev.tx_builder(1) as bulk_a, vev.tx_builder(1) as bulk_b:
                 bulk_a.add_string(2, ":user/name", "Durable Grace")
@@ -556,11 +569,11 @@ def main() -> int:
                 with durable.transact_bulk([bulk_a, bulk_b]) as report:
                     if not report.value().get(":ok"):
                         raise RuntimeError("unexpected SQLite bulk transaction report")
-            if durable.basis_t() != 2:
+            if durable.basis_t() != first_durable_basis + 1:
                 raise RuntimeError("unexpected durable basis after bulk tx")
             if durable.tx_count() != 2:
                 raise RuntimeError("unexpected durable tx count after bulk tx")
-            if durable.tx_ids() != [1, 2]:
+            if durable.tx_ids() != [first_durable_basis, first_durable_basis + 1]:
                 raise RuntimeError("unexpected durable tx ids after bulk tx")
             with vev.tx_builder(1) as logical_a, vev.tx_builder(1) as logical_b:
                 logical_a.add_string(4, ":user/name", "Durable Ada")
@@ -583,11 +596,11 @@ def main() -> int:
                     raise RuntimeError(
                         "unexpected SQLite logical EDN group transaction reports"
                     )
-            if durable.basis_t() != 6:
+            if durable.basis_t() != first_durable_basis + 5:
                 raise RuntimeError("unexpected durable basis after logical group tx")
             if durable.tx_count() != 6:
                 raise RuntimeError("unexpected durable tx count after logical group tx")
-            if durable.tx_ids() != [1, 2, 3, 4, 5, 6]:
+            if durable.tx_ids() != [first_durable_basis + offset for offset in range(6)]:
                 raise RuntimeError("unexpected durable tx ids after logical group tx")
             with durable.prepare(
                 "[:find ?e ?email :where [?e :user/email ?email]]"
@@ -598,11 +611,11 @@ def main() -> int:
                     raise RuntimeError("unexpected SQLite live row count")
 
         with vev.connect(sqlite_path) as durable:
-            if durable.basis_t() != 6:
+            if durable.basis_t() != first_durable_basis + 5:
                 raise RuntimeError("unexpected reopened durable basis")
             if durable.tx_count() != 6:
                 raise RuntimeError("unexpected reopened durable tx count")
-            if durable.tx_ids() != [1, 2, 3, 4, 5, 6]:
+            if durable.tx_ids() != [first_durable_basis + offset for offset in range(6)]:
                 raise RuntimeError("unexpected reopened durable tx ids")
             with durable.prepare(
                 "[:find ?e ?email :where [?e :user/email ?email]]"

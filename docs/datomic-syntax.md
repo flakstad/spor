@@ -328,6 +328,11 @@ This is the intended split:
 - Datomic-compatible syntax outside
 - native typed structures inside
 
+EDN `#inst` literals are first-class instant values rather than strings. Vev
+also follows Datomic's reified transaction convention: every successful
+transaction automatically asserts `[tx :db/txInstant instant]`, and explicit
+import instants may target `"datomic.tx"` or `:db/current-tx`.
+
 ## First implementation priority
 
 The implementation order should remain:
