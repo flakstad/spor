@@ -784,7 +784,10 @@
 (defn shared-write-state-advance-next-entity-from-datoms! [state: ^Shared-Write-State, datoms: []Datom]
   (let [next state^.next-entity-id]
     (for [datom datoms]
-      (when (>= datom.e next)
+      ;; Transaction entities occupy their own high partition and must never
+      ;; advance the allocator for ordinary entity tempids.
+      (when (and (< datom.e tx-partition-base)
+                 (>= datom.e next))
         (set! next (+ datom.e 1))))
     (set! state^.next-entity-id next)))
 
@@ -1569,6 +1572,7 @@
       (when (and (not data.has-tempid)
                  (not data.has-lookup-ref)
                  (not data.has-ident)
+                 (< data.e tx-partition-base)
                  (>= data.e next))
         (set! next (+ data.e 1))))
     next))

@@ -3659,6 +3659,44 @@
         (vev.delete-store-tx-report report))
       (vev.close-store reopened))))
 
+(t.deftest sqlite-store-keeps-tempids-out-of-transaction-partition-across-transactions
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.tempid-partition.sqlite")
+  (let [path "tmp.vev.tempid-partition.sqlite"
+        [store opened-ok opened-error] (vev.open-store path)
+        first (vev.transact-store-text (addr store) "[{:db/id 1 :bootstrap/value true}]")
+        created (vev.transact-store-report-text (addr store) "[{:db/id \"item\" :item/name \"Ada\"}]")
+        [item-id item-ok] (vev.tempid-lookup (slice created.tempids 0) "item")]
+    (defer (remove-sqlite-files path))
+    (t.is opened-ok)
+    (t.is (= opened-error ""))
+    (t.is first.ok first.error)
+    (t.is created.ok created.error)
+    (t.is item-ok)
+    (t.is (< item-id vev.tx-partition-base))
+    (vev.delete-live-tx-report-shallow first)
+    (vev.delete-store-tx-report created)
+    (vev.close-store store)
+    (let [[reopened reopened-ok reopened-error] (vev.open-store path)
+          replacement-text (fmt.tprintf "[[:db/add %d :item/name \"Ada Lovelace\"]]" item-id)
+          replaced (vev.transact-store-report-text (addr reopened) replacement-text)]
+      (t.is reopened-ok)
+      (t.is (= reopened-error ""))
+      (t.is replaced.ok replaced.error)
+      (delete replacement-text)
+      (vev.delete-store-tx-report replaced)
+      (vev.close-store reopened))
+    (let [[reopened reopened-ok reopened-error] (vev.open-store path)
+          result (vev.q-result-store-text (addr reopened) "[:find ?name :where [?e :item/name ?name]]")]
+      (t.is reopened-ok)
+      (t.is (= reopened-error ""))
+      (t.is result.result.ok result.result.error)
+      (t.is (= (count result.result.rows) 1))
+      (t.is (result-has-string-row? result.result "Ada Lovelace"))
+      (t.is (not (result-has-string-row? result.result "Ada")))
+      (vev.delete-query-result result)
+      (vev.close-store reopened))))
+
 (t.deftest sqlite-store-report-direct-write-supports-retract
   (defer (free_all context.allocator))
   (remove-sqlite-files "tmp.vev.store-report-direct-retract.sqlite")
