@@ -30,15 +30,17 @@ cleanup() {
 trap cleanup EXIT
 
 report_failure() {
-  local status="$?"
-  echo "fresh JVM coordinate smoke failed with status $status" >&2
+  local status="$1"
+  local line="$2"
+  local command="$3"
+  echo "fresh JVM coordinate smoke failed at line $line with status $status: $command" >&2
   if [[ -s "$SERVER_LOG" ]]; then
     echo "temporary Maven repository log:" >&2
     cat "$SERVER_LOG" >&2
   fi
   exit "$status"
 }
-trap report_failure ERR
+trap 'report_failure "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
 command -v openssl >/dev/null 2>&1 || {
   echo "openssl is required for the temporary HTTPS Maven repository" >&2
@@ -108,14 +110,6 @@ if ! kill -0 "$SERVER_PID" 2>/dev/null; then
   echo "temporary Maven HTTPS repository exited before the consumer smoke" >&2
   wait "$SERVER_PID"
 fi
-
-curl \
-  --fail \
-  --silent \
-  --show-error \
-  --cacert "$CERT_FILE" \
-  "https://127.0.0.1:$PORT/dev/vevdb/vev-java/$VERSION/vev-java-$VERSION.pom" \
-  >/dev/null
 
 VEV_MAVEN_REPOSITORY_URL="https://127.0.0.1:$PORT" \
 VEV_MAVEN_CACHE="$TMP_DIR/consumer-m2" \

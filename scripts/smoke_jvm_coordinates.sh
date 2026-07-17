@@ -113,11 +113,16 @@ EOF
   cd "$TMP_DIR/java"
   echo "resolving vev-java from ${REPOSITORY_URL:-$M2_DIR}"
   MAVEN_OPTS="${MAVEN_OPTS:-} $TRUST_OPTIONS" \
-    mvn -Dmaven.repo.local="$M2_DIR" package
+    mvn --batch-mode --no-transfer-progress -Dmaven.repo.local="$M2_DIR" package
+  VEV_CLASSPATH="$(
+    find "$M2_DIR/dev/vevdb" -type f -name "*.jar" -print |
+      sort |
+      paste -sd: -
+  )"
   java \
     --enable-preview \
     --enable-native-access=ALL-UNNAMED \
-    -cp "target/classes:$M2_DIR/dev/vevdb/vev-java/$VERSION/vev-java-$VERSION.jar" \
+    -cp "target/classes:$VEV_CLASSPATH" \
     example.Main
 )
 
