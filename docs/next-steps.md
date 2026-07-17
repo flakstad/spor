@@ -32,7 +32,8 @@ immutable database values.
 - The combined release assembles one `vev-java` jar containing all verified
   platform-native resources. Fresh Java and Clojure consumers are then tested
   with only `dev.vevdb:vev-java` or `dev.vevdb/vev-clj` coordinates; consumers
-  do not select a native artifact or configure a library path.
+  resolve them from a temporary Maven HTTPS repository and do not select a
+  native artifact or configure a library path.
 - A clean emulated Linux x86-64 run builds `libvev.so` and passes the C,
   Java/Clojure, Python, Node, Go, Rust, and Odin package smokes. The isolated
   Kvist package smoke reaches its Odin build but exceeds the local Docker VM's
@@ -92,10 +93,10 @@ machine-local package path.
    package-only host smoke passes and the combined manifest is produced.
    Generated Odin must be identical; native bytes need not be identical across
    operating systems.
-2. Publish the verified combined `vev-java` and `vev-clj` artifacts to a
-   temporary remote Maven repository and repeat the fresh Java and Clojure
-   coordinate smokes without `:mvn/local-repo`. The local staged-repository
-   proof is part of the combined release workflow.
+2. Publish the verified combined `vev-java` and `vev-clj` artifacts to the
+   selected public Maven repository. The combined release already verifies
+   clean consumer caches against a temporary Maven HTTPS repository, without
+   repository-local classpaths, native paths, or `:mvn/local-repo`.
 3. Add the successful release workflow as a required branch/release check.
    Stop advertising any host whose package smoke does not pass on both
    applicable runners.

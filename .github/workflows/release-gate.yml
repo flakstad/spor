@@ -158,7 +158,7 @@ jobs:
             --jvm-dir dist/jvm
 
       - name: Smoke fresh JVM coordinate consumers
-        run: scripts/smoke_jvm_coordinates.sh "$(cat VERSION)" dist/m2
+        run: scripts/smoke_jvm_remote_coordinates.sh "$(cat VERSION)" dist/m2
 
       - name: Upload combined release
         uses: actions/upload-artifact@v4

@@ -61,6 +61,11 @@ install_artifact() {
   mkdir -p "$artifact_dir"
   cp "$OUT_DIR/$artifact-$VERSION.jar" "$artifact_dir/"
   cp "$OUT_DIR/$artifact-$VERSION.pom" "$artifact_dir/"
+  for file in \
+    "$artifact_dir/$artifact-$VERSION.jar" \
+    "$artifact_dir/$artifact-$VERSION.pom"; do
+    shasum -a 1 "$file" | awk '{print $1}' > "$file.sha1"
+  done
 }
 
 first_java=""
