@@ -17,13 +17,13 @@ immutable database values.
 - Kvist queries, rules, pull patterns, transaction data, and inputs are quoted
   immutable `Data`. Clojure uses the corresponding Datomic-style forms.
 - EDN text remains the portable C ABI representation.
-- The main engine suite passes 377 of 377 tests. Parser inputs pass 5 of 5 and
-  the resident/durable MusicBrainz mini suite passes 2 of 2.
+- The installed Kvist compiler passes all 379 Vev tests, including parser
+  inputs and the resident/durable MusicBrainz mini suite.
 - The macOS arm64 release build produces checksummed native, JVM, and source
-  artifacts and passes extracted C plus staged Java/Clojure package smokes.
-- Local package-only smokes pass for C, Java/Clojure, Python, Node, Go, Rust,
-  and Odin. The development native layout now stages `include`, `lib`, and
-  relocatable pkg-config metadata with the same structure as release bundles.
+  artifacts. Its release command enforces extracted-native and package-only
+  smokes for C, Java/Clojure, Python, Node, Go, Rust, Odin, and Kvist.
+- The development native layout stages `include`, `lib`, and relocatable
+  pkg-config metadata with the same structure as release bundles.
 
 The real 1968-1973 MusicBrainz sample currently validates the complete paired
 Clojure and Kvist workshop. The setup uses pinned upstream sources rather than
@@ -43,12 +43,11 @@ all migrations or rewrites the FTS index: a marked 763,299-datom store opens in
 about 12 ms instead of about 10.2 seconds. An older unmarked store pays the
 migration once and is marked for later opens.
 
-Kvist's `kvist:edn` reader now builds parsed vectors, lists, sets, and maps with
+Kvist's `kvist:edn` reader builds parsed vectors, lists, sets, and maps with
 linear mutable builders followed by one immutable freeze. A 100,000-form,
 5.1 MB MusicBrainz transaction chunk parses in about 0.4 seconds rather than
-following the former quadratic append path. This compiler/runtime change is on
-the isolated Kvist branch as commit `326b8869` and must land before Vev's
-installed-toolchain release gate is final.
+following the former quadratic append path. This work is on Kvist main and is
+verified through the installed `kvist` binary.
 
 Vev vendors the optional official `kvist:cli` package under `deps/cli`, pinned
 to its upstream revision, so repository builds do not depend on an undeclared
@@ -68,16 +67,14 @@ machine-local package path.
 
 ## Remaining Work
 
-1. Land Kvist commit `326b8869`, rebuild the installed `kvist` binary, and run
-   all Vev gates with that installed binary rather than a worktree compiler.
-2. Run the release gate on Linux x86-64 and add the native artifact to the
-   release manifest. Generated Odin must be identical; native bytes need not be
-   identical across operating systems.
-3. Stage or publish the platform-native artifact, then the Java and Clojure
+1. Run the same release gate on Linux x86-64 and combine its native artifact
+   with the macOS arm64 artifact manifest. Generated Odin must be identical;
+   native bytes need not be identical across operating systems.
+2. Stage or publish the platform-native artifacts, then the Java and Clojure
    artifacts that depend on it. Verify fresh Maven and Clojure projects using
    coordinates only, with no repository-local classpath or library path.
-4. Move the current package-only host smokes into the release workflow on every
-   supported platform, and stop advertising any host that does not pass there.
+3. Add automated macOS arm64 and Linux x86-64 release runners. Stop advertising
+   any host whose package smoke does not pass on both applicable runners.
 
 Parser diagnostic exactness, additional DataScript edge cases, and specialized
 query optimizations continue after this release gate. They are not allowed to
@@ -88,7 +85,7 @@ expose correctness or safety failures.
 
 This gate is complete when:
 
-- the installed Kvist compiler passes the 377-test engine suite, parser-input
+- the installed Kvist compiler passes the 379-test engine suite, parser-input
   suite, and MusicBrainz mini suite
 - a clean MusicBrainz setup completes both Clojure and Kvist workshops
 - contact-book examples pass through the canonical application API
@@ -106,5 +103,4 @@ kvist test src/vev_tests/musicbrainz_test.kvist
 
 scripts/musicbrainz_workshop_setup.sh --from-datomic --validate
 scripts/build_release.sh
-scripts/smoke_packages.sh
 ```

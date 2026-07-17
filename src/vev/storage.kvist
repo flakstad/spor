@@ -13839,14 +13839,16 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (when (source-backed-store-db? snapshot)
     (return (failed-store-tx-report snapshot^ "unsupported source-backed transaction shape")))
   (let [resident-report (with-store-db-tx-data snapshot tx-data)
-        before (Store-DB {kind: .Resident resident: (clone-db resident-report.db-before)})
-        after (Store-DB {kind: .Resident resident: (clone-db resident-report.db-after)})
+        before (Store-DB {kind: .Resident
+                          resident: (build-db (clone-owned-datom-slice (slice resident-report.db-before.datoms 0)))})
+        after (Store-DB {kind: .Resident
+                         resident: (build-db (clone-owned-datom-slice (slice resident-report.db-after.datoms 0)))})
         tempids (arr.into [dynamic]Tempid (slice resident-report.tempids 0))
         report (Store-Tx-Report {ok: resident-report.ok
-                                 error: resident-report.error
+                                 error: (string-owned resident-report.error)
                                  db-before: before
                                  db-after: after
-                                 tx-data: (clone-datoms resident-report.tx-data)
+                                 tx-data: (clone-owned-datom-slice (slice resident-report.tx-data 0))
                                  tx: resident-report.tx
                                  tx-meta: (clone-tx-meta (slice resident-report.tx-meta 0))
                                  tempids: tempids

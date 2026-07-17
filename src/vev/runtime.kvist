@@ -845,11 +845,13 @@
 
 (defn clone-relation-column [column: Relation-Column] -> Relation-Column
   (let [entities (arr.into [dynamic]u64 (slice column.entities 0))
-        texts (arr.into [dynamic]string (slice column.texts 0))
+        texts (make [dynamic]string 0 (count column.texts))
         ints (arr.into [dynamic]i64 (slice column.ints 0))
         floats (arr.into [dynamic]f64 (slice column.floats 0))
         bools (arr.into [dynamic]bool (slice column.bools 0))
         values (make [dynamic]Value 0 (count column.values))]
+    (for [text column.texts]
+      (arr.push! texts (string-owned text)))
     (if (= column.kind .Mixed)
       (for [value column.values]
         (arr.push! values (value-owned value)))
@@ -2414,7 +2416,10 @@
         (when (not value-ok)
           (return "" false))
         (arr.push! dedupe-values value)))
-    (row-values-dedupe-key (slice dedupe-values 0))))
+    (let [[dedupe-key key-ok] (row-values-dedupe-key (slice dedupe-values 0))]
+      (if key-ok
+        (return (string-owned dedupe-key) true)
+        (return "" false)))))
 
 (defn resolved-typed-flat-materialization-row-visible? [rel: Query-Relation, resolved: Resolved-Typed-Flat-Materialization, row: int, seen: (ptr (map string (struct {})))] -> [visible: bool, ok: bool]
   (when resolved.trust-unique-bindings

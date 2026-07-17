@@ -345,6 +345,11 @@ vev_result_t vev_query_prepared_result_with_inputs(
     vev_conn_t conn,
     vev_prepared_query_t query,
     const char *inputs_text);
+vev_result_t vev_query_prepared_result_with_rules_text_and_inputs(
+    vev_conn_t conn,
+    vev_prepared_query_t query,
+    const char *rules_text,
+    const char *inputs_text);
 const char *vev_query_db_prepared_with_inputs(
     vev_db_t db,
     vev_prepared_query_t query,
@@ -352,6 +357,11 @@ const char *vev_query_db_prepared_with_inputs(
 vev_result_t vev_query_db_prepared_result_with_inputs(
     vev_db_t db,
     vev_prepared_query_t query,
+    const char *inputs_text);
+vev_result_t vev_query_db_prepared_result_with_rules_text_and_inputs(
+    vev_db_t db,
+    vev_prepared_query_t query,
+    const char *rules_text,
     const char *inputs_text);
 vev_u64_array_t vev_query_db_prepared_entity_column_with_inputs(
     vev_db_t db,

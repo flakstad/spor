@@ -1069,6 +1069,58 @@ int main(void) {
     }
     vev_result_free(result);
 
+    vev_prepared_query_t rules_query =
+        vev_prepare_query_edn("[:find ?name :in $ % :where (named ?e ?name)]");
+    vev_db_t rules_db = vev_conn_db(conn);
+    if (rules_query == NULL ||
+        !vev_prepared_query_ok(rules_query) ||
+        rules_db == NULL) {
+        fprintf(stderr, "failed to prepare snapshot rules query\n");
+        if (rules_query != NULL) {
+            vev_prepared_query_free(rules_query);
+        }
+        if (rules_db != NULL) {
+            vev_db_release(rules_db);
+        }
+        vev_prepared_query_free(query);
+        vev_conn_close(conn);
+        return 1;
+    }
+    result = vev_query_prepared_result_with_rules_text_and_inputs(
+        conn,
+        rules_query,
+        "[[(named ?e ?name) [?e :user/name ?name]]]",
+        "[]");
+    int resident_rules_rows = result_row_count_or_error("resident-rules", result);
+    if (resident_rules_rows != 2) {
+        fprintf(stderr, "unexpected resident rules row count: %d\n", resident_rules_rows);
+        vev_result_free(result);
+        vev_db_release(rules_db);
+        vev_prepared_query_free(rules_query);
+        vev_prepared_query_free(query);
+        vev_conn_close(conn);
+        return 1;
+    }
+    vev_result_free(result);
+    result = vev_query_db_prepared_result_with_rules_text_and_inputs(
+        rules_db,
+        rules_query,
+        "[[(named ?e ?name) [?e :user/name ?name]]]",
+        "[]");
+    int rules_rows = result_row_count_or_error("snapshot-rules", result);
+    if (rules_rows != 2) {
+        fprintf(stderr, "unexpected snapshot rules row count: %d\n", rules_rows);
+        vev_result_free(result);
+        vev_db_release(rules_db);
+        vev_prepared_query_free(rules_query);
+        vev_prepared_query_free(query);
+        vev_conn_close(conn);
+        return 1;
+    }
+    vev_result_free(result);
+    vev_db_release(rules_db);
+    vev_prepared_query_free(rules_query);
+
     vev_db_t batch_db = vev_conn_db(conn);
     if (batch_db == NULL) {
         fprintf(stderr, "failed to retain DB for column batch API\n");

@@ -12,5 +12,5 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 "$ROOT/scripts/package_source_archives.sh" >/dev/null
 "$ROOT/scripts/package_jvm.sh" >/dev/null
 "$ROOT/scripts/verify_jvm_reproducibility.sh" >/dev/null
-"$ROOT/scripts/smoke_jvm_package.sh"
+"$ROOT/scripts/smoke_packages.sh"
 "$ROOT/scripts/release_manifest.sh"
