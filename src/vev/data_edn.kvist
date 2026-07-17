@@ -161,8 +161,8 @@
         (kdata.retain (kdata.nth rows[0] 0))
         (kdata.from-nil))
     .Relation
-      (kdata.set-from-array rows)
-    (kdata.set-from-array rows)))
+      (kdata.set-from-unique rows)
+    (kdata.set-from-unique rows)))
 
 (defn query-result-data-value [source: DB-Read-Source, query-source: Data, result: Result-Set] -> [value: Data, ok: bool, error: string]
   (let [rows (make [dynamic]Data) :defer-with delete-data-items

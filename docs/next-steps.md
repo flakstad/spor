@@ -76,11 +76,11 @@ are not bottlenecks.
 
 Current development measurements:
 
-| Rows | Build | Durable transaction | Materialize | Render |
-| ---: | ---: | ---: | ---: | ---: |
-| 100 | 0.3 ms | 0.03 s | 0.06 s | 1.7 ms |
-| 1,000 | 3.0 ms | 0.29 s | 0.51 s | 15 ms |
-| 10,000 | 30 ms | 3.15 s | 4.11 s | 154 ms |
+| Rows | Build | Durable transaction | Materialize | Optional parent | Render |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 0.3 ms | 0.033 s | 0.050 s | 0.011 s | 1.7 ms |
+| 1,000 | 3.0 ms | 0.303 s | 0.463 s | 0.053 s | 15 ms |
+| 10,000 | 30 ms | 3.322 s | 3.676 s | 0.543 s | 157 ms |
 
 The original 1,000-row durable transaction took about 17.2 seconds and the
 10,000-row transaction did not finish within three minutes.
@@ -100,9 +100,16 @@ At 10,000 rows, measured transaction phases are about 0.26 seconds resolving,
 datoms, and 0.90 seconds publishing persisted index roots. The transaction no
 longer contains a quadratic planner scan.
 
-The next visible bottleneck is query materialization. Ro currently performs
-separate item, parent, and status queries; 10,000 rows take about 4.1 seconds
-before HTML rendering.
+The chained optional-parent `get-else` query now uses a general typed batch
+operator instead of one durable lookup per result row. Dense durable entity
+sets use one bounded EAVT range scan; sparse sets retain indexed point reads.
+The query engine's already-distinct rows cross into `Data` through a trusted
+linear set constructor rather than being structurally deduplicated a second
+time. Optional-parent scaling is now near-linear through 10,000 rows.
+
+The remaining visible cost is total collection materialization. Ro performs
+separate item, parent, and status queries; together they take about 3.7 seconds
+for 10,000 rows before HTML rendering.
 
 ## Hard Constraints
 
@@ -125,22 +132,20 @@ before HTML rendering.
 2. Cut the first tagged release from a successful gate run and publish its
    checksummed native bundles, combined JVM artifacts, source package, and
    adapter packages.
-3. Add the exact optional-parent `get-else` outline query to the scale harness.
-   Measure its physical plan and durable index reads at 100, 1,000, and 10,000
-   rows.
-4. Replace repeated per-row parent and status lookups with a general batched
-   attribute operator or merge scan. The target is one bounded index pass per
-   attribute, independent of result row count.
-5. Carry typed columns through result projection and the application boundary
-   so the engine does not repeatedly box and decode every scalar result.
-6. Keep the durable transaction write profile as a regression gate.
+3. Profile the complete 10,000-row collection materialization path and reduce
+   its multiple query/result passes. Prefer a reusable multi-attribute
+   projection or typed-column boundary over application-specific fusion.
+4. Carry typed columns through result projection and the application boundary
+   where measurements still show repeated scalar boxing and decoding.
+5. Keep the durable transaction and optional-parent profiles as regression
+   gates.
    Revisit typed root batches and append serialization only when measurements
    show those phases dominate a real workload.
-7. Keep contextual `Data` usage canonical.
+6. Keep contextual `Data` usage canonical.
    Remove remaining runtime quasiquote/unquote construction in Vev examples
    and adapters where an expected `Data` type can carry ordinary literals.
    Compile-time macro construction is not part of this cleanup.
-8. Run correctness and scale gates after each storage or query change.
+7. Run correctness and scale gates after each storage or query change.
    Include Vev engine tests, durable reopen tests, Ro checks, and the full
    10,000-row benchmark.
 
@@ -150,16 +155,20 @@ failures.
 
 ## Exit Criteria
 
-This scale batch is complete when:
+The bulk transaction and optional-parent batch is complete. Its regression
+criteria are:
 
-- the optional-parent `get-else` query is included and no longer performs
-  repeated per-row durable lookups
-- 100, 1,000, and 10,000 rows show explainable near-linear scaling for both
-  transaction and materialization phases
-- the 10,000-row durable transaction remains below the current 3.5-second
-  regression ceiling on the development machine
-- the 379-test engine suite and durable storage tests pass
+- optional-parent `get-else` performs bounded batch reads and scales
+  near-linearly through 10,000 rows
+- the 10,000-row durable transaction remains below 3.5 seconds on the
+  development machine
+- the 379-test engine suite passes
 - Ro's check, test, smoke, and `benchmark-outline.sh --full` commands pass
+
+The next materialization batch is complete when profiling identifies the
+dominant remaining 10,000-row costs and a general operator or result-boundary
+change reduces them without regressing correctness, in-memory mode, or smaller
+workloads.
 
 ## Verification
 

@@ -12222,38 +12222,80 @@
 (defn db-read-source-query-relation-apply-primary-clause-typed [source: DB-Read-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (db-read-source-query-relation-apply-primary-clause-typed-with-op source rel clause-value (Physical-Op {}) stats))
 
+(defn db-read-source-get-else-batch-datoms [source: DB-Read-Source, entities: []u64, attr: string] -> [datoms: [dynamic]Datom, ok: bool, used: bool, scans: int, candidates: int, error: string]
+  (when (reverse-attr? attr)
+    (return (make [dynamic]Datom) true false 0 0 ""))
+  (source-eavt-entity-attrs-datoms source entities ([]string [attr])))
+
 (defn db-read-source-query-relation-apply-primary-get-else-typed [source: DB-Read-Source, rel: Query-Relation, get-else: Get-Else, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (when (not (and rel.has-typed-columns
                   (db-read-source-primary-source? get-else.has-source get-else.source)))
     (return (query-relation-empty) false))
   (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
-        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))]
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        row-entities (make [dynamic]u64 0 rel.typed-rows) :defer
+        row-has-entity (make [dynamic]bool 0 rel.typed-rows) :defer
+        entities (make [dynamic]u64 0 rel.typed-rows) :defer]
     (append-var-binding-attr! (addr attrs) (addr attr-sources) get-else.out "")
-    (let [builder (query-relation-builder (slice attrs 0))
-          row 0]
+    (let [row 0]
       (while (< row rel.typed-rows)
         (let [[entity entity-ok entity-error] (db-read-source-query-relation-resolve-typed-entity-term source rel row get-else.e)]
           (when (not (= entity-error ""))
             (delete attrs)
             (delete attr-sources)
-            (delete-query-relation-builder builder)
             (return (query-relation-empty) false))
-          (when (and entity-ok (= entity.kind .Entity))
-            (let [[attr-value attr-ok attr-error] (db-read-source-pull-attr-value source entity.entity get-else.a)]
-              (when (not (= attr-error ""))
-                (delete attrs)
-                (delete attr-sources)
-                (delete-query-relation-builder builder)
-                (return (query-relation-empty) false))
-              (let [out-value (if attr-ok attr-value get-else.default-value)]
-                (when (query-relation-typed-row-var-agrees? rel row get-else.out out-value)
-                  (when (not (query-relation-builder-add-column-row-with-output-value! (addr builder) (slice attrs 0) (slice rel.typed-columns 0) row get-else.out out-value))
+          (let [has-entity (and entity-ok (= entity.kind .Entity))]
+            (arr.push! row-has-entity has-entity)
+            (arr.push! row-entities (if has-entity entity.entity (u64 0)))
+            (when has-entity
+              (arr.push! entities entity.entity))))
+        (mut! row += 1)))
+    (let [builder (query-relation-builder-with-capacity (slice attrs 0) rel.typed-rows)
+          [datoms datoms-ok datoms-used scan-count candidate-count datoms-error]
+            (db-read-source-get-else-batch-datoms source (slice entities 0) get-else.a)]
+      (defer (delete-owned-datoms datoms))
+      (when (not datoms-ok)
+        (delete attrs)
+        (delete attr-sources)
+        (delete-query-relation-builder builder)
+        (return (query-relation-empty) false))
+      (if datoms-used
+        (let [values-by-entity (make (map u64 Value)) :defer
+              batch-row 0]
+          (for [datom datoms]
+            (mmap.assoc! values-by-entity datom.e datom.v))
+          (while (< batch-row rel.typed-rows)
+            (when row-has-entity[batch-row]
+              (let [[attr-value attr-ok] (mmap.get values-by-entity row-entities[batch-row])
+                    out-value (if attr-ok attr-value get-else.default-value)]
+                (when (query-relation-typed-row-var-agrees? rel batch-row get-else.out out-value)
+                  (when (not (query-relation-builder-add-column-row-with-output-value! (addr builder) (slice attrs 0) (slice rel.typed-columns 0) batch-row get-else.out out-value))
                     (delete attrs)
                     (delete attr-sources)
                     (delete-query-relation-builder builder)
-                    (return (query-relation-empty) false)))))))
-        (set! row (+ row 1)))
-      (set! stats^.source-index-scans (+ stats^.source-index-scans rel.typed-rows))
+                    (return (query-relation-empty) false)))))
+            (mut! batch-row += 1))
+          (mut! stats^.source-index-scans += scan-count)
+          (when (>= candidate-count 0)
+            (mut! stats^.clause-candidates += candidate-count)))
+        (let [fallback-row 0]
+          (while (< fallback-row rel.typed-rows)
+            (when row-has-entity[fallback-row]
+              (let [[attr-value attr-ok attr-error] (db-read-source-pull-attr-value source row-entities[fallback-row] get-else.a)]
+                (when (not (= attr-error ""))
+                  (delete attrs)
+                  (delete attr-sources)
+                  (delete-query-relation-builder builder)
+                  (return (query-relation-empty) false))
+                (let [out-value (if attr-ok attr-value get-else.default-value)]
+                  (when (query-relation-typed-row-var-agrees? rel fallback-row get-else.out out-value)
+                    (when (not (query-relation-builder-add-column-row-with-output-value! (addr builder) (slice attrs 0) (slice rel.typed-columns 0) fallback-row get-else.out out-value))
+                      (delete attrs)
+                      (delete attr-sources)
+                      (delete-query-relation-builder builder)
+                      (return (query-relation-empty) false))))))
+            (mut! fallback-row += 1))
+          (mut! stats^.source-index-scans += (count entities))))
       (query-stats-observe-source-operator! stats)
       (return (Query-Relation {attrs: attrs
                                attr-sources: attr-sources

@@ -4584,6 +4584,83 @@ sqlite_direct_eavt_entity_attrs_datom_parts_raw :: proc(handle: rawptr, entities
     if len(entities) == 0 || len(attrs) == 0 {
         return entities_out, attrs_out, values, value_entities, txs, added, true, \"\"
     }
+    min_entity := entities[0]
+    max_entity := entities[len(entities) - 1]
+    span := max_entity - min_entity + 1
+    if len(entities) > 256 && span <= u64(len(entities)) * 16 {
+        entity_set := make(map[u64]struct{}, len(entities))
+        defer delete(entity_set)
+        for entity in entities {
+            entity_set[entity] = {}
+        }
+        parts := make([dynamic]string, 0, len(attrs) * 2 + 2)
+        append(&parts, \"SELECT d.e, d.a, d.value_text, d.value_entity, d.tx, d.added FROM vev_datoms d INDEXED BY vev_datoms_eavt_entity_cover WHERE d.e >= ? AND d.e <= ? AND d.a IN (\")
+        for _, index in attrs {
+            if index > 0 {
+                append(&parts, \",\")
+            }
+            append(&parts, \"?\")
+        }
+        append(&parts, \") ORDER BY d.e, d.a, d.value_text, d.tx, d.added\")
+        sql := strings.concatenate(parts[:])
+        delete(parts)
+        defer delete(sql)
+        db := (^SQLite3)(handle)
+        stmt: ^SQLite3_Stmt
+        sql_c, sql_c_ok := sqlite_cstring(sql)
+        if !sql_c_ok {
+            return entities_out, attrs_out, values, value_entities, txs, added, false, \"failed to allocate sqlite dense EAVT entity attrs SQL text\"
+        }
+        defer delete(sql_c)
+        if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+            return entities_out, attrs_out, values, value_entities, txs, added, false, sqlite_error_text(db, \"sqlite prepare dense EAVT entity attrs read failed\")
+        }
+        defer _ = sqlite3_finalize(stmt)
+        if sqlite3_bind_int64(stmt, 1, i64(min_entity)) != SQLITE_OK ||
+           sqlite3_bind_int64(stmt, 2, i64(max_entity)) != SQLITE_OK {
+            return entities_out, attrs_out, values, value_entities, txs, added, false, sqlite_error_text(db, \"sqlite bind dense EAVT entity attrs range failed\")
+        }
+        for attr, index in attrs {
+            if sqlite_bind_text_borrowed(stmt, i32(index) + 3, attr) != SQLITE_OK {
+                return entities_out, attrs_out, values, value_entities, txs, added, false, sqlite_error_text(db, \"sqlite bind dense EAVT entity attrs attr failed\")
+            }
+        }
+        for {
+            rc := sqlite3_step(stmt)
+            if rc == SQLITE_DONE {
+                break
+            }
+            if rc != SQLITE_ROW {
+                return entities_out, attrs_out, values, value_entities, txs, added, false, sqlite_error_text(db, \"sqlite dense EAVT entity attrs read failed\")
+            }
+            entity := u64(sqlite3_column_int64(stmt, 0))
+            if _, wanted := entity_set[entity]; !wanted {
+                continue
+            }
+            attr_text, attr_ok := sqlite_column_text_owned(stmt, 1)
+            if !attr_ok {
+                return entities_out, attrs_out, values, value_entities, txs, added, false, \"sqlite dense EAVT entity attrs row had null attr\"
+            }
+            value_entity := sqlite3_column_int64(stmt, 3)
+            value_text := strings.clone(\"\")
+            if value_entity < 0 {
+                delete(value_text)
+                value_text_ok: bool
+                value_text, value_text_ok = sqlite_column_text_owned(stmt, 2)
+                if !value_text_ok {
+                    delete(attr_text)
+                    return entities_out, attrs_out, values, value_entities, txs, added, false, \"sqlite dense EAVT entity attrs row had null value\"
+                }
+            }
+            append(&entities_out, entity)
+            append(&attrs_out, attr_text)
+            append(&values, value_text)
+            append(&value_entities, value_entity)
+            append(&txs, u64(sqlite3_column_int64(stmt, 4)))
+            append(&added, sqlite3_column_int(stmt, 5) != 0)
+        }
+        return entities_out, attrs_out, values, value_entities, txs, added, true, \"\"
+    }
     parts := make([dynamic]string, 0, len(attrs) * 2 + 2)
     append(&parts, \"SELECT d.e, d.a, d.value_text, d.value_entity, d.tx, d.added FROM vev_datoms d INDEXED BY vev_datoms_eavt_entity_cover WHERE d.e = ? AND d.a IN (\")
     for _, index in attrs {

@@ -7905,3 +7905,31 @@
       (vev.delete-store-tx-report source-fn-report))
     (vev.close-store store)
     (remove-sqlite-files path)))
+
+(t.deftest sqlite-dense-bound-entity-get-else-uses-batched-source-operator
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.dense-get-else.sqlite")
+  (let [path "tmp.vev.dense-get-else.sqlite"
+        [store store-ok store-error] (vev.open-store path)
+        tx-data (make [dynamic]vev.Tx-Data) :defer]
+    (defer (remove-sqlite-files path))
+    (t.is store-ok store-error)
+    (for [index (arr.range 1 301)]
+      (arr.push! tx-data (vev.add (u64 index) ":item/id" (vev.value-int (i64 index)))))
+    (let [report (vev.transact-store-report-tx-data (addr store) (slice tx-data 0))
+          profiled (vev.q-profiled-store-db-text
+                     (addr report.db-after)
+                     "[:find ?e ?fallback :where [?e :item/id] [(get-else $ ?e :item/missing 0) ?fallback]]")]
+      (t.is report.ok report.error)
+      (t.is profiled.result.ok profiled.result.error)
+      (t.is (= (count profiled.result.rows) 300))
+      (t.is (> profiled.stats.source-index-scans 0))
+      (t.is (> profiled.stats.source-operators 0))
+      (t.is (= profiled.stats.binding-materializations 0))
+      (for [row profiled.result.rows]
+        (t.is (= (count row.values) 2))
+        (t.is (= row.values[1].kind .Int))
+        (t.is (= row.values[1].int-value 0)))
+      (vev.delete-profiled-result-set-owned-values profiled)
+      (vev.delete-store-tx-report report))
+    (vev.close-store store)))
