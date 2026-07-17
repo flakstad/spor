@@ -1,11 +1,34 @@
 (package main)
 
 (import os "core:os")
+(import thread "core:thread")
 (import test "kvist:test")
 (import kdata "kvist:data")
 (import d "../vev_app")
 
 (def app-test-path "/tmp/vev-app-durable-test.sqlite")
+(def concurrent-app-test-path "/tmp/vev-app-concurrent-test.sqlite")
+
+(defstruct Concurrent-Reader {
+  conn: d.Conn
+  iterations: int
+  ok: bool
+})
+
+(def concurrent-value-query
+  '[:find ?value .
+    :where [?e :entity/id "counter"]
+           [?e :entity/value ?value]])
+
+(defn concurrent-read-loop [reader: ^Concurrent-Reader]
+  (let [remaining reader^.iterations]
+    (while (> remaining 0)
+      (let [db (d.db reader^.conn)
+            value (d.q concurrent-value-query db)]
+        (when (not (kdata.int? value))
+          (set! reader^.ok false))
+        (d.close db))
+      (dec! remaining))))
 
 (def ref-join-query
   '[:find ?workspace-id .
@@ -18,6 +41,11 @@
   (os.remove app-test-path)
   (os.remove "/tmp/vev-app-durable-test.sqlite-wal")
   (os.remove "/tmp/vev-app-durable-test.sqlite-shm"))
+
+(defn remove-concurrent-app-test-db []
+  (os.remove concurrent-app-test-path)
+  (os.remove "/tmp/vev-app-concurrent-test.sqlite-wal")
+  (os.remove "/tmp/vev-app-concurrent-test.sqlite-shm"))
 
 (test.deftest durable-app-query-input-joins-through-ref
   (remove-app-test-db)
@@ -57,3 +85,35 @@
       (d.close db))
     (d.close conn))
   (remove-app-test-db))
+
+(test.deftest durable-app-connection-serializes-concurrent-reads-and-writes
+  (remove-concurrent-app-test-db)
+  (let [conn (d.connect concurrent-app-test-path)]
+    (d.transact conn
+      '[[:db/add 10 :db/ident :entity/id]
+        [:db/add 10 :db/valueType :db.type/string]
+        [:db/add 10 :db/unique :db.unique/identity]
+        [:db/add 11 :db/ident :entity/value]
+        [:db/add 11 :db/valueType :db.type/long]])
+    (d.transact conn
+      '[{:db/id "counter" :entity/id "counter" :entity/value 0}])
+    ;; Holding an immutable DB value must not block a later connection
+    ;; transaction, and the held value must retain its original basis.
+    (let [held (d.db conn)]
+      (d.transact conn
+        '[[:db/add [:entity/id "counter"] :entity/value 1]])
+      (let [held-value (d.q concurrent-value-query held)]
+        (test.is (= (kdata.int held-value) 0)))
+      (d.close held))
+    (let [reader (Concurrent-Reader {conn: conn iterations: 30 ok: true})
+          worker (thread.create-and-start-with-poly-data (addr reader) concurrent-read-loop)
+          index 0]
+      (while (< index 30)
+        (d.transact conn
+          `[[:db/add [:entity/id "counter"] :entity/value ~index]])
+        (inc! index))
+      (thread.join worker)
+      (thread.destroy worker)
+      (test.is reader.ok))
+    (d.close conn))
+  (remove-concurrent-app-test-db))

@@ -7,6 +7,7 @@
 (import arr "kvist:arr")
 (import edn "kvist:edn")
 (import kdata "kvist:data")
+(import sync "core:sync")
 
 (def Conn (distinct rawptr))
 (def DB (distinct rawptr))
@@ -45,24 +46,55 @@
   owns-values: bool
 })
 
+;; The application facade is routinely used from HTTP servers where reads and
+;; writes can arrive on different worker threads. Store-Conn owns mutable
+;; snapshot and write caches, so access through a shared Conn must be serialized.
+(defstruct Conn-State {
+  store: vev.Store-Conn
+  lock: ^sync.Mutex
+})
+
+(defstruct DB-State {
+  db: vev.Store-DB
+  lock: ^sync.Mutex
+})
+
+(defn- conn-state [conn: Conn] -> ^Conn-State
+  (transmute ^Conn-State (rawptr conn)))
+
 (defn- conn-ptr [conn: Conn] -> ^vev.Store-Conn
-  (transmute ^vev.Store-Conn (rawptr conn)))
+  (let [state (conn-state conn)]
+    (addr state^.store)))
 
 (defn- db-ptr [db: DB] -> ^vev.Store-DB
-  (transmute ^vev.Store-DB (rawptr db)))
+  (let [state (transmute ^DB-State (rawptr db))]
+    (addr state^.db)))
+
+(defn- db-lock [db: DB] -> ^sync.Mutex
+  (let [state (transmute ^DB-State (rawptr db))]
+    state^.lock))
 
 (defn- log-conn [log-value: Log] -> Conn
   (Conn (rawptr log-value)))
 
 (defn- conn-handle [conn: vev.Store-Conn] -> Conn
-  (let [ptr (alloc vev.Store-Conn)]
-    (set! ptr^ conn)
+  (let [ptr (alloc Conn-State)]
+    (set! ptr^.store conn)
+    (set! ptr^.lock (alloc sync.Mutex))
     (Conn (rawptr ptr))))
 
-(defn- db-handle [db: vev.Store-DB] -> DB
-  (let [ptr (alloc vev.Store-DB)]
-    (set! ptr^ db)
+(defn- db-handle [db: vev.Store-DB, lock: ^sync.Mutex] -> DB
+  (let [ptr (alloc DB-State)]
+    (set! ptr^.db db)
+    (set! ptr^.lock lock)
     (DB (rawptr ptr))))
+
+(defmacro- with-db-lock [result-type db form]
+  `(do
+     (sync.mutex-lock (db-lock ~db))
+     (defer (sync.mutex-unlock (db-lock ~db)))
+     (let [out: ~result-type ~form]
+       out)))
 
 (defn- result-value [result: vev.Query-Result] -> Result
   (when (not result.result.ok)
@@ -81,15 +113,21 @@
     value))
 
 (defn- q-data-value [query: Data, db: DB, inputs: []vev.Query-Input] -> Data
-  (data-result-value
-    db query
-    (vev.q-result-store-db-data-with-inputs (db-ptr db) query inputs)))
+  (let [out: Data
+        (with-db-lock Data db
+          (data-result-value
+            db query
+            (vev.q-result-store-db-data-with-inputs (db-ptr db) query inputs)))]
+    out))
 
 (defn- q-data-with-fns-value [query: Data, db: DB, fns: []vev.Native-Query-Fn, inputs: []vev.Query-Input] -> Data
-  (data-result-value
-    db query
-    (vev.q-result-store-db-data-with-inputs-and-fns
-      (db-ptr db) query inputs fns)))
+  (let [out: Data
+        (with-db-lock Data db
+          (data-result-value
+            db query
+            (vev.q-result-store-db-data-with-inputs-and-fns
+              (db-ptr db) query inputs fns)))]
+    out))
 
 (defn- unchecked-result-value [result: vev.Query-Result] -> Result
   (Result {ok: result.result.ok
@@ -153,27 +191,39 @@
 (defn close-conn [conn: Conn]
   (when (= (rawptr conn) nil)
     (return))
-  (let [ptr (conn-ptr conn)]
-    (vev.close-store ptr^)
+  (let [state (conn-state conn)]
+    (sync.mutex-lock state^.lock)
+    (vev.close-store state^.store)
+    (sync.mutex-unlock state^.lock)
+    (free state^.lock)
     (free (rawptr conn))))
 
 (defn log [conn: Conn] -> Log
-  (let [store (conn-ptr conn)]
+  (let [state (conn-state conn)]
+    (sync.mutex-lock state^.lock)
+    (defer (sync.mutex-unlock state^.lock))
+    (let [store (addr state^.store)]
     (when (not (= store^.kind .SQLite))
       (panic "transaction log requires a durable connection"))
-    (Log (rawptr conn))))
+    (Log (rawptr conn)))))
 
 (defn log-tx-ids [conn: Conn] -> [tx-ids: [dynamic]u64, ok: bool, error: string]
-  (let [store (conn-ptr conn)]
+  (let [state (conn-state conn)]
+    (sync.mutex-lock state^.lock)
+    (defer (sync.mutex-unlock state^.lock))
+    (let [store (addr state^.store)]
     (when (not (= store^.kind .SQLite))
       (return (make [dynamic]u64) false "transaction log requires a durable connection"))
-    (vev.sqlite-conn-tx-ids (addr store^.sqlite))))
+    (vev.sqlite-conn-tx-ids (addr store^.sqlite)))))
 
 (defn log-tx-data [conn: Conn, tx: u64] -> [text: string, ok: bool, error: string]
-  (let [store (conn-ptr conn)]
+  (let [state (conn-state conn)]
+    (sync.mutex-lock state^.lock)
+    (defer (sync.mutex-unlock state^.lock))
+    (let [store (addr state^.store)]
     (when (not (= store^.kind .SQLite))
       (return "" false "transaction log requires a durable connection"))
-    (vev.sqlite-conn-tx-data-text (addr store^.sqlite) tx)))
+    (vev.sqlite-conn-tx-data-text (addr store^.sqlite) tx))))
 
 (defn- log-query-function-call [query: Data] -> Data #borrowed
   (when (not (kdata.vector? query))
@@ -245,12 +295,17 @@
         :else 'nil))))
 
 (defn try-db [conn: Conn] -> [db: DB, ok: bool, error: string]
-  (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (conn-ptr conn))]
+  (let [state (conn-state conn)]
+    (sync.mutex-lock state^.lock)
+    (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (addr state^.store))]
     (if snapshot-ok
-      (return (db-handle snapshot) true "")
+      (do
+        (sync.mutex-unlock state^.lock)
+        (return (db-handle snapshot state^.lock) true ""))
       (do
         (vev.close-store-db! (addr snapshot))
-        (return (DB nil) false snapshot-error)))))
+        (sync.mutex-unlock state^.lock)
+        (return (DB nil) false snapshot-error))))))
 
 (defn db [conn: Conn] -> DB
   (let [[snapshot ok error] (try-db conn)]
@@ -261,12 +316,18 @@
 (defn close-db [db: DB]
   (when (= (rawptr db) nil)
     (return))
-  (vev.close-store-db! (db-ptr db))
+  (let [state (transmute ^DB-State (rawptr db))]
+    (sync.mutex-lock state^.lock)
+    (vev.close-store-db! (addr state^.db))
+    (sync.mutex-unlock state^.lock))
   (free (rawptr db)))
 
 (defmacro transact [conn tx-form]
-  `(tx-report-value
-     (vev.transact-store (conn-ptr ~conn) ~tx-form)))
+  `(let [state (conn-state ~conn)]
+     (sync.mutex-lock state^.lock)
+     (defer (sync.mutex-unlock state^.lock))
+     (tx-report-value
+       (vev.transact-store (addr state^.store) ~tx-form))))
 
 (defn close-result [result: Result]
   (vev.delete-query-result
@@ -455,9 +516,10 @@
 (defn- q-data-source-query-input [query: Data, first: vev.Query-Input] -> Data
   (let [conn (create-conn)
         snapshot (db conn)
-        out (data-result-value
-              snapshot query
-              (q-result-with-first-input query snapshot first ([]vev.Query-Input [])))]
+        out: Data (with-db-lock Data snapshot
+                    (data-result-value
+                      snapshot query
+                      (q-result-with-first-input query snapshot first ([]vev.Query-Input []))))]
     (close-db snapshot)
     (close-conn conn)
     out))
@@ -465,9 +527,10 @@
 (defn- q-data-source-data [query: Data, first: Data] -> Data
   (let [conn (create-conn)
         snapshot (db conn)
-        out (data-result-value
-              snapshot query
-              (q-result-first-data query snapshot first ([]vev.Query-Input [])))]
+        out: Data (with-db-lock Data snapshot
+                    (data-result-value
+                      snapshot query
+                      (q-result-first-data query snapshot first ([]vev.Query-Input []))))]
     (close-db snapshot)
     (close-conn conn)
     out))
@@ -507,7 +570,10 @@
             q-data-source-keyword))
 
 (defn- q-data-with-first-db [query: Data, source: DB, first: Data, rest: []vev.Query-Input] -> Data
-  (data-result-value source query (q-result-first-data query source first rest)))
+  (let [out: Data
+        (with-db-lock Data source
+          (data-result-value source query (q-result-first-data query source first rest)))]
+    out))
 
 (defn- q-data-with-first-log [query: Data, source: Log, first: Data, rest: []vev.Query-Input] -> Data
   (when (> (count rest) 0)
@@ -528,44 +594,53 @@
 (defmacro try-q [query db & inputs]
   (if (vector? query)
     `(unchecked-result-value
-       (vev.q-result-store-db ~query (db-ptr ~db) ~@inputs))
+       (with-db-lock vev.Query-Result ~db
+         (vev.q-result-store-db ~query (db-ptr ~db) ~@inputs)))
     (if (= (count inputs) 0)
       `(unchecked-result-value
-         (vev.q-result-store-db-data-with-inputs
-           (db-ptr ~db) ~query ([]vev.Query-Input [])))
+         (with-db-lock vev.Query-Result ~db
+           (vev.q-result-store-db-data-with-inputs
+             (db-ptr ~db) ~query ([]vev.Query-Input []))))
       `(unchecked-result-value
-         (q-result-first
-           ~query ~db ~(q-first-form (first inputs))
-           ([]vev.Query-Input [~@(q-input-forms (rest inputs))]))))))
+         (with-db-lock vev.Query-Result ~db
+           (q-result-first
+             ~query ~db ~(q-first-form (first inputs))
+             ([]vev.Query-Input [~@(q-input-forms (rest inputs))])))))))
 
 (defn try-q-text-inputs [query: string, db: DB, inputs: string] -> Result
   (unchecked-result-value
-    (vev.q-result-store-db-text-with-input-text (db-ptr db) query inputs)))
+    (with-db-lock vev.Query-Result db
+      (vev.q-result-store-db-text-with-input-text (db-ptr db) query inputs))))
 
 (defn try-q-text-no-input [query: string, db: DB] -> Result
   (unchecked-result-value
-    (vev.q-result-store-db-text (db-ptr db) query)))
+    (with-db-lock vev.Query-Result db
+      (vev.q-result-store-db-text (db-ptr db) query))))
 
 (def try-q-text (overload try-q-text-inputs try-q-text-no-input))
 
 (defn try-q-data-inputs [query: Data, db: DB, inputs: string] -> Result
   (unchecked-result-value
-    (vev.q-result-store-db-data-with-input-text (db-ptr db) query inputs)))
+    (with-db-lock vev.Query-Result db
+      (vev.q-result-store-db-data-with-input-text (db-ptr db) query inputs))))
 
 (defn try-q-data-no-input [query: Data, db: DB] -> Result
   (unchecked-result-value
-    (vev.q-result-store-db-data-with-inputs
-      (db-ptr db) query ([]vev.Query-Input []))))
+    (with-db-lock vev.Query-Result db
+      (vev.q-result-store-db-data-with-inputs
+        (db-ptr db) query ([]vev.Query-Input [])))))
 
 (def try-q-data (overload try-q-data-inputs try-q-data-no-input))
 
 (defn q-text-inputs [query: string, db: DB, inputs: string] -> Result
   (result-value
-    (vev.q-result-store-db-text-with-input-text (db-ptr db) query inputs)))
+    (with-db-lock vev.Query-Result db
+      (vev.q-result-store-db-text-with-input-text (db-ptr db) query inputs))))
 
 (defn q-text-no-input [query: string, db: DB] -> Result
   (result-value
-    (vev.q-result-store-db-text (db-ptr db) query)))
+    (with-db-lock vev.Query-Result db
+      (vev.q-result-store-db-text (db-ptr db) query))))
 
 (def q-text (overload q-text-inputs q-text-no-input))
 
@@ -606,41 +681,60 @@
   false)
 
 (defmacro pull [db pattern entity]
-  `(let [[value ok error]
-          (vev.pull-store-db (db-ptr ~db) ~pattern ~entity)]
-     (pulled-data value ok error)))
+  `(do
+     (sync.mutex-lock (db-lock ~db))
+     (defer (sync.mutex-unlock (db-lock ~db)))
+     (let [[value ok error]
+            (vev.pull-store-db (db-ptr ~db) ~pattern ~entity)]
+       (pulled-data value ok error))))
 
 (defn pull-text [db: DB, pattern: string, entity: u64] -> Value
+  (sync.mutex-lock (db-lock db))
+  (defer (sync.mutex-unlock (db-lock db)))
   (let [[value ok error]
           (vev.pull-store-db-value-text (db-ptr db) pattern entity)]
     (pulled-value value ok error)))
 
 (defn try-pull-text [db: DB, pattern: string, entity: u64] -> [value: Value, ok: bool, error: string]
+  (sync.mutex-lock (db-lock db))
+  (defer (sync.mutex-unlock (db-lock db)))
   (vev.pull-store-db-value-text (db-ptr db) pattern entity))
 
 (defn pull-data [db: DB, pattern: Data, entity: u64] -> Value
+  (sync.mutex-lock (db-lock db))
+  (defer (sync.mutex-unlock (db-lock db)))
   (let [[value ok error]
           (vev.pull-store-db-value-data (db-ptr db) pattern entity)]
     (pulled-value value ok error)))
 
 (defn try-pull-data [db: DB, pattern: Data, entity: u64] -> [value: Value, ok: bool, error: string]
+  (sync.mutex-lock (db-lock db))
+  (defer (sync.mutex-unlock (db-lock db)))
   (vev.pull-store-db-value-data (db-ptr db) pattern entity))
 
 (defn pull-lookup-text [db: DB, pattern: string, attr: string, lookup-value: Value] -> Value
+  (sync.mutex-lock (db-lock db))
+  (defer (sync.mutex-unlock (db-lock db)))
   (let [[value ok error]
           (vev.pull-store-db-lookup-ref-value-text
             (db-ptr db) pattern attr lookup-value)]
     (pulled-value value ok error)))
 
 (defn try-pull-lookup-text [db: DB, pattern: string, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
+  (sync.mutex-lock (db-lock db))
+  (defer (sync.mutex-unlock (db-lock db)))
   (vev.pull-store-db-lookup-ref-value-text
     (db-ptr db) pattern attr lookup-value))
 
 (defn try-pull-lookup-data [db: DB, pattern: Data, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
+  (sync.mutex-lock (db-lock db))
+  (defer (sync.mutex-unlock (db-lock db)))
   (vev.pull-store-db-lookup-ref-value-data
     (db-ptr db) pattern attr lookup-value))
 
 (defn pull-lookup-data [db: DB, pattern: Data, attr: string, lookup-value: Value] -> Value
+  (sync.mutex-lock (db-lock db))
+  (defer (sync.mutex-unlock (db-lock db)))
   (let [[value ok error]
           (vev.pull-store-db-lookup-ref-value-data
             (db-ptr db) pattern attr lookup-value)]
@@ -666,6 +760,8 @@
 
 (defmacro db-with [db tx-form]
   `(db-handle
-     (vev.db-with-store-db (db-ptr ~db) ~tx-form)))
+     (with-db-lock vev.Store-DB ~db
+       (vev.db-with-store-db (db-ptr ~db) ~tx-form))
+     (db-lock ~db)))
 
 (def close (overload close-conn close-db close-result close-value))

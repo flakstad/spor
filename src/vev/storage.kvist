@@ -122,6 +122,7 @@ sqlite_set_synchronous_raw :: proc(handle: rawptr, level: c.int) -> (bool, strin
 }
 
 sqlite_schema_sql :: `
+PRAGMA busy_timeout = 5000;
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 CREATE TABLE IF NOT EXISTS vev_meta (
