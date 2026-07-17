@@ -1,0 +1,34 @@
+(package main)
+
+(import os "core:os")
+(import test "kvist:test")
+(import kdata "kvist:data")
+(import d "../vev_app")
+
+(def durable-dedupe-path "/tmp/vev-durable-dedupe-ownership.sqlite")
+
+(defn remove-durable-dedupe-db []
+  (os.remove durable-dedupe-path)
+  (os.remove "/tmp/vev-durable-dedupe-ownership.sqlite-wal")
+  (os.remove "/tmp/vev-durable-dedupe-ownership.sqlite-shm"))
+
+(test.deftest durable-typed-dedupe-cursor-owns-retained-keys
+  (remove-durable-dedupe-db)
+  (let [conn (d.connect durable-dedupe-path)]
+    ;; Separate durable roots force the source-backed materializer through its
+    ;; non-proven-unique cursor path, the shape used by an established Ro DB.
+    (d.transact conn
+      '[[:db/add 10 :db/ident :fixture/value]
+        [:db/add 10 :db/valueType :db.type/keyword]])
+    (d.transact conn '[[:db/add 100 :fixture/value :fixture/a]])
+    (d.transact conn '[[:db/add 101 :fixture/value :fixture/b]])
+    (d.transact conn '[[:db/add 102 :fixture/value :fixture/a]])
+    (d.close conn))
+  (let [conn (d.connect durable-dedupe-path)
+        db (d.db conn)
+        values (d.q '[:find ?value
+                      :where [?entity :fixture/value ?value]] db)]
+    (test.is (= (kdata.count values) 2))
+    (d.close db)
+    (d.close conn))
+  (remove-durable-dedupe-db))

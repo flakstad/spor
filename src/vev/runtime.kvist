@@ -2423,9 +2423,11 @@
     (when (not key-ok)
       (return false false))
     (when (set.contains? seen^ key)
-      (delete key)
       (return false true))
-    (set.add! seen^ key)
+    ;; Dedupe key helpers return transient formatter/literal strings. This
+    ;; cursor retains keys across rows and owns their cleanup, so retain an
+    ;; explicit copy rather than later freeing borrowed storage.
+    (set.add! seen^ (string-owned key))
     (return true true)))
 
 (defn typed-flat-materialization-cursor-next! [cursor: ^Typed-Flat-Materialization-Cursor, rel: Query-Relation, resolved: Resolved-Typed-Flat-Materialization] -> [row: int, found: bool, ok: bool]
