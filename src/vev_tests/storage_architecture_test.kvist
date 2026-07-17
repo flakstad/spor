@@ -1337,7 +1337,8 @@
         [before before-ok before-error] (vev.sqlite-index-run-manifest-count path)
         [manifest-id manifest-ok manifest-error] (vev.sqlite-create-index-run-manifest-for-test path ":aevt")
         [after after-ok after-error] (vev.sqlite-index-run-manifest-count path)
-        [run-count run-count-ok run-count-error] (vev.sqlite-index-run-manifest-run-count-for-test path manifest-id)]
+        [run-count run-count-ok run-count-error] (vev.sqlite-index-run-manifest-run-count-for-test path manifest-id)
+        [bound-count bound-count-ok bound-count-error] (vev.sqlite-index-run-manifest-run-bounds-count-for-test path manifest-id)]
     (defer (remove-sqlite-files path))
     (t.is opened-ok)
     (t.is (= opened-error ""))
@@ -1354,6 +1355,8 @@
     (t.is run-count-ok)
     (t.is (= run-count-error ""))
     (t.is (= run-count 1))
+    (t.is bound-count-ok bound-count-error)
+    (t.is (= bound-count 1))
     (vev.delete-tx-report-shallow report)
     (vev.close-sqlite-conn store)))
 

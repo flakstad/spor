@@ -78,9 +78,9 @@ Current development measurements:
 
 | Rows | Build | Durable transaction | Materialize | Optional parent | Render |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | 0.3 ms | 0.033 s | 0.050 s | 0.011 s | 1.7 ms |
-| 1,000 | 3.0 ms | 0.303 s | 0.463 s | 0.053 s | 15 ms |
-| 10,000 | 30 ms | 3.322 s | 3.676 s | 0.543 s | 157 ms |
+| 100 | 0.3 ms | 0.032 s | 0.050 s | 0.011 s | 1.6 ms |
+| 1,000 | 3.0 ms | 0.294 s | 0.452 s | 0.050 s | 15 ms |
+| 10,000 | 30 ms | 3.172 s | 2.788 s | 0.409 s | 158 ms |
 
 The original 1,000-row durable transaction took about 17.2 seconds and the
 10,000-row transaction did not finish within three minutes.
@@ -108,8 +108,14 @@ linear set constructor rather than being structurally deduplicated a second
 time. Optional-parent scaling is now near-linear through 10,000 rows.
 
 The remaining visible cost is total collection materialization. Ro performs
-separate item, parent, and status queries; together they take about 3.7 seconds
+separate item, parent, and status queries; together they take about 2.8 seconds
 for 10,000 rows before HTML rendering.
+
+Persisted index manifests now load all ordered run bounds with one SQLite
+statement per manifest instead of preparing one statement per run. This reduced
+the measured 10,000-row collection materialization path from about 3.4 seconds
+to 2.8 seconds and benefits every query that traverses durable immutable index
+runs.
 
 ## Hard Constraints
 

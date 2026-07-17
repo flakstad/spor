@@ -2994,6 +2994,89 @@ sqlite_index_run_manifest_run_bound_parts_raw :: proc(handle: rawptr, manifest_i
     return 0, 0, 0, \"\", \"\", 0, false, 0, \"\", \"\", 0, false, false, sqlite_error_text(db, \"sqlite index run manifest bound read failed\")
 }
 
+sqlite_index_run_manifest_run_bounds_parts_raw :: proc(handle: rawptr, manifest_id: u64) -> ([dynamic]u64, [dynamic]u64, [dynamic]u64, [dynamic]string, [dynamic]string, [dynamic]u64, [dynamic]bool, [dynamic]u64, [dynamic]string, [dynamic]string, [dynamic]u64, [dynamic]bool, bool, string) {
+    roots := make([dynamic]u64)
+    counts := make([dynamic]u64)
+    first_entities := make([dynamic]u64)
+    first_attrs := make([dynamic]string)
+    first_values := make([dynamic]string)
+    first_txs := make([dynamic]u64)
+    first_added := make([dynamic]bool)
+    last_entities := make([dynamic]u64)
+    last_attrs := make([dynamic]string)
+    last_values := make([dynamic]string)
+    last_txs := make([dynamic]u64)
+    last_added := make([dynamic]bool)
+    if handle == nil {
+        return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, false, \"sqlite handle was nil\"
+    }
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql := \"SELECT run_chunk_id, row_count, first_e, first_a, first_value_text, first_tx, first_added, last_e, last_a, last_value_text, last_tx, last_added FROM vev_index_run_manifest_runs WHERE manifest_id = ? ORDER BY ordinal\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, false, \"failed to allocate sqlite SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, false, sqlite_error_text(db, \"sqlite prepare index run manifest bounds read failed\")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    if sqlite3_bind_int64(stmt, 1, i64(manifest_id)) != SQLITE_OK {
+        return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, false, sqlite_error_text(db, \"sqlite bind index run manifest bounds read failed\")
+    }
+    for {
+        rc := sqlite3_step(stmt)
+        if rc == SQLITE_DONE {
+            return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, true, \"\"
+        }
+        if rc != SQLITE_ROW {
+            return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, false, sqlite_error_text(db, \"sqlite index run manifest bounds read failed\")
+        }
+        first_a_raw := sqlite3_column_text(stmt, 3)
+        first_value_raw := sqlite3_column_text(stmt, 4)
+        last_a_raw := sqlite3_column_text(stmt, 8)
+        last_value_raw := sqlite3_column_text(stmt, 9)
+        if first_a_raw == nil || first_value_raw == nil || last_a_raw == nil || last_value_raw == nil {
+            return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, false, \"sqlite index run manifest bound text was null\"
+        }
+        first_a, first_a_err := strings.clone_from_cstring(first_a_raw)
+        if first_a_err != nil {
+            return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, false, \"failed to clone sqlite index run manifest first attr\"
+        }
+        first_value, first_value_err := strings.clone_from_cstring(first_value_raw)
+        if first_value_err != nil {
+            delete(first_a)
+            return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, false, \"failed to clone sqlite index run manifest first value\"
+        }
+        last_a, last_a_err := strings.clone_from_cstring(last_a_raw)
+        if last_a_err != nil {
+            delete(first_a)
+            delete(first_value)
+            return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, false, \"failed to clone sqlite index run manifest last attr\"
+        }
+        last_value, last_value_err := strings.clone_from_cstring(last_value_raw)
+        if last_value_err != nil {
+            delete(first_a)
+            delete(first_value)
+            delete(last_a)
+            return roots, counts, first_entities, first_attrs, first_values, first_txs, first_added, last_entities, last_attrs, last_values, last_txs, last_added, false, \"failed to clone sqlite index run manifest last value\"
+        }
+        append(&roots, u64(sqlite3_column_int64(stmt, 0)))
+        append(&counts, u64(sqlite3_column_int64(stmt, 1)))
+        append(&first_entities, u64(sqlite3_column_int64(stmt, 2)))
+        append(&first_attrs, first_a)
+        append(&first_values, first_value)
+        append(&first_txs, u64(sqlite3_column_int64(stmt, 5)))
+        append(&first_added, sqlite3_column_int(stmt, 6) != 0)
+        append(&last_entities, u64(sqlite3_column_int64(stmt, 7)))
+        append(&last_attrs, last_a)
+        append(&last_values, last_value)
+        append(&last_txs, u64(sqlite3_column_int64(stmt, 10)))
+        append(&last_added, sqlite3_column_int(stmt, 11) != 0)
+    }
+}
+
 sqlite_index_run_manifest_attr_range_parts_raw :: proc(handle: rawptr, manifest_id: u64, ordinal: u64, attr: string) -> (i64, u64, string, u64, bool, i64, u64, string, u64, bool, bool, bool, string) {
     if handle == nil {
         return -1, 0, \"\", 0, false, -1, 0, \"\", 0, false, false, false, \"sqlite handle was nil\"
@@ -9435,6 +9518,41 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (sqlite-close-live-raw handle)
       (return count count-ok count-error))))
 
+(defn sqlite-index-run-manifest-run-bounds-count-for-test [path: string, manifest-id: u64] -> [run-count: int, ok: bool, error: string]
+  (let [[handle open-ok open-error] (sqlite-open-live-raw path)]
+    (when (not open-ok)
+      (return 0 false open-error))
+    (let [[roots counts first-entities first-attrs first-values first-txs first-added last-entities last-attrs last-values last-txs last-added bounds-ok bounds-error] (sqlite-index-run-manifest-run-bounds-parts-raw handle manifest-id)]
+      (sqlite-close-live-raw handle)
+      (defer (delete roots))
+      (defer (delete counts))
+      (defer (delete first-entities))
+      (defer (delete-owned-strings-array first-attrs))
+      (defer (delete-owned-strings-array first-values))
+      (defer (delete first-txs))
+      (defer (delete first-added))
+      (defer (delete last-entities))
+      (defer (delete-owned-strings-array last-attrs))
+      (defer (delete-owned-strings-array last-values))
+      (defer (delete last-txs))
+      (defer (delete last-added))
+      (when (not bounds-ok)
+        (return 0 false bounds-error))
+      (let [bounds-count (count roots)]
+        (when (or (not (= (count counts) bounds-count))
+                  (not (= (count first-entities) bounds-count))
+                  (not (= (count first-attrs) bounds-count))
+                  (not (= (count first-values) bounds-count))
+                  (not (= (count first-txs) bounds-count))
+                  (not (= (count first-added) bounds-count))
+                  (not (= (count last-entities) bounds-count))
+                  (not (= (count last-attrs) bounds-count))
+                  (not (= (count last-values) bounds-count))
+                  (not (= (count last-txs) bounds-count))
+                  (not (= (count last-added) bounds-count)))
+          (return 0 false "sqlite index run manifest bound columns had mismatched lengths"))
+        (return bounds-count true "")))))
+
 (defn sqlite-create-index-run-manifest-for-test [path: string, index-name: string] -> [manifest-id: u64, ok: bool, error: string]
   (let [[handle open-ok open-error] (sqlite-open-live-raw path)]
     (when (not open-ok)
@@ -11010,25 +11128,38 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (arr.push! highs^ (int base-count))
           (arr.push! first-datoms^ first-bound)
           (arr.push! last-datoms^ last-bound))))
-    (let [[direct-run-count direct-count-ok direct-count-error] (sqlite-index-run-manifest-run-count-raw handle manifest-id)]
-      (when (not direct-count-ok)
-        (return false direct-count-error))
-      (for [ordinal (arr.range 0 (int direct-run-count))]
-        (let [[run-root row-count first-e first-a first-value first-tx first-added last-e last-a last-value last-tx last-added run-ok run-error] (sqlite-index-run-manifest-run-bound-parts-raw handle manifest-id (u64 ordinal))]
-          (when (not run-ok)
-            (return false run-error))
-          (let [[first-datom first-datom-ok first-datom-error] (sqlite-datom-from-persisted-parts first-e first-a first-value first-tx first-added)]
+    (let [[run-roots run-counts first-entities first-attrs first-values first-txs first-added last-entities last-attrs last-values last-txs last-added runs-ok runs-error] (sqlite-index-run-manifest-run-bounds-parts-raw handle manifest-id)]
+      (defer (delete run-roots))
+      (defer (delete run-counts))
+      (defer (delete first-entities))
+      (defer (delete first-txs))
+      (defer (delete first-added))
+      (defer (delete last-entities))
+      (defer (delete last-txs))
+      (defer (delete last-added))
+      (defer (delete-owned-strings-array first-attrs))
+      (defer (delete-owned-strings-array first-values))
+      (defer (delete-owned-strings-array last-attrs))
+      (defer (delete-owned-strings-array last-values))
+      (when (not runs-ok)
+        (return false runs-error))
+      (for [ordinal (arr.range 0 (count run-roots))]
+        (let [run-root run-roots[ordinal]
+              row-count run-counts[ordinal]
+              first-e first-entities[ordinal]
+              first-a first-attrs[ordinal]
+              first-value first-values[ordinal]
+              first-tx first-txs[ordinal]
+              first-is-added first-added[ordinal]
+              last-e last-entities[ordinal]
+              last-a last-attrs[ordinal]
+              last-value last-values[ordinal]
+              last-tx last-txs[ordinal]
+              last-is-added last-added[ordinal]]
+          (let [[first-datom first-datom-ok first-datom-error] (sqlite-datom-from-persisted-parts first-e first-a first-value first-tx first-is-added)]
             (when (not first-datom-ok)
-              (delete first-a)
-              (delete first-value)
-              (delete last-a)
-              (delete last-value)
               (return false first-datom-error))
-            (let [[last-datom last-datom-ok last-datom-error] (sqlite-datom-from-persisted-parts last-e last-a last-value last-tx last-added)]
-              (delete first-a)
-              (delete first-value)
-              (delete last-a)
-              (delete last-value)
+            (let [[last-datom last-datom-ok last-datom-error] (sqlite-datom-from-persisted-parts last-e last-a last-value last-tx last-is-added)]
               (when (not last-datom-ok)
                 (delete-owned-datom first-datom)
                 (return false last-datom-error))
