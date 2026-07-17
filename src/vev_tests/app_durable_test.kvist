@@ -110,7 +110,7 @@
           index 0]
       (while (< index 30)
         (d.transact conn
-          `[[:db/add [:entity/id "counter"] :entity/value ~index]])
+          [[:db/add [:entity/id "counter"] :entity/value index]])
         (inc! index))
       (thread.join worker)
       (thread.destroy worker)

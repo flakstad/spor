@@ -216,9 +216,25 @@ Durability changes only connection creation:
   ...)
 ```
 
-Quoted values are `Data`, so the same value can be passed to `d.q`,
-`d.transact`, `d.pull`, or `d.db-with`. Use `q-text` only when a query arrives
-as EDN text at runtime:
+Quoted values are static `Data`, so the same value can be passed to `d.q`,
+`d.transact`, `d.pull`, or `d.db-with`. Keep queries quoted when symbols such
+as `?name` are part of the query data.
+
+When `Data` is expected, transaction and input collections can instead use
+ordinary contextual literals. Runtime names and expressions are inserted
+directly, without quasiquote and unquote:
+
+```clojure
+(defn contact-tx [id: i64, name: string] -> Data
+  [{:db/id id :contact/name name}])
+
+(d.transact conn
+  [[:db/add [:entity/id "counter"] :entity/value index]])
+
+(d.q contacts-by-emails snapshot [first-email second-email])
+```
+
+Use `q-text` only when a query arrives as EDN text at runtime:
 
 ```clojure
 (d.q-text query-text snapshot input-text)

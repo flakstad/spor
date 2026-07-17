@@ -330,7 +330,7 @@
      (sync.mutex-lock state^.lock)
      (defer (sync.mutex-unlock state^.lock))
      (tx-report-value
-       (vev.transact-store (addr state^.store) ~tx-form))))
+       (vev.transact-store-report-data (addr state^.store) ~tx-form))))
 
 (defn close-result [result: Result]
   (vev.delete-query-result
@@ -447,7 +447,7 @@
 
 (defmacro- q-first-data-form [form]
   (cond
-    (vector? form) `(quote ~form)
+    (vector? form) form
     (keyword? form) `(kdata.from-keyword ~(source form))
     (q-literal-int? form) `(kdata.from-int (i64 ~form))
     (string? form) `(q-data-input-string ~form)
@@ -764,7 +764,7 @@
 (defmacro db-with [db tx-form]
   `(db-handle
      (with-db-lock vev.Store-DB ~db
-       (vev.db-with-store-db (db-ptr ~db) ~tx-form))
+       (vev.db-with-store-db-data (db-ptr ~db) ~tx-form))
      (db-lock ~db)))
 
 (def close (overload close-conn close-db close-result close-value))

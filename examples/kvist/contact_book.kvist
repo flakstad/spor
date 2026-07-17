@@ -28,10 +28,10 @@
     [:db/add 1 :contact/knows 2]])
 
 (defn contact-tx [id: i64, name: string, email: string, company: string] -> Data
-  `[{:db/id ~id
-     :contact/name ~name
-     :contact/email ~email
-     :contact/company ~company}])
+  [{:db/id id
+    :contact/name name
+    :contact/email email
+    :contact/company company}])
 
 (defn katherine-contact [] -> Data
   (contact-tx 3 "Katherine Johnson" "katherine@example.com" "NASA"))
@@ -108,7 +108,7 @@
   (d.q contact-names-query db))
 
 (defn has-name? [result: Data, name: string] -> bool
-  (contains? result `[~name]))
+  (contains? result [name]))
 
 (defn assert-contact-names! [result: Data, expected-count: int, require-katherine: bool]
   (when (not (and (= (count result) expected-count)
@@ -118,13 +118,16 @@
     (fail! "unexpected contact names")))
 
 (defn assert-base-contacts! [db: d.DB]
-  (let [names (contact-names db)
+  (let [first-email "ada@example.com"
+        names (contact-names db)
         email-result (d.q contact-by-email-query db "ada@example.com")
         collection-find (d.q contact-name-collection-query db)
         tuple-find (d.q contact-by-email-tuple-query db "ada@example.com")
         scalar-find (d.q contact-by-email-scalar-query db "ada@example.com")
         map-find (d.q contact-by-email-map-query db "ada@example.com")
         collection-result (d.q contacts-by-emails-query db contact-emails)
+        contextual-collection-result
+          (d.q contacts-by-emails-query db [first-email "grace@example.com"])
         rule-result (d.q known-contact-query db known-contact-rules)
         profile (d.pull db contact-profile-pattern 1)]
     (assert-contact-names! names 2 false)
@@ -137,6 +140,8 @@
       (fail! "rule query returned the wrong contacts"))
     (when (not (= (count collection-result) 2))
       (fail! "collection Data input returned the wrong contacts"))
+    (when (not (= (count contextual-collection-result) 2))
+      (fail! "contextual collection Data input returned the wrong contacts"))
     (when (not (and (= (count collection-find) 2)
                     (contains? collection-find "Ada Lovelace")
                     (contains? collection-find "Grace Hopper")))
