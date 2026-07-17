@@ -111,8 +111,9 @@ EOF
 
 (
   cd "$TMP_DIR/java"
+  echo "resolving vev-java from ${REPOSITORY_URL:-$M2_DIR}"
   MAVEN_OPTS="${MAVEN_OPTS:-} $TRUST_OPTIONS" \
-    mvn -q -Dmaven.repo.local="$M2_DIR" package
+    mvn -Dmaven.repo.local="$M2_DIR" package
   java \
     --enable-preview \
     --enable-native-access=ALL-UNNAMED \
@@ -130,6 +131,7 @@ EOF
 
 (
   cd "$TMP_DIR/clojure"
+  echo "resolving vev-clj from ${REPOSITORY_URL:-$M2_DIR}"
   env -u VEV_LIB JAVA_TOOL_OPTIONS="$CLOJURE_JAVA_TOOL_OPTIONS" clojure -M:run -e "(require '[vev.core :as d])
 (let [conn (d/create-conn)]
   (d/transact conn [{:db/id 1 :user/name \"Ada\"}])
