@@ -85,51 +85,9 @@ else
   echo "odin not found; skipping Odin smoke"
 fi
 
-if command -v node >/dev/null 2>&1 && command -v clang++ >/dev/null 2>&1; then
-  NODE_INCLUDE_DIR="${NODE_INCLUDE_DIR:-}"
-  if [[ -z "$NODE_INCLUDE_DIR" ]]; then
-    NODE_PREFIX="$(cd "$(dirname "$(command -v node)")/.." && pwd)"
-    if [[ -f "$NODE_PREFIX/include/node/node_api.h" ]]; then
-      NODE_INCLUDE_DIR="$NODE_PREFIX/include/node"
-    fi
-  fi
-
-  if [[ -n "$NODE_INCLUDE_DIR" && -f "$NODE_INCLUDE_DIR/node_api.h" ]]; then
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-      clang++ \
-        -std=c++17 \
-        -bundle \
-        -undefined dynamic_lookup \
-        -I"$ROOT/include" \
-        -I"$NODE_INCLUDE_DIR" \
-        "$ROOT/clients/node/vev_native.cc" \
-        -L"$LIB_DIR" \
-        -lvev \
-        -Wl,-rpath,"$LIB_DIR" \
-        -Wl,-rpath,@loader_path \
-        -o "$NODE_EXAMPLE_DIR/vev_native.node"
-    else
-      clang++ \
-        -std=c++17 \
-        -shared \
-        -fPIC \
-        -I"$ROOT/include" \
-        -I"$NODE_INCLUDE_DIR" \
-        "$ROOT/clients/node/vev_native.cc" \
-        -L"$LIB_DIR" \
-        -lvev \
-        -Wl,-rpath,"$LIB_DIR" \
-        -Wl,-rpath,'$ORIGIN' \
-        -o "$NODE_EXAMPLE_DIR/vev_native.node"
-    fi
-
-    VEV_NODE_NATIVE="$NODE_EXAMPLE_DIR/vev_native.node" \
-      node "$ROOT/clients/node/smoke.js"
-  else
-    echo "node_api.h not found; skipping Node smoke"
-  fi
-else
-  echo "node/clang++ not found; skipping Node smoke"
+NODE_ADDON="$("$ROOT/scripts/build_node_addon.sh" --if-available)"
+if [[ -n "$NODE_ADDON" ]]; then
+  VEV_NODE_NATIVE="$NODE_ADDON" node "$ROOT/clients/node/smoke.js"
 fi
 
 if command -v javac >/dev/null 2>&1 && command -v java >/dev/null 2>&1; then

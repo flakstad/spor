@@ -20,7 +20,7 @@ case "$(uname -m)" in
 esac
 
 if [[ ! -f "$ROOT/build/examples/node/vev_native.node" || ! -f "$ROOT/build/lib/$LIB_NAME" ]]; then
-  "$ROOT/scripts/build_c_abi.sh"
+  "$ROOT/scripts/build_node_addon.sh" >/dev/null
 fi
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vev-node-package.XXXXXX")"
