@@ -2,3 +2,7 @@
 /src/src
 build/
 /.DS_Store
+/.kvist-cache/
+/src/vev_tests/*.sqlite
+/src/vev_tests/*.sqlite-shm
+/src/vev_tests/*.sqlite-wal
