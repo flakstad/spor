@@ -3699,6 +3699,48 @@ sqlite_insert_fulltext_datom_raw :: proc(handle: rawptr, log_index: i64, a: stri
     return true, \"\"
 }
 
+sqlite_prepare_insert_fulltext_datom_raw :: proc(handle: rawptr) -> (rawptr, bool, string) {
+    if handle == nil {
+        return nil, false, \"sqlite handle was nil\"
+    }
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql := \"INSERT OR REPLACE INTO vev_fulltext(rowid, attr, value_text, log_index) VALUES (?, ?, ?, ?)\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return nil, false, \"failed to allocate sqlite fulltext insert SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return nil, false, sqlite_error_text(db, \"sqlite prepare fulltext datom failed\")
+    }
+    return rawptr(stmt), true, \"\"
+}
+
+sqlite_step_fulltext_datom_stmt_raw :: proc(handle: rawptr, stmt_handle: rawptr, log_index: i64, a: string, value_text: string, added: bool) -> (bool, string) {
+    if handle == nil || stmt_handle == nil {
+        return false, \"sqlite handle was nil\"
+    }
+    if !added || log_index < 0 {
+        return true, \"\"
+    }
+    db := (^SQLite3)(handle)
+    stmt := (^SQLite3_Stmt)(stmt_handle)
+    _ = sqlite3_reset(stmt)
+    _ = sqlite3_clear_bindings(stmt)
+    if sqlite3_bind_int64(stmt, 1, log_index) != SQLITE_OK ||
+       sqlite_bind_text_borrowed(stmt, 2, a) != SQLITE_OK ||
+       sqlite_bind_text_borrowed(stmt, 3, value_text) != SQLITE_OK ||
+       sqlite3_bind_int64(stmt, 4, log_index) != SQLITE_OK {
+        return false, sqlite_error_text(db, \"sqlite bind fulltext datom failed\")
+    }
+    if sqlite3_step(stmt) != SQLITE_DONE {
+        return false, sqlite_error_text(db, \"sqlite insert fulltext datom failed\")
+    }
+    _ = sqlite3_clear_bindings(stmt)
+    return true, \"\"
+}
+
 sqlite_text_term_char_ok :: proc(ch: u8) -> bool {
     return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
 }
@@ -3736,6 +3778,47 @@ sqlite_insert_text_term_raw :: proc(db: ^SQLite3, log_index: i64, a: string, ter
     return true, \"\"
 }
 
+sqlite_prepare_insert_text_term_raw :: proc(handle: rawptr) -> (rawptr, bool, string) {
+    if handle == nil {
+        return nil, false, \"sqlite handle was nil\"
+    }
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql := \"INSERT OR IGNORE INTO vev_text_terms(attr, term, log_index) VALUES (?, ?, ?)\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return nil, false, \"failed to allocate sqlite text term insert SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return nil, false, sqlite_error_text(db, \"sqlite prepare text term insert failed\")
+    }
+    return rawptr(stmt), true, \"\"
+}
+
+sqlite_step_text_term_stmt_raw :: proc(handle: rawptr, stmt_handle: rawptr, log_index: i64, a: string, term: string) -> (bool, string) {
+    if handle == nil || stmt_handle == nil {
+        return false, \"sqlite handle was nil\"
+    }
+    if len(term) == 0 {
+        return true, \"\"
+    }
+    db := (^SQLite3)(handle)
+    stmt := (^SQLite3_Stmt)(stmt_handle)
+    _ = sqlite3_reset(stmt)
+    _ = sqlite3_clear_bindings(stmt)
+    if sqlite_bind_text_borrowed(stmt, 1, a) != SQLITE_OK ||
+       sqlite_bind_text_borrowed(stmt, 2, term) != SQLITE_OK ||
+       sqlite3_bind_int64(stmt, 3, log_index) != SQLITE_OK {
+        return false, sqlite_error_text(db, \"sqlite bind text term failed\")
+    }
+    if sqlite3_step(stmt) != SQLITE_DONE {
+        return false, sqlite_error_text(db, \"sqlite insert text term failed\")
+    }
+    _ = sqlite3_clear_bindings(stmt)
+    return true, \"\"
+}
+
 sqlite_insert_text_terms_for_datom_raw :: proc(handle: rawptr, log_index: i64, a: string, value_text: string, added: bool) -> (bool, string) {
     if handle == nil {
         return false, \"sqlite handle was nil\"
@@ -3767,6 +3850,38 @@ sqlite_insert_text_terms_for_datom_raw :: proc(handle: rawptr, log_index: i64, a
         }
     }
     return flush_token(db, log_index, a, &token)
+}
+
+sqlite_insert_text_terms_for_datom_stmt_raw :: proc(handle: rawptr, stmt_handle: rawptr, log_index: i64, a: string, value_text: string, added: bool) -> (bool, string) {
+    if handle == nil || stmt_handle == nil {
+        return false, \"sqlite handle was nil\"
+    }
+    if !added || log_index < 0 {
+        return true, \"\"
+    }
+    token := make([dynamic]u8, 0, 32)
+    defer delete(token)
+    flush_token :: proc(handle: rawptr, stmt_handle: rawptr, log_index: i64, a: string, token: ^[dynamic]u8) -> (bool, string) {
+        if len(token^) == 0 {
+            return true, \"\"
+        }
+        term := string(token^[:])
+        ok, err := sqlite_step_text_term_stmt_raw(handle, stmt_handle, log_index, a, term)
+        clear(token)
+        return ok, err
+    }
+    for i := 0; i < len(value_text); i += 1 {
+        ch := value_text[i]
+        if sqlite_text_term_char_ok(ch) {
+            append(&token, sqlite_text_term_lower(ch))
+        } else {
+            ok, err := flush_token(handle, stmt_handle, log_index, a, &token)
+            if !ok {
+                return false, err
+            }
+        }
+    }
+    return flush_token(handle, stmt_handle, log_index, a, &token)
 }
 
 sqlite_text_terms_count_raw :: proc(handle: rawptr) -> i64 {
@@ -3920,7 +4035,7 @@ sqlite_step_prepared_datom_by_log_index_text_raw :: proc(handle: rawptr, stmt_ha
         return \"\", false, \"sqlite handle was nil\"
     }
     if stmt_handle == nil {
-        return \"\", false, \"sqlite statement was nil\"
+        return \"\", false, \"sqlite datom text statement was nil\"
     }
     db := (^SQLite3)(handle)
     stmt := (^SQLite3_Stmt)(stmt_handle)
@@ -3969,7 +4084,7 @@ sqlite_step_prepared_datom_by_log_index_parts_raw :: proc(handle: rawptr, stmt_h
         return 0, \"\", \"\", 0, false, false, \"sqlite handle was nil\"
     }
     if stmt_handle == nil {
-        return 0, \"\", \"\", 0, false, false, \"sqlite statement was nil\"
+        return 0, \"\", \"\", 0, false, false, \"sqlite datom parts statement was nil\"
     }
     db := (^SQLite3)(handle)
     stmt := (^SQLite3_Stmt)(stmt_handle)
@@ -4013,7 +4128,7 @@ sqlite_step_prepared_datom_entity_by_log_index_raw :: proc(handle: rawptr, stmt_
         return 0, false, \"sqlite handle was nil\"
     }
     if stmt_handle == nil {
-        return 0, false, \"sqlite statement was nil\"
+        return 0, false, \"sqlite datom entity statement was nil\"
     }
     db := (^SQLite3)(handle)
     stmt := (^SQLite3_Stmt)(stmt_handle)
@@ -4037,7 +4152,7 @@ sqlite_step_prepared_datom_attr_by_log_index_raw :: proc(handle: rawptr, stmt_ha
         return \"\", false, \"sqlite handle was nil\"
     }
     if stmt_handle == nil {
-        return \"\", false, \"sqlite statement was nil\"
+        return \"\", false, \"sqlite datom attr statement was nil\"
     }
     db := (^SQLite3)(handle)
     stmt := (^SQLite3_Stmt)(stmt_handle)
@@ -4703,7 +4818,7 @@ sqlite_attr_string_term_datom_parts_raw :: proc(handle: rawptr, attr: string, se
     return entities_out, attrs, values, txs, added, true, \"\"
 }
 
-sqlite_step_datom_stmt_raw :: proc(handle: rawptr, stmt_handle: rawptr, log_index: i64, e: u64, a: string, value_text: string, value_entity: i64, tx: u64, added: bool) -> (bool, string) {
+sqlite_step_datom_stmt_raw :: proc(handle: rawptr, stmt_handle: rawptr, fulltext_stmt_handle: rawptr, text_term_stmt_handle: rawptr, log_index: i64, e: u64, a: string, value_text: string, value_entity: i64, tx: u64, added: bool) -> (bool, string) {
     if handle == nil || stmt_handle == nil {
         return false, \"sqlite handle was nil\"
     }
@@ -4724,10 +4839,18 @@ sqlite_step_datom_stmt_raw :: proc(handle: rawptr, stmt_handle: rawptr, log_inde
         return false, sqlite_error_text(db, \"sqlite insert datom failed\")
     }
     _ = sqlite3_clear_bindings(stmt)
-    _, _ = sqlite_insert_fulltext_datom_raw(handle, log_index, a, value_text, added)
-    terms_ok, terms_error := sqlite_insert_text_terms_for_datom_raw(handle, log_index, a, value_text, added)
-    if !terms_ok {
-        return false, terms_error
+    if fulltext_stmt_handle != nil || text_term_stmt_handle != nil {
+        if fulltext_stmt_handle == nil || text_term_stmt_handle == nil {
+            return false, \"sqlite secondary text statement was nil\"
+        }
+        fulltext_ok, fulltext_error := sqlite_step_fulltext_datom_stmt_raw(handle, fulltext_stmt_handle, log_index, a, value_text, added)
+        if !fulltext_ok {
+            return false, fulltext_error
+        }
+        terms_ok, terms_error := sqlite_insert_text_terms_for_datom_stmt_raw(handle, text_term_stmt_handle, log_index, a, value_text, added)
+        if !terms_ok {
+            return false, terms_error
+        }
     }
     return true, \"\"
 }
@@ -5404,6 +5527,8 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defstruct SQLite-Direct-Write-Stmts {
   tx-stmt: rawptr
   datom-stmt: rawptr
+  fulltext-stmt: rawptr
+  text-term-stmt: rawptr
   tx-meta-stmt: rawptr
 })
 
@@ -5415,20 +5540,37 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (when (not datom-ok)
         (sqlite-finalize-stmt-raw tx-stmt)
         (return (SQLite-Direct-Write-Stmts {}) false datom-error))
-      (let [[tx-meta-stmt tx-meta-ok tx-meta-error] (sqlite-prepare-insert-tx-meta-raw handle)]
-        (when (not tx-meta-ok)
+      (let [[fulltext-stmt fulltext-ok fulltext-error] (sqlite-prepare-insert-fulltext-datom-raw handle)]
+        (when (not fulltext-ok)
           (sqlite-finalize-stmt-raw tx-stmt)
           (sqlite-finalize-stmt-raw datom-stmt)
-          (return (SQLite-Direct-Write-Stmts {}) false tx-meta-error))
-        (return (SQLite-Direct-Write-Stmts {tx-stmt: tx-stmt
-                                            datom-stmt: datom-stmt
-                                            tx-meta-stmt: tx-meta-stmt})
-                true
-                "")))))
+          (return (SQLite-Direct-Write-Stmts {}) false fulltext-error))
+        (let [[text-term-stmt text-term-ok text-term-error] (sqlite-prepare-insert-text-term-raw handle)]
+          (when (not text-term-ok)
+            (sqlite-finalize-stmt-raw tx-stmt)
+            (sqlite-finalize-stmt-raw datom-stmt)
+            (sqlite-finalize-stmt-raw fulltext-stmt)
+            (return (SQLite-Direct-Write-Stmts {}) false text-term-error))
+          (let [[tx-meta-stmt tx-meta-ok tx-meta-error] (sqlite-prepare-insert-tx-meta-raw handle)]
+            (when (not tx-meta-ok)
+              (sqlite-finalize-stmt-raw tx-stmt)
+              (sqlite-finalize-stmt-raw datom-stmt)
+              (sqlite-finalize-stmt-raw fulltext-stmt)
+              (sqlite-finalize-stmt-raw text-term-stmt)
+              (return (SQLite-Direct-Write-Stmts {}) false tx-meta-error))
+            (return (SQLite-Direct-Write-Stmts {tx-stmt: tx-stmt
+                                                datom-stmt: datom-stmt
+                                                fulltext-stmt: fulltext-stmt
+                                                text-term-stmt: text-term-stmt
+                                                tx-meta-stmt: tx-meta-stmt})
+                    true
+                    "")))))))
 
 (defn sqlite-direct-write-stmts-close [stmts: SQLite-Direct-Write-Stmts]
   (sqlite-finalize-stmt-raw stmts.tx-stmt)
   (sqlite-finalize-stmt-raw stmts.datom-stmt)
+  (sqlite-finalize-stmt-raw stmts.fulltext-stmt)
+  (sqlite-finalize-stmt-raw stmts.text-term-stmt)
   (sqlite-finalize-stmt-raw stmts.tx-meta-stmt))
 
 (defn sqlite-insert-index-chunk-with-stmts [handle: rawptr, stmts: ^SQLite-Index-Write-Stmts, index-name: string, level: i64, first-key: string, last-key: string, row-count: i64, child-count: i64, payload-text: string, checksum-text: string, created-tx: u64] -> [chunk-id: u64, ok: bool, error: string]
@@ -7935,7 +8077,34 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (sqlite-insert-tx-raw handle tx)
     (sqlite-step-tx-stmt-raw handle stmts^.tx-stmt tx)))
 
-(defn append-sqlite-datoms-with-stmts! [handle: rawptr, stmts: ^SQLite-Direct-Write-Stmts, base-count: int, datoms: []Datom] -> [ok: bool, error: string]
+(defn source-fulltext-attrs-for-append [source: DB-Read-Source, datoms: []Datom] -> [attrs: (map string (struct {})), ok: bool, error: string]
+  (let [out (set.empty string)
+        checked (set.empty string)]
+    (defer (delete-owned-string-set checked))
+    (for [datom datoms]
+      (when (not (set.contains? checked datom.a))
+        (set.add! checked (string-owned datom.a))
+        (let [[fulltext fulltext-ok fulltext-error] (db-read-source-schema-bool? source datom.a ":db/fulltext")]
+          (when (not fulltext-ok)
+            (delete-owned-string-set out)
+            (return (set.empty string) false fulltext-error))
+          (when fulltext
+            (set.add! out (string-owned datom.a))))))
+    (for [fulltext-datom datoms]
+      (when (and fulltext-datom.added
+                 (= fulltext-datom.a ":db/fulltext")
+                 (= fulltext-datom.v.kind .Bool)
+                 fulltext-datom.v.bool-value)
+        (for [ident-datom datoms]
+          (when (and ident-datom.added
+                     (= ident-datom.e fulltext-datom.e)
+                     (= ident-datom.a ":db/ident")
+                     (= ident-datom.v.kind .Keyword)
+                     (not (set.contains? out ident-datom.v.text)))
+            (set.add! out (string-owned ident-datom.v.text))))))
+    (return out true "")))
+
+(defn append-sqlite-datoms-with-stmts! [handle: rawptr, stmts: ^SQLite-Direct-Write-Stmts, base-count: int, datoms: []Datom, fulltext-attrs: (ptr (map string (struct {}))) = nil] -> [ok: bool, error: string]
   (for [datom index datoms]
     (let [value-text (value-serializable-text datom.v)
           value-entity (sqlite-datom-value-entity-index datom)]
@@ -7944,7 +8113,11 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (delete value-text)
           (when (not insert-ok)
             (return false insert-error)))
-        (let [[insert-ok insert-error] (sqlite-step-datom-stmt-raw handle stmts^.datom-stmt (i64 (+ base-count index)) datom.e datom.a value-text value-entity datom.tx datom.added)]
+        (let [secondary? (or (= fulltext-attrs nil)
+                             (set.contains? fulltext-attrs^ datom.a))
+              fulltext-stmt (if secondary? stmts^.fulltext-stmt nil)
+              text-term-stmt (if secondary? stmts^.text-term-stmt nil)
+              [insert-ok insert-error] (sqlite-step-datom-stmt-raw handle stmts^.datom-stmt fulltext-stmt text-term-stmt (i64 (+ base-count index)) datom.e datom.a value-text value-entity datom.tx datom.added)]
           (delete value-text)
           (when (not insert-ok)
             (return false insert-error))))))
@@ -8589,11 +8762,17 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (sqlite-rollback-if-owned! handle owns-tx)
           (return (SQLite-Durable-Published-Root {}) false tx-error)))
       (let [datom-start (time.now)
-            [datoms-ok datoms-error] (append-sqlite-datoms-with-stmts! handle write-stmts plan.start-index tx-data)]
+            [fulltext-attrs fulltext-ok fulltext-error] (source-fulltext-attrs-for-append source tx-data)]
+        (when (not fulltext-ok)
+          (set! profile^.append-datoms-us (+ profile^.append-datoms-us (sqlite-profile-elapsed-us datom-start)))
+          (sqlite-rollback-if-owned! handle owns-tx)
+          (return (SQLite-Durable-Published-Root {}) false fulltext-error))
+        (defer (delete-owned-string-set fulltext-attrs))
+        (let [[datoms-ok datoms-error] (append-sqlite-datoms-with-stmts! handle write-stmts plan.start-index tx-data (addr fulltext-attrs))]
         (set! profile^.append-datoms-us (+ profile^.append-datoms-us (sqlite-profile-elapsed-us datom-start)))
         (when (not datoms-ok)
           (sqlite-rollback-if-owned! handle owns-tx)
-          (return (SQLite-Durable-Published-Root {}) false datoms-error)))
+          (return (SQLite-Durable-Published-Root {}) false datoms-error))))
       (let [meta-start (time.now)
             [meta-ok meta-error] (insert-sqlite-tx-meta-with-stmts! handle write-stmts tx tx-meta)]
         (set! profile^.append-meta-us (+ profile^.append-meta-us (sqlite-profile-elapsed-us meta-start)))
@@ -10276,6 +10455,8 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (datom-from-owned-serial-text text)))
 
 (defn sqlite-load-datom-by-log-index-handle-stmt [handle: rawptr, stmt: rawptr, log-index: int] -> [datom: Datom, ok: bool, error: string]
+  (when (= stmt nil)
+    (return (sqlite-load-datom-by-log-index-handle handle log-index)))
   (let [[entity attr value-text tx added loaded-ok loaded-error] (sqlite-step-prepared-datom-by-log-index-parts-raw handle stmt (i64 log-index))]
     (when (not loaded-ok)
       (return (Datom {}) false loaded-error))
@@ -10287,9 +10468,23 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (return (Datom {e: entity a: attr v: value tx: tx added: added}) true ""))))
 
 (defn sqlite-load-datom-entity-by-log-index-handle-stmt [handle: rawptr, stmt: rawptr, log-index: int] -> [entity: u64, ok: bool, error: string]
+  (when (= stmt nil)
+    (let [[datom datom-ok datom-error] (sqlite-load-datom-by-log-index-handle handle log-index)]
+      (when (not datom-ok)
+        (return 0 false datom-error))
+      (let [entity datom.e]
+        (delete-owned-datom datom)
+        (return entity true ""))))
   (sqlite-step-prepared-datom-entity-by-log-index-raw handle stmt (i64 log-index)))
 
 (defn sqlite-load-datom-attr-by-log-index-handle-stmt [handle: rawptr, stmt: rawptr, log-index: int] -> [attr: string, ok: bool, error: string]
+  (when (= stmt nil)
+    (let [[datom datom-ok datom-error] (sqlite-load-datom-by-log-index-handle handle log-index)]
+      (when (not datom-ok)
+        (return "" false datom-error))
+      (let [attr (string-owned datom.a)]
+        (delete-owned-datom datom)
+        (return attr true ""))))
   (sqlite-step-prepared-datom-attr-by-log-index-raw handle stmt (i64 log-index)))
 
 (defn delete-active-datoms! [datoms: ^[dynamic]Datom, active: ^[dynamic]bool]
@@ -11430,13 +11625,22 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         high (db-index-view-count view)]
     (while (< low high)
       (let [mid (/ (+ low high) 2)
-            log-index (db-index-view-at view mid)
-            [datom-entity entity-ok entity-error] (sqlite-load-datom-entity-by-log-index-handle-stmt snapshot^.indexes.handle snapshot^.datom-stmt log-index)]
-        (when (not entity-ok)
-          (return low false entity-error))
-        (if (if upper (<= datom-entity entity) (< datom-entity entity))
-          (set! low (+ mid 1))
-          (set! high mid))))
+            log-index (db-index-view-at view mid)]
+        (if (not (= snapshot^.datom-stmt nil))
+          (let [[datom-entity entity-ok entity-error] (sqlite-load-datom-entity-by-log-index-handle-stmt snapshot^.indexes.handle snapshot^.datom-stmt log-index)]
+            (when (not entity-ok)
+              (return low false entity-error))
+            (if (if upper (<= datom-entity entity) (< datom-entity entity))
+              (set! low (+ mid 1))
+              (set! high mid)))
+          (let [[datom datom-ok datom-error] (sqlite-db-snapshot-datom-at-log-index snapshot log-index)]
+            (when (not datom-ok)
+              (return low false datom-error))
+            (let [datom-entity datom.e]
+              (delete-owned-datom datom)
+              (if (if upper (<= datom-entity entity) (< datom-entity entity))
+                (set! low (+ mid 1))
+                (set! high mid)))))))
     (return low true "")))
 
 (defn sqlite-db-snapshot-eavt-entity-range [snapshot: ^SQLite-DB-Snapshot, entity: u64] -> [low: int, high: int, ok: bool, error: string]
@@ -11467,15 +11671,24 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         high (db-index-view-count view)]
     (while (< low high)
       (let [mid (/ (+ low high) 2)
-            log-index (db-index-view-at view mid)
-            [datom-attr attr-ok attr-error] (sqlite-load-datom-attr-by-log-index-handle-stmt snapshot^.indexes.handle snapshot^.datom-stmt log-index)]
-        (when (not attr-ok)
-          (return low false attr-error))
-        (let [compare (strings.compare datom-attr attr)]
-          (delete datom-attr)
-          (if (if upper (<= compare 0) (< compare 0))
-            (set! low (+ mid 1))
-            (set! high mid)))))
+            log-index (db-index-view-at view mid)]
+        (if (not (= snapshot^.datom-stmt nil))
+          (let [[datom-attr attr-ok attr-error] (sqlite-load-datom-attr-by-log-index-handle-stmt snapshot^.indexes.handle snapshot^.datom-stmt log-index)]
+            (when (not attr-ok)
+              (return low false attr-error))
+            (let [compare (strings.compare datom-attr attr)]
+              (delete datom-attr)
+              (if (if upper (<= compare 0) (< compare 0))
+                (set! low (+ mid 1))
+                (set! high mid))))
+          (let [[datom datom-ok datom-error] (sqlite-db-snapshot-datom-at-log-index snapshot log-index)]
+            (when (not datom-ok)
+              (return low false datom-error))
+            (let [compare (strings.compare datom.a attr)]
+              (delete-owned-datom datom)
+              (if (if upper (<= compare 0) (< compare 0))
+                (set! low (+ mid 1))
+                (set! high mid)))))))
     (return low true "")))
 
 (defn sqlite-db-snapshot-aevt-attr-range [snapshot: ^SQLite-DB-Snapshot, attr: string] -> [low: int, high: int, ok: bool, error: string]
@@ -12578,7 +12791,60 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (arr.push! store^.direct-attr-cache entry)
           (return entry true ""))))))
 
-(defn append-source-new-entity-overlay-op-cached! [out: ^[dynamic]Tx-Op, store: ^SQLite-Conn, source: DB-Read-Source, op: Tx-Op] -> [ok: bool, error: string]
+(defstruct Source-Overlay-Batch-Index {
+  unique-entity: (map string u64)
+  owned-unique-keys: [dynamic]string
+  cardinality-op: (map string int)
+  owned-cardinality-keys: [dynamic]string
+})
+
+(defn source-overlay-batch-index [] -> Source-Overlay-Batch-Index
+  (Source-Overlay-Batch-Index
+    {unique-entity: (make (map string u64))
+     owned-unique-keys: (make [dynamic]string)
+     cardinality-op: (make (map string int))
+     owned-cardinality-keys: (make [dynamic]string)}))
+
+(defn delete-source-overlay-batch-index [index: Source-Overlay-Batch-Index]
+  (for [key index.owned-unique-keys]
+    (delete key))
+  (delete index.owned-unique-keys)
+  (delete index.unique-entity)
+  (for [key index.owned-cardinality-keys]
+    (delete key))
+  (delete index.owned-cardinality-keys)
+  (delete index.cardinality-op))
+
+(defn source-overlay-cardinality-key [entity: u64, attr: string] -> string
+  (fmt.aprintf "%d:%d:%s" entity (count attr) attr))
+
+(defn source-overlay-batch-remove-unique! [index: ^Source-Overlay-Batch-Index, op: Tx-Op]
+  (let [[key key-ok] (source-tx-unique-key op.a op.v)]
+    (when key-ok
+      (mmap.dissoc! index^.unique-entity key)
+      (delete key))))
+
+(defn source-overlay-batch-add-unique! [index: ^Source-Overlay-Batch-Index, op: Tx-Op] -> bool
+  (let [[key key-ok] (source-tx-unique-key op.a op.v)]
+    (when (not key-ok)
+      (return false))
+    (let [[entity found] (mmap.get index^.unique-entity key)]
+      (when found
+        (delete key)
+        (return (= entity op.e))))
+    (mmap.assoc! index^.unique-entity key op.e)
+    (arr.push! index^.owned-unique-keys key)
+    true))
+
+(defn delete-owned-tx-op-fields [op: Tx-Op]
+  (when op.owned-attr
+    (delete op.a))
+  (when op.owned-value
+    (delete-owned-value op.v))
+  (when (not (= op.map-group ""))
+    (delete op.map-group)))
+
+(defn append-source-new-entity-overlay-op-cached! [out: ^[dynamic]Tx-Op, batch: ^Source-Overlay-Batch-Index, store: ^SQLite-Conn, source: DB-Read-Source, op: Tx-Op] -> [ok: bool, error: string]
   (when (not (= op.kind .Add))
     (return false "new-entity overlay cached path only supports adds"))
   (let [[info info-ok info-error] (sqlite-conn-direct-attr-info store source op.a)]
@@ -12587,19 +12853,53 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (when info.has-type
       (when (not (value-matches-schema-type? op.v info.schema-type))
         (return false "schema value type mismatch")))
+    (let [cardinality-key ""
+          prior-index -1
+          has-prior false]
+      (when (not info.cardinality-many)
+        (set! cardinality-key (source-overlay-cardinality-key op.e op.a))
+        (let [[found-index found] (mmap.get batch^.cardinality-op cardinality-key)]
+          (set! prior-index found-index)
+          (set! has-prior found))
+        (when (and has-prior
+                   (value-equal? out^[prior-index].v op.v))
+          (delete cardinality-key)
+          (return true "")))
+      (when (and has-prior info.unique)
+        (source-overlay-batch-remove-unique! batch out^[prior-index]))
     (when info.unique
-      (when (source-overlay-prior-unique-conflict? (slice out^ 0) op)
-        (let [[error-text error-ok] (source-overlay-unique-error source (slice out^ 0) op)]
-          (return false (if error-ok error-text "schema unique conflict"))))
+        (when (not (source-overlay-batch-add-unique! batch op))
+          (when (not (= cardinality-key ""))
+            (delete cardinality-key))
+          (return false
+            (if (and (= info.unique-kind ":db.unique/identity")
+                     (not op.tuple-identity))
+              "conflicting upsert"
+              "schema unique conflict")))
       (let [[conflict conflict-ok conflict-error] (source-overlay-existing-unique-conflict? source op)]
         (when (not conflict-ok)
+            (when (not (= cardinality-key ""))
+              (delete cardinality-key))
           (return false conflict-error))
         (when conflict
-          (let [[error-text error-ok] (source-overlay-unique-error source (slice out^ 0) op)]
-            (return false (if error-ok error-text "schema unique conflict"))))))
-    (when (not info.cardinality-many)
-      (append-overlay-cardinality-one-retractions! out op))
-    (arr.push! out^ (tx-op-owned op))
+            (when (not (= cardinality-key ""))
+              (delete cardinality-key))
+            (return false
+              (if (and (= info.unique-kind ":db.unique/identity")
+                       (not op.tuple-identity))
+                "conflicting upsert"
+                "schema unique conflict")))))
+      (if has-prior
+        (do
+          (delete-owned-tx-op-fields out^[prior-index])
+          (set! out^[prior-index] (tx-op-owned op))
+          (delete cardinality-key))
+        (do
+          (let [out-index (count out^)]
+            (arr.push! out^ (tx-op-owned op))
+            (when (not info.cardinality-many)
+              (mmap.assoc! batch^.cardinality-op cardinality-key out-index)
+              (arr.push! batch^.owned-cardinality-keys cardinality-key))))))
     (return true "")))
 
 (defn source-overlay-ops-from-resolved [source: DB-Read-Source, resolved: Resolved-Tx] -> [ops: [dynamic]Tx-Op, ok: bool, error: string]
@@ -12656,12 +12956,14 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (if (and (source-overlay-ops-all-new-entity-adds? next-entity-id (slice resolved.ops 0))
            (not (source-overlay-ops-contain-schema-mutation? (slice resolved.ops 0))))
     (let [out (make [dynamic]Tx-Op 0 (count resolved.ops))]
+      (let [batch (source-overlay-batch-index)]
+        (defer (delete-source-overlay-batch-index batch))
       (for [op resolved.ops]
-        (let [[append-ok append-error] (append-source-new-entity-overlay-op-cached! (addr out) store source op)]
+          (let [[append-ok append-error] (append-source-new-entity-overlay-op-cached! (addr out) (addr batch) store source op)]
           (when (not append-ok)
             (delete-owned-tx-ops out)
             (return (make [dynamic]Tx-Op) false append-error))))
-      (return out true ""))
+        (return out true "")))
     (source-overlay-ops-from-resolved-for-direct-write source resolved next-entity-id)))
 
 (defn source-overlay-new-entity-ops-from-ops [source: DB-Read-Source, ops: []Tx-Op] -> [out-ops: [dynamic]Tx-Op, ok: bool, error: string]

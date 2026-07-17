@@ -6653,15 +6653,6 @@
         (delete-owned-datoms out)
         (return entity true "")))
     (delete-owned-datoms out)
-    (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source attr)]
-      (when (not datoms-ok)
-        (return 0 false datoms-error))
-      (for [datom datoms]
-        (when (= (index-position-compare datom.v lookup-value) 0)
-          (let [entity datom.e]
-            (delete-owned-datoms datoms)
-            (return entity true ""))))
-      (delete-owned-datoms datoms))
     (return 0 false ""))))
 
 (defn db-read-source-resolve-entity-term [source: DB-Read-Source, term: Term, binding: Binding] -> [value: Value, ok: bool, error: string]

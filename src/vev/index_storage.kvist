@@ -1098,6 +1098,12 @@
       (return false)))
   true)
 
+(defn shared-write-state-tx-declares-validation-schema? [tx-data: []Tx-Data] -> bool
+  (for [data tx-data]
+    (when (tx-data-modifies-validation-schema? data)
+      (return true)))
+  false)
+
 (defn shared-write-state-declared-schema-attrs [tx-data: []Tx-Data] -> [dynamic]string
   (let [out (make [dynamic]string)]
     (for [data tx-data]
@@ -1159,14 +1165,16 @@
 (defn shared-write-state-declared-attr-cardinality-many? [tx-data: []Tx-Data, attr: string] -> bool
   (shared-write-state-declared-attr-has-schema-value? tx-data attr ":db/cardinality" ":db.cardinality/many"))
 
-(defn shared-write-state-schema-ref-target-for-tx? [state: ^Shared-Write-State, tx-data: []Tx-Data, attr: string] -> bool
+(defn shared-write-state-schema-ref-target-for-tx? [state: ^Shared-Write-State, tx-data: []Tx-Data, attr: string, declared-schema?: bool = true] -> bool
   (if (reverse-attr? attr)
     (let [forward (forward-attr-for-reverse attr)]
       (defer (delete forward))
       (or (set.contains? state^.schema-ref forward)
-          (shared-write-state-declared-attr-ref? tx-data forward)))
+          (and declared-schema?
+               (shared-write-state-declared-attr-ref? tx-data forward))))
     (or (set.contains? state^.schema-ref attr)
-        (shared-write-state-declared-attr-ref? tx-data attr))))
+        (and declared-schema?
+             (shared-write-state-declared-attr-ref? tx-data attr)))))
 
 (defn shared-write-state-ref-tempid-value-for-tx? [state: ^Shared-Write-State, tx-data: []Tx-Data, attr: string, value: Value] -> bool
   (when (not (shared-write-state-schema-ref-target-for-tx? state tx-data attr))
@@ -1227,6 +1235,12 @@
 (defn shared-write-state-source-simple-mixed-schema-tx-data? [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data] -> bool
   (when (= (count tx-data) 0)
     (return false))
+  (let [has-schema false]
+    (for [data tx-data]
+      (when (tx-data-modifies-validation-schema? data)
+        (set! has-schema true)))
+    (when (not has-schema)
+      (return false)))
   (when (shared-write-state-source-simple-has-intermediate-lookup-target? state source tx-data)
     (return false))
   (when (not (shared-write-state-source-simple-value-tempids-have-entities? tx-data))
@@ -1397,21 +1411,87 @@
   (let [[_ lookup-ok lookup-error] (db-read-source-resolve-lookup-ref source attr value)]
     (and lookup-ok (= lookup-error ""))))
 
+(defn source-tx-unique-key [attr: string, value: Value] -> [key: string, ok: bool]
+  (let [[value-key value-ok] (primitive-value-dedupe-key value)]
+    (when (not value-ok)
+      (return "" false))
+    (return (fmt.aprintf "%d:%s:%d:%s" (count attr) attr (count value-key) value-key) true)))
+
+(defn shared-write-state-source-simple-indexed-lookup-resolves? [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, local-adds: (map string (struct {})), source-results: (ptr (map string bool)), owned-source-keys: ^[dynamic]string, attr: string, value: Value, data-index: int] -> bool
+  (when (not (or (shared-write-state-schema-unique? state attr)
+                 (shared-write-state-schema-fact-before-index? tx-data attr ":db/unique" data-index)))
+    (return false))
+  (let [[key key-ok] (source-tx-unique-key attr value)]
+    (when (not key-ok)
+      (return (shared-write-state-source-simple-lookup-resolves? state source tx-data attr value data-index)))
+    (when (set.contains? local-adds key)
+      (delete key)
+      (return true))
+    (let [[cached cached-ok] (mmap.get source-results^ key)]
+      (when cached-ok
+        (delete key)
+        (return cached)))
+    (let [[_ lookup-ok lookup-error] (db-read-source-resolve-lookup-ref source attr value)
+          resolved (and lookup-ok (= lookup-error ""))]
+      (mmap.assoc! source-results^ key resolved)
+      (arr.push! owned-source-keys^ key)
+      resolved)))
+
 (defn shared-write-state-source-simple-has-intermediate-lookup-target? [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data] -> bool
-  (for [data index tx-data]
-    (when (and data.has-lookup-ref
-               (shared-write-state-tx-adds-attr? tx-data data.lookup-attr)
-               (not (shared-write-state-source-simple-lookup-resolves? state source tx-data data.lookup-attr data.lookup-value index)))
-      (return true))
-    (when (and data.has-value-lookup-ref
-               (shared-write-state-tx-adds-attr? tx-data data.value-lookup-attr)
-               (not (shared-write-state-source-simple-lookup-resolves? state source tx-data data.value-lookup-attr data.value-lookup-value index)))
-      (return true))
-    (when (and data.has-expected-lookup-ref
-               (shared-write-state-tx-adds-attr? tx-data data.expected-lookup-attr)
-               (not (shared-write-state-source-simple-lookup-resolves? state source tx-data data.expected-lookup-attr data.expected-lookup-value index)))
-      (return true)))
-  false)
+  (let [lookup-attrs (set.empty string)
+        added-attrs (set.empty string)
+        local-adds (set.empty string)
+        owned-local-keys (make [dynamic]string)
+        source-results (make (map string bool))
+        owned-source-keys (make [dynamic]string)]
+    (defer
+      (do
+        (for [key owned-local-keys]
+          (delete key))
+        (delete owned-local-keys)
+        (delete local-adds)
+        (for [key owned-source-keys]
+          (delete key))
+        (delete owned-source-keys)
+        (delete source-results)
+        (delete added-attrs)
+        (delete lookup-attrs)))
+    (for [data tx-data]
+      (when data.has-lookup-ref
+        (set.add! lookup-attrs data.lookup-attr))
+      (when data.has-value-lookup-ref
+        (set.add! lookup-attrs data.value-lookup-attr))
+      (when data.has-expected-lookup-ref
+        (set.add! lookup-attrs data.expected-lookup-attr)))
+    (when (= (count lookup-attrs) 0)
+      (return false))
+    (for [data tx-data]
+      (when (= data.op ":db/add")
+        (set.add! added-attrs data.a)
+        (when (and (not data.has-lookup-ref)
+                   (not data.has-ident)
+                   (set.contains? lookup-attrs data.a))
+          (let [[key key-ok] (source-tx-unique-key data.a data.v)]
+            (when key-ok
+              (if (set.contains? local-adds key)
+                (delete key)
+                (do
+                  (set.add! local-adds key)
+                  (arr.push! owned-local-keys key))))))))
+    (for [data index tx-data]
+      (when (and data.has-lookup-ref
+                 (set.contains? added-attrs data.lookup-attr)
+                 (not (shared-write-state-source-simple-indexed-lookup-resolves? state source tx-data local-adds (addr source-results) (addr owned-source-keys) data.lookup-attr data.lookup-value index)))
+        (return true))
+      (when (and data.has-value-lookup-ref
+                 (set.contains? added-attrs data.value-lookup-attr)
+                 (not (shared-write-state-source-simple-indexed-lookup-resolves? state source tx-data local-adds (addr source-results) (addr owned-source-keys) data.value-lookup-attr data.value-lookup-value index)))
+        (return true))
+      (when (and data.has-expected-lookup-ref
+                 (set.contains? added-attrs data.expected-lookup-attr)
+                 (not (shared-write-state-source-simple-indexed-lookup-resolves? state source tx-data local-adds (addr source-results) (addr owned-source-keys) data.expected-lookup-attr data.expected-lookup-value index)))
+        (return true)))
+    false))
 
 (defn shared-write-state-tx-adds-ident? [tx-data: []Tx-Data, ident: string] -> bool
   (for [data tx-data]
@@ -1443,6 +1523,15 @@
 (defn shared-write-state-source-simple-ref-tempids-have-entities? [state: ^Shared-Write-State, tx-data: []Tx-Data] -> bool
   (for [data tx-data]
     (when (and (shared-write-state-ref-tempid-value-for-tx? state tx-data data.a data.v)
+               (not (current-tx-value? data.v)))
+      (let [value-tempid (ref-tempid-value-text data.v)]
+        (when (not (shared-write-state-source-simple-tx-has-tempid? tx-data value-tempid))
+          (return false)))))
+  true)
+
+(defn shared-write-state-source-simple-ref-tempids-have-entities-from-schema? [state: ^Shared-Write-State, tx-data: []Tx-Data] -> bool
+  (for [data tx-data]
+    (when (and (shared-write-state-ref-tempid-value? state data.a data.v)
                (not (current-tx-value? data.v)))
       (let [value-tempid (ref-tempid-value-text data.v)]
         (when (not (shared-write-state-source-simple-tx-has-tempid? tx-data value-tempid))
@@ -1578,15 +1667,15 @@
     next))
 
 (defn shared-write-state-source-simple-tx-data? [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data] -> bool
+  (for [data tx-data]
+    (when (not (shared-write-state-source-simple-tx-data-item? state data))
+      (return false)))
   (when (shared-write-state-source-simple-has-intermediate-lookup-target? state source tx-data)
     (return false))
   (when (not (shared-write-state-source-simple-value-tempids-have-entities? tx-data))
     (return false))
-  (when (not (shared-write-state-source-simple-ref-tempids-have-entities? state tx-data))
+  (when (not (shared-write-state-source-simple-ref-tempids-have-entities-from-schema? state tx-data))
     (return false))
-  (for [data tx-data]
-    (when (not (shared-write-state-source-simple-tx-data-item? state data))
-      (return false)))
   true)
 
 (defn shared-write-state-resolve-source-simple-tempid [tempid: string, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64] -> u64
@@ -1627,68 +1716,228 @@
       (return found true "")
       (return 0 false ""))))
 
-(defn shared-write-state-source-simple-tempid-upsert-entity [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64] -> [e: u64, ok: bool, conflict: bool, error: string]
-  (let [found: u64 0
-        has-found false]
+(defstruct Source-Tx-Resolve-Index {
+  tempid-head: (map string int)
+  tempid-tail: (map string int)
+  next-by-data: [dynamic]int
+  unique-entity: (map string u64)
+  owned-unique-keys: [dynamic]string
+  resolved-unique: (map string (struct {}))
+  added-attrs: (map string (struct {}))
+  batch-resolved-attrs: (map string (struct {}))
+  non-tuple-attrs: (map string (struct {}))
+})
+
+(defn source-tx-resolve-index [tx-data: []Tx-Data] -> Source-Tx-Resolve-Index
+  (let [out (Source-Tx-Resolve-Index
+              {tempid-head: (make (map string int))
+               tempid-tail: (make (map string int))
+               next-by-data: (make [dynamic]int (count tx-data))
+               unique-entity: (make (map string u64))
+               owned-unique-keys: (make [dynamic]string)
+               resolved-unique: (set.empty string)
+               added-attrs: (set.empty string)
+               batch-resolved-attrs: (set.empty string)
+               non-tuple-attrs: (set.empty string)})]
+    (arr.fill! out.next-by-data -1)
+    (for [data index tx-data]
+      (when data.has-tempid
+        (let [head (mmap.get out.tempid-head data.tempid -1)]
+          (if (< head 0)
+            (mmap.assoc! out.tempid-head data.tempid index)
+            (let [tail (mmap.get out.tempid-tail data.tempid head)]
+              (set! out.next-by-data[tail] index)))
+          (mmap.assoc! out.tempid-tail data.tempid index)))
+      (when (= data.op ":db/add")
+        (set.add! out.added-attrs data.a)))
+    out))
+
+(defn delete-source-tx-resolve-index [index: Source-Tx-Resolve-Index]
+  (for [key index.owned-unique-keys]
+    (delete key))
+  (delete index.owned-unique-keys)
+  (delete index.unique-entity)
+  (delete index.resolved-unique)
+  (delete index.added-attrs)
+  (delete index.batch-resolved-attrs)
+  (delete index.non-tuple-attrs)
+  (delete index.next-by-data)
+  (delete index.tempid-tail)
+  (delete index.tempid-head))
+
+(defn source-tx-resolve-index-put-unique! [index: ^Source-Tx-Resolve-Index, key: string, entity: u64] -> bool
+  (let [[existing found] (mmap.get index^.unique-entity key)]
+    (when found
+      (delete key)
+      (return (= existing entity))))
+  (mmap.assoc! index^.unique-entity key entity)
+  (set.add! index^.resolved-unique key)
+  (arr.push! index^.owned-unique-keys key)
+  true)
+
+(defn source-tx-resolve-index-put-missing! [index: ^Source-Tx-Resolve-Index, key: string]
+  (when (set.contains? index^.resolved-unique key)
+    (delete key)
+    (return))
+  (set.add! index^.resolved-unique key)
+  (arr.push! index^.owned-unique-keys key))
+
+(defn source-tx-resolve-index-lookup [index: ^Source-Tx-Resolve-Index, attr: string, value: Value] -> [entity: u64, found: bool, resolved: bool]
+  (let [[key key-ok] (source-tx-unique-key attr value)]
+    (when (not key-ok)
+      (return 0 false false))
+    (let [cached-resolved (set.contains? index^.resolved-unique key)
+          [cached-entity cached-found] (mmap.get index^.unique-entity key)]
+      (delete key)
+      (return cached-entity cached-found cached-resolved))))
+
+(defn source-tx-resolve-index-preload-existing-unique! [index: ^Source-Tx-Resolve-Index, state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data] -> [ok: bool, error: string]
+  (let [requested (set.empty string)
+        owned-requested (make [dynamic]string)
+        attr-counts (make (map string int))]
+    (defer
+      (do
+        (for [key owned-requested]
+          (delete key))
+        (delete owned-requested)
+        (delete requested)
+        (delete attr-counts)))
     (for [data tx-data]
       (when (and data.has-tempid
-                 (= data.tempid tempid)
                  (= data.op ":db/add")
                  (shared-write-state-schema-unique-identity? state data.a))
-        (when (and data.has-value-tempid
-                   (= data.value-tempid tempid))
-          (continue))
-        (let [empty-ops ([]Tx-Op [])
-              [value value-ok value-skip value-error] (shared-write-state-resolve-source-simple-value state source tx-data empty-ops data tempid-index tempids next-e)]
-          (when value-skip
+        (let [[key key-ok] (source-tx-unique-key data.a data.v)]
+          (when key-ok
+            (if (set.contains? requested key)
+              (delete key)
+              (do
+                (set.add! requested key)
+                (arr.push! owned-requested key)
+                (mmap.assoc! attr-counts data.a (+ (mmap.get attr-counts data.a 0) 1))))))))
+    (for [attr count attr-counts]
+      ;; Point probes are cheaper for small transactions. Above this boundary,
+      ;; one ordered attribute scan avoids repeated persisted-index setup.
+      (when (>= count 32)
+        (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source attr)]
+          (when (not datoms-ok)
+            (delete-owned-datoms datoms)
+            (return false datoms-error))
+          (for [datom datoms]
+            (let [[key key-ok] (source-tx-unique-key attr datom.v)]
+              (when key-ok
+                (if (set.contains? requested key)
+                  (when (not (source-tx-resolve-index-put-unique! index key datom.e))
+                    (delete-owned-datoms datoms)
+                    (return false "schema unique conflict"))
+                  (delete key)))))
+          (delete-owned-datoms datoms)
+          (for [data tx-data]
+            (when (and data.has-tempid
+                       (= data.op ":db/add")
+                       (= data.a attr)
+                       (shared-write-state-schema-unique-identity? state data.a))
+              (let [[key key-ok] (source-tx-unique-key data.a data.v)]
+                (when key-ok
+                  (source-tx-resolve-index-put-missing! index key)))))
+          (set.add! index^.batch-resolved-attrs attr))))
+    (return true "")))
+
+(defn shared-write-state-source-simple-tempid-upsert-entity [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, declared-schema?: bool, resolve-index: ^Source-Tx-Resolve-Index] -> [e: u64, ok: bool, conflict: bool, error: string]
+  (when (= resolve-index nil)
+    (let [local-index (source-tx-resolve-index tx-data)]
+      (defer (delete-source-tx-resolve-index local-index))
+      (return (shared-write-state-source-simple-tempid-upsert-entity state source tx-data tempid tempid-index tempids next-e declared-schema? (addr local-index)))))
+  (let [found: u64 0
+        has-found false
+        unique-keys (make [dynamic]string)]
+    (defer
+      (do
+        (for [key unique-keys]
+          (delete key))
+        (delete unique-keys)))
+    (let [cursor (mmap.get resolve-index^.tempid-head tempid -1)]
+      (while (>= cursor 0)
+        (let [index cursor
+              data tx-data[index]]
+          (set! cursor resolve-index^.next-by-data[index])
+        (when (and data.has-tempid
+                   (= data.tempid tempid)
+                   (= data.op ":db/add")
+                   (shared-write-state-schema-unique-identity? state data.a))
+          (when (and data.has-value-tempid
+                     (= data.value-tempid tempid))
             (continue))
-          (when (not value-ok)
-            (return 0 false false value-error))
-          (let [[local-entity local-ok local-error] (shared-write-state-resolve-source-simple-resolved-tx-data-lookup-ref tx-data tempid-index data.a value)]
-            (when (not (= local-error ""))
-              (return 0 false false local-error))
-            (when local-ok
-              (when (and has-found
-                         (not (= found local-entity)))
-                (return found false true ""))
-              (set! found local-entity)
-              (set! has-found true)))
-          (let [[entity entity-ok lookup-error] (db-read-source-resolve-lookup-ref source data.a value)]
-            (when (not (= lookup-error ""))
-              (return 0 false false lookup-error))
-            (when entity-ok
-              (when (and has-found
-                         (not (= found entity)))
-                (return found false true ""))
-              (set! found entity)
-              (set! has-found true))))))
-    (let [[tuple-e tuple-ok tuple-conflict tuple-error] (shared-write-state-source-simple-tempid-tuple-upsert-entity state source tx-data tempid tempid-index tempids next-e)]
-      (when tuple-conflict
-        (return found false true ""))
-      (when (not (= tuple-error ""))
-        (return found false false tuple-error))
-      (when tuple-ok
-        (when (and has-found
-                   (not (= found tuple-e)))
+          (let [empty-ops ([]Tx-Op [])
+                [value value-ok value-skip value-error] (shared-write-state-resolve-source-simple-value state source tx-data empty-ops data tempid-index tempids next-e declared-schema? resolve-index)]
+            (when value-skip
+              (continue))
+            (when (not value-ok)
+              (return 0 false false value-error))
+            (let [[unique-key key-ok] (source-tx-unique-key data.a value)]
+              (if key-ok
+                (do
+                  (arr.push! unique-keys unique-key)
+                  (let [[local-entity local-ok] (mmap.get resolve-index^.unique-entity unique-key)]
+                    (when local-ok
+                      (when (and has-found
+                                 (not (= found local-entity)))
+                        (return found false true ""))
+                      (set! found local-entity)
+                      (set! has-found true))))
+                (let [[local-entity local-ok local-error] (shared-write-state-resolve-source-simple-resolved-tx-data-lookup-ref tx-data tempid-index data.a value)]
+                  (when (not (= local-error ""))
+                    (return 0 false false local-error))
+                  (when local-ok
+                      (when (and has-found
+                                 (not (= found local-entity)))
+                        (return found false true ""))
+                      (set! found local-entity)
+                      (set! has-found true))))
+            (when (not (set.contains? resolve-index^.batch-resolved-attrs data.a))
+              (let [[entity entity-ok lookup-error] (db-read-source-resolve-lookup-ref source data.a value)]
+                (when (not (= lookup-error ""))
+                  (return 0 false false lookup-error))
+                (when entity-ok
+                  (when (and has-found
+                             (not (= found entity)))
+                    (return found false true ""))
+                  (set! found entity)
+                  (set! has-found true))))))))))
+    (when state^.has-tuple-schema
+      (let [[tuple-e tuple-ok tuple-conflict tuple-error] (shared-write-state-source-simple-tempid-tuple-upsert-entity state source tx-data tempid tempid-index tempids next-e declared-schema? resolve-index)]
+        (when tuple-conflict
           (return found false true ""))
-        (set! found tuple-e)
-        (set! has-found true)))
+        (when (not (= tuple-error ""))
+          (return found false false tuple-error))
+        (when tuple-ok
+          (when (and has-found
+                     (not (= found tuple-e)))
+            (return found false true ""))
+          (set! found tuple-e)
+          (set! has-found true))))
+    (when (not has-found)
+      (set! found next-e^)
+      (set! next-e^ (+ next-e^ 1))
+      (set! has-found true))
+    (for [key unique-keys]
+      (when (not (source-tx-resolve-index-put-unique! resolve-index (strings.clone key) found))
+        (return found false true "")))
     (return found has-found false "")))
 
-(defn shared-write-state-source-simple-tempid-component-value [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, attr: string, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64] -> [value: Value, ok: bool, error: string]
+(defn shared-write-state-source-simple-tempid-component-value [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, attr: string, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, declared-schema?: bool = true, resolve-index: (ptr Source-Tx-Resolve-Index) = nil] -> [value: Value, ok: bool, error: string]
   (for [data tx-data]
     (when (and data.has-tempid
                (= data.tempid tempid)
                (= data.op ":db/add")
                (= data.a attr))
       (let [empty-ops ([]Tx-Op [])
-            [value value-ok value-skip value-error] (shared-write-state-resolve-source-simple-value state source tx-data empty-ops data tempid-index tempids next-e)]
+            [value value-ok value-skip value-error] (shared-write-state-resolve-source-simple-value state source tx-data empty-ops data tempid-index tempids next-e declared-schema? resolve-index)]
         (if value-skip
           (return (Value {}) false "")
           (return value value-ok value-error)))))
   (return (Value {}) false ""))
 
-(defn shared-write-state-source-simple-tempid-tuple-upsert-entity [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64] -> [e: u64, ok: bool, conflict: bool, error: string]
+(defn shared-write-state-source-simple-tempid-tuple-upsert-entity [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, declared-schema?: bool = true, resolve-index: (ptr Source-Tx-Resolve-Index) = nil] -> [e: u64, ok: bool, conflict: bool, error: string]
   (let [found: u64 0
         has-found false
         seen (make [dynamic]string)]
@@ -1710,7 +1959,7 @@
           (let [items (make [dynamic]Value 0 (count schema.attrs))
                 complete true]
             (for [component schema.attrs]
-              (let [[value value-ok value-error] (shared-write-state-source-simple-tempid-component-value state source tx-data tempid component tempid-index tempids next-e)]
+              (let [[value value-ok value-error] (shared-write-state-source-simple-tempid-component-value state source tx-data tempid component tempid-index tempids next-e declared-schema? resolve-index)]
                 (when (not (= value-error ""))
                   (shared-write-state-delete-source-tuple-schemas schemas)
                   (delete items)
@@ -1737,13 +1986,13 @@
         (shared-write-state-delete-source-tuple-schemas schemas)))
     (return found has-found false "")))
 
-(defn shared-write-state-resolve-source-simple-tempid-with-upsert [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64] -> [entity: u64, ok: bool, error: string]
+(defn shared-write-state-resolve-source-simple-tempid-with-upsert [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, declared-schema?: bool = true, resolve-index: (ptr Source-Tx-Resolve-Index) = nil] -> [entity: u64, ok: bool, error: string]
   (let [[existing existing-ok] (resolved-tempid-lookup tempid-index tempid)]
     (when existing-ok
       (return existing true "")))
   (when (not (shared-write-state-source-simple-tx-has-tempid? tx-data tempid))
     (return 0 false "tempid used only as value"))
-  (let [[upsert-e upsert-ok upsert-conflict upsert-error] (shared-write-state-source-simple-tempid-upsert-entity state source tx-data tempid tempid-index tempids next-e)]
+  (let [[upsert-e upsert-ok upsert-conflict upsert-error] (shared-write-state-source-simple-tempid-upsert-entity state source tx-data tempid tempid-index tempids next-e declared-schema? resolve-index)]
     (when upsert-conflict
       (return 0 false "conflicting upsert"))
     (when (not (= upsert-error ""))
@@ -1757,7 +2006,7 @@
         (push-resolved-tempid! tempids tempid-index tempid assigned)
         (return assigned true "")))))
 
-(defn shared-write-state-prepare-source-simple-tempids! [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64] -> [ok: bool, error: string]
+(defn shared-write-state-prepare-source-simple-tempids! [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, declared-schema?: bool = true, resolve-index: (ptr Source-Tx-Resolve-Index) = nil] -> [ok: bool, error: string]
   (for [data tx-data]
     (when data.has-tempid
       (let [[_ existing-ok] (resolved-tempid-lookup tempid-index data.tempid)]
@@ -1765,7 +2014,7 @@
           (if (current-tx-tempid? data.tempid)
             (let [tx (shared-write-state-next-tx state)]
               (push-resolved-tempid! tempids tempid-index data.tempid tx))
-            (let [[upsert-e upsert-ok upsert-conflict upsert-error] (shared-write-state-source-simple-tempid-upsert-entity state source tx-data data.tempid tempid-index tempids next-e)]
+            (let [[upsert-e upsert-ok upsert-conflict upsert-error] (shared-write-state-source-simple-tempid-upsert-entity state source tx-data data.tempid tempid-index tempids next-e declared-schema? resolve-index)]
               (when upsert-conflict
                 (return false "conflicting upsert"))
               (when (not (= upsert-error ""))
@@ -1919,9 +2168,9 @@
       (shared-write-state-delete-source-tuple-schemas declared))
     (return true "")))
 
-(defn shared-write-state-append-source-tuple-maintenance-for-new-ops! [state: ^Shared-Write-State, ops: ^[dynamic]Tx-Op, source: DB-Read-Source, tx-data: []Tx-Data, start-index: int] -> [ok: bool, error: string]
+(defn shared-write-state-append-source-tuple-maintenance-for-new-ops! [state: ^Shared-Write-State, ops: ^[dynamic]Tx-Op, source: DB-Read-Source, tx-data: []Tx-Data, start-index: int, declared-tuple-schema?: bool = true] -> [ok: bool, error: string]
   (when (and (not state^.has-tuple-schema)
-             (not (shared-write-state-declares-tuple-schema? tx-data)))
+             (not declared-tuple-schema?))
     (return true ""))
   (let [end-index (count ops^)
         index start-index]
@@ -2071,8 +2320,15 @@
         (return found true "")
         (return 0 false "")))))
 
-(defn shared-write-state-resolve-lookup-ref-for-tx [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, ops: []Tx-Op, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, attr: string, value: Value] -> [entity: u64, ok: bool, error: string]
-  (when (shared-write-state-tx-adds-attr? tx-data attr)
+(defn shared-write-state-resolve-lookup-ref-for-tx [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, ops: []Tx-Op, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, attr: string, value: Value, resolve-index: (ptr Source-Tx-Resolve-Index) = nil] -> [entity: u64, ok: bool, error: string]
+  (when (not (= resolve-index nil))
+    (let [[cached-e cached-found cached-resolved] (source-tx-resolve-index-lookup resolve-index attr value)]
+      (when cached-resolved
+        (return cached-e cached-found ""))))
+  (let [tx-adds-attr (if (= resolve-index nil)
+                       (shared-write-state-tx-adds-attr? tx-data attr)
+                       (set.contains? resolve-index^.added-attrs attr))]
+  (when tx-adds-attr
     (let [[local-e local-ok local-error] (shared-write-state-resolve-tx-local-lookup-ref ops attr value)]
       (when (or local-ok
                 (not (= local-error "")))
@@ -2080,14 +2336,22 @@
     (let [[tx-data-e tx-data-ok tx-data-error] (shared-write-state-resolve-tx-data-lookup-ref tx-data tempid-index attr value)]
       (when (or tx-data-ok
                 (not (= tx-data-error "")))
-        (return tx-data-e tx-data-ok tx-data-error))))
+        (return tx-data-e tx-data-ok tx-data-error)))))
   (let [[tuple-e tuple-ok tuple-error] (shared-write-state-resolve-tx-local-tuple-lookup-ref state source tx-data ops tempid-index tempids next-e attr value)]
     (when (or tuple-ok
               (not (= tuple-error "")))
       (return tuple-e tuple-ok tuple-error)))
-  (db-read-source-resolve-lookup-ref source attr value))
+  (let [[source-e source-ok source-error] (db-read-source-resolve-lookup-ref source attr value)]
+    (when (and (= source-error "")
+               (not (= resolve-index nil)))
+      (let [[key key-ok] (source-tx-unique-key attr value)]
+        (when key-ok
+          (if source-ok
+            (discard (source-tx-resolve-index-put-unique! resolve-index key source-e))
+            (source-tx-resolve-index-put-missing! resolve-index key)))))
+    (return source-e source-ok source-error)))
 
-(defn shared-write-state-resolve-source-simple-entity [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, ops: []Tx-Op, data: Tx-Data, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64] -> [entity: u64, ok: bool, skip: bool, error: string]
+(defn shared-write-state-resolve-source-simple-entity [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, ops: []Tx-Op, data: Tx-Data, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, resolve-index: (ptr Source-Tx-Resolve-Index) = nil] -> [entity: u64, ok: bool, skip: bool, error: string]
   (when data.has-tempid
     (when (current-tx-tempid? data.tempid)
       (let [tx (shared-write-state-next-tx state)]
@@ -2110,7 +2374,7 @@
         (return 0 false false "ident not found")
         (return 0 false false ident-error)))))
   (when data.has-lookup-ref
-    (let [[lookup-e lookup-ok lookup-error] (shared-write-state-resolve-lookup-ref-for-tx state source tx-data ops tempid-index tempids next-e data.lookup-attr data.lookup-value)]
+    (let [[lookup-e lookup-ok lookup-error] (shared-write-state-resolve-lookup-ref-for-tx state source tx-data ops tempid-index tempids next-e data.lookup-attr data.lookup-value resolve-index)]
       (when lookup-ok
         (return lookup-e true false ""))
       (if (and (shared-write-state-retract-like-op? data.op)
@@ -2121,7 +2385,7 @@
           (return 0 false false lookup-error)))))
   (return data.e true false ""))
 
-(defn shared-write-state-resolve-source-simple-value [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, ops: []Tx-Op, data: Tx-Data, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64] -> [resolved: Value, ok: bool, skip: bool, error: string]
+(defn shared-write-state-resolve-source-simple-value [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, ops: []Tx-Op, data: Tx-Data, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, declared-schema?: bool = true, resolve-index: (ptr Source-Tx-Resolve-Index) = nil] -> [resolved: Value, ok: bool, skip: bool, error: string]
   (when (current-tx-value? data.v)
     (return (value-entity (shared-write-state-next-tx state)) true false ""))
   (when data.has-value-tempid
@@ -2129,25 +2393,28 @@
       (let [tx (shared-write-state-next-tx state)]
         (ensure-resolved-tempid! tempids tempid-index data.value-tempid tx)
         (return (value-entity tx) true false "")))
-    (let [[entity entity-ok entity-error] (shared-write-state-resolve-source-simple-tempid-with-upsert state source tx-data data.value-tempid tempid-index tempids next-e)]
+    (let [[entity entity-ok entity-error] (shared-write-state-resolve-source-simple-tempid-with-upsert state source tx-data data.value-tempid tempid-index tempids next-e declared-schema? resolve-index)]
       (return (value-entity entity) entity-ok false entity-error)))
-  (when (shared-write-state-ref-tempid-value-for-tx? state tx-data data.a data.v)
+  (when (and (shared-write-state-schema-ref-target-for-tx? state tx-data data.a declared-schema?)
+             (or (= data.v.kind .String)
+                 (and (= data.v.kind .Int)
+                      (< data.v.int-value 0))))
     (let [value-tempid (ref-tempid-value-text data.v)]
       (when (current-tx-tempid? value-tempid)
         (let [tx (shared-write-state-next-tx state)]
           (ensure-resolved-tempid! tempids tempid-index value-tempid tx)
           (return (value-entity tx) true false "")))
-      (let [[entity entity-ok entity-error] (shared-write-state-resolve-source-simple-tempid-with-upsert state source tx-data value-tempid tempid-index tempids next-e)]
+      (let [[entity entity-ok entity-error] (shared-write-state-resolve-source-simple-tempid-with-upsert state source tx-data value-tempid tempid-index tempids next-e declared-schema? resolve-index)]
         (return (value-entity entity) entity-ok false entity-error))))
-  (when (and (shared-write-state-schema-ref-target-for-tx? state tx-data data.a)
+  (when (and (shared-write-state-schema-ref-target-for-tx? state tx-data data.a declared-schema?)
              (= data.v.kind .Keyword)
              (shared-write-state-tx-adds-ident? tx-data data.v.text))
     (let [[entity entity-ok entity-error] (shared-write-state-resolve-tx-data-ident tx-data tempid-index data.v.text)]
       (return (value-entity entity) entity-ok false entity-error)))
   (when data.has-value-lookup-ref
-    (when (not (shared-write-state-schema-ref-target-for-tx? state tx-data data.a))
+    (when (not (shared-write-state-schema-ref-target-for-tx? state tx-data data.a declared-schema?))
       (return (value-lookup-ref-vector data.value-lookup-attr data.value-lookup-value) true false ""))
-    (let [[lookup-e lookup-ok lookup-error] (shared-write-state-resolve-lookup-ref-for-tx state source tx-data ops tempid-index tempids next-e data.value-lookup-attr data.value-lookup-value)]
+    (let [[lookup-e lookup-ok lookup-error] (shared-write-state-resolve-lookup-ref-for-tx state source tx-data ops tempid-index tempids next-e data.value-lookup-attr data.value-lookup-value resolve-index)]
       (if lookup-ok
         (return (value-entity lookup-e) true false "")
         (if (and (= data.op ":db/retract")
@@ -2156,20 +2423,35 @@
           (if (= lookup-error "")
             (return data.v false false "lookup ref not found")
             (return data.v false false lookup-error))))))
-  (if (shared-write-state-schema-ref-target-for-tx? state tx-data data.a)
+  (if (shared-write-state-schema-ref-target-for-tx? state tx-data data.a declared-schema?)
     (let [[value value-ok value-error] (db-read-source-resolve-ref-component-value source data.v)]
       (return value value-ok false value-error))
-    (let [[value value-ok value-error] (db-read-source-resolve-tuple-value source data.a data.v)]
-      (return value value-ok false value-error))))
+    (if (not state^.has-tuple-schema)
+      (return data.v true false "")
+      (do
+        (when (and (not (= resolve-index nil))
+                   (not declared-schema?))
+          (when (set.contains? resolve-index^.non-tuple-attrs data.a)
+            (return data.v true false ""))
+          (let [[tuple-attrs tuple-ok tuple-error] (db-read-source-schema-tuple-attrs source data.a)]
+            (when (not tuple-ok)
+              (return data.v false false tuple-error))
+            (let [has-tuple (> (count tuple-attrs) 0)]
+              (delete tuple-attrs)
+              (when (not has-tuple)
+                (set.add! resolve-index^.non-tuple-attrs data.a)
+                (return data.v true false "")))))
+        (let [[value value-ok value-error] (db-read-source-resolve-tuple-value source data.a data.v)]
+          (return value value-ok false value-error))))))
 
 (defn shared-write-state-resolve-source-tx-value [state: ^Shared-Write-State, source: DB-Read-Source, attr: string, value: Value] -> [resolved: Value, ok: bool, error: string]
   (if (shared-write-state-schema-ref-target? state attr)
     (db-read-source-resolve-ref-component-value source value)
     (db-read-source-resolve-tuple-value source attr value)))
 
-(defn shared-write-state-resolve-source-cas-expected [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, ops: []Tx-Op, data: Tx-Data, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64] -> [resolved: Value, ok: bool, error: string]
+(defn shared-write-state-resolve-source-cas-expected [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, ops: []Tx-Op, data: Tx-Data, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, declared-schema?: bool = true] -> [resolved: Value, ok: bool, error: string]
   (when data.has-expected-lookup-ref
-    (when (not (shared-write-state-schema-ref-target-for-tx? state tx-data data.a))
+    (when (not (shared-write-state-schema-ref-target-for-tx? state tx-data data.a declared-schema?))
       (return (value-lookup-ref-vector data.expected-lookup-attr data.expected-lookup-value) true ""))
     (let [[lookup-e lookup-ok lookup-error] (shared-write-state-resolve-lookup-ref-for-tx state source tx-data ops tempid-index tempids next-e data.expected-lookup-attr data.expected-lookup-value)]
       (if lookup-ok
@@ -2245,9 +2527,23 @@
         resolved-meta (make [dynamic]Tx-Meta)
         resolved-tempids (make [dynamic]Tempid)
         tempid-index (make (map string u64))
+        resolve-index (source-tx-resolve-index tx-data)
+        declared-schema? (shared-write-state-tx-declares-validation-schema? tx-data)
+        declared-tuple-schema? (and declared-schema?
+                                    (shared-write-state-declares-tuple-schema? tx-data))
         next-e (shared-write-state-source-simple-next-entity-id state tx-data)]
-    (defer (delete tempid-index))
-    (let [[prepared-ok prepared-error] (shared-write-state-prepare-source-simple-tempids! state source tx-data (addr tempid-index) (addr resolved-tempids) (addr next-e))]
+    (defer
+      (do
+        (delete-source-tx-resolve-index resolve-index)
+        (delete tempid-index)))
+    (let [[preload-ok preload-error] (source-tx-resolve-index-preload-existing-unique! (addr resolve-index) state source tx-data)]
+      (when (not preload-ok)
+        (return (Resolved-Tx {ok: false
+                              error: preload-error
+                              ops: resolved-ops
+                              tx-meta: resolved-meta
+                              tempids: resolved-tempids}))))
+    (let [[prepared-ok prepared-error] (shared-write-state-prepare-source-simple-tempids! state source tx-data (addr tempid-index) (addr resolved-tempids) (addr next-e) declared-schema? (addr resolve-index))]
       (when (not prepared-ok)
         (return (Resolved-Tx {ok: false
                               error: prepared-error
@@ -2262,7 +2558,7 @@
                                 ops: resolved-ops
                                 tx-meta: resolved-meta
                                 tempids: resolved-tempids}))))
-      (let [[e e-ok skip-data e-error] (shared-write-state-resolve-source-simple-entity state source tx-data (slice resolved-ops 0) data (addr tempid-index) (addr resolved-tempids) (addr next-e))]
+      (let [[e e-ok skip-data e-error] (shared-write-state-resolve-source-simple-entity state source tx-data (slice resolved-ops 0) data (addr tempid-index) (addr resolved-tempids) (addr next-e) (addr resolve-index))]
         (when (not e-ok)
           (return (Resolved-Tx {ok: false
                                 error: e-error
@@ -2284,7 +2580,7 @@
                                     ops: resolved-ops
                                     tx-meta: resolved-meta
                                     tempids: resolved-tempids})))
-            (let [[tuple-ok tuple-error] (shared-write-state-append-source-tuple-maintenance-for-new-ops! state (addr resolved-ops) source tx-data start-index)]
+            (let [[tuple-ok tuple-error] (shared-write-state-append-source-tuple-maintenance-for-new-ops! state (addr resolved-ops) source tx-data start-index declared-tuple-schema?)]
               (when (not tuple-ok)
                 (return (Resolved-Tx {ok: false
                                       error: tuple-error
@@ -2301,7 +2597,7 @@
                                     ops: resolved-ops
                                     tx-meta: resolved-meta
                                     tempids: resolved-tempids})))
-            (let [[tuple-ok tuple-error] (shared-write-state-append-source-tuple-maintenance-for-new-ops! state (addr resolved-ops) source tx-data start-index)]
+            (let [[tuple-ok tuple-error] (shared-write-state-append-source-tuple-maintenance-for-new-ops! state (addr resolved-ops) source tx-data start-index declared-tuple-schema?)]
               (when (not tuple-ok)
                 (return (Resolved-Tx {ok: false
                                       error: tuple-error
@@ -2310,14 +2606,14 @@
                                       tempids: resolved-tempids})))))
           (continue))
         (when (and (reverse-attr? data.a)
-                   (not (shared-write-state-schema-ref-target-for-tx? state tx-data data.a)))
+                   (not (shared-write-state-schema-ref-target-for-tx? state tx-data data.a declared-schema?)))
           (return (Resolved-Tx {ok: false
                                 error: "reverse attribute requires ref schema"
                                 ops: resolved-ops
                                 tx-meta: resolved-meta
                                 tempids: resolved-tempids})))
         (when (shared-write-state-source-cas-op? data)
-          (let [[expected expected-ok expected-error] (shared-write-state-resolve-source-cas-expected state source tx-data (slice resolved-ops 0) data (addr tempid-index) (addr resolved-tempids) (addr next-e))]
+          (let [[expected expected-ok expected-error] (shared-write-state-resolve-source-cas-expected state source tx-data (slice resolved-ops 0) data (addr tempid-index) (addr resolved-tempids) (addr next-e) declared-schema?)]
             (when (not expected-ok)
               (return (Resolved-Tx {ok: false
                                     error: expected-error
@@ -2338,7 +2634,7 @@
                                         ops: resolved-ops
                                         tx-meta: resolved-meta
                                         tempids: resolved-tempids})))))))
-        (let [[value value-ok skip-value value-error] (shared-write-state-resolve-source-simple-value state source tx-data (slice resolved-ops 0) data (addr tempid-index) (addr resolved-tempids) (addr next-e))]
+        (let [[value value-ok skip-value value-error] (shared-write-state-resolve-source-simple-value state source tx-data (slice resolved-ops 0) data (addr tempid-index) (addr resolved-tempids) (addr next-e) declared-schema? (addr resolve-index))]
           (when (not value-ok)
             (return (Resolved-Tx {ok: false
                                   error: value-error
@@ -2366,7 +2662,7 @@
               (if (= data.op ":db/retract")
                 (arr.push! resolved-ops (tx-op-with-map-group (tx-retract e data.a value) data.map-group))
                 (arr.push! resolved-ops (tx-op-with-map-group (tx-add e data.a value) data.map-group))))
-            (let [[tuple-ok tuple-error] (shared-write-state-append-source-tuple-maintenance-for-new-ops! state (addr resolved-ops) source tx-data start-index)]
+            (let [[tuple-ok tuple-error] (shared-write-state-append-source-tuple-maintenance-for-new-ops! state (addr resolved-ops) source tx-data start-index declared-tuple-schema?)]
               (when (not tuple-ok)
                 (return (Resolved-Tx {ok: false
                                       error: tuple-error

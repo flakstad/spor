@@ -49,6 +49,17 @@
   owns-values: bool
 })
 
+(defstruct Direct-Write-Profile {
+  resolve-us: f64
+  overlay-us: f64
+  append-datoms-us: f64
+  append-roots-us: f64
+  append-root-sort-us: f64
+  append-root-persist-us: f64
+  append-root-publish-us: f64
+  append-commit-us: f64
+})
+
 ;; The application facade is routinely used from HTTP servers where reads and
 ;; writes can arrive on different worker threads. Store-Conn owns mutable
 ;; snapshot and write caches, so access through a shared Conn must be serialized.
@@ -68,6 +79,21 @@
 (defn- conn-ptr [conn: Conn] -> ^vev.Store-Conn
   (let [state (conn-state conn)]
     (addr state^.store)))
+
+(defn direct-write-profile [conn: Conn] -> Direct-Write-Profile
+  (let [profile (vev.store-direct-write-profile (conn-ptr conn))]
+    (Direct-Write-Profile
+      {resolve-us: profile.resolve-us
+       overlay-us: profile.overlay-us
+       append-datoms-us: profile.append-datoms-us
+       append-roots-us: profile.append-roots-us
+       append-root-sort-us: profile.append-root-sort-us
+       append-root-persist-us: profile.append-root-persist-us
+       append-root-publish-us: profile.append-root-publish-us
+       append-commit-us: profile.append-commit-us})))
+
+(defn reset-direct-write-profile! [conn: Conn]
+  (vev.reset-store-direct-write-profile! (conn-ptr conn)))
 
 (defn- db-ptr [db: DB] -> ^vev.Store-DB
   (let [state (transmute ^DB-State (rawptr db))]
