@@ -1,0 +1,136 @@
+name: release gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/release-gate.yml"
+      - "KVIST_REVISION"
+      - "VERSION"
+      - "clients/**"
+      - "include/**"
+      - "scripts/**"
+      - "src/**"
+
+jobs:
+  package:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin-aarch64
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+
+    steps:
+      - name: Check out Vev
+        uses: actions/checkout@v4
+        with:
+          path: vev
+
+      - name: Check out Kvist
+        uses: actions/checkout@v4
+        with:
+          repository: kvist-lang/kvist
+          path: kvist
+
+      - name: Select pinned Kvist revision
+        working-directory: kvist
+        run: git checkout --detach "$(cat ../vev/KVIST_REVISION)"
+
+      - name: Install Odin
+        uses: laytan/setup-odin@v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang libsqlite3-dev
+
+      - name: Build Kvist
+        working-directory: kvist
+        run: |
+          odin build src/cli/kvist -o:speed -out:./kvist
+          echo "$PWD" >> "$GITHUB_PATH"
+
+      - name: Verify release environment
+        working-directory: vev
+        env:
+          VEV_EXPECT_PLATFORM: ${{ matrix.platform }}
+        run: scripts/check_release_environment.sh
+
+      - name: Build and smoke release
+        working-directory: vev
+        env:
+          VEV_EXPECT_PLATFORM: ${{ matrix.platform }}
+        run: scripts/build_release.sh
+
+      - name: Upload verified platform release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            vev/build/release/**
+            vev/build/jvm/*.jar
+            vev/build/jvm/*.pom
+
+  manifest:
+    name: combined manifest
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download macOS release
+        uses: actions/download-artifact@v4
+        with:
+          name: release-darwin-aarch64
+          path: dist/darwin-aarch64
+
+      - name: Download Linux release
+        uses: actions/download-artifact@v4
+        with:
+          name: release-linux-x86_64
+          path: dist/linux-x86_64
+
+      - name: Combine manifests
+        run: |
+          scripts/combine_release_manifests.py \
+            --output dist/manifest.json \
+            dist/darwin-aarch64/release/manifest.json \
+            dist/linux-x86_64/release/manifest.json
+
+      - name: Upload combined manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest
+          if-no-files-found: error
+          path: dist/manifest.json

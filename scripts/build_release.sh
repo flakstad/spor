@@ -6,6 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+"$ROOT/scripts/check_release_environment.sh" >/dev/null
 "$ROOT/scripts/build_native_library.sh"
 "$ROOT/scripts/package_native_bundle.sh" >/dev/null
 "$ROOT/scripts/smoke_native_bundle.sh" >/dev/null

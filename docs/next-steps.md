@@ -22,6 +22,13 @@ immutable database values.
 - The macOS arm64 release build produces checksummed native, JVM, and source
   artifacts. Its release command enforces extracted-native and package-only
   smokes for C, Java/Clojure, Python, Node, Go, Rust, Odin, and Kvist.
+- Release builds now reject missing host toolchains and an unexpected runner
+  architecture instead of silently accepting skipped host smokes.
+- The release workflow pins the Kvist compiler revision, builds on macOS arm64
+  and Linux x86-64, uploads each verified platform release, and combines their
+  manifests only when version, commit, and shared artifact hashes agree. The
+  workflow still needs its first successful remote run before Linux support is
+  advertised.
 - The development native layout stages `include`, `lib`, and relocatable
   pkg-config metadata with the same structure as release bundles.
 
@@ -67,14 +74,16 @@ machine-local package path.
 
 ## Remaining Work
 
-1. Run the same release gate on Linux x86-64 and combine its native artifact
-   with the macOS arm64 artifact manifest. Generated Odin must be identical;
+1. Run the new release workflow and fix any Linux x86-64 portability failures.
+   Accept the platform only after its complete package-only host smoke passes
+   and the combined manifest is produced. Generated Odin must be identical;
    native bytes need not be identical across operating systems.
-2. Stage or publish the platform-native artifacts, then the Java and Clojure
+2. Stage or publish both platform-native artifacts, then the Java and Clojure
    artifacts that depend on it. Verify fresh Maven and Clojure projects using
    coordinates only, with no repository-local classpath or library path.
-3. Add automated macOS arm64 and Linux x86-64 release runners. Stop advertising
-   any host whose package smoke does not pass on both applicable runners.
+3. Add the successful release workflow as a required branch/release check.
+   Stop advertising any host whose package smoke does not pass on both
+   applicable runners.
 
 Parser diagnostic exactness, additional DataScript edge cases, and specialized
 query optimizations continue after this release gate. They are not allowed to
@@ -91,6 +100,8 @@ This gate is complete when:
 - contact-book examples pass through the canonical application API
 - one versioned command produces a complete checksummed artifact manifest
 - macOS arm64 and Linux x86-64 artifacts pass package-only host smokes
+- the combined manifest proves that both platform releases came from the same
+  Vev commit and agree on all platform-independent artifact hashes
 - fresh Clojure and Java projects consume staged or published coordinates
   without repository-local setup
 
