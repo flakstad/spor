@@ -54,6 +54,42 @@
       (= snapshot.kind .SQLite-Lazy-Snapshot)
       (= snapshot.kind .SQLite-Root-Snapshot)))
 
+(t.deftest sqlite-map-db-id-lookup-ref-update-preserves-unrelated-entities
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.lookup-map-update.sqlite")
+  (let [path "tmp.vev.lookup-map-update.sqlite"
+        [store opened-ok opened-error] (vev.open-store path)
+        seed (vev.transact-store-text
+               (addr store)
+               "[{:db/id 100 :db/ident :ro/id :db/valueType :db.type/string :db/unique :db.unique/identity} {:db/id 101 :db/ident :item/collection :db/valueType :db.type/ref} {:db/id 102 :db/ident :property-value/option :db/valueType :db.type/ref} {:db/id 200 :ro/id \"collection\"} {:db/id 201 :ro/id \"todo\"} {:db/id 202 :ro/id \"done\"} {:db/id 1 :ro/id \"inserted\" :item/collection 200} {:db/id 2 :ro/id \"beta\" :item/collection 200} {:db/id 3 :ro/id \"status-beta\" :property-value/option 201}]")]
+    (defer (remove-sqlite-files path))
+    (t.is opened-ok opened-error)
+    (t.is seed.ok seed.error)
+    (vev.delete-live-tx-report-shallow seed)
+    (let [report (vev.transact-store-report-tx-data
+                   (addr store)
+                   (vev.tx-data
+                     {:db/id [:ro/id "status-beta"]
+                      :property-value/option [:ro/id "done"]}))
+          items (vev.q-result-store-text
+                  (addr store)
+                  "[:find ?id :where [?item :item/collection 200] [?item :ro/id ?id]]")
+          status (vev.q-result-store-text
+                   (addr store)
+                   "[:find ?option-id :where [?value :ro/id \"status-beta\"] [?value :property-value/option ?option] [?option :ro/id ?option-id]]")]
+      (t.is report.ok report.error)
+      (t.is items.result.ok items.result.error)
+      (t.is (= (count items.result.rows) 2))
+      (t.is (result-has-string-row? items.result "inserted"))
+      (t.is (result-has-string-row? items.result "beta"))
+      (t.is status.result.ok status.result.error)
+      (t.is (= (count status.result.rows) 1))
+      (t.is (result-has-string-row? status.result "done"))
+      (vev.delete-query-result items)
+      (vev.delete-query-result status)
+      (vev.delete-store-tx-report report))
+    (vev.close-store store)))
+
 (t.deftest sqlite-direct-frontier-log-indexes-preserve-prefix-order
   (defer (free_all context.allocator))
   (remove-sqlite-files "tmp.vev.direct-frontier-log-indexes.sqlite")

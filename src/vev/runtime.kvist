@@ -6289,7 +6289,18 @@
           (when (not current-ok)
             (return (Value {}) false current-error))
           (when (not current)
-            (return (Value {}) false ""))))
+            ;; A cardinality-one replacement leaves the prior value in EAVT
+            ;; as a retracted historical entry. The first entry for (e, a)
+            ;; is therefore not necessarily the current value. Fall back to
+            ;; the current-datom scan instead of treating the attribute as
+            ;; absent; source-backed bind joins depend on this helper.
+            (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity attr)]
+              (when (not datoms-ok)
+                (return (Value {}) false datoms-error))
+              (defer (delete-owned-datoms datoms))
+              (when (= (count datoms) 0)
+                (return (Value {}) false ""))
+              (return (value-owned datoms[(- (count datoms) 1)].v) true "")))))
       (let [datom (Datom {})
             datom-ok false
             datom-error ""]
