@@ -36,6 +36,7 @@ jobs:
         with:
           repository: kvist-lang/kvist
           path: kvist
+          fetch-depth: 0
 
       - name: Select pinned Kvist revision
         working-directory: kvist
