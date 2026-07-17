@@ -29,6 +29,14 @@ immutable database values.
   manifests only when version, commit, and shared artifact hashes agree. The
   workflow still needs its first successful remote run before Linux support is
   advertised.
+- A clean emulated Linux x86-64 run builds `libvev.so` and passes the C,
+  Java/Clojure, Python, Node, Go, Rust, and Odin package smokes. The isolated
+  Kvist package smoke reaches its Odin build but exceeds the local Docker VM's
+  3.8 GB memory ceiling. A native Linux runner must complete that final smoke;
+  emulation is not accepted as the release proof.
+- Node package assembly has a focused native-addon builder. It no longer
+  rebuilds the complete C ABI, CLI, and unrelated host adapters when the addon
+  is the only missing artifact.
 - The development native layout stages `include`, `lib`, and relocatable
   pkg-config metadata with the same structure as release bundles.
 
@@ -74,10 +82,12 @@ machine-local package path.
 
 ## Remaining Work
 
-1. Run the new release workflow and fix any Linux x86-64 portability failures.
-   Accept the platform only after its complete package-only host smoke passes
-   and the combined manifest is produced. Generated Odin must be identical;
-   native bytes need not be identical across operating systems.
+1. Run the new release workflow on native Linux x86-64. Confirm that the Kvist
+   package smoke completes with the runner's larger memory budget and fix any
+   real portability failure it exposes. Accept the platform only after every
+   package-only host smoke passes and the combined manifest is produced.
+   Generated Odin must be identical; native bytes need not be identical across
+   operating systems.
 2. Stage or publish both platform-native artifacts, then the Java and Clojure
    artifacts that depend on it. Verify fresh Maven and Clojure projects using
    coordinates only, with no repository-local classpath or library path.
