@@ -26,19 +26,17 @@ immutable database values.
   architecture instead of silently accepting skipped host smokes.
 - The release workflow pins the Kvist compiler revision, builds on macOS arm64
   and Linux x86-64, uploads each verified platform release, and combines their
-  manifests only when version, commit, and shared artifact hashes agree. The
-  workflow still needs its first successful remote run before Linux support is
-  advertised.
+  manifests only when version, commit, and shared artifact hashes agree.
 - The combined release assembles one `vev-java` jar containing all verified
   platform-native resources. Fresh Java and Clojure consumers are then tested
   with only `dev.vevdb:vev-java` or `dev.vevdb/vev-clj` coordinates; consumers
   resolve them from a temporary Maven HTTPS repository and do not select a
   native artifact or configure a library path.
-- A clean emulated Linux x86-64 run builds `libvev.so` and passes the C,
-  Java/Clojure, Python, Node, Go, Rust, and Odin package smokes. The isolated
-  Kvist package smoke reaches its Odin build but exceeds the local Docker VM's
-  3.8 GB memory ceiling. A native Linux runner must complete that final smoke;
-  emulation is not accepted as the release proof.
+- Native GitHub runners pass the complete package-only host suite on macOS
+  arm64 and Linux x86-64, including Kvist. The combined JVM artifacts also pass
+  fresh Java and Clojure coordinate resolution over HTTPS. This release proof
+  is recorded by successful workflow run
+  [29576948634](https://github.com/vevdb/vev/actions/runs/29576948634).
 - Node package assembly has a focused native-addon builder. It no longer
   rebuilds the complete C ABI, CLI, and unrelated host adapters when the addon
   is the only missing artifact.
@@ -87,19 +85,16 @@ machine-local package path.
 
 ## Remaining Work
 
-1. Run the new release workflow on native Linux x86-64. Confirm that the Kvist
-   package smoke completes with the runner's larger memory budget and fix any
-   real portability failure it exposes. Accept the platform only after every
-   package-only host smoke passes and the combined manifest is produced.
-   Generated Odin must be identical; native bytes need not be identical across
-   operating systems.
-2. Publish the verified combined `vev-java` and `vev-clj` artifacts to the
+1. Publish the verified combined `vev-java` and `vev-clj` artifacts to the
    selected public Maven repository. The combined release already verifies
    clean consumer caches against a temporary Maven HTTPS repository, without
    repository-local classpaths, native paths, or `:mvn/local-repo`.
-3. Add the successful release workflow as a required branch/release check.
+2. Add the successful release workflow as a required branch/release check.
    Stop advertising any host whose package smoke does not pass on both
    applicable runners.
+3. Cut the first tagged release from a successful gate run and publish its
+   checksummed native bundles, combined JVM artifacts, source package, and
+   adapter packages.
 
 Parser diagnostic exactness, additional DataScript edge cases, and specialized
 query optimizations continue after this release gate. They are not allowed to
