@@ -74,20 +74,19 @@ documented system SQLite runtime dependency for `libvev`; future packages may
 bundle or statically link SQLite per platform without changing the public Vev
 API.
 
-The JVM path has a bundled-native loading shape. The Java loader checks
-explicit path configuration, local `build/lib`, then classpath resources under
-`dev/vevdb/vev/native/<platform>/<library>`. `scripts/stage_jvm_native.sh`
-creates that resource tree for the current platform, and
-`scripts/package_jvm.sh` builds local proof jars for the intended split:
+The JVM path has bundled-native loading. The Java loader checks explicit path
+configuration, local `build/lib`, then classpath resources under
+`dev/vevdb/vev/native/<platform>/<library>`. Platform builds stage and test one
+native resource each; the combined release merges all verified resources into
+the final `vev-java` jar:
 
 - `vev-java-<version>.jar`
-- `vev-native-<platform>-<version>.jar`
 - `vev-clj-<version>.jar`
 
-`scripts/contact_book_package_clojure.sh` verifies the packaged Clojure path
-with a complete in-memory and durable application from a temporary project. It
-uses only `dev.vevdb/vev-clj`; no repository source classpath or explicit
-native-library path is present in the consumer project.
+`scripts/smoke_jvm_coordinates.sh` verifies a fresh Maven project and a fresh
+Clojure project against a staged repository. The projects use only
+`dev.vevdb:vev-java` or `dev.vevdb/vev-clj`; no repository source classpath,
+platform selection, or explicit native-library path is present.
 
 It also writes a local Maven repository under `build/m2`, so the future
 published dependency shapes can already be tested from outside the repo:
@@ -98,9 +97,8 @@ published dependency shapes can already be tested from outside the repo:
 ```
 
 For Java, the matching local Maven dependency is `dev.vevdb:vev-java`. These
-are not published releases yet, but they make the future one-dependency
-Clojure and Java stories mechanically real. `scripts/smoke_jvm_package.sh`
-verifies both shapes from temporary projects.
+are not published releases yet, but the one-dependency Clojure and Java paths
+are mechanically verified by the combined release gate.
 
 The Python path has the same explicit-to-bundled fallback shape: explicit
 `vev.Library(path)`, `VEV_LIB`, repo `build/lib`, then

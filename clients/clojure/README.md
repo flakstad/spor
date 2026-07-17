@@ -102,8 +102,9 @@ scripts/package_jvm.sh
 ```
 
 `scripts/package_jvm.sh` builds local Java, native-resource, and Clojure jars
-under `build/jvm` and a local Maven-style repository under `build/m2`. They are
-proof artifacts for the eventual deps.edn/Maven path, not a published release.
+under `build/jvm` and a local Maven-style repository under `build/m2`. Release
+automation combines the verified platform resources into one `vev-java` jar,
+so applications do not select a native artifact.
 
 That local repository can be consumed from a separate test project:
 
@@ -114,8 +115,9 @@ That local repository can be consumed from a separate test project:
                             "--enable-native-access=ALL-UNNAMED"]}}}
 ```
 
-`scripts/smoke_jvm_package.sh` builds the local artifacts and verifies the
-one-dependency Java and Clojure shapes from temporary deps.edn projects.
+`scripts/smoke_jvm_package.sh` verifies each platform package during its native
+build. `scripts/smoke_jvm_coordinates.sh` verifies the final combined artifacts
+from a fresh Maven project and a fresh Clojure project.
 
 When developing from the repo root, the root `:clj-dev` alias adds the locally
 built Java classes and the required JVM flags:

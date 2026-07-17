@@ -103,11 +103,25 @@ jobs:
             vev/build/jvm/*.pom
 
   manifest:
-    name: combined manifest
+    name: combined release
     needs: package
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+
+      - name: Install Maven
+        run: sudo apt-get update && sudo apt-get install -y maven
 
       - name: Download macOS release
         uses: actions/download-artifact@v4
@@ -128,9 +142,29 @@ jobs:
             dist/darwin-aarch64/release/manifest.json \
             dist/linux-x86_64/release/manifest.json
 
-      - name: Upload combined manifest
+      - name: Assemble cross-platform JVM release
+        run: |
+          scripts/assemble_jvm_release.sh \
+            "$(cat VERSION)" \
+            dist/jvm \
+            dist/m2 \
+            dist/darwin-aarch64/jvm \
+            dist/linux-x86_64/jvm
+
+      - name: Record cross-platform JVM artifacts
+        run: |
+          scripts/add_combined_jvm_artifacts.py \
+            --manifest dist/manifest.json \
+            --jvm-dir dist/jvm
+
+      - name: Smoke fresh JVM coordinate consumers
+        run: scripts/smoke_jvm_coordinates.sh "$(cat VERSION)" dist/m2
+
+      - name: Upload combined release
         uses: actions/upload-artifact@v4
         with:
-          name: release-manifest
+          name: release-combined
           if-no-files-found: error
-          path: dist/manifest.json
+          path: |
+            dist/manifest.json
+            dist/jvm/**

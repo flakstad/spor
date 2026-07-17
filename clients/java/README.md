@@ -137,11 +137,9 @@ Durable connections returned by `vev.connect("app.vev")` expose the same
 `listen` / `unlisten` API. Durable listener reports are delivered after
 successful commits only.
 
-The first published package should still support explicit native library paths.
-Bundled platform native artifacts should be published as separate
-`dev.vevdb:vev-native-<platform>` packages or merged into the runtime classpath
-by the Clojure/Java distribution. The Java loader already supports classpath
-resources such as:
+The Java package supports explicit native library paths, but normal consumers
+do not need one. The combined release merges each verified platform library
+into `dev.vevdb:vev-java` as classpath resources such as:
 
 ```text
 dev/vevdb/vev/native/darwin-aarch64/libvev.dylib
@@ -149,9 +147,10 @@ dev/vevdb/vev/native/darwin-x86_64/libvev.dylib
 dev/vevdb/vev/native/linux-x86_64/libvev.so
 ```
 
-`scripts/stage_jvm_native.sh` creates that resource tree for the current
-platform. A published native artifact can package the staged files as jar
-resources.
+`scripts/stage_jvm_native.sh` creates that resource tree for one platform.
+`scripts/assemble_jvm_release.sh` verifies the platform-independent Java
+classes agree and assembles the final cross-platform jar after all platform
+builds pass.
 
 `scripts/package_jvm.sh` builds local proof jars under `build/jvm`:
 
@@ -161,13 +160,15 @@ vev-native-<platform>-0.1.0.jar
 vev-clj-0.1.0.jar
 ```
 
-It also writes a local Maven-style repository under `build/m2`. Those artifacts
-are not published yet, but they verify the intended Maven split and
-bundled-native loading path.
+It also writes a local Maven-style repository under `build/m2`. These
+per-platform artifacts exercise native loading during platform builds. The
+combined release writes the publishable `vev-java` and `vev-clj` artifacts
+after merging all platform resources.
 
-Run `scripts/smoke_jvm_package.sh` to test the local Maven repo from temporary
-projects with only `dev.vevdb:vev-java` for the Java path and only
-`dev.vevdb/vev-clj` for the Clojure path.
+`scripts/smoke_jvm_coordinates.sh` verifies a fresh Maven project with only
+`dev.vevdb:vev-java` and a fresh Clojure project with only
+`dev.vevdb/vev-clj`. Neither consumer selects a platform artifact or configures
+a native-library path.
 
 Durable stores are opened through Vev APIs with paths such as `app.vev`. The
 current native library depends on the platform SQLite runtime. Java and Clojure

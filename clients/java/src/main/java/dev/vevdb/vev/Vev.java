@@ -29,7 +29,7 @@ import java.lang.ref.Cleaner;
 import java.util.UUID;
 import java.util.Date;
 
-public final class Vev {
+public final class Vev implements AutoCloseable {
     private static final Linker LINKER = Linker.nativeLinker();
     private static final Cleaner CLEANER = Cleaner.create();
     public static final int COLUMN_ENTITY = 1;
@@ -770,6 +770,7 @@ public final class Vev {
         return new QueryFunctionRegistry(raw);
     }
 
+    @Override
     public void close() {
         cleanable.clean();
     }
