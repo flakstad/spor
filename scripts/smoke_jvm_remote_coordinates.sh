@@ -92,7 +92,12 @@ done
 [[ -s "$PORT_FILE" ]] || { echo "temporary Maven repository did not start" >&2; exit 1; }
 
 PORT="$(cat "$PORT_FILE")"
-VEV_MAVEN_REPOSITORY_URL="https://localhost:$PORT" \
+if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+  echo "temporary Maven HTTPS repository exited before the consumer smoke" >&2
+  wait "$SERVER_PID"
+fi
+
+VEV_MAVEN_REPOSITORY_URL="https://127.0.0.1:$PORT" \
 VEV_MAVEN_CACHE="$TMP_DIR/consumer-m2" \
 VEV_MAVEN_TRUST_STORE="$TRUST_STORE" \
   "$ROOT/scripts/smoke_jvm_coordinates.sh" "$VERSION" "$STAGED_M2_DIR"
