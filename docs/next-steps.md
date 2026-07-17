@@ -37,6 +37,8 @@ immutable database values.
   fresh Java and Clojure coordinate resolution over HTTPS. This release proof
   is recorded by successful workflow run
   [29576948634](https://github.com/vevdb/vev/actions/runs/29576948634).
+- Every pull request runs the release gate, and `combined release` is required
+  before changes can land on `main`.
 - Node package assembly has a focused native-addon builder. It no longer
   rebuilds the complete C ABI, CLI, and unrelated host adapters when the addon
   is the only missing artifact.
@@ -89,10 +91,7 @@ machine-local package path.
    selected public Maven repository. The combined release already verifies
    clean consumer caches against a temporary Maven HTTPS repository, without
    repository-local classpaths, native paths, or `:mvn/local-repo`.
-2. Add the successful release workflow as a required branch/release check.
-   Stop advertising any host whose package smoke does not pass on both
-   applicable runners.
-3. Cut the first tagged release from a successful gate run and publish its
+2. Cut the first tagged release from a successful gate run and publish its
    checksummed native bundles, combined JVM artifacts, source package, and
    adapter packages.
 
