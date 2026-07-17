@@ -68,6 +68,7 @@ JAVA_HOME_PATH="$(
     head -1
 )"
 cp "$JAVA_HOME_PATH/lib/security/cacerts" "$TRUST_STORE"
+chmod u+w "$TRUST_STORE"
 keytool \
   -importcert \
   -noprompt \
