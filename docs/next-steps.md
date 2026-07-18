@@ -22,19 +22,22 @@ connections. Kvist and Clojure expose Datomic-shaped `q`, `pull`, `transact`,
   smokes for C, Java/Clojure, Python, Node, Go, Rust, Odin, and Kvist.
 - Release builds now reject missing host toolchains and an unexpected runner
   architecture instead of silently accepting skipped host smokes.
-- The release workflow pins the Kvist compiler revision, builds on macOS arm64
-  and Linux x86-64, uploads each verified platform release, and combines their
-  manifests only when version, commit, and shared artifact hashes agree.
+- The release workflow pins the Kvist compiler revision, builds on macOS arm64,
+  Linux x86-64, and Windows x86-64, uploads each verified platform release, and
+  combines their manifests only when version, commit, and shared artifact
+  hashes agree.
 - The combined release assembles one `vev-java` jar containing all verified
   platform-native resources. Fresh Java and Clojure consumers are then tested
   with only `dev.vevdb:vev-java` or `dev.vevdb/vev-clj` coordinates; consumers
   resolve them from a temporary Maven HTTPS repository and do not select a
   native artifact or configure a library path.
 - Native GitHub runners pass the complete package-only host suite on macOS
-  arm64 and Linux x86-64, including Kvist. The combined JVM artifacts also pass
-  fresh Java and Clojure coordinate resolution over HTTPS. This release proof
-  is recorded by successful workflow run
-  [29576948634](https://github.com/vevdb/vev/actions/runs/29576948634).
+  arm64, Linux x86-64, and Windows x86-64, including Kvist. Windows produces
+  `vev.dll` and `vev.lib`; its system SQLite DLL and import library are supplied
+  by vcpkg during the gate. The combined JVM artifacts contain all three native
+  resources and pass fresh Java and Clojure coordinate resolution over HTTPS.
+  This release proof is recorded by successful workflow run
+  [29598836792](https://github.com/vevdb/vev/actions/runs/29598836792).
 - Every pull request runs the release gate, and `combined release` is required
   before changes can land on `main`.
 - Node package assembly has a focused native-addon builder. It no longer

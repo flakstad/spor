@@ -10,9 +10,9 @@ VERSION="$(vev_version "$ROOT")"
 OUT="${1:-$ROOT/build/release/manifest.json}"
 
 case "$(uname -s)" in
-  Darwin) OS="darwin"; LIB_NAME="libvev.dylib" ;;
-  Linux) OS="linux"; LIB_NAME="libvev.so" ;;
-  MINGW*|MSYS*|CYGWIN*) OS="windows"; LIB_NAME="vev.dll" ;;
+  Darwin) OS="darwin"; LIB_NAME="libvev.dylib"; LINK_NAME="" ;;
+  Linux) OS="linux"; LIB_NAME="libvev.so"; LINK_NAME="" ;;
+  MINGW*|MSYS*|CYGWIN*) OS="windows"; LIB_NAME="vev.dll"; LINK_NAME="vev.lib" ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
@@ -59,6 +59,9 @@ required_artifacts=(
   "$SOURCE_DIR/vev-odin-$VERSION.tar.gz"
   "$SOURCE_DIR/vev-kvist-$VERSION.tar.gz"
 )
+if [[ -n "$LINK_NAME" ]]; then
+  required_artifacts+=("$ROOT/build/lib/$LINK_NAME")
+fi
 
 for path in "${required_artifacts[@]}"; do
   if [[ ! -f "$path" ]]; then
@@ -69,7 +72,11 @@ done
 
 sha256() {
   if [[ -f "$1" ]]; then
-    shasum -a 256 "$1" | awk '{print $1}'
+    if command -v shasum >/dev/null 2>&1; then
+      shasum -a 256 "$1" | awk '{print $1}'
+    else
+      sha256sum "$1" | awk '{print $1}'
+    fi
   fi
 }
 
@@ -100,6 +107,9 @@ artifact() {
   printf '  "platform": "%s",\n' "$PLATFORM"
   printf '  "artifacts": [\n'
   artifact "vev-native-$PLATFORM" "native-library" "$ROOT/build/lib/$LIB_NAME"; printf ',\n'
+  if [[ -n "$LINK_NAME" ]]; then
+    artifact "vev-native-$PLATFORM-import" "native-import-library" "$ROOT/build/lib/$LINK_NAME"; printf ',\n'
+  fi
   artifact "vev-native-$PLATFORM-bundle" "native-bundle" "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"; printf ',\n'
   artifact "vev-c-header" "c-header" "$ROOT/include/vev.h"; printf ',\n'
   artifact "vev-java" "jvm-jar" "$ROOT/build/jvm/vev-java-$VERSION.jar"; printf ',\n'

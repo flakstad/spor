@@ -9,9 +9,13 @@ source "$ROOT/scripts/version.sh"
 VERSION="$(vev_version "$ROOT")"
 
 case "$(uname -s)" in
-  Darwin) LIB_NAME="libvev.dylib" ;;
-  Linux) LIB_NAME="libvev.so" ;;
-  MINGW*|MSYS*|CYGWIN*) LIB_NAME="vev.dll" ;;
+  Darwin) LIB_NAME="libvev.dylib"; RUST_CLIENT_ROOT="$ROOT/clients/rust"; NATIVE_LIB_DIR="$ROOT/build/lib" ;;
+  Linux) LIB_NAME="libvev.so"; RUST_CLIENT_ROOT="$ROOT/clients/rust"; NATIVE_LIB_DIR="$ROOT/build/lib" ;;
+  MINGW*|MSYS*|CYGWIN*)
+    LIB_NAME="vev.dll"
+    RUST_CLIENT_ROOT="$(cygpath -m "$ROOT/clients/rust")"
+    NATIVE_LIB_DIR="$(cygpath -m "$ROOT/build/lib")"
+    ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
@@ -33,7 +37,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-vev = { path = "$ROOT/clients/rust" }
+vev = { path = "$RUST_CLIENT_ROOT" }
 EOF
 
 mkdir -p "$TMP_DIR/src"
@@ -75,7 +79,8 @@ fn main() -> Result<(), String> {
 }
 EOF
 
+PATH="$ROOT/build/lib:$PATH" \
 DYLD_LIBRARY_PATH="$ROOT/build/lib:${DYLD_LIBRARY_PATH:-}" \
 LD_LIBRARY_PATH="$ROOT/build/lib:${LD_LIBRARY_PATH:-}" \
-VEV_LIB_DIR="$ROOT/build/lib" \
+VEV_LIB_DIR="$NATIVE_LIB_DIR" \
   cargo run --quiet --manifest-path "$TMP_DIR/Cargo.toml"

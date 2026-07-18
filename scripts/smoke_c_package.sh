@@ -27,16 +27,28 @@ cat > "$TMP_DIR/smoke.c" <<'EOF'
 #include "vev.h"
 #include <stdio.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
+
+static void remove_file(const char *path) {
+#ifdef _WIN32
+    DeleteFileA(path);
+#else
+    unlink(path);
+#endif
+}
 
 static void remove_store(const char *path) {
     char wal[512];
     char shm[512];
     snprintf(wal, sizeof(wal), "%s-wal", path);
     snprintf(shm, sizeof(shm), "%s-shm", path);
-    unlink(path);
-    unlink(wal);
-    unlink(shm);
+    remove_file(path);
+    remove_file(wal);
+    remove_file(shm);
 }
 
 int main(void) {
@@ -128,10 +140,21 @@ int main(void) {
 }
 EOF
 
-PKG_CONFIG_PATH="$ROOT/build/lib/pkgconfig" \
-  clang "$TMP_DIR/smoke.c" \
-  $(PKG_CONFIG_PATH="$ROOT/build/lib/pkgconfig" pkg-config --cflags --libs vev) \
-  -Wl,-rpath,"$ROOT/build/lib" \
-  -o "$TMP_DIR/smoke"
-
-"$TMP_DIR/smoke"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    clang \
+      -I"$ROOT/build/include" \
+      "$TMP_DIR/smoke.c" \
+      "$ROOT/build/lib/vev.lib" \
+      -o "$TMP_DIR/smoke.exe"
+    PATH="$ROOT/build/lib:$PATH" "$TMP_DIR/smoke.exe"
+    ;;
+  *)
+    PKG_CONFIG_PATH="$ROOT/build/lib/pkgconfig" \
+      clang "$TMP_DIR/smoke.c" \
+      $(PKG_CONFIG_PATH="$ROOT/build/lib/pkgconfig" pkg-config --cflags --libs vev) \
+      -Wl,-rpath,"$ROOT/build/lib" \
+      -o "$TMP_DIR/smoke"
+    "$TMP_DIR/smoke"
+    ;;
+esac

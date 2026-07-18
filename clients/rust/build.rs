@@ -16,5 +16,7 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=dylib=vev");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
+    }
 }

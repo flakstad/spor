@@ -44,7 +44,48 @@ EOF
 
 (
   cd "$PACKAGE_ROOT"
-  kvist run smoke.kvist >/dev/null
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      BINARY="$PACKAGE_ROOT/smoke.exe"
+      WINDOWS_GENERATED="$(cygpath -m "$PACKAGE_ROOT/smoke.odin")"
+      WINDOWS_BINARY="$(cygpath -m "$BINARY")"
+      ;;
+    *)
+      BINARY="$PACKAGE_ROOT/smoke"
+      ;;
+  esac
+  kvist compile smoke.kvist -o "$PACKAGE_ROOT/smoke.odin" >/dev/null
+  if [[ -n "${WINDOWS_GENERATED:-}" ]]; then
+    COLLECTION_ARGS=()
+    while IFS= read -r drive; do
+      COLLECTION_ARGS+=("-collection:$drive=$drive:/")
+    done < <(
+      sed -nE 's/^import .*"([A-Za-z]):[\\/].*/\1/p' "$PACKAGE_ROOT/smoke.odin" |
+        tr '[:lower:]' '[:upper:]' |
+        sort -u
+    )
+    if (( ${#COLLECTION_ARGS[@]} == 0 )); then
+      echo "generated Kvist package has no Windows import collections" >&2
+      exit 1
+    fi
+    if [[ -z "${VEV_SQLITE_LIB_DIR:-}" ]]; then
+      echo "VEV_SQLITE_LIB_DIR is required for the Windows Kvist package smoke" >&2
+      exit 1
+    fi
+    MSYS2_ARG_CONV_EXCL="*" odin build "$WINDOWS_GENERATED" -file \
+      "${COLLECTION_ARGS[@]}" \
+      "-extra-linker-flags:/LIBPATH:$VEV_SQLITE_LIB_DIR" \
+      -out:"$WINDOWS_BINARY"
+  else
+    odin build "$PACKAGE_ROOT/smoke.odin" -file -out:"$BINARY"
+  fi
+  if ! "$BINARY"; then
+    if command -v objdump >/dev/null 2>&1; then
+      objdump -p "$BINARY" | grep "DLL Name" >&2 || true
+    fi
+    echo "packaged Kvist executable failed" >&2
+    exit 1
+  fi
 )
 
 echo ":vev-kvist-package-ok"

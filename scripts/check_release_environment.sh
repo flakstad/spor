@@ -7,6 +7,7 @@ set -euo pipefail
 case "$(uname -s)" in
   Darwin) OS="darwin" ;;
   Linux) OS="linux" ;;
+  MINGW*|MSYS*|CYGWIN*) OS="windows" ;;
   *) echo "release builds do not support $(uname -s)" >&2; exit 1 ;;
 esac
 
@@ -34,9 +35,9 @@ required_commands=(
   kvist
   node
   odin
+  pkg-config
   python3
   rustc
-  shasum
   tar
   unzip
 )
@@ -52,6 +53,12 @@ if (( ${#missing[@]} > 0 )); then
   printf 'release environment is missing required commands:' >&2
   printf ' %s' "${missing[@]}" >&2
   printf '\n' >&2
+  exit 1
+fi
+
+if ! command -v shasum >/dev/null 2>&1 &&
+   ! command -v sha256sum >/dev/null 2>&1; then
+  echo "release environment is missing shasum or sha256sum" >&2
   exit 1
 fi
 

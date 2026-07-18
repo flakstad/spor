@@ -7,9 +7,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 case "$(uname -s)" in
-  Darwin) LIB_NAME="libvev.dylib" ;;
-  Linux) LIB_NAME="libvev.so" ;;
-  MINGW*|MSYS*|CYGWIN*) LIB_NAME="vev.dll" ;;
+  Darwin) LIB_NAME="libvev.dylib"; GO_CLIENT_ROOT="$ROOT/clients/go" ;;
+  Linux) LIB_NAME="libvev.so"; GO_CLIENT_ROOT="$ROOT/clients/go" ;;
+  MINGW*|MSYS*|CYGWIN*) LIB_NAME="vev.dll"; GO_CLIENT_ROOT="$(cygpath -m "$ROOT/clients/go")" ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
@@ -30,7 +30,7 @@ go 1.22
 
 require github.com/vevdb/vev/clients/go v0.0.0
 
-replace github.com/vevdb/vev/clients/go => $ROOT/clients/go
+replace github.com/vevdb/vev/clients/go => $GO_CLIENT_ROOT
 EOF
 
 cat > "$TMP_DIR/main.go" <<'EOF'
@@ -61,7 +61,8 @@ EOF
 
 (
   cd "$TMP_DIR"
-  DYLD_LIBRARY_PATH="$ROOT/build/lib:${DYLD_LIBRARY_PATH:-}" \
+  PATH="$ROOT/build/lib:$PATH" \
+    DYLD_LIBRARY_PATH="$ROOT/build/lib:${DYLD_LIBRARY_PATH:-}" \
     LD_LIBRARY_PATH="$ROOT/build/lib:${LD_LIBRARY_PATH:-}" \
     go run .
 )

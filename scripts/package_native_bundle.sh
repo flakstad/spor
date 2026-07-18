@@ -12,9 +12,9 @@ OUT_DIR="$ROOT/build/release/native"
 STAGE_DIR="$ROOT/build/release/stage/native"
 
 case "$(uname -s)" in
-  Darwin) OS="darwin"; LIB_NAME="libvev.dylib" ;;
-  Linux) OS="linux"; LIB_NAME="libvev.so" ;;
-  MINGW*|MSYS*|CYGWIN*) OS="windows"; LIB_NAME="vev.dll" ;;
+  Darwin) OS="darwin"; LIB_NAME="libvev.dylib"; LINK_NAME="" ;;
+  Linux) OS="linux"; LIB_NAME="libvev.so"; LINK_NAME="" ;;
+  MINGW*|MSYS*|CYGWIN*) OS="windows"; LIB_NAME="vev.dll"; LINK_NAME="vev.lib" ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
@@ -38,6 +38,9 @@ mkdir -p \
 
 cp "$ROOT/include/vev.h" "$STAGE_DIR/$BUNDLE_ROOT/include/vev.h"
 cp "$ROOT/build/lib/$LIB_NAME" "$STAGE_DIR/$BUNDLE_ROOT/lib/$LIB_NAME"
+if [[ -n "$LINK_NAME" ]]; then
+  cp "$ROOT/build/lib/$LINK_NAME" "$STAGE_DIR/$BUNDLE_ROOT/lib/$LINK_NAME"
+fi
 cp "$ROOT/build/lib/pkgconfig/vev.pc" "$STAGE_DIR/$BUNDLE_ROOT/lib/pkgconfig/vev.pc"
 cp "$ROOT/LICENSE" "$STAGE_DIR/$BUNDLE_ROOT/LICENSE"
 

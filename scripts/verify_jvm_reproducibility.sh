@@ -10,7 +10,11 @@ SECOND="$(mktemp "${TMPDIR:-/tmp}/vev-jvm-hashes.XXXXXX")"
 trap 'rm -f "$FIRST" "$SECOND"' EXIT
 
 jvm_hashes() {
-  shasum -a 256 "$ROOT"/build/jvm/*.jar | sed "s#$ROOT/##"
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$ROOT"/build/jvm/*.jar
+  else
+    sha256sum "$ROOT"/build/jvm/*.jar
+  fi | sed "s#$ROOT/##"
 }
 
 "$ROOT/scripts/package_jvm.sh" >/dev/null

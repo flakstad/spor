@@ -55,21 +55,33 @@ if (pkg.name !== "@vevdb/vev" || pkg.main !== "vev.js" || pkg.types !== "vev.d.t
   throw new Error(`unexpected package metadata: ${JSON.stringify(pkg)}`);
 }
 const conn = vev.createConn();
-conn.transact('[{:db/id 1 :user/name "Ada"}]');
-const result = conn.queryText('[:find ?name :where [?e :user/name ?name]]');
-if (!result.includes('"Ada"')) {
-  throw new Error(`unexpected query result: ${result}`);
-}
 const store = "tmp.vev.node-package.sqlite";
 removeStore(store);
 try {
+  conn.transact('[{:db/id 1 :user/name "Ada"}]');
+  const result = conn.queryText('[:find ?name :where [?e :user/name ?name]]');
+  if (!result.includes('"Ada"')) {
+    throw new Error(`unexpected query result: ${result}`);
+  }
   const durable = vev.connect(store);
-  durable.transact('[{:db/id 2 :user/name "Durable Grace"}]');
-  const durableResult = durable.db().query(conn.prepare('[:find ?name :where [?e :user/name ?name]]'));
-  if (!durableResult.includes('"Durable Grace"')) {
-    throw new Error(`unexpected durable query result: ${durableResult}`);
+  try {
+    durable.transact('[{:db/id 2 :user/name "Durable Grace"}]');
+    const db = durable.db();
+    const query = conn.prepare('[:find ?name :where [?e :user/name ?name]]');
+    try {
+      const durableResult = db.query(query);
+      if (!durableResult.includes('"Durable Grace"')) {
+        throw new Error(`unexpected durable query result: ${durableResult}`);
+      }
+    } finally {
+      query.close();
+      db.close();
+    }
+  } finally {
+    durable.close();
   }
 } finally {
+  conn.close();
   removeStore(store);
 }
 console.log(":vev-node-package-ok");

@@ -31,11 +31,22 @@ unavailable() {
 command -v node >/dev/null 2>&1 || unavailable "node not found"
 command -v clang++ >/dev/null 2>&1 || unavailable "clang++ not found"
 
+NODE_VERSION="$(node -p 'process.versions.node')"
+NODE_GYP_CACHE=""
+if [[ -n "${LOCALAPPDATA:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+  NODE_GYP_CACHE="$(cygpath -u "$LOCALAPPDATA")/node-gyp/Cache/$NODE_VERSION"
+elif [[ -n "${HOME:-}" ]]; then
+  NODE_GYP_CACHE="$HOME/.cache/node-gyp/$NODE_VERSION"
+fi
+
 NODE_INCLUDE_DIR="${NODE_INCLUDE_DIR:-}"
 if [[ -z "$NODE_INCLUDE_DIR" ]]; then
-  NODE_PREFIX="$(cd "$(dirname "$(command -v node)")/.." && pwd)"
+  NODE_BIN_DIR="$(cd "$(dirname "$(command -v node)")" && pwd)"
+  NODE_PREFIX="$(cd "$NODE_BIN_DIR/.." && pwd)"
   for candidate in \
+    "$NODE_BIN_DIR/include/node" \
     "$NODE_PREFIX/include/node" \
+    "$NODE_GYP_CACHE/include/node" \
     /usr/local/include/node \
     /usr/include/node; do
     if [[ -f "$candidate/node_api.h" ]]; then
@@ -77,6 +88,31 @@ case "$(uname -s)" in
       -lvev \
       -Wl,-rpath,"$LIB_DIR" \
       -Wl,-rpath,'$ORIGIN' \
+      -o "$OUT"
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    NODE_LIB="${NODE_LIB:-}"
+    if [[ -z "$NODE_LIB" ]]; then
+      for candidate in \
+        "$NODE_BIN_DIR/node.lib" \
+        "$NODE_PREFIX/node.lib" \
+        "$NODE_GYP_CACHE/x64/node.lib"; do
+        if [[ -f "$candidate" ]]; then
+          NODE_LIB="$candidate"
+          break
+        fi
+      done
+    fi
+    [[ -f "${NODE_LIB:-}" ]] || unavailable "node.lib not found"
+    clang++ \
+      -std=c++17 \
+      -shared \
+      -I"$ROOT/include" \
+      -I"$NODE_INCLUDE_DIR" \
+      "$ROOT/clients/node/vev_native.cc" \
+      "$NODE_LIB" \
+      -L"$LIB_DIR" \
+      -lvev \
       -o "$OUT"
     ;;
   *)

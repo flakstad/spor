@@ -7,9 +7,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 case "$(uname -s)" in
-  Darwin) LIB_NAME="libvev.dylib" ;;
-  Linux) LIB_NAME="libvev.so" ;;
-  MINGW*|MSYS*|CYGWIN*) LIB_NAME="vev.dll" ;;
+  Darwin) LIB_NAME="libvev.dylib"; EXE_NAME="vev_odin_smoke" ;;
+  Linux) LIB_NAME="libvev.so"; EXE_NAME="vev_odin_smoke" ;;
+  MINGW*|MSYS*|CYGWIN*) LIB_NAME="vev.dll"; EXE_NAME="vev_odin_smoke.exe" ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
@@ -28,6 +28,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-odin build "$ROOT/clients/odin" -file -out:"$TMP_DIR/vev_odin_smoke"
-"$TMP_DIR/vev_odin_smoke" "$ROOT/build/lib/$LIB_NAME" >/dev/null
+odin build "$ROOT/clients/odin" -file -out:"$TMP_DIR/$EXE_NAME"
+PATH="$ROOT/build/lib:$PATH" \
+  "$TMP_DIR/$EXE_NAME" "$ROOT/build/lib/$LIB_NAME" >/dev/null
 echo ":vev-odin-package-ok"

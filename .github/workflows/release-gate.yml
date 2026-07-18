@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   pull_request:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   package:
     name: ${{ matrix.platform }}
@@ -16,6 +20,8 @@ jobs:
             platform: darwin-aarch64
           - runner: ubuntu-24.04
             platform: linux-x86_64
+          - runner: windows-2025
+            platform: windows-x86_64
 
     steps:
       - name: Check out Vev
@@ -67,10 +73,44 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang libsqlite3-dev
 
+      - name: Install Windows native dependencies
+        if: runner.os == 'Windows'
+        run: |
+          choco install pkgconfiglite -y
+          vcpkg install 'sqlite3[fts5]:x64-windows'
+          sqlite_root="$(cygpath -u "$VCPKG_INSTALLATION_ROOT")/installed/x64-windows"
+          sqlite_lib="$(cygpath -m "$sqlite_root/lib")"
+          echo "$(cygpath -m "$sqlite_root/bin")" >> "$GITHUB_PATH"
+          echo "VEV_SQLITE_LIB_DIR=$sqlite_lib" >> "$GITHUB_ENV"
+          node_version="$(node -p 'process.versions.node')"
+          for attempt in 1 2 3; do
+            if npx --yes node-gyp install "$node_version"; then
+              break
+            fi
+            if [[ "$attempt" == 3 ]]; then
+              exit 1
+            fi
+            sleep 5
+          done
+          node_gyp_root="$(cygpath -u "$LOCALAPPDATA")/node-gyp/Cache/$node_version"
+          echo "NODE_INCLUDE_DIR=$(cygpath -m "$node_gyp_root/include/node")" >> "$GITHUB_ENV"
+          echo "NODE_LIB=$(cygpath -m "$node_gyp_root/x64/node.lib")" >> "$GITHUB_ENV"
+
       - name: Build Kvist
         working-directory: kvist
         run: |
-          odin build src/cli/kvist -o:speed -out:./kvist
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            editbin="$(find "/c/Program Files/Microsoft Visual Studio" -path '*/bin/Hostx64/x64/editbin.exe' -print -quit)"
+            test -n "$editbin"
+            odin_exe="$(command -v odin).exe"
+            test -f "$odin_exe"
+            "$editbin" /STACK:67108864 "$(cygpath -w "$odin_exe")"
+            objdump -p "$odin_exe" | grep "SizeOfStackReserve"
+            odin build src/cli/kvist -o:speed -extra-linker-flags:"/STACK:67108864" -out:./kvist.exe
+            objdump -p ./kvist.exe | grep "SizeOfStackReserve"
+          else
+            odin build src/cli/kvist -o:speed -out:./kvist
+          fi
           echo "$PWD" >> "$GITHUB_PATH"
 
       - name: Verify release environment
@@ -82,6 +122,7 @@ jobs:
       - name: Build and smoke release
         working-directory: vev
         env:
+          KVIST_BIN: ${{ runner.os == 'Windows' && 'kvist.exe' || 'kvist' }}
           VEV_EXPECT_PLATFORM: ${{ matrix.platform }}
         run: scripts/build_release.sh
 
@@ -128,12 +169,19 @@ jobs:
           name: release-linux-x86_64
           path: dist/linux-x86_64
 
+      - name: Download Windows release
+        uses: actions/download-artifact@v4
+        with:
+          name: release-windows-x86_64
+          path: dist/windows-x86_64
+
       - name: Combine manifests
         run: |
           scripts/combine_release_manifests.py \
             --output dist/manifest.json \
             dist/darwin-aarch64/release/manifest.json \
-            dist/linux-x86_64/release/manifest.json
+            dist/linux-x86_64/release/manifest.json \
+            dist/windows-x86_64/release/manifest.json
 
       - name: Assemble cross-platform JVM release
         run: |
@@ -142,7 +190,8 @@ jobs:
             dist/jvm \
             dist/m2 \
             dist/darwin-aarch64/jvm \
-            dist/linux-x86_64/jvm
+            dist/linux-x86_64/jvm \
+            dist/windows-x86_64/jvm
 
       - name: Record cross-platform JVM artifacts
         run: |

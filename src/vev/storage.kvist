@@ -7,9 +7,13 @@
 (import os "core:os")
 (import time "core:time")
 
-(foreign-import sqlite "system:sqlite3")
-
 (odin "
+when ODIN_OS == .Windows {
+    foreign import sqlite \"system:sqlite3.lib\"
+} else {
+    foreign import sqlite \"system:sqlite3\"
+}
+
 SQLite3 :: struct {}
 SQLite3_Stmt :: struct {}
 

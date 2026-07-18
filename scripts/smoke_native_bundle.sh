@@ -37,17 +37,29 @@ fi
 )
 
 BUNDLE="$TMP_DIR/vev-$VERSION"
-PKG_CONFIG_PATH="$BUNDLE/lib/pkgconfig"
-FLAGS="$(PKG_CONFIG_PATH="$PKG_CONFIG_PATH" pkg-config --cflags --libs vev)"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    clang \
+      -I"$BUNDLE/include" \
+      "$ROOT/clients/c/smoke.c" \
+      "$BUNDLE/lib/vev.lib" \
+      -o "$TMP_DIR/vev-c-smoke.exe"
+    PATH="$BUNDLE/lib:$PATH" "$TMP_DIR/vev-c-smoke.exe"
+    ;;
+  *)
+    PKG_CONFIG_PATH="$BUNDLE/lib/pkgconfig"
+    FLAGS="$(PKG_CONFIG_PATH="$PKG_CONFIG_PATH" pkg-config --cflags --libs vev)"
 
-# Intentional word splitting: pkg-config emits compiler and linker arguments.
-# shellcheck disable=SC2086
-clang \
-  $FLAGS \
-  "$ROOT/clients/c/smoke.c" \
-  -Wl,-rpath,"$BUNDLE/lib" \
-  -o "$TMP_DIR/vev-c-smoke"
+    # Intentional word splitting: pkg-config emits compiler and linker arguments.
+    # shellcheck disable=SC2086
+    clang \
+      $FLAGS \
+      "$ROOT/clients/c/smoke.c" \
+      -Wl,-rpath,"$BUNDLE/lib" \
+      -o "$TMP_DIR/vev-c-smoke"
 
-DYLD_LIBRARY_PATH="$BUNDLE/lib:${DYLD_LIBRARY_PATH:-}" \
-LD_LIBRARY_PATH="$BUNDLE/lib:${LD_LIBRARY_PATH:-}" \
-  "$TMP_DIR/vev-c-smoke"
+    DYLD_LIBRARY_PATH="$BUNDLE/lib:${DYLD_LIBRARY_PATH:-}" \
+    LD_LIBRARY_PATH="$BUNDLE/lib:${LD_LIBRARY_PATH:-}" \
+      "$TMP_DIR/vev-c-smoke"
+    ;;
+esac
