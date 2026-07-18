@@ -5,7 +5,7 @@
 
 (import fmt "core:fmt")
 (import os "core:os")
-(import kdata "kvist:data")
+(import data "kvist:data")
 (import d "../vev_app")
 
 (def state-query
@@ -54,8 +54,8 @@
         (let [db (d.db conn)
               value: Data (d.q state-query db)]
           (defer (d.close db))
-          (when (not (and (kdata.keyword? value)
-                          (= (kdata.keyword value) ":attention.kind/review")))
-            (fail! (fmt.tprintf "expected review, got %s" (kdata.describe value)))))
+          (when (not (and (data.keyword? value)
+                          (= (data.keyword value) ":attention.kind/review")))
+            (fail! (fmt.tprintf "expected review, got %s" (data.describe value)))))
       :else
         (fail! "unknown fixture mode"))))
