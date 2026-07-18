@@ -61,12 +61,20 @@ ODIN_ARGS=(
 )
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    ODIN_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_LIB_DIR")
+    SQLITE_WINDOWS_DIR="$(cygpath -w "$SQLITE_LIB_DIR")"
+    ODIN_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_WINDOWS_DIR")
     ;;
   *)
     ODIN_ARGS+=("-extra-linker-flags:-L$SQLITE_LIB_DIR")
     ;;
 esac
 
-odin build "${ODIN_ARGS[@]}"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    MSYS2_ARG_CONV_EXCL="-extra-linker-flags:" odin build "${ODIN_ARGS[@]}"
+    ;;
+  *)
+    odin build "${ODIN_ARGS[@]}"
+    ;;
+esac
 printf '%s\n' "$OUTPUT"
