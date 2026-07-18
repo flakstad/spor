@@ -1,6 +1,6 @@
 {
   "name": "@vevdb/vev",
-  "version": "0.1.0",
+  "version": "0.2.0-rc.1",
   "description": "Node and TypeScript wrapper for VevDB",
   "private": true,
   "type": "commonjs",

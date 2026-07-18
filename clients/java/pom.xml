@@ -6,7 +6,7 @@
 
   <groupId>com.vevdb</groupId>
   <artifactId>vev-java</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0-rc.1</version>
   <name>VevDB for Java</name>
   <description>Java Foreign Function &amp; Memory wrapper for VevDB.</description>
   <url>https://github.com/vevdb/vev</url>

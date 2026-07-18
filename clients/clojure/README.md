@@ -14,7 +14,7 @@ Java wrapper, whose combined release contains the verified platform native
 libraries:
 
 ```clojure
-{:deps {com.vevdb/vev-clj {:mvn/version "0.1.0"}}}
+{:deps {com.vevdb/vev-clj {:mvn/version "0.2.0-rc.1"}}}
 ```
 
 The source repository can instead be consumed through a Git coordinate:
@@ -123,7 +123,7 @@ That local repository can be consumed from a separate test project:
 
 ```clojure
 {:mvn/local-repo "/path/to/vev/build/m2"
- :deps {com.vevdb/vev-clj {:mvn/version "0.1.0"}}
+ :deps {com.vevdb/vev-clj {:mvn/version "0.2.0-rc.1"}}
  :aliases {:run {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}}}
 ```
 
