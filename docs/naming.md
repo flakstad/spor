@@ -17,8 +17,8 @@ make APIs noisier or break established ecosystem conventions:
 | CLI command | `vevdb` |
 | CLI release archive | `vevdb-cli-<platform>-<version>` |
 | Core repository | `github.com/vevdb/vev` |
-| Clojure | `dev.vevdb/vev-clj`, namespace `vev.core` |
-| Java | `dev.vevdb:vev-java`, class `dev.vevdb.vev.Vev` |
+| Clojure | `dev.vevdb/vev-clj`, namespace `vev.core`; source at `vevdb/vev-clj` |
+| Java | `dev.vevdb:vev-java`, class `dev.vevdb.vev.Vev`; source at `vevdb/vev-java` |
 | Node.js | `@vevdb/vev` |
 | Python | distribution and import `vevdb` |
 | Rust | crate `vevdb` |

@@ -31,6 +31,22 @@ write_pom() {
   local path="$1"
   local artifact="$2"
   local deps="${3:-}"
+  local project_url="https://github.com/vevdb/vev"
+  local repository="vev"
+  local description="VevDB embedded native database."
+
+  case "$artifact" in
+    vev-java)
+      project_url="https://github.com/vevdb/vev-java"
+      repository="vev-java"
+      description="Java Foreign Function and Memory wrapper for VevDB."
+      ;;
+    vev-clj)
+      project_url="https://github.com/vevdb/vev-clj"
+      repository="vev-clj"
+      description="Clojure API for the VevDB embedded database."
+      ;;
+  esac
 
   cat > "$path" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -42,14 +58,25 @@ write_pom() {
   <artifactId>$artifact</artifactId>
   <version>$VERSION</version>
   <name>$artifact</name>
-  <description>VevDB embedded native database.</description>
-  <url>https://github.com/vevdb/vev</url>
+  <description>$description</description>
+  <url>$project_url</url>
   <licenses>
     <license>
       <name>Eclipse Public License 2.0</name>
       <url>https://www.eclipse.org/legal/epl-2.0/</url>
     </license>
-  </licenses>$deps
+  </licenses>
+  <developers>
+    <developer>
+      <name>Andreas Flakstad</name>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:$project_url.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/vevdb/$repository.git</developerConnection>
+    <url>$project_url</url>
+    <tag>HEAD</tag>
+  </scm>$deps
 </project>
 EOF
 }

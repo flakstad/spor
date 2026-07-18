@@ -336,8 +336,8 @@ library and SQLite deployment details.
 | Host | API |
 | --- | --- |
 | Kvist | [`src/vev_app`](src/vev_app) |
-| Clojure | [`clients/clojure`](clients/clojure) |
-| Java | [`clients/java`](clients/java) |
+| Clojure | [`vevdb/vev-clj`](https://github.com/vevdb/vev-clj) |
+| Java | [`vevdb/vev-java`](https://github.com/vevdb/vev-java) |
 | C | [`include/vev.h`](include/vev.h) and [`clients/c`](clients/c) |
 | Python | [`clients/python`](clients/python) |
 | Rust | [`clients/rust`](clients/rust) |
