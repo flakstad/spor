@@ -220,6 +220,12 @@ jobs:
             --manifest dist/manifest.json \
             --jvm-dir dist/jvm
 
+      - name: Validate Maven Central inputs
+        run: |
+          scripts/validate_maven_central_inputs.sh \
+            "$(cat VERSION)" \
+            dist/jvm
+
       - name: Smoke fresh JVM coordinate consumers
         run: scripts/smoke_jvm_remote_coordinates.sh "$(cat VERSION)" dist/m2
 

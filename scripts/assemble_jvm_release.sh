@@ -16,10 +16,11 @@ shift 3
 JVM_DIRS=("$@")
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCHIVE_DATE="$(git -C "$ROOT" show -s --format=%cI HEAD)"
-STAGE="$(mktemp -d "${TMPDIR:-/tmp}/vev-jvm-release.XXXXXX")"
+TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/vev-jvm-release.XXXXXX")"
+STAGE="$TMP_ROOT/combined"
 
 cleanup() {
-  rm -rf "$STAGE"
+  rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
 
@@ -86,11 +87,14 @@ install_artifact() {
   local artifact_dir="$M2_DIR/com/vevdb/$artifact/$VERSION"
 
   mkdir -p "$artifact_dir"
-  cp "$OUT_DIR/$artifact-$VERSION.jar" "$artifact_dir/"
+  for classifier in "" "-sources" "-javadoc"; do
+    cp \
+      "$OUT_DIR/$artifact-$VERSION$classifier.jar" \
+      "$artifact_dir/$artifact-$VERSION$classifier.jar"
+  done
   cp "$OUT_DIR/$artifact-$VERSION.pom" "$artifact_dir/"
-  for file in \
-    "$artifact_dir/$artifact-$VERSION.jar" \
-    "$artifact_dir/$artifact-$VERSION.pom"; do
+  for file in "$artifact_dir/$artifact-$VERSION".{jar,pom} \
+              "$artifact_dir/$artifact-$VERSION"-{sources,javadoc}.jar; do
     shasum -a 1 "$file" | awk '{print $1}' > "$file.sha1"
   done
 }
@@ -99,7 +103,7 @@ first_java=""
 first_clj=""
 java_hash=""
 clj_hash=""
-mkdir -p "$OUT_DIR" "$M2_DIR"
+mkdir -p "$OUT_DIR" "$M2_DIR" "$STAGE"
 
 for jvm_dir in "${JVM_DIRS[@]}"; do
   java_jar="$jvm_dir/vev-java-$VERSION.jar"
@@ -153,10 +157,59 @@ write_pom "$OUT_DIR/vev-clj-$VERSION.pom" "vev-clj" "
     </dependency>
   </dependencies>"
 
+JAVA_SOURCES="$TMP_ROOT/java-sources"
+JAVA_JAVADOC="$TMP_ROOT/java-javadoc"
+CLJ_SOURCES="$TMP_ROOT/clj-sources"
+CLJ_JAVADOC="$TMP_ROOT/clj-javadoc"
+mkdir -p \
+  "$JAVA_SOURCES/com/vevdb" \
+  "$JAVA_JAVADOC" \
+  "$CLJ_SOURCES/vev" \
+  "$CLJ_JAVADOC"
+
+cp \
+  "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" \
+  "$JAVA_SOURCES/com/vevdb/Vev.java"
+jar --create \
+  --date="$ARCHIVE_DATE" \
+  --file "$OUT_DIR/vev-java-$VERSION-sources.jar" \
+  -C "$JAVA_SOURCES" .
+
+javadoc \
+  -quiet \
+  --release 25 \
+  -d "$JAVA_JAVADOC" \
+  "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java"
+jar --create \
+  --date="$ARCHIVE_DATE" \
+  --file "$OUT_DIR/vev-java-$VERSION-javadoc.jar" \
+  -C "$JAVA_JAVADOC" .
+
+cp "$ROOT/clients/clojure/src/vev/core.clj" "$CLJ_SOURCES/vev/core.clj"
+jar --create \
+  --date="$ARCHIVE_DATE" \
+  --file "$OUT_DIR/vev-clj-$VERSION-sources.jar" \
+  -C "$CLJ_SOURCES" .
+
+cat > "$CLJ_JAVADOC/README.md" <<EOF
+# VevDB for Clojure $VERSION
+
+API documentation and examples:
+https://github.com/vevdb/vev-clj
+EOF
+jar --create \
+  --date="$ARCHIVE_DATE" \
+  --file "$OUT_DIR/vev-clj-$VERSION-javadoc.jar" \
+  -C "$CLJ_JAVADOC" .
+
 install_artifact "vev-java"
 install_artifact "vev-clj"
 
 printf '%s\n' \
   "$OUT_DIR/vev-java-$VERSION.jar" \
+  "$OUT_DIR/vev-java-$VERSION-sources.jar" \
+  "$OUT_DIR/vev-java-$VERSION-javadoc.jar" \
   "$OUT_DIR/vev-clj-$VERSION.jar" \
+  "$OUT_DIR/vev-clj-$VERSION-sources.jar" \
+  "$OUT_DIR/vev-clj-$VERSION-javadoc.jar" \
   "$M2_DIR"

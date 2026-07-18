@@ -31,8 +31,28 @@ def main() -> None:
     version = manifest["version"]
     definitions = (
         ("vev-java", "jvm-jar", f"vev-java-{version}.jar"),
+        (
+            "vev-java-sources",
+            "maven-sources",
+            f"vev-java-{version}-sources.jar",
+        ),
+        (
+            "vev-java-javadoc",
+            "maven-javadoc",
+            f"vev-java-{version}-javadoc.jar",
+        ),
         ("vev-java-pom", "maven-pom", f"vev-java-{version}.pom"),
         ("vev-clj", "clojure-jar", f"vev-clj-{version}.jar"),
+        (
+            "vev-clj-sources",
+            "maven-sources",
+            f"vev-clj-{version}-sources.jar",
+        ),
+        (
+            "vev-clj-javadoc",
+            "maven-javadoc",
+            f"vev-clj-{version}-javadoc.jar",
+        ),
         ("vev-clj-pom", "maven-pom", f"vev-clj-{version}.pom"),
     )
 

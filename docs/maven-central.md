@@ -69,9 +69,21 @@ same version of `com.vevdb:vev-java`.
 1. Merge and tag the coordinated version in `vev`, `vev-java`, and `vev-clj`.
    Use a new version: Maven Central artifacts are immutable.
 2. Let the five-platform release gate build and smoke the native SDKs and the
-   combined Java artifact.
-3. Generate sources and Javadoc artifacts, construct the Maven directory tree,
-   sign the eight primary files, add required checksums, and zip the tree.
+   combined Java artifact. It also generates and validates the sources and
+   Javadoc artifacts required by Central.
+3. Run the **Stage Maven Central deployment** workflow with the published
+   GitHub release tag and artifact version. The workflow downloads the verified
+   release files, constructs the Maven directory tree, signs the eight primary
+   files, adds required checksums, and uploads a user-managed deployment.
+   Locally, the equivalent bundle command is:
+
+   ```sh
+   scripts/package_maven_central_bundle.sh \
+     VERSION \
+     /path/to/jvm-release-files \
+     central-bundle.zip
+   ```
+
    Paths inside the ZIP begin at `com/`, not at an extra staging directory.
 4. Create the Portal bearer token:
 
@@ -81,7 +93,7 @@ same version of `com.vevdb:vev-java`.
    )"
    ```
 
-5. Upload the bundle as user-managed:
+5. The workflow uploads the bundle as user-managed. The equivalent API call is:
 
    ```sh
    DEPLOYMENT_ID="$(

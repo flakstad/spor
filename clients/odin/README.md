@@ -73,8 +73,8 @@ and also runs the lower-level ABI coverage program:
 scripts/smoke_odin_package.sh
 ```
 
-The next standalone client repository should be `vevdb/vev-odin`, with the
-`vev` package at its root, tagged source releases, a pinned tested Odin compiler
-version, examples, and CI against every native VevDB release platform. That
-repository shape is deliberately vendor-friendly and is the artifact to share
-with the Odin community.
+The canonical, vendor-friendly client repository is
+[`vevdb/vev-odin`](https://github.com/vevdb/vev-odin). It keeps the package at
+the repository root and tests fresh consumers against every native VevDB
+release platform. The copy here is retained so the engine release gate can
+verify client and ABI changes together.

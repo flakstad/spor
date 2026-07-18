@@ -92,7 +92,6 @@ $MAVEN_REPOSITORIES
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
-        <configuration><enablePreview>true</enablePreview></configuration>
       </plugin>
     </plugins>
   </build>

@@ -51,8 +51,12 @@ mkdir -p "$DOWNLOAD_DIR" "$M2_DIR"
 files=(
   SHA256SUMS
   "vev-java-$VERSION.jar"
+  "vev-java-$VERSION-sources.jar"
+  "vev-java-$VERSION-javadoc.jar"
   "vev-java-$VERSION.pom"
   "vev-clj-$VERSION.jar"
+  "vev-clj-$VERSION-sources.jar"
+  "vev-clj-$VERSION-javadoc.jar"
   "vev-clj-$VERSION.pom"
 )
 
@@ -101,6 +105,15 @@ jar --list --file "$DOWNLOAD_DIR/vev-java-$VERSION.jar" |
   awk '/^com\/vevdb\/native\/.*\/(libvev\.(dylib|so)|vev\.dll)$/ {print}' |
   sort > "$actual_native_resources"
 diff -u "$expected_native_resources" "$actual_native_resources"
+
+jar --list --file "$DOWNLOAD_DIR/vev-java-$VERSION-sources.jar" |
+  grep -qx 'com/vevdb/Vev.java'
+jar --list --file "$DOWNLOAD_DIR/vev-java-$VERSION-javadoc.jar" |
+  grep -qx 'com/vevdb/Vev.html'
+jar --list --file "$DOWNLOAD_DIR/vev-clj-$VERSION-sources.jar" |
+  grep -qx 'vev/core.clj'
+jar --list --file "$DOWNLOAD_DIR/vev-clj-$VERSION-javadoc.jar" |
+  grep -qx 'README.md'
 
 for artifact in vev-java vev-clj; do
   artifact_dir="$M2_DIR/com/vevdb/$artifact/$VERSION"
