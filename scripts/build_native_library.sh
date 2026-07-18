@@ -79,13 +79,21 @@ ODIN_BUILD_ARGS=(
 )
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    ODIN_BUILD_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_LIB_DIR")
+    SQLITE_WINDOWS_DIR="$(cygpath -w "$SQLITE_LIB_DIR")"
+    ODIN_BUILD_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_WINDOWS_DIR")
     ;;
   *)
     ODIN_BUILD_ARGS+=("-extra-linker-flags:-L$SQLITE_LIB_DIR")
     ;;
 esac
-odin build "${ODIN_BUILD_ARGS[@]}"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    MSYS2_ARG_CONV_EXCL="-extra-linker-flags:" odin build "${ODIN_BUILD_ARGS[@]}"
+    ;;
+  *)
+    odin build "${ODIN_BUILD_ARGS[@]}"
+    ;;
+esac
 if [[ -n "$LINK_NAME" && ! -f "$LIB_DIR/$LINK_NAME" ]]; then
   echo "Windows build did not produce import library $LIB_DIR/$LINK_NAME" >&2
   exit 1

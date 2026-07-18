@@ -5,6 +5,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PREFIX="${1:-$ROOT/build}"
 
 case "$(uname -s)" in
   Darwin) LIB_NAME="libvev.dylib" ;;
@@ -13,8 +14,13 @@ case "$(uname -s)" in
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
-if [[ ! -f "$ROOT/build/lib/$LIB_NAME" || ! -f "$ROOT/build/lib/pkgconfig/vev.pc" ]]; then
+if [[ "$PREFIX" == "$ROOT/build" &&
+      (! -f "$PREFIX/lib/$LIB_NAME" || ! -f "$PREFIX/lib/pkgconfig/vev.pc") ]]; then
   "$ROOT/scripts/build_c_abi.sh"
+fi
+if [[ ! -f "$PREFIX/lib/$LIB_NAME" || ! -f "$PREFIX/include/vev.h" ]]; then
+  echo "missing C package under $PREFIX" >&2
+  exit 1
 fi
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vev-c-package.XXXXXX")"
@@ -143,17 +149,17 @@ EOF
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     clang \
-      -I"$ROOT/build/include" \
+      -I"$PREFIX/include" \
       "$TMP_DIR/smoke.c" \
-      "$ROOT/build/lib/vev.lib" \
+      "$PREFIX/lib/vev.lib" \
       -o "$TMP_DIR/smoke.exe"
-    PATH="$ROOT/build/lib:$PATH" "$TMP_DIR/smoke.exe"
+    PATH="$PREFIX/lib:$PATH" "$TMP_DIR/smoke.exe"
     ;;
   *)
-    PKG_CONFIG_PATH="$ROOT/build/lib/pkgconfig" \
+    PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" \
       clang "$TMP_DIR/smoke.c" \
-      $(PKG_CONFIG_PATH="$ROOT/build/lib/pkgconfig" pkg-config --cflags --libs vev) \
-      -Wl,-rpath,"$ROOT/build/lib" \
+      $(PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" pkg-config --cflags --libs vev) \
+      -Wl,-rpath,"$PREFIX/lib" \
       -o "$TMP_DIR/smoke"
     "$TMP_DIR/smoke"
     ;;
