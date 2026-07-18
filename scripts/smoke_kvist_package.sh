@@ -50,6 +50,7 @@ EOF
       BINARY="$PACKAGE_ROOT/smoke.exe"
       WINDOWS_GENERATED="$(cygpath -m "$PACKAGE_ROOT/smoke.odin")"
       WINDOWS_BINARY="$(cygpath -m "$BINARY")"
+      WINDOWS_SQLITE_LIB_DIR="$(cygpath -w "$SQLITE_LIB_DIR")"
       ;;
     *)
       BINARY="$PACKAGE_ROOT/smoke"
@@ -69,9 +70,9 @@ EOF
       echo "generated Kvist package has no Windows import collections" >&2
       exit 1
     fi
-    MSYS2_ARG_CONV_EXCL="*" odin build "$WINDOWS_GENERATED" -file \
+      MSYS2_ARG_CONV_EXCL="*" odin build "$WINDOWS_GENERATED" -file \
       "${COLLECTION_ARGS[@]}" \
-      "-extra-linker-flags:/LIBPATH:$SQLITE_LIB_DIR" \
+      "-extra-linker-flags:/LIBPATH:$WINDOWS_SQLITE_LIB_DIR" \
       -out:"$WINDOWS_BINARY"
   else
     odin build "$PACKAGE_ROOT/smoke.odin" -file \
