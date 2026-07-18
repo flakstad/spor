@@ -12,8 +12,17 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$1"
 M2_DIR="$(cd "$2" && pwd)"
-GIT_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+GIT_URL="${VEV_CLJ_GIT_URL:-https://github.com/vevdb/vev-clj.git}"
+GIT_SHA="${VEV_CLJ_GIT_SHA:-}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vev-clojure-git-coordinates.XXXXXX")"
+
+if [[ -z "$GIT_SHA" ]]; then
+  GIT_SHA="$(git ls-remote "$GIT_URL" refs/heads/main | awk 'NR == 1 {print $1}')"
+fi
+if [[ -z "$GIT_SHA" ]]; then
+  echo "could not resolve vev-clj main from $GIT_URL" >&2
+  exit 1
+fi
 
 cleanup() {
   rm -rf "$TMP_DIR"
@@ -22,10 +31,9 @@ trap cleanup EXIT
 
 cat > "$TMP_DIR/deps.edn" <<EOF
 {:mvn/local-repo "$M2_DIR"
- :deps {io.github.vevdb/vev-clj
-        {:git/url "file://$ROOT"
-         :git/sha "$GIT_SHA"
-         :deps/root "clients/clojure"}}
+ :deps {dev.vevdb/vev-clj
+        {:git/url "$GIT_URL"
+         :git/sha "$GIT_SHA"}}
  :aliases {:run {:jvm-opts ["--enable-preview"
                             "--enable-native-access=ALL-UNNAMED"]}}}
 EOF
