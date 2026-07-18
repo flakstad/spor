@@ -102,5 +102,5 @@ connections, DB snapshots, entity views, prepared queries, prepared pull pattern
 statements, transaction reports, and durable Vev connections.
 
 Durable stores are opened through Vev APIs with paths such as `app.vev`. The
-Python package loads `libvev`; the current native library depends on the
-platform SQLite runtime, but Python application code does not set up SQLite.
+Python package loads `libvev`, whose release build includes SQLite with FTS5.
+Python application code does not install or configure SQLite.

@@ -67,9 +67,12 @@ That command creates a temporary project whose only Vev dependency is
 
 ## CLI
 
-The CLI is the shortest way to try durable Vev from a shell:
+The CLI is a standalone executable with SQLite included. A release archive
+unpacks to `vev-<version>/bin/vev`; copy that executable onto `PATH`. A source
+build writes the same executable to `build/vev`:
 
 ```sh
+build/vev --version
 build/vev transact app.vev '[{:db/id 1 :user/name "Ada"}]'
 build/vev query app.vev '[:find ?name :where [?e :user/name ?name]]'
 build/vev pull app.vev '[:user/name]' 1
@@ -456,6 +459,7 @@ From this repository, the broad smoke suite is:
 ```sh
 scripts/smoke_clients.sh
 scripts/smoke_cli.sh
+scripts/smoke_cli_package.sh
 scripts/smoke_packages.sh
 ```
 
@@ -471,6 +475,8 @@ scripts/smoke_rust_package.sh
 scripts/smoke_odin_package.sh
 ```
 
-These build the native library under `build/lib`, local JVM proof artifacts
-under `build/jvm` and `build/m2`, `build/lib/pkgconfig/vev.pc`, `build/vev`,
-and temporary smoke artifacts or projects for the host wrappers.
+These build the self-contained native library under `build/lib`, local JVM
+proof artifacts under `build/jvm` and `build/m2`,
+`build/lib/pkgconfig/vev.pc`, `build/vev`, a standalone CLI archive under
+`build/release/cli`, and temporary smoke artifacts or projects for the host
+wrappers.

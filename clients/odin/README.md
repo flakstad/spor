@@ -58,5 +58,5 @@ Directly depending on generated Odin should remain a development/debug escape
 hatch rather than the documented integration path.
 
 Durable stores are opened through Vev APIs with paths such as `app.vev`. The
-current native library depends on the platform SQLite runtime; Odin application
-code should not configure SQLite directly.
+release native library includes SQLite with FTS5; Odin application code does
+not install or configure SQLite.

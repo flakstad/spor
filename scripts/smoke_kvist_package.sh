@@ -26,6 +26,7 @@ trap cleanup EXIT
 
 tar -xzf "$ARCHIVE" -C "$TMP_DIR"
 PACKAGE_ROOT="$TMP_DIR/vev-kvist-$VERSION"
+SQLITE_LIB_DIR="${VEV_SQLITE_LIB_DIR:-$("$ROOT/scripts/build_sqlite.sh")}"
 
 cat > "$PACKAGE_ROOT/smoke.kvist" <<'EOF'
 (package main)
@@ -68,16 +69,14 @@ EOF
       echo "generated Kvist package has no Windows import collections" >&2
       exit 1
     fi
-    if [[ -z "${VEV_SQLITE_LIB_DIR:-}" ]]; then
-      echo "VEV_SQLITE_LIB_DIR is required for the Windows Kvist package smoke" >&2
-      exit 1
-    fi
     MSYS2_ARG_CONV_EXCL="*" odin build "$WINDOWS_GENERATED" -file \
       "${COLLECTION_ARGS[@]}" \
-      "-extra-linker-flags:/LIBPATH:$VEV_SQLITE_LIB_DIR" \
+      "-extra-linker-flags:/LIBPATH:$SQLITE_LIB_DIR" \
       -out:"$WINDOWS_BINARY"
   else
-    odin build "$PACKAGE_ROOT/smoke.odin" -file -out:"$BINARY"
+    odin build "$PACKAGE_ROOT/smoke.odin" -file \
+      "-extra-linker-flags:-L$SQLITE_LIB_DIR" \
+      -out:"$BINARY"
   fi
   if ! "$BINARY"; then
     if command -v objdump >/dev/null 2>&1; then

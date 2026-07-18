@@ -28,9 +28,10 @@ options:
                    Vev transaction chunk prefix; default: $EXPORT_PREFIX
   -h, --help       show this help
 
-The ordinary setup path needs Kvist, Odin, system SQLite, and an existing
-Vev-compatible MusicBrainz export. Datomic is used only with --from-datomic to
-convert the upstream sample backup into that export.
+The ordinary setup path needs Kvist, Odin, Clang, an archiver, and an existing
+Vev-compatible MusicBrainz export. The Vev build supplies SQLite. Datomic is
+used only with --from-datomic to convert the upstream sample backup into that
+export.
 EOF
 }
 

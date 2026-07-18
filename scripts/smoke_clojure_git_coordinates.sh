@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Copyright (c) Andreas Flakstad and Vev contributors
+# SPDX-License-Identifier: EPL-2.0
+
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: scripts/smoke_clojure_git_coordinates.sh <version> <m2-dir>" >&2
+  exit 1
+fi
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="$1"
+M2_DIR="$(cd "$2" && pwd)"
+GIT_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vev-clojure-git-coordinates.XXXXXX")"
+
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+cat > "$TMP_DIR/deps.edn" <<EOF
+{:mvn/local-repo "$M2_DIR"
+ :deps {io.github.vevdb/vev-clj
+        {:git/url "file://$ROOT"
+         :git/sha "$GIT_SHA"
+         :deps/root "clients/clojure"}}
+ :aliases {:run {:jvm-opts ["--enable-preview"
+                            "--enable-native-access=ALL-UNNAMED"]}}}
+EOF
+
+(
+  cd "$TMP_DIR"
+  env -u VEV_LIB clojure -M:run -e "(require '[vev.core :as d])
+(let [conn (d/connect \"git-coordinate.vev\")]
+  (try
+    (d/transact conn [{:db/id 1 :user/name \"Ada\"}])
+    (assert (= #{[\"Ada\"]}
+               (d/q '[:find ?name :where [?e :user/name ?name]]
+                    (d/db conn))))
+    (finally
+      (.close conn))))
+(println :vev-clojure-git-coordinate-ok)"
+)

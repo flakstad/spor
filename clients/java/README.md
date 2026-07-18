@@ -171,6 +171,5 @@ after merging all platform resources.
 a native-library path.
 
 Durable stores are opened through Vev APIs with paths such as `app.vev`. The
-current native library depends on the platform SQLite runtime. Java and Clojure
-applications do not configure SQLite directly; they load Vev and call
-`connect`.
+release native library includes SQLite with FTS5. Java and Clojure applications
+do not install or configure SQLite; they load Vev and call `connect`.

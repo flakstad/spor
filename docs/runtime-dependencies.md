@@ -1,72 +1,59 @@
 # Runtime Dependencies
 
-Vev applications use Vev APIs and Vev store files. They do not set up SQLite
-schemas, run SQLite migrations, or issue SQL.
+Vev applications use Vev APIs and Vev store files. They do not install SQLite,
+set up SQLite schemas, run SQLite migrations, or issue SQL.
 
-The current local durable backend is implemented on top of SQLite. Today the
-native Vev library links to the platform SQLite library at runtime. On macOS
-this is normally already present. On Linux and other deployment targets, the
-runtime image needs a compatible SQLite shared library with FTS5 enabled unless
-the Vev package for that target is later changed to bundle or statically link
-SQLite.
-On Windows the native release contains `vev.dll` and `vev.lib`; `sqlite3.dll`
-must be available beside `vev.dll` or on `PATH`.
-
-This is intentionally similar to using Datomic with SQLite as the durable
-backend: SQLite is part of the storage setup, but application code still talks
-to Datomic/Vev, not to SQLite directly.
+Durable Vev stores are implemented on SQLite. Release builds compile the
+official SQLite amalgamation into `libvev` and the standalone CLI with FTS5
+enabled. The amalgamation version and SHA3-256 checksum are pinned in
+`scripts/build_sqlite.sh`.
 
 ## What Users Install
 
-For the current local build:
+The prebuilt distributions are self-contained:
 
-- the Vev native library, such as `libvev.dylib`, `libvev.so`, or `vev.dll`
-- the host wrapper for the language being used
-- a system SQLite runtime library
-- for Java/Clojure, Java 21 with the required FFM flags while the wrapper uses
-  preview FFM
+- Clojure users add `dev.vevdb/vev-clj`; it brings in `vev-java` and the
+  bundled native Vev library.
+- Java users add `dev.vevdb:vev-java`; its release jar contains the supported
+  platform libraries.
+- CLI users unpack the platform `vev-cli` archive and place `vev` on `PATH`.
+- C ABI consumers unpack the native bundle containing `vev.h` and `libvev`.
 
-For a published package, the intended shape is:
+None of these consumers installs SQLite separately. Java and Clojure currently
+require Java 21 and the FFM preview/native-access options documented by their
+packages.
 
-- package managers install the host wrapper and Vev native library
-- package docs state whether SQLite is expected from the system or bundled in
-  the native artifact
-- application code opens a Vev store with `connect`, for example `app.vev`
+## Source Builds
 
-## Checking The Native Library
+`scripts/build_sqlite.sh` downloads the pinned SQLite amalgamation once into
+`build/vendor/sqlite`, verifies its SHA3-256 digest, and builds a static
+library. `scripts/build_native_library.sh` and `scripts/build_cli.sh` use that
+library by default.
 
-On macOS, inspect the linked runtime libraries with:
+Set `VEV_SQLITE_CACHE_DIR` to share the downloaded and compiled SQLite cache.
+Set `VEV_SQLITE_LIB_DIR` only when deliberately testing another compatible
+static SQLite build.
+
+Building Vev from source requires:
+
+- Kvist and Odin
+- Clang
+- `llvm-ar` or `ar`
+- Python 3, `curl`, and `unzip` for the pinned amalgamation
+
+No system SQLite development or runtime package is required.
+
+## Verifying Artifacts
+
+The release gate runs:
 
 ```sh
-otool -L build/lib/libvev.dylib
+scripts/check_self_contained_native.sh build/lib/libvev.dylib
+scripts/check_self_contained_native.sh build/vev
 ```
 
-On Linux:
-
-```sh
-ldd build/lib/libvev.so
-```
-
-On Windows:
-
-```powershell
-dumpbin /dependents build\lib\vev.dll
-```
-
-If SQLite is dynamically linked, these commands should show a SQLite library.
-
-## Windows SQLite
-
-The verified Windows x86-64 release gate uses vcpkg:
-
-```powershell
-vcpkg install "sqlite3[fts5]:x64-windows"
-```
-
-Add `installed\x64-windows\bin` to `PATH` when running Vev. Applications that
-compile Vev's Kvist or Odin source package also need
-`installed\x64-windows\lib` in the linker search path so `sqlite3.lib` can be
-resolved. Consumers of the prebuilt Vev DLL need only the runtime DLL.
+The check uses `otool`, `ldd`, or `objdump` according to the platform and fails
+if an artifact depends on a SQLite dynamic library.
 
 ## Store Paths
 
@@ -77,44 +64,6 @@ app.vev
 data/app.vev
 ```
 
-The file currently contains SQLite-managed storage internally, but the file is
-a Vev store from the application's point of view. The extension is not
-semantically important; `.vev` is the recommended convention for examples and
-application docs.
-
-## Client Notes
-
-C and Odin users link or dynamically load `libvev` and therefore need both
-`libvev` and the SQLite runtime library available to the process.
-
-Python loads `libvev` through `ctypes`. The package can locate an explicit
-library path, `VEV_LIB`, a repo-local `build/lib`, or a future bundled native
-resource. SQLite is still a native dependency of `libvev` unless that package
-bundles it.
-
-Rust and Go link through the C ABI. Their build/package setup must make
-`libvev` available and ensure SQLite can be found by the dynamic linker.
-
-Java and Clojure use the Java FFM wrapper. The Java loader can use an explicit
-library path, `VEV_LIB`, a repo-local `build/lib`, or a bundled classpath
-native resource. The loaded Vev native library still needs SQLite available
-unless the native artifact bundles it.
-
-Node loads a native addon which loads/links `libvev`. A package can bundle the
-addon and `libvev` side by side, but SQLite remains a runtime dependency of
-`libvev` unless bundled into that native artifact.
-
-## Future Packaging Decision
-
-The acceptable baseline is a documented system SQLite dependency. The more
-polished distribution option is to bundle or statically link SQLite per
-platform so a language package can be installed without a separate OS package.
-
-That packaging decision is independent from the public API. Either way, users
-should write:
-
-```clojure
-(def conn (d/connect "app.vev"))
-```
-
-not SQLite setup code.
+SQLite manages the file internally, but it is a Vev store from the
+application's point of view. The extension is not semantically important;
+`.vev` is the recommended convention.

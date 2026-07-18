@@ -6,6 +6,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+case "$(uname -s)" in
+  Darwin) NATIVE_LIBRARY="libvev.dylib" ;;
+  Linux) NATIVE_LIBRARY="libvev.so" ;;
+  MINGW*|MSYS*|CYGWIN*) NATIVE_LIBRARY="vev.dll" ;;
+  *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
+esac
+
 release_step() {
   local name="$1"
   shift
@@ -15,6 +22,9 @@ release_step() {
 
 release_step environment "$ROOT/scripts/check_release_environment.sh" >/dev/null
 release_step native-library "$ROOT/scripts/build_native_library.sh"
+release_step native-self-contained "$ROOT/scripts/check_self_contained_native.sh" "$ROOT/build/lib/$NATIVE_LIBRARY" >/dev/null
+release_step cli "$ROOT/scripts/package_cli.sh" >/dev/null
+release_step cli-smoke "$ROOT/scripts/smoke_cli_package.sh" >/dev/null
 release_step native-bundle "$ROOT/scripts/package_native_bundle.sh" >/dev/null
 release_step native-bundle-smoke "$ROOT/scripts/smoke_native_bundle.sh" >/dev/null
 release_step source-archives "$ROOT/scripts/package_source_archives.sh" >/dev/null

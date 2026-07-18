@@ -25,6 +25,6 @@ info="$("$ROOT/build/vev" info "$DB")"
 case "$tx" in *":ok true"*) ;; *) echo "unexpected tx: $tx" >&2; exit 1 ;; esac
 case "$query" in *'"Ada"'*) ;; *) echo "unexpected query: $query" >&2; exit 1 ;; esac
 case "$pull" in *'"Ada"'*) ;; *) echo "unexpected pull: $pull" >&2; exit 1 ;; esac
-case "$info" in *":basis-t 1"*":tx-count 1"*) ;; *) echo "unexpected info: $info" >&2; exit 1 ;; esac
+case "$info" in *":basis-t 4611686018427387904"*":tx-count 1"*) ;; *) echo "unexpected info: $info" >&2; exit 1 ;; esac
 
 echo ":vev-cli-ok"

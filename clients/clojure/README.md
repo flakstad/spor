@@ -17,6 +17,19 @@ platform native artifact, then load the native library itself:
 {:deps {dev.vevdb/vev-clj {:mvn/version "0.1.0"}}}
 ```
 
+The source repository can instead be consumed through a Git coordinate:
+
+```clojure
+{:deps
+ {io.github.vevdb/vev-clj
+  {:git/tag "v0.1.0"
+   :git/sha "<release-sha>"}}}
+```
+
+Its `deps.edn` brings in the published `vev-java` artifact, which contains the
+native Vev engine. Both forms therefore provide the same self-contained
+runtime.
+
 Application code should not pass Java paths or native library paths around:
 
 ```clojure
@@ -77,9 +90,9 @@ local development still has extra setup. The Java loader already supports the
 future packaged shape by checking for bundled native resources after explicit
 local paths.
 
-The current durable backend uses SQLite internally, and the native Vev library
-depends on the platform SQLite runtime. Clojure code does not configure SQLite;
-it opens a Vev store with `d/connect`.
+The durable backend uses SQLite internally. Release builds link SQLite with
+FTS5 into the native Vev library, so Clojure users do not install or configure
+SQLite; application code opens a Vev store with `d/connect`.
 
 ## Local Development
 

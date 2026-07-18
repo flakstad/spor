@@ -287,9 +287,10 @@ aggregates, rules, and immutable `db-with` operations.
 
 ## Build And Verify
 
-Building Vev from source requires Kvist and Odin. Durable databases also need a
-platform SQLite runtime. The normal `kvist` command should point to a built
-Kvist compiler.
+Building Vev from source requires Kvist, Odin, Clang, and an archiver. The
+build downloads and checksum-verifies a pinned SQLite amalgamation, then links
+it statically; users do not install SQLite separately. The normal `kvist`
+command should point to a built Kvist compiler.
 
 Build the native and JVM artifacts and produce the release manifest:
 

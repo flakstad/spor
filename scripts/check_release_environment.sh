@@ -28,6 +28,7 @@ required_commands=(
   clang
   clang++
   clojure
+  curl
   go
   jar
   java
@@ -59,6 +60,12 @@ fi
 if ! command -v shasum >/dev/null 2>&1 &&
    ! command -v sha256sum >/dev/null 2>&1; then
   echo "release environment is missing shasum or sha256sum" >&2
+  exit 1
+fi
+
+if ! command -v llvm-ar >/dev/null 2>&1 &&
+   ! command -v ar >/dev/null 2>&1; then
+  echo "release environment is missing llvm-ar or ar" >&2
   exit 1
 fi
 

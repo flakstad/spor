@@ -46,7 +46,10 @@ def main() -> None:
                     )
                 continue
             entry = dict(artifact)
-            if name.startswith("vev-native-") and platform in name:
+            if (
+                name.startswith(("vev-native-", "vev-cli-"))
+                and platform in name
+            ):
                 entry["platform"] = platform
             artifacts[name] = entry
 

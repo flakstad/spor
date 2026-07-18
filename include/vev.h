@@ -6,6 +6,8 @@
 
 #include <stdbool.h>
 
+#define VEV_ABI_VERSION 1u
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -101,6 +103,7 @@ typedef const char *(*vev_tx_fn_edn_callback)(
 typedef void (*vev_tx_report_listener_callback)(void *user, vev_tx_report_t report);
 
 const char *vev_version(void);
+unsigned int vev_abi_version(void);
 
 vev_conn_t vev_conn_open_memory(void);
 void vev_conn_close(vev_conn_t conn);

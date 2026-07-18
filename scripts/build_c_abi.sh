@@ -7,7 +7,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KVIST_BIN="${KVIST_BIN:-kvist}"
 
-CLI_GENERATED_DIR="$ROOT/build/generated/vev_cli"
 LIB_DIR="$ROOT/build/lib"
 EXAMPLE_DIR="$ROOT/build/examples/c"
 RUST_EXAMPLE_DIR="$ROOT/build/examples/rust"
@@ -25,7 +24,7 @@ esac
 
 LIB_PATH="$LIB_DIR/$LIB_NAME"
 
-mkdir -p "$CLI_GENERATED_DIR" "$LIB_DIR" "$EXAMPLE_DIR" "$RUST_EXAMPLE_DIR" "$JAVA_EXAMPLE_DIR" "$GO_EXAMPLE_DIR" "$NODE_EXAMPLE_DIR" "$ODIN_EXAMPLE_DIR"
+mkdir -p "$LIB_DIR" "$EXAMPLE_DIR" "$RUST_EXAMPLE_DIR" "$JAVA_EXAMPLE_DIR" "$GO_EXAMPLE_DIR" "$NODE_EXAMPLE_DIR" "$ODIN_EXAMPLE_DIR"
 
 "$ROOT/scripts/build_native_library.sh" >/dev/null
 
@@ -72,11 +71,7 @@ else
   echo "go not found; skipping Go smoke"
 fi
 
-(
-  cd "$ROOT"
-  "$KVIST_BIN" compile "$ROOT/src/vev_cli/main.kvist" -o "$CLI_GENERATED_DIR/vev_cli.odin"
-  odin build "$CLI_GENERATED_DIR/vev_cli.odin" -file -out:"$ROOT/build/vev"
-)
+"$ROOT/scripts/build_cli.sh" >/dev/null
 
 if command -v odin >/dev/null 2>&1; then
   odin build "$ROOT/clients/odin" -file -out:"$ODIN_EXAMPLE_DIR/vev_odin_smoke"

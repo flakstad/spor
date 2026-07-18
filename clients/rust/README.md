@@ -71,8 +71,8 @@ The current binary target is still `vev-rust-smoke`; the library crate identity
 is the future public crate identity.
 
 Durable stores are opened through Vev APIs with paths such as `app.vev`. The
-Rust wrapper links to `libvev`; the current native library depends on the
-platform SQLite runtime, but Rust application code does not set up SQLite.
+Rust wrapper links to `libvev`, whose release build includes SQLite with FTS5.
+Rust application code does not install or configure SQLite.
 
 ```rust
 let durable = DurableConn::open("app.vev")?;

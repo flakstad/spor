@@ -71,17 +71,12 @@ jobs:
 
       - name: Install Linux native dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y clang libsqlite3-dev
+        run: sudo apt-get update && sudo apt-get install -y clang
 
       - name: Install Windows native dependencies
         if: runner.os == 'Windows'
         run: |
           choco install pkgconfiglite -y
-          vcpkg install 'sqlite3[fts5]:x64-windows'
-          sqlite_root="$(cygpath -u "$VCPKG_INSTALLATION_ROOT")/installed/x64-windows"
-          sqlite_lib="$(cygpath -m "$sqlite_root/lib")"
-          echo "$(cygpath -m "$sqlite_root/bin")" >> "$GITHUB_PATH"
-          echo "VEV_SQLITE_LIB_DIR=$sqlite_lib" >> "$GITHUB_ENV"
           node_version="$(node -p 'process.versions.node')"
           for attempt in 1 2 3; do
             if npx --yes node-gyp install "$node_version"; then
@@ -201,6 +196,9 @@ jobs:
 
       - name: Smoke fresh JVM coordinate consumers
         run: scripts/smoke_jvm_remote_coordinates.sh "$(cat VERSION)" dist/m2
+
+      - name: Smoke Clojure Git coordinate consumer
+        run: scripts/smoke_clojure_git_coordinates.sh "$(cat VERSION)" dist/m2
 
       - name: Upload combined release
         uses: actions/upload-artifact@v4

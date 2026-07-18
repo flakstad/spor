@@ -9,7 +9,8 @@ connections. Kvist and Clojure expose Datomic-shaped `q`, `pull`, `transact`,
 `db`, and `db-with` APIs. Other hosts use the C ABI or language adapters.
 
 - In-memory databases are first-class and require no SQLite.
-- Durable databases use system SQLite behind Vev connection and DB-value APIs.
+- Durable databases use a statically linked, pinned SQLite amalgamation behind
+  Vev connection and DB-value APIs.
 - Durable queries use Vev's persisted indexes and query engine; Datalog is not
   translated to SQL and opening a store does not rebuild a resident database.
 - Kvist queries, rules, pull patterns, transaction data, and inputs are quoted
@@ -32,9 +33,9 @@ connections. Kvist and Clojure expose Datomic-shaped `q`, `pull`, `transact`,
   resolve them from a temporary Maven HTTPS repository and do not select a
   native artifact or configure a library path.
 - Native GitHub runners pass the complete package-only host suite on macOS
-  arm64, Linux x86-64, and Windows x86-64, including Kvist. Windows produces
-  `vev.dll` and `vev.lib`; its system SQLite DLL and import library are supplied
-  by vcpkg during the gate. The combined JVM artifacts contain all three native
+  arm64, Linux x86-64, and Windows x86-64, including Kvist. Each build compiles
+  a checksum-verified SQLite amalgamation with FTS5 into the CLI and native
+  library. The combined JVM artifacts contain all three self-contained native
   resources and pass fresh Java and Clojure coordinate resolution over HTTPS.
   This release proof is recorded by successful workflow run
   [29598836792](https://github.com/vevdb/vev/actions/runs/29598836792).

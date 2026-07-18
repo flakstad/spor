@@ -12,6 +12,7 @@
 
 (def usage
   "usage:
+  vev --version
   vev info <uri>
   vev transact <uri> <tx-edn | @file>
   vev query <uri> <query-edn | @file> [inputs-edn]
@@ -22,6 +23,9 @@ examples:
   vev query app.vev '[:find ?name :where [?e :user/name ?name]]'
   vev pull app.vev '[:user/name]' 1
 ")
+
+(defn version [] -> string
+  (odin "return #config(VEV_VERSION, \"dev\")"))
 
 (defn delete-store! [store: vev.Store-Conn]
   (vev.close-store store))
@@ -47,16 +51,20 @@ examples:
       (delete-store! store)
       (return 1))
     (defer (delete-store! store))
+    (let [[basis basis-ok basis-error] (vev.store-basis-t (addr store))]
+      (when (not basis-ok)
+        (cli.eprintln basis-error)
+        (return 1))
     (let [[tx-count tx-ok tx-error] (vev.store-tx-count (addr store))]
       (when (not tx-ok)
         (cli.eprintln tx-error)
         (return 1))
       (fmt.print "{:basis-t ")
-      (fmt.print (- store.sqlite.conn.next-tx 1))
+      (fmt.print basis)
       (fmt.print " :tx-count ")
       (fmt.print tx-count)
       (fmt.println "}")
-      0)))
+      0))))
 
 (defn command-transact [uri: string, tx-arg: string] -> int
   (let [[tx-text text-ok text-error] (read-text-arg tx-arg)]
@@ -148,6 +156,12 @@ examples:
             (= os.args[1] "-h")
             (= os.args[1] "--help"))
     (fmt.print usage)
+    (return))
+  (when (and (= (len os.args) 2)
+             (or (= os.args[1] "-V")
+                 (= os.args[1] "--version")
+                 (= os.args[1] "version")))
+    (fmt.printf "vev %s\n" (version))
     (return))
   (let [command os.args[1]
         code (cond

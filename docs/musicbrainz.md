@@ -31,7 +31,7 @@ Local source builds require:
 
 - `kvist`
 - Odin
-- a system SQLite runtime for durable Vev stores
+- Clang and an archiver for the bundled SQLite build
 - Java 21 and Clojure CLI for the Clojure workshop
 
 Applications use Vev store paths and Vev APIs. They do not create SQLite

@@ -61,18 +61,16 @@ The C SDK path is `include/vev.h`, `libvev`, and `build/lib/pkgconfig/vev.pc`.
 including in-memory query and durable open/write/reopen/query through
 `vev_connect`.
 
-The CLI path builds `build/vev` from `src/vev_cli/main.kvist`. It currently
-exposes durable `info`, `transact`, `query`, and `pull` commands over the native
-Kvist implementation. `scripts/smoke_cli.sh` verifies that path. The current
-local durable backend uses SQLite internally, but the CLI and host wrappers
-should present this as a Vev connection/store, not as application code
-programming SQLite directly.
+The CLI path builds `build/vev` from `src/vev_cli/main.kvist`. It exposes
+`--version` plus durable `info`, `transact`, `query`, and `pull` commands over
+the native Kvist implementation. Each platform release contains a standalone
+`vev-cli-<platform>-<version>` archive. `scripts/smoke_cli_package.sh` extracts
+and exercises that artifact.
 
 Runtime dependency details are tracked in
-[`runtime-dependencies.md`](runtime-dependencies.md). The current baseline is a
-documented system SQLite runtime dependency for `libvev`; future packages may
-bundle or statically link SQLite per platform without changing the public Vev
-API.
+[`runtime-dependencies.md`](runtime-dependencies.md). Vev builds a pinned,
+checksum-verified SQLite amalgamation with FTS5 into the CLI and `libvev`.
+Prebuilt consumers therefore have no separate SQLite runtime dependency.
 
 The JVM path has bundled-native loading. The Java loader checks explicit path
 configuration, local `build/lib`, then classpath resources under
@@ -86,7 +84,9 @@ the final `vev-java` jar:
 `scripts/smoke_jvm_coordinates.sh` verifies a fresh Maven project and a fresh
 Clojure project against a staged repository. The projects use only
 `dev.vevdb:vev-java` or `dev.vevdb/vev-clj`; no repository source classpath,
-platform selection, or explicit native-library path is present.
+platform selection, SQLite installation, or explicit native-library path is
+present. The Java wrapper also checks the native ABI version before exposing a
+connection.
 
 It also writes a local Maven repository under `build/m2`, so the future
 published dependency shapes can already be tested from outside the repo:

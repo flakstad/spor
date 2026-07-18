@@ -15435,6 +15435,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     .Shared (return (shared-write-state-next-tx (addr store^.shared.write)) true "")
      (return 0 false "store is not open")))
 
+(defn store-basis-t [store: ^Store-Conn] -> [basis-t: u64, ok: bool, error: string]
+  (case store^.kind
+    .SQLite (sqlite-conn-basis-t (addr store^.sqlite))
+    .Shared (return (shared-write-state-next-tx (addr store^.shared.write)) true "")
+     (return 0 false "store is not open")))
+
 (defn store-index-maintenance-count [store: ^Store-Conn] -> [maintenance-count: u64, ok: bool, error: string]
   (case store^.kind
     .SQLite (sqlite-conn-index-maintenance-count (addr store^.sqlite))

@@ -835,6 +835,10 @@ cleanup:
 
 int main(void) {
     printf("version: %s\n", vev_version());
+    if (vev_abi_version() != VEV_ABI_VERSION) {
+        fprintf(stderr, "unexpected Vev ABI version\n");
+        return 1;
+    }
 
     vev_conn_t conn = vev_conn_open_memory();
     if (conn == NULL) {

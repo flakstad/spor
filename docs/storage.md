@@ -32,9 +32,10 @@ Current preferred entry points:
   `db-with` in the language-specific API
 
 The current durable backend is SQLite. A plain filesystem path and
-`sqlite://...` URI both select that backend, and the native library currently
-depends on a platform SQLite runtime. Application code does not create SQLite
-tables, run migrations, issue SQL, or configure SQLite schemas.
+`sqlite://...` URI both select that backend. Release builds include a pinned
+SQLite amalgamation with FTS5 in the native library. Application code does not
+install SQLite, create SQLite tables, run migrations, issue SQL, or configure
+SQLite schemas.
 
 Durable stores can be configured with `configure-store-durability!`:
 

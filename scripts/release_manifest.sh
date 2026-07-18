@@ -24,6 +24,12 @@ esac
 
 PLATFORM="$OS-$ARCH"
 SOURCE_DIR="$ROOT/build/release/source"
+CLI_DIR="$ROOT/build/release/cli"
+
+case "$OS" in
+  windows) CLI_FORMAT="zip" ;;
+  *) CLI_FORMAT="tar.gz" ;;
+esac
 
 metadata_version() {
   case "$1" in
@@ -47,6 +53,7 @@ mkdir -p "$(dirname "$OUT")"
 
 required_artifacts=(
   "$ROOT/build/lib/$LIB_NAME"
+  "$CLI_DIR/vev-cli-$PLATFORM-$VERSION.$CLI_FORMAT"
   "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"
   "$ROOT/include/vev.h"
   "$ROOT/build/jvm/vev-java-$VERSION.jar"
@@ -110,6 +117,7 @@ artifact() {
   if [[ -n "$LINK_NAME" ]]; then
     artifact "vev-native-$PLATFORM-import" "native-import-library" "$ROOT/build/lib/$LINK_NAME"; printf ',\n'
   fi
+  artifact "vev-cli-$PLATFORM" "cli-bundle" "$CLI_DIR/vev-cli-$PLATFORM-$VERSION.$CLI_FORMAT"; printf ',\n'
   artifact "vev-native-$PLATFORM-bundle" "native-bundle" "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"; printf ',\n'
   artifact "vev-c-header" "c-header" "$ROOT/include/vev.h"; printf ',\n'
   artifact "vev-java" "jvm-jar" "$ROOT/build/jvm/vev-java-$VERSION.jar"; printf ',\n'

@@ -50,6 +50,8 @@ if [[ ! -f "$SOURCE" ]]; then
   exit 1
 fi
 
+"$ROOT/scripts/check_self_contained_native.sh" "$SOURCE" >/dev/null
+
 mkdir -p "$TARGET_DIR"
 cp "$SOURCE" "$TARGET"
 

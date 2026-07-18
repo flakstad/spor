@@ -103,5 +103,5 @@ defer reports.Close()
 separate Go module using a local `replace` to this checkout.
 
 Durable stores are opened through Vev APIs with paths such as `app.vev`. The Go
-package uses cgo over `libvev`; the current native library depends on the
-platform SQLite runtime, but Go application code does not set up SQLite.
+package uses cgo over `libvev`, whose release build includes SQLite with FTS5.
+Go application code does not install or configure SQLite.

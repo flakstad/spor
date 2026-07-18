@@ -3955,6 +3955,11 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (cstring "vev-abi/0.1"))
 
 @export
+(defn vev_abi_version :abi "c" [] -> u32
+  (odin "context = runtime.default_context()")
+  (u32 1))
+
+@export
 (defn vev_conn_open_memory :abi "c" [] -> Vev-Conn
   (odin "context = runtime.default_context()")
   (let [conn (abi-alloc-conn)

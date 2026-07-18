@@ -64,5 +64,5 @@ future package can place `vev_native.node` and the platform `libvev` in the same
 layout from a temporary directory without `VEV_NODE_NATIVE`.
 
 Durable stores are opened through Vev APIs with paths such as `app.vev`. The
-Node addon loads the Vev native library; the current native library depends on
-the platform SQLite runtime, but Node application code does not set up SQLite.
+Node addon loads the Vev native library, whose release build includes SQLite
+with FTS5. Node application code does not install or configure SQLite.

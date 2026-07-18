@@ -35,6 +35,11 @@ esac
 LIB_PATH="$LIB_DIR/$LIB_NAME"
 mkdir -p "$GENERATED_DIR" "$LIB_DIR" "$INCLUDE_DIR" "$PKGCONFIG_DIR"
 
+SQLITE_LIB_DIR="${VEV_SQLITE_LIB_DIR:-}"
+if [[ -z "$SQLITE_LIB_DIR" ]]; then
+  SQLITE_LIB_DIR="$("$ROOT/scripts/build_sqlite.sh")"
+fi
+
 if [[ "$IF_NEEDED" == "true" && -f "$LIB_PATH" ]]; then
   SOURCES_CURRENT="true"
   if find "$ROOT/src/vev" "$ROOT/src/vev_abi" -type f -newer "$LIB_PATH" -print -quit | grep -q .; then
@@ -72,9 +77,14 @@ ODIN_BUILD_ARGS=(
   -build-mode:dll
   -out:"$LIB_PATH"
 )
-if [[ -n "${VEV_SQLITE_LIB_DIR:-}" ]]; then
-  ODIN_BUILD_ARGS+=("-extra-linker-flags:/LIBPATH:${VEV_SQLITE_LIB_DIR}")
-fi
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    ODIN_BUILD_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_LIB_DIR")
+    ;;
+  *)
+    ODIN_BUILD_ARGS+=("-extra-linker-flags:-L$SQLITE_LIB_DIR")
+    ;;
+esac
 odin build "${ODIN_BUILD_ARGS[@]}"
 if [[ -n "$LINK_NAME" && ! -f "$LIB_DIR/$LINK_NAME" ]]; then
   echo "Windows build did not produce import library $LIB_DIR/$LINK_NAME" >&2

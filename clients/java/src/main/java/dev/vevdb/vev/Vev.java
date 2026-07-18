@@ -32,6 +32,7 @@ import java.util.Date;
 public final class Vev implements AutoCloseable {
     private static final Linker LINKER = Linker.nativeLinker();
     private static final Cleaner CLEANER = Cleaner.create();
+    public static final int ABI_VERSION = 1;
     public static final int COLUMN_ENTITY = 1;
     public static final int COLUMN_STRING = 2;
     public static final int COLUMN_INT = 3;
@@ -367,6 +368,24 @@ public final class Vev implements AutoCloseable {
         this.arena = Arena.ofShared();
         this.cleanable = CLEANER.register(this, arena::close);
         this.symbols = SymbolLookup.libraryLookup(libraryPath, arena);
+
+        MethodHandle nativeAbiVersion = downcall(
+            "vev_abi_version",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT));
+        try {
+            int actualAbiVersion = (int) nativeAbiVersion.invoke();
+            if (actualAbiVersion != ABI_VERSION) {
+                throw new IllegalStateException(
+                    "incompatible Vev native ABI: Java requires "
+                    + ABI_VERSION + ", native library provides " + actualAbiVersion);
+            }
+        } catch (RuntimeException | Error error) {
+            cleanable.clean();
+            throw error;
+        } catch (Throwable error) {
+            cleanable.clean();
+            throw new IllegalStateException("failed to read Vev native ABI version", error);
+        }
 
         this.connOpenMemory = downcall("vev_conn_open_memory", FunctionDescriptor.of(ValueLayout.ADDRESS));
         this.connClose = downcall("vev_conn_close", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
