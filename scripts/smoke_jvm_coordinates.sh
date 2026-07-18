@@ -12,6 +12,21 @@ fi
 VERSION="$1"
 STAGED_M2_DIR="$(cd "$2" && pwd)"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vev-jvm-coordinates.XXXXXX")"
+JAVA_SPECIFICATION_VERSION="$(
+  java -XshowSettings:properties -version 2>&1 |
+    sed -n 's/^[[:space:]]*java.specification.version = //p' |
+    head -1
+)"
+if [[ "$JAVA_SPECIFICATION_VERSION" != "21" ]]; then
+  echo "Java 21 is required for the current preview FFM client; found Java $JAVA_SPECIFICATION_VERSION" >&2
+  exit 1
+fi
+JAVA_HOME="$(
+  java -XshowSettings:properties -version 2>&1 |
+    sed -n 's/^[[:space:]]*java.home = //p' |
+    head -1
+)"
+export JAVA_HOME
 REPOSITORY_URL="${VEV_MAVEN_REPOSITORY_URL:-}"
 TRUST_STORE="${VEV_MAVEN_TRUST_STORE:-}"
 TRUST_OPTIONS=""
@@ -88,20 +103,34 @@ cat > "$TMP_DIR/java/src/main/java/example/Main.java" <<'EOF'
 package example;
 
 import dev.vevdb.vev.Vev;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
 public final class Main {
+    private static void assertRows(Vev vev, Vev.DB db) throws Throwable {
+        List<List<Object>> rows = vev.queryRows(Map.of(
+            "query", "[:find ?name :where [?e :user/name ?name]]",
+            "args", List.of(db)));
+        if (!rows.equals(List.of(List.of("Ada")))) {
+            throw new AssertionError(rows);
+        }
+    }
+
     public static void main(String[] args) throws Throwable {
         try (Vev vev = Vev.load(); Vev.Connection conn = vev.createConn()) {
             conn.transact("[{:db/id 1 :user/name \"Ada\"}]");
             try (Vev.DB db = conn.db()) {
-                List<List<Object>> rows = vev.queryRows(Map.of(
-                    "query", "[:find ?name :where [?e :user/name ?name]]",
-                    "args", List.of(db)));
-                if (!rows.equals(List.of(List.of("Ada")))) {
-                    throw new AssertionError(rows);
-                }
+                assertRows(vev, db);
+            }
+        }
+        try (Vev vev = Vev.load();
+             Vev.DurableConnection conn = vev.connect(Path.of("target", "coordinate-smoke.vev"))) {
+            try (Vev.TxReport ignored = conn.transactReport("[{:db/id 1 :user/name \"Ada\"}]")) {
+                // Closing the report releases its native snapshots.
+            }
+            try (Vev.DB db = conn.db()) {
+                assertRows(vev, db);
             }
         }
         System.out.println("vev-java-coordinates-ok");
@@ -139,9 +168,20 @@ EOF
   echo "resolving vev-clj from ${REPOSITORY_URL:-$M2_DIR}"
   env -u VEV_LIB JAVA_TOOL_OPTIONS="$CLOJURE_JAVA_TOOL_OPTIONS" clojure -M:run -e "(require '[vev.core :as d])
 (let [conn (d/create-conn)]
-  (d/transact conn [{:db/id 1 :user/name \"Ada\"}])
-  (assert (= #{[\"Ada\"]}
-             (d/q '[:find ?name :where [?e :user/name ?name]]
-                  (d/db conn)))))
+  (try
+    (d/transact conn [{:db/id 1 :user/name \"Ada\"}])
+    (assert (= #{[\"Ada\"]}
+               (d/q '[:find ?name :where [?e :user/name ?name]]
+                    (d/db conn))))
+    (finally
+      (.close conn))))
+(let [conn (d/connect \"coordinate-smoke.vev\")]
+  (try
+    (d/transact conn [{:db/id 1 :user/name \"Ada\"}])
+    (assert (= #{[\"Ada\"]}
+               (d/q '[:find ?name :where [?e :user/name ?name]]
+                    (d/db conn))))
+    (finally
+      (.close conn))))
 (println :vev-clojure-coordinates-ok)"
 )

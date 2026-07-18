@@ -32,10 +32,14 @@ connections. Kvist and Clojure expose Datomic-shaped `q`, `pull`, `transact`,
   with only `dev.vevdb:vev-java` or `dev.vevdb/vev-clj` coordinates; consumers
   resolve them from a temporary Maven HTTPS repository and do not select a
   native artifact or configure a library path.
+- Tagged releases then run a post-publication acceptance check against only
+  the public GitHub release checksums, JVM JARs, and POMs. Fresh in-memory and
+  durable Java and Clojure consumers run with empty Vev dependency caches, no
+  `VEV_LIB`, and no system SQLite setup.
 - Native GitHub runners pass the complete package-only host suite on macOS
   arm64, Linux x86-64, and Windows x86-64, including Kvist. Each build compiles
   a checksum-verified SQLite amalgamation with FTS5 into the CLI and native
-  library. The combined JVM artifacts contain all three self-contained native
+  library. The combined JVM artifacts contain all five self-contained native
   resources and pass fresh Java and Clojure coordinate resolution over HTTPS.
   This release proof is recorded by successful workflow run
   [29598836792](https://github.com/vevdb/vev/actions/runs/29598836792).
@@ -148,9 +152,8 @@ runs.
    selected public Maven repository. The combined release already verifies
    clean consumer caches against a temporary Maven HTTPS repository, without
    repository-local classpaths, native paths, or `:mvn/local-repo`.
-2. Cut the first tagged release from a successful gate run and publish its
-   checksummed native bundles, combined JVM artifacts, source package, and
-   adapter packages.
+2. Promote a prerelease whose post-publication acceptance check passed to the
+   first stable release.
 3. Profile the complete 10,000-row collection materialization path and reduce
    its multiple query/result passes. Prefer a reusable multi-attribute
    projection or typed-column boundary over application-specific fusion.

@@ -266,7 +266,7 @@ jobs:
             cp "dist/release-$platform/release/native/"* upload/
           done
           cp dist/release-linux-x86_64/release/source/* upload/
-          shasum -a 256 upload/* > upload/SHA256SUMS
+          (cd upload && shasum -a 256 *) > upload/SHA256SUMS
 
       - name: Publish prerelease
         env:
@@ -277,3 +277,32 @@ jobs:
             --generate-notes \
             --title "VevDB ${GITHUB_REF_NAME}" \
             upload/*
+
+  public-jvm-acceptance:
+    name: published JVM release acceptance
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: prerelease
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+
+      - name: Install Maven
+        run: sudo apt-get update && sudo apt-get install -y maven
+
+      - name: Smoke published Java and Clojure artifacts
+        run: |
+          scripts/smoke_public_jvm_release.sh \
+            "${GITHUB_REF_NAME}" \
+            "$(cat VERSION)" \
+            "${GITHUB_REPOSITORY}"
