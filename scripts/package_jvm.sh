@@ -124,8 +124,7 @@ install_artifact() {
 }
 
 javac \
-  --enable-preview \
-  --release 21 \
+  --release 25 \
   -d "$JAVA_CLASSES" \
   "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java"
 

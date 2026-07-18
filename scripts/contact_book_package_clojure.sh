@@ -19,8 +19,7 @@ cat > "$TMP_DIR/deps.edn" <<EOF
 {:mvn/local-repo "$ROOT/build/m2"
  :paths ["."]
  :deps {com.vevdb/vev-clj {:mvn/version "$VERSION"}}
- :aliases {:run {:jvm-opts ["--enable-preview"
-                            "--enable-native-access=ALL-UNNAMED"]}}}
+ :aliases {:run {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}}}
 EOF
 
 (

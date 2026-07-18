@@ -69,8 +69,8 @@ if ! command -v llvm-ar >/dev/null 2>&1 &&
   exit 1
 fi
 
-if ! javac -version 2>&1 | grep -Eq 'javac (21|2[2-9]|[3-9][0-9])([.]|$)'; then
-  echo "release builds require JDK 21 or newer" >&2
+if ! javac -version 2>&1 | grep -Eq 'javac (2[5-9]|[3-9][0-9])([.]|$)'; then
+  echo "release builds require JDK 25 or newer" >&2
   javac -version >&2
   exit 1
 fi

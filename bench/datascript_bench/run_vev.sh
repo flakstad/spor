@@ -18,8 +18,7 @@ mkdir -p "$JAVA_DIR"
 
 if [[ ! -f "$JAVA_DIR/vev/Vev.class" || "$ROOT/examples/java/Vev.java" -nt "$JAVA_DIR/vev/Vev.class" ]]; then
   javac \
-    --enable-preview \
-    --release 21 \
+    --release 25 \
     -d "$JAVA_DIR" \
     "$ROOT/examples/java/Vev.java"
 fi
@@ -37,7 +36,6 @@ printf "\n"
 printf "vev\t"
 
 clojure \
-  -J--enable-preview \
   -J--enable-native-access=ALL-UNNAMED \
   -Sdeps "{:paths [\"$JAVA_DIR\" \"$ROOT/clients/clojure/src\" \"$ROOT/bench/datascript_bench/src\"]}" \
   -M \

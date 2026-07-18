@@ -21,7 +21,7 @@ The prebuilt distributions are self-contained:
 - C ABI consumers unpack the native bundle containing `vev.h` and `libvev`.
 
 None of these consumers installs SQLite separately. Java and Clojure currently
-require Java 21 and the FFM preview/native-access options documented by their
+require Java 25 and the native-access option documented by their
 packages.
 
 ## Source Builds

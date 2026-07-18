@@ -1,62 +1,80 @@
 # VevDB for Odin
 
 VevDB is authored in Kvist and lowers through Odin, but generated Odin is build
-output, not the public Odin package surface.
+output, not the public package surface. The supported Odin API is the small,
+handwritten package in [`vev`](vev).
 
-For Odin applications, the supported direction is a small wrapper over the C
-ABI:
+The package dynamically loads the VevDB C ABI, checks `VEV_ABI_VERSION`, and
+provides explicit Odin ownership around the native library and connections.
+SQLite with FTS5 is included in the native VevDB library.
 
-- link against the platform library under `build/lib`
-- import functions matching `include/vev.h`
-- manage VevDB handles explicitly, mirroring the C ABI ownership rules
+Odin intentionally has no official package manager. Vendor the `vev` directory
+in your source tree or pin this repository as a Git submodule. A project with
+this layout:
 
-`clients/odin/smoke.odin` is the first concrete proof of that direction. It
-uses `core:dynlib` to load the VevDB native library, opens an in-memory
-connection, transacts EDN, runs a Datalog query, and frees returned C ABI
-strings.
-
-The smoke also exercises the DB-value path directly through the ABI:
-
-```odin
-snapshot := api.db(conn)
-defer api.db_release(snapshot)
-
-query := api.prepare_query(query_text)
-defer api.free_query(query)
-
-result := api.query_db(snapshot, query, empty_inputs)
-defer api.string_free(result)
+```text
+my-app/
+  main.odin
+  vendor/
+    vev/
+      doc.odin
+      vev.odin
 ```
 
-That is the shape a future Odin package should wrap in Odin-native `Conn`,
-`DB`, prepared-query, and result types.
+can use:
 
-Run it from the repo root after building the native library:
+```odin
+import vev "vendor/vev"
+
+library, ok := vev.load("/path/to/libvev")
+assert(ok)
+defer vev.unload(&library)
+
+connection, ok := vev.open_memory(&library)
+assert(ok)
+defer vev.close(&connection)
+
+tx, ok := vev.transact(&connection, `[{:db/id 1 :user/name "Ada"}]`)
+assert(ok)
+defer delete(tx)
+
+rows, ok := vev.query(
+    &connection,
+    `[:find ?name :where [?e :user/name ?name]]`,
+)
+assert(ok)
+defer delete(rows)
+```
+
+For a shared dependency directory, expose a collection at build time:
+
+```sh
+odin build . -collection:deps=vendor
+```
+
+and import it as `import vev "deps:vev"`.
+
+The complete consumer example is in [`example`](example). Run it from the
+repository root after building the native library:
 
 ```sh
 scripts/build_c_abi.sh
-odin run clients/odin -file
+odin run clients/odin/example -- build/lib/libvev.dylib
 ```
 
-Or pass an explicit native library path:
+Use `libvev.so` on Linux and `vev.dll` on Windows. Release native SDK archives
+contain the matching library, C header, `pkg-config` metadata, license, and no
+external SQLite runtime dependency.
 
-```sh
-odin run clients/odin -file -- build/lib/libvev.dylib
-```
-
-The focused package proof is:
+The release-shaped package proof checks the package, runs the consumer example,
+and also runs the lower-level ABI coverage program:
 
 ```sh
 scripts/smoke_odin_package.sh
 ```
 
-It builds the smoke wrapper into a temporary directory and runs it against the
-platform native VevDB library, mirroring how an Odin application would dynamically
-load `libvev`.
-
-Directly depending on generated Odin should remain a development/debug escape
-hatch rather than the documented integration path.
-
-Durable stores are opened through VevDB APIs with paths such as `app.vev`. The
-release native library includes SQLite with FTS5; Odin application code does
-not install or configure SQLite.
+The next standalone client repository should be `vevdb/vev-odin`, with the
+`vev` package at its root, tagged source releases, a pinned tested Odin compiler
+version, examples, and CI against every native VevDB release platform. That
+repository shape is deliberately vendor-friendly and is the artifact to share
+with the Odin community.

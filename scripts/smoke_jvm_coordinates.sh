@@ -17,8 +17,8 @@ JAVA_SPECIFICATION_VERSION="$(
     sed -n 's/^[[:space:]]*java.specification.version = //p' |
     head -1
 )"
-if [[ "$JAVA_SPECIFICATION_VERSION" != "21" ]]; then
-  echo "Java 21 is required for the current preview FFM client; found Java $JAVA_SPECIFICATION_VERSION" >&2
+if [[ "$JAVA_SPECIFICATION_VERSION" != "25" ]]; then
+  echo "Java 25 is required for the current FFM client; found Java $JAVA_SPECIFICATION_VERSION" >&2
   exit 1
 fi
 JAVA_HOME="$(
@@ -76,7 +76,7 @@ cat > "$TMP_DIR/java/pom.xml" <<EOF
   <artifactId>vev-coordinate-smoke</artifactId>
   <version>1.0.0</version>
   <properties>
-    <maven.compiler.release>21</maven.compiler.release>
+    <maven.compiler.release>25</maven.compiler.release>
   </properties>
   <dependencies>
     <dependency>
@@ -149,7 +149,6 @@ EOF
       paste -sd: -
   )"
   java \
-    --enable-preview \
     --enable-native-access=ALL-UNNAMED \
     -cp "target/classes:$VEV_CLASSPATH" \
     example.Main
@@ -159,8 +158,7 @@ cat > "$TMP_DIR/clojure/deps.edn" <<EOF
 {$CLOJURE_LOCAL_REPO
  $CLOJURE_REPOSITORIES
  :deps {com.vevdb/vev-clj {:mvn/version "$VERSION"}}
- :aliases {:run {:jvm-opts ["--enable-preview"
-                            "--enable-native-access=ALL-UNNAMED"]}}}
+ :aliases {:run {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}}}
 EOF
 
 (

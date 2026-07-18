@@ -1,4 +1,4 @@
 {:aliases
  {:clj-dev
   {:extra-paths ["build/examples/java" "clients/clojure/src"]
-   :jvm-opts ["--enable-preview" "--enable-native-access=ALL-UNNAMED"]}}}
+   :jvm-opts ["--enable-native-access=ALL-UNNAMED"]}}}

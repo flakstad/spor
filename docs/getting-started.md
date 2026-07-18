@@ -389,7 +389,7 @@ let durable_rows = durable.q("[:find ?name :where [?e :user/name ?name]]", "[]")
 
 ## Java
 
-Java uses the Java 21 Foreign Function & Memory wrapper in `clients/java`:
+Java uses the Java 25 Foreign Function & Memory wrapper in `clients/java`:
 
 ```java
 import com.vevdb.Vev;
@@ -404,10 +404,10 @@ System.out.println(vev.queryRows(java.util.Map.of(
 System.out.println(db.pull("[:user/name]", 1));
 ```
 
-Local Java runs need Java 21 preview FFM flags:
+Local Java runs need Java 25 and native access for the unnamed module:
 
 ```sh
---enable-preview --enable-native-access=ALL-UNNAMED
+--enable-native-access=ALL-UNNAMED
 ```
 
 Planned Maven coordinate: `com.vevdb:vev-java`.

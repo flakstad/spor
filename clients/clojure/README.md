@@ -1,7 +1,7 @@
 # VevDB for Clojure
 
 This is the Clojure package layer for VevDB. It depends on the JVM wrapper in
-`clients/java`, which uses Java 21 Foreign Function & Memory to call the native
+`clients/java`, which uses Java 25 Foreign Function & Memory to call the native
 VevDB shared library.
 
 The public API accepts ordinary Clojure data and serializes it to the same EDN
@@ -9,9 +9,9 @@ text frontend used by C, Python, Rust, and Java callers.
 
 ## Intended Published Usage
 
-Normal application setup should be one dependency. The Clojure package should
-pull in the Java wrapper, and the Java wrapper should pull in the right
-platform native artifact, then load the native library itself:
+Normal application setup is one dependency. The Clojure package pulls in the
+Java wrapper, whose combined release contains the verified platform native
+libraries:
 
 ```clojure
 {:deps {com.vevdb/vev-clj {:mvn/version "0.1.0"}}}
@@ -124,8 +124,7 @@ That local repository can be consumed from a separate test project:
 ```clojure
 {:mvn/local-repo "/path/to/vev/build/m2"
  :deps {com.vevdb/vev-clj {:mvn/version "0.1.0"}}
- :aliases {:run {:jvm-opts ["--enable-preview"
-                            "--enable-native-access=ALL-UNNAMED"]}}}
+ :aliases {:run {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}}}
 ```
 
 `scripts/smoke_jvm_package.sh` verifies each platform package during its native

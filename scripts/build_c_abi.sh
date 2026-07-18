@@ -90,21 +90,18 @@ if command -v javac >/dev/null 2>&1 && command -v java >/dev/null 2>&1; then
   mkdir -p "$JAVA_EXAMPLE_DIR"
 
   javac \
-    --enable-preview \
-    --release 21 \
+    --release 25 \
     -d "$JAVA_EXAMPLE_DIR" \
     "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" \
     "$ROOT/examples/java/Smoke.java"
 
   java \
-    --enable-preview \
     --enable-native-access=ALL-UNNAMED \
     -cp "$JAVA_EXAMPLE_DIR" \
     com.vevdb.examples.Smoke "$LIB_PATH"
 
   if command -v clojure >/dev/null 2>&1; then
     clojure \
-      -J--enable-preview \
       -J--enable-native-access=ALL-UNNAMED \
       -Sdeps "{:paths [\"$JAVA_EXAMPLE_DIR\" \"$ROOT/clients/clojure/src\"]}" \
       -M \

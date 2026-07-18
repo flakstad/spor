@@ -1,6 +1,6 @@
 # VevDB for Java
 
-This package is the Java 21 Foreign Function & Memory wrapper for VevDB's native
+This package is the Java 25 Foreign Function & Memory wrapper for VevDB's native
 C ABI. It is the lower JVM layer used by the Clojure package.
 
 Current local development:
@@ -23,22 +23,21 @@ The wrapper loads the native library in this order:
 4. bundled classpath resource:
    `com/vevdb/native/<platform>/<mapped-library-name>`
 
-Java FFM is still a preview API, so local runs need:
+Java 25's FFM API is final. Local runs only need native access enabled:
 
 ```sh
---enable-preview --enable-native-access=ALL-UNNAMED
+--enable-native-access=ALL-UNNAMED
 ```
 
-Planned Maven coordinate:
+Maven coordinate:
 
 ```text
 com.vevdb:vev-java
 ```
 
-The Java artifact is intended to be a one-dependency entry point for Java
-applications. It depends on the matching platform native artifact, so Java
-users should not also list a separate `vev-native-*` dependency in normal
-project setup.
+The combined release artifact is a one-dependency entry point for Java
+applications. It contains every verified platform native library, so Java
+users do not list a separate `vev-native-*` dependency.
 
 Basic usage:
 

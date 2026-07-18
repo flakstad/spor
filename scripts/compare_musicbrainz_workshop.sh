@@ -66,8 +66,7 @@ fi
 
 if [[ ! -f "$JAVA_OUT/com/vevdb/Vev.class" || "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" -nt "$JAVA_OUT/com/vevdb/Vev.class" ]]; then
   javac \
-    --enable-preview \
-    --release 21 \
+    --release 25 \
     -d "$JAVA_OUT" \
     "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java"
 fi
@@ -82,7 +81,6 @@ if [[ "$ENGINE" != "vev" ]]; then
 fi
 
 clojure \
-  -J--enable-preview \
   -J--enable-native-access=ALL-UNNAMED \
   -Sdeps "{:deps {com.datomic/peer {:mvn/version \"1.0.7277\"}}
            :paths [\"$JAVA_OUT\" \"$ROOT/clients/clojure/src\" \"$ROOT/examples/clojure\" \"$ROOT/scripts\"]}" \

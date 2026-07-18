@@ -30,8 +30,7 @@ trap cleanup EXIT
 cat > "$TMP_DIR/deps-java.edn" <<EOF
 {:mvn/local-repo "$M2_REPO"
  :deps {com.vevdb/vev-java {:mvn/version "$VERSION"}}
- :aliases {:run {:jvm-opts ["--enable-preview"
-                            "--enable-native-access=ALL-UNNAMED"]}}}
+ :aliases {:run {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}}}
 EOF
 
 cat > "$TMP_DIR/java-smoke.clj" <<'EOF'
@@ -65,8 +64,7 @@ EOF
 cat > "$TMP_DIR/deps-clj.edn" <<EOF
 {:mvn/local-repo "$M2_REPO"
  :deps {com.vevdb/vev-clj {:mvn/version "$VERSION"}}
- :aliases {:run {:jvm-opts ["--enable-preview"
-                            "--enable-native-access=ALL-UNNAMED"]}}}
+ :aliases {:run {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}}}
 EOF
 
 cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'

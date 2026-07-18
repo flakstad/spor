@@ -126,7 +126,7 @@ SQLite tables, run migrations, or issue SQL.
 
 ### Java
 
-Java 21 uses the Foreign Function and Memory API through an `AutoCloseable`
+Java 25 uses the Foreign Function and Memory API through an `AutoCloseable`
 wrapper:
 
 ```java
@@ -341,6 +341,7 @@ library and SQLite deployment details.
 - [Durable storage](docs/storage.md)
 - [C ABI](docs/c-abi.md)
 - [Language interop](docs/interop.md)
+- [Maven Central release recipe](docs/maven-central.md)
 - [MusicBrainz and Day of Datomic](docs/musicbrainz.md)
 
 ## Acknowledgements

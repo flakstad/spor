@@ -563,7 +563,7 @@ connection or retained immutable DB snapshot.
 
 ## Java And Clojure Examples
 
-[Vev.java](../clients/java/src/main/java/com/vevdb/Vev.java) is the Java 21 Foreign
+[Vev.java](../clients/java/src/main/java/com/vevdb/Vev.java) is the Java 25 Foreign
 Function & Memory wrapper over the platform native Vev library. It is not published yet, but it
 now lives under the planned client package layout. The wrapper exposes the same
 core host shape as Python and Rust:
@@ -589,11 +589,12 @@ The Clojure adapter still uses the direct shape-specific Java methods on hot
 future native one-call column batch handle is needed before it should replace
 the current optimized Clojure dispatch.
 
-Because it uses the preview FFM API, the examples compile and run with:
+The FFM API is final in Java 25. The examples compile and run with native
+access enabled:
 
 ```sh
-javac --enable-preview --release 21 ...
-java --enable-preview --enable-native-access=ALL-UNNAMED ...
+javac --release 25 ...
+java --enable-native-access=ALL-UNNAMED ...
 ```
 
 The Java wrapper exposes `Vev.load(path)` and `createConn()` as the public-ish

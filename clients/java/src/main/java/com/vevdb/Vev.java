@@ -624,7 +624,7 @@ public final class Vev implements AutoCloseable {
 
     public DurableConnection connect(String uri) throws Throwable {
         try (Arena local = Arena.ofConfined()) {
-            MemorySegment raw = (MemorySegment) connectionOpen.invoke(local.allocateUtf8String(uri));
+            MemorySegment raw = (MemorySegment) connectionOpen.invoke(local.allocateFrom(uri));
             if (isNull(raw)) throw new IllegalStateException("failed to connect Vev durable connection");
             boolean ok = (boolean) connectionOk.invoke(raw);
             if (!ok) {
@@ -638,7 +638,7 @@ public final class Vev implements AutoCloseable {
 
     public SQLiteConnection openSqlite(Path path) throws Throwable {
         try (Arena local = Arena.ofConfined()) {
-            MemorySegment raw = (MemorySegment) sqliteConnOpen.invoke(local.allocateUtf8String(path.toString()));
+            MemorySegment raw = (MemorySegment) sqliteConnOpen.invoke(local.allocateFrom(path.toString()));
             if (isNull(raw)) throw new IllegalStateException("failed to open SQLite-backed Vev connection");
             boolean ok = (boolean) sqliteConnOk.invoke(raw);
             if (!ok) {
@@ -665,7 +665,7 @@ public final class Vev implements AutoCloseable {
 
     public PreparedQuery prepare(String query) throws Throwable {
         try (Arena local = Arena.ofConfined()) {
-            MemorySegment raw = (MemorySegment) prepareQueryEdn.invoke(local.allocateUtf8String(query));
+            MemorySegment raw = (MemorySegment) prepareQueryEdn.invoke(local.allocateFrom(query));
             if (isNull(raw)) throw new IllegalStateException("failed to prepare query");
             return new PreparedQuery(raw);
         }
@@ -673,7 +673,7 @@ public final class Vev implements AutoCloseable {
 
     public PreparedPullPattern preparePullPattern(String pattern) throws Throwable {
         try (Arena local = Arena.ofConfined()) {
-            MemorySegment raw = (MemorySegment) preparePullPatternEdn.invoke(local.allocateUtf8String(pattern));
+            MemorySegment raw = (MemorySegment) preparePullPatternEdn.invoke(local.allocateFrom(pattern));
             if (isNull(raw)) throw new IllegalStateException("failed to prepare pull pattern");
             if (!((boolean) preparedPullPatternOk.invoke(raw))) {
                 String error = ownedString((MemorySegment) preparedPullPatternError.invoke(raw));
@@ -686,7 +686,7 @@ public final class Vev implements AutoCloseable {
 
     public String parseClauseEdn(String clause) throws Throwable {
         try (Arena local = Arena.ofConfined()) {
-            return ownedString((MemorySegment) parseClauseEdn.invoke(local.allocateUtf8String(clause)));
+            return ownedString((MemorySegment) parseClauseEdn.invoke(local.allocateFrom(clause)));
         }
     }
 
@@ -694,9 +694,9 @@ public final class Vev implements AutoCloseable {
         query.requireOpen();
         try (Arena local = Arena.ofConfined()) {
             return new ResultSet((MemorySegment) queryRelationDbPreparedResultWithInputs.invoke(
-                local.allocateUtf8String(rows),
+                local.allocateFrom(rows),
                 query.raw,
-                local.allocateUtf8String(inputs)));
+                local.allocateFrom(inputs)));
         }
     }
 
@@ -704,9 +704,9 @@ public final class Vev implements AutoCloseable {
         query.requireOpen();
         try (Arena local = Arena.ofConfined()) {
             return columnResultFromBatch((MemorySegment) queryRelationDbPreparedColumnBatchWithInputs.invoke(
-                local.allocateUtf8String(rows),
+                local.allocateFrom(rows),
                 query.raw,
-                local.allocateUtf8String(inputs)));
+                local.allocateFrom(inputs)));
         }
     }
 
@@ -714,9 +714,9 @@ public final class Vev implements AutoCloseable {
         query.requireOpen();
         try (Arena local = Arena.ofConfined()) {
             return (long) queryRelationDbPreparedRowCountWithInputs.invoke(
-                local.allocateUtf8String(rows),
+                local.allocateFrom(rows),
                 query.raw,
-                local.allocateUtf8String(inputs));
+                local.allocateFrom(inputs));
         }
     }
 
@@ -801,7 +801,7 @@ public final class Vev implements AutoCloseable {
 
     private String ownedString(MemorySegment ptr) throws Throwable {
         if (isNull(ptr)) return "";
-        String out = ptr.reinterpret(Long.MAX_VALUE).getUtf8String(0);
+        String out = ptr.reinterpret(Long.MAX_VALUE).getString(0);
         stringFree.invoke(ptr);
         return out;
     }
@@ -1017,7 +1017,7 @@ public final class Vev implements AutoCloseable {
         try (DB callbackDb = retainedDb(db)) {
             String result = function.apply(callbackDb, txFnArgs(argc, args));
             if (result == null) return MemorySegment.NULL;
-            return registry.arena.allocateUtf8String(result);
+            return registry.arena.allocateFrom(result);
         }
     }
 
@@ -1028,7 +1028,7 @@ public final class Vev implements AutoCloseable {
     private MemorySegment queryAggregateCallback(QueryFunctionRegistry registry, QueryAggregate aggregate, MemorySegment user, int argc, MemorySegment args) throws Throwable {
         String result = aggregate.apply(txFnArgs(argc, args));
         if (result == null) return MemorySegment.NULL;
-        return registry.arena.allocateUtf8String(result);
+        return registry.arena.allocateFrom(result);
     }
 
     private void txReportListenerCallback(TxReportListener listener, MemorySegment user, MemorySegment report) throws Throwable {
@@ -1040,7 +1040,7 @@ public final class Vev implements AutoCloseable {
     }
 
     private static MemorySegment longArray(Arena arena, long[] values) {
-        MemorySegment array = arena.allocateArray(ValueLayout.JAVA_LONG, values.length);
+        MemorySegment array = arena.allocate(ValueLayout.JAVA_LONG, values.length);
         for (int i = 0; i < values.length; i++) {
             array.setAtIndex(ValueLayout.JAVA_LONG, i, values[i]);
         }
@@ -1367,7 +1367,7 @@ public final class Vev implements AutoCloseable {
                 arena);
             boolean ok = (boolean) txFnRegistryRegisterEdn.invoke(
                 raw,
-                arena.allocateUtf8String(ident),
+                arena.allocateFrom(ident),
                 stub,
                 MemorySegment.NULL);
             if (!ok) throw new IllegalStateException("failed to register transaction function: " + ident);
@@ -1422,7 +1422,7 @@ public final class Vev implements AutoCloseable {
                 arena);
             boolean ok = (boolean) queryFnRegistryRegisterPredicate.invoke(
                 raw,
-                arena.allocateUtf8String(ident),
+                arena.allocateFrom(ident),
                 stub,
                 MemorySegment.NULL);
             if (!ok) throw new IllegalStateException("failed to register query predicate: " + ident);
@@ -1454,7 +1454,7 @@ public final class Vev implements AutoCloseable {
                 arena);
             boolean ok = (boolean) queryFnRegistryRegisterAggregate.invoke(
                 raw,
-                arena.allocateUtf8String(ident),
+                arena.allocateFrom(ident),
                 stub,
                 MemorySegment.NULL);
             if (!ok) throw new IllegalStateException("failed to register query aggregate: " + ident);
@@ -1506,7 +1506,7 @@ public final class Vev implements AutoCloseable {
             if (open) {
                 try (Arena local = Arena.ofConfined()) {
                     if (!isNull(connRaw)) {
-                        unlistenFn.invoke(connRaw, local.allocateUtf8String(name));
+                        unlistenFn.invoke(connRaw, local.allocateFrom(name));
                     }
                 } catch (Throwable error) {
                     throw new RuntimeException(error);
@@ -1527,13 +1527,13 @@ public final class Vev implements AutoCloseable {
 
         public String transact(String tx) throws Throwable {
             try (Arena local = Arena.ofConfined()) {
-                return ownedString((MemorySegment) transactEdn.invoke(raw, local.allocateUtf8String(tx)));
+                return ownedString((MemorySegment) transactEdn.invoke(raw, local.allocateFrom(tx)));
             }
         }
 
         public TxReport transactReport(String tx) throws Throwable {
             try (Arena local = Arena.ofConfined()) {
-                return new TxReport((MemorySegment) transactEdnReport.invoke(raw, local.allocateUtf8String(tx)));
+                return new TxReport((MemorySegment) transactEdnReport.invoke(raw, local.allocateFrom(tx)));
             }
         }
 
@@ -1542,7 +1542,7 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined()) {
                 return new TxReport((MemorySegment) transactEdnReportWithTxFns.invoke(
                     raw,
-                    local.allocateUtf8String(tx),
+                    local.allocateFrom(tx),
                     registry.raw));
             }
         }
@@ -1570,7 +1570,7 @@ public final class Vev implements AutoCloseable {
                 listenerArena);
             boolean ok;
             try (Arena local = Arena.ofConfined()) {
-                ok = (boolean) connListenTxReport.invoke(raw, local.allocateUtf8String(name), stub, MemorySegment.NULL);
+                ok = (boolean) connListenTxReport.invoke(raw, local.allocateFrom(name), stub, MemorySegment.NULL);
             }
             if (!ok) {
                 listenerArena.close();
@@ -1582,19 +1582,19 @@ public final class Vev implements AutoCloseable {
         public boolean unlisten(String name) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                return (boolean) connUnlistenTxReport.invoke(raw, local.allocateUtf8String(name));
+                return (boolean) connUnlistenTxReport.invoke(raw, local.allocateFrom(name));
             }
         }
 
         public String queryText(String query, String inputs) throws Throwable {
             try (Arena local = Arena.ofConfined()) {
-                return ownedString((MemorySegment) queryEdnWithInputs.invoke(raw, local.allocateUtf8String(query), local.allocateUtf8String(inputs)));
+                return ownedString((MemorySegment) queryEdnWithInputs.invoke(raw, local.allocateFrom(query), local.allocateFrom(inputs)));
             }
         }
 
         public ResultSet query(PreparedQuery query, String inputs) throws Throwable {
             try (Arena local = Arena.ofConfined()) {
-                return new ResultSet((MemorySegment) queryPreparedResultWithInputs.invoke(raw, query.raw, local.allocateUtf8String(inputs)));
+                return new ResultSet((MemorySegment) queryPreparedResultWithInputs.invoke(raw, query.raw, local.allocateFrom(inputs)));
             }
         }
 
@@ -1604,7 +1604,7 @@ public final class Vev implements AutoCloseable {
                 return columnResultFromBatch((MemorySegment) queryPreparedColumnBatchWithInputs.invoke(
                     raw,
                     query.raw,
-                    local.allocateUtf8String(inputs)));
+                    local.allocateFrom(inputs)));
             }
         }
 
@@ -1613,8 +1613,8 @@ public final class Vev implements AutoCloseable {
                 return new ResultSet((MemorySegment) queryPreparedResultWithRulesTextAndInputs.invoke(
                     raw,
                     query.raw,
-                    local.allocateUtf8String(rules),
-                    local.allocateUtf8String(inputs)));
+                    local.allocateFrom(rules),
+                    local.allocateFrom(inputs)));
             }
         }
 
@@ -1652,7 +1652,7 @@ public final class Vev implements AutoCloseable {
         public TxReport transactReport(String tx) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                return new TxReport((MemorySegment) connectionTransactEdnReport.invoke(raw, local.allocateUtf8String(tx)));
+                return new TxReport((MemorySegment) connectionTransactEdnReport.invoke(raw, local.allocateFrom(tx)));
             }
         }
 
@@ -1662,7 +1662,7 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined()) {
                 return new TxReport((MemorySegment) connectionTransactEdnReportWithTxFns.invoke(
                     raw,
-                    local.allocateUtf8String(tx),
+                    local.allocateFrom(tx),
                     registry.raw));
             }
         }
@@ -1735,7 +1735,7 @@ public final class Vev implements AutoCloseable {
                     if (tx == null) {
                         throw new IllegalArgumentException("logical EDN transaction cannot be null");
                     }
-                    texts.setAtIndex(ValueLayout.ADDRESS, index, local.allocateUtf8String(tx));
+                    texts.setAtIndex(ValueLayout.ADDRESS, index, local.allocateFrom(tx));
                 }
                 return new TxReportArray((MemorySegment) connectionTransactManyEdnReports.invoke(raw, texts, txs.size()));
             }
@@ -1752,7 +1752,7 @@ public final class Vev implements AutoCloseable {
                 return columnResultFromBatch((MemorySegment) connectionPreparedColumnBatchWithInputs.invoke(
                     raw,
                     query.raw,
-                    local.allocateUtf8String(inputs)));
+                    local.allocateFrom(inputs)));
             }
         }
 
@@ -1774,7 +1774,7 @@ public final class Vev implements AutoCloseable {
                 listenerArena);
             boolean ok;
             try (Arena local = Arena.ofConfined()) {
-                ok = (boolean) connectionListenTxReport.invoke(raw, local.allocateUtf8String(name), stub, MemorySegment.NULL);
+                ok = (boolean) connectionListenTxReport.invoke(raw, local.allocateFrom(name), stub, MemorySegment.NULL);
             }
             if (!ok) {
                 listenerArena.close();
@@ -1786,7 +1786,7 @@ public final class Vev implements AutoCloseable {
         public boolean unlisten(String name) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                return (boolean) connectionUnlistenTxReport.invoke(raw, local.allocateUtf8String(name));
+                return (boolean) connectionUnlistenTxReport.invoke(raw, local.allocateFrom(name));
             }
         }
 
@@ -1865,7 +1865,7 @@ public final class Vev implements AutoCloseable {
         public TxReport transactReport(String tx) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                return new TxReport((MemorySegment) sqliteConnTransactEdnReport.invoke(raw, local.allocateUtf8String(tx)));
+                return new TxReport((MemorySegment) sqliteConnTransactEdnReport.invoke(raw, local.allocateFrom(tx)));
             }
         }
 
@@ -1892,7 +1892,7 @@ public final class Vev implements AutoCloseable {
                     if (tx == null) {
                         throw new IllegalArgumentException("logical EDN transaction cannot be null");
                     }
-                    texts.setAtIndex(ValueLayout.ADDRESS, index, local.allocateUtf8String(tx));
+                    texts.setAtIndex(ValueLayout.ADDRESS, index, local.allocateFrom(tx));
                 }
                 return new TxReportArray((MemorySegment) sqliteConnTransactManyEdnReports.invoke(raw, texts, txs.size()));
             }
@@ -1909,7 +1909,7 @@ public final class Vev implements AutoCloseable {
                 return columnResultFromBatch((MemorySegment) sqliteConnPreparedColumnBatchWithInputs.invoke(
                     raw,
                     query.raw,
-                    local.allocateUtf8String(inputs)));
+                    local.allocateFrom(inputs)));
             }
         }
 
@@ -1961,8 +1961,8 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined()) {
                 MemorySegment raw = (MemorySegment) dbEntityLookupRefString.invoke(
                     handle.raw,
-                    local.allocateUtf8String(attr),
-                    local.allocateUtf8String(value));
+                    local.allocateFrom(attr),
+                    local.allocateFrom(value));
                 if (isNull(raw)) throw new IllegalStateException("failed to create lookup-ref entity view");
                 return new EntityView(raw);
             }
@@ -1971,7 +1971,7 @@ public final class Vev implements AutoCloseable {
         public EntityView entityIdent(String ident) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                MemorySegment raw = (MemorySegment) dbEntityIdent.invoke(handle.raw, local.allocateUtf8String(ident));
+                MemorySegment raw = (MemorySegment) dbEntityIdent.invoke(handle.raw, local.allocateFrom(ident));
                 if (isNull(raw)) throw new IllegalStateException("failed to create ident entity view");
                 return new EntityView(raw);
             }
@@ -1980,7 +1980,7 @@ public final class Vev implements AutoCloseable {
         public ResultSet query(PreparedQuery query, String inputs) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                return new ResultSet((MemorySegment) queryDbPreparedResultWithInputs.invoke(handle.raw, query.raw, local.allocateUtf8String(inputs)));
+                return new ResultSet((MemorySegment) queryDbPreparedResultWithInputs.invoke(handle.raw, query.raw, local.allocateFrom(inputs)));
             }
         }
 
@@ -1991,7 +1991,7 @@ public final class Vev implements AutoCloseable {
                 return new ResultSet((MemorySegment) queryDbPreparedResultWithInputsAndFns.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(inputs),
+                    local.allocateFrom(inputs),
                     registry.raw));
             }
         }
@@ -2002,7 +2002,7 @@ public final class Vev implements AutoCloseable {
                 return ownedString((MemorySegment) queryDbPreparedProfileEdnWithInputs.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(inputs)));
+                    local.allocateFrom(inputs)));
             }
         }
 
@@ -2012,8 +2012,8 @@ public final class Vev implements AutoCloseable {
                 return ownedString((MemorySegment) queryDbPreparedProfileEdnWithRulesTextAndInputs.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(rules),
-                    local.allocateUtf8String(inputs)));
+                    local.allocateFrom(rules),
+                    local.allocateFrom(inputs)));
             }
         }
 
@@ -2023,8 +2023,8 @@ public final class Vev implements AutoCloseable {
                 return new ResultSet((MemorySegment) queryDbPreparedResultWithRulesTextAndInputs.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(rules),
-                    local.allocateUtf8String(inputs)));
+                    local.allocateFrom(rules),
+                    local.allocateFrom(inputs)));
             }
         }
 
@@ -2034,8 +2034,8 @@ public final class Vev implements AutoCloseable {
                 MemorySegment raw = (MemorySegment) queryDbPreparedColumnBatchWithRulesTextAndInputs.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(rules),
-                    local.allocateUtf8String(inputs));
+                    local.allocateFrom(rules),
+                    local.allocateFrom(inputs));
                 return columnResultFromBatch(raw);
             }
         }
@@ -2046,7 +2046,7 @@ public final class Vev implements AutoCloseable {
                 MemorySegment raw = (MemorySegment) queryDbPreparedEntityColumnWithInputs.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(inputs));
+                    local.allocateFrom(inputs));
                 if (isNull(raw)) return null;
                 try {
                     int count = (int) u64ArrayCount.invoke(raw);
@@ -2066,7 +2066,7 @@ public final class Vev implements AutoCloseable {
                 MemorySegment raw = (MemorySegment) queryDbPreparedStringColumnWithInputs.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(inputs));
+                    local.allocateFrom(inputs));
                 if (isNull(raw)) return null;
                 try {
                     int count = (int) stringArrayCount.invoke(raw);
@@ -2094,7 +2094,7 @@ public final class Vev implements AutoCloseable {
                 MemorySegment raw = (MemorySegment) queryDbPreparedEntityIntPairsWithInputs.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(inputs));
+                    local.allocateFrom(inputs));
                 if (isNull(raw)) return null;
                 try {
                     int count = (int) entityIntPairsCount.invoke(raw);
@@ -2122,7 +2122,7 @@ public final class Vev implements AutoCloseable {
                 MemorySegment raw = (MemorySegment) queryDbPreparedEntityIntPairsWithInputs.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(inputs));
+                    local.allocateFrom(inputs));
                 if (isNull(raw)) return null;
                 try {
                     int count = (int) entityIntPairsCount.invoke(raw);
@@ -2145,7 +2145,7 @@ public final class Vev implements AutoCloseable {
                 MemorySegment raw = (MemorySegment) queryDbPreparedEntityStringIntTriplesWithInputs.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(inputs));
+                    local.allocateFrom(inputs));
                 if (isNull(raw)) return null;
                 try {
                     int count = (int) entityStringIntTriplesCount.invoke(raw);
@@ -2341,7 +2341,7 @@ public final class Vev implements AutoCloseable {
                 MemorySegment raw = (MemorySegment) queryDbPreparedColumnBatchWithInputs.invoke(
                     handle.raw,
                     query.raw,
-                    local.allocateUtf8String(inputs));
+                    local.allocateFrom(inputs));
                 return columnResultFromBatch(raw);
             }
         }
@@ -2401,14 +2401,14 @@ public final class Vev implements AutoCloseable {
         public String with(String tx) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                return ownedString((MemorySegment) withEdn.invoke(handle.raw, local.allocateUtf8String(tx)));
+                return ownedString((MemorySegment) withEdn.invoke(handle.raw, local.allocateFrom(tx)));
             }
         }
 
         public TxReport withReport(String tx) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                return new TxReport((MemorySegment) withEdnReport.invoke(handle.raw, local.allocateUtf8String(tx)));
+                return new TxReport((MemorySegment) withEdnReport.invoke(handle.raw, local.allocateFrom(tx)));
             }
         }
 
@@ -2418,7 +2418,7 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined()) {
                 return new TxReport((MemorySegment) withEdnReportWithTxFns.invoke(
                     handle.raw,
-                    local.allocateUtf8String(tx),
+                    local.allocateFrom(tx),
                     registry.raw));
             }
         }
@@ -2426,7 +2426,7 @@ public final class Vev implements AutoCloseable {
         public DB dbWith(String tx) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                MemorySegment db = (MemorySegment) dbWithEdn.invoke(handle.raw, local.allocateUtf8String(tx));
+                MemorySegment db = (MemorySegment) dbWithEdn.invoke(handle.raw, local.allocateFrom(tx));
                 if (isNull(db)) throw new IllegalStateException("failed to create DB snapshot");
                 return new DB(db);
             }
@@ -2445,7 +2445,7 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined();
                  ValueHandle value = new ValueHandle((MemorySegment) pullEdn.invoke(
                      handle.raw,
-                     local.allocateUtf8String(pattern),
+                     local.allocateFrom(pattern),
                      entity))) {
                 return value.value();
             }
@@ -2467,9 +2467,9 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined();
                  ValueHandle pulled = new ValueHandle((MemorySegment) pullLookupRefStringEdn.invoke(
                      handle.raw,
-                     local.allocateUtf8String(pattern),
-                     local.allocateUtf8String(attr),
-                     local.allocateUtf8String(value)))) {
+                     local.allocateFrom(pattern),
+                     local.allocateFrom(attr),
+                     local.allocateFrom(value)))) {
                 return pulled.value();
             }
         }
@@ -2481,8 +2481,8 @@ public final class Vev implements AutoCloseable {
                  ValueHandle pulled = new ValueHandle((MemorySegment) pullLookupRefStringPrepared.invoke(
                      handle.raw,
                      pattern.raw,
-                     local.allocateUtf8String(attr),
-                     local.allocateUtf8String(value)))) {
+                     local.allocateFrom(attr),
+                     local.allocateFrom(value)))) {
                 return pulled.value();
             }
         }
@@ -2492,9 +2492,9 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined();
                  ValueHandle pulled = new ValueHandle((MemorySegment) pullLookupRefKeywordEdn.invoke(
                      handle.raw,
-                     local.allocateUtf8String(pattern),
-                     local.allocateUtf8String(attr),
-                     local.allocateUtf8String(value)))) {
+                     local.allocateFrom(pattern),
+                     local.allocateFrom(attr),
+                     local.allocateFrom(value)))) {
                 return pulled.value();
             }
         }
@@ -2506,8 +2506,8 @@ public final class Vev implements AutoCloseable {
                  ValueHandle pulled = new ValueHandle((MemorySegment) pullLookupRefKeywordPrepared.invoke(
                      handle.raw,
                      pattern.raw,
-                     local.allocateUtf8String(attr),
-                     local.allocateUtf8String(value)))) {
+                     local.allocateFrom(attr),
+                     local.allocateFrom(value)))) {
                 return pulled.value();
             }
         }
@@ -2517,9 +2517,9 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined();
                  ValueHandle pulled = new ValueHandle((MemorySegment) pullLookupRefUuidEdn.invoke(
                      handle.raw,
-                     local.allocateUtf8String(pattern),
-                     local.allocateUtf8String(attr),
-                     local.allocateUtf8String(value.toString())))) {
+                     local.allocateFrom(pattern),
+                     local.allocateFrom(attr),
+                     local.allocateFrom(value.toString())))) {
                 return pulled.value();
             }
         }
@@ -2531,8 +2531,8 @@ public final class Vev implements AutoCloseable {
                  ValueHandle pulled = new ValueHandle((MemorySegment) pullLookupRefUuidPrepared.invoke(
                      handle.raw,
                      pattern.raw,
-                     local.allocateUtf8String(attr),
-                     local.allocateUtf8String(value.toString())))) {
+                     local.allocateFrom(attr),
+                     local.allocateFrom(value.toString())))) {
                 return pulled.value();
             }
         }
@@ -2542,8 +2542,8 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined();
                  ValueHandle pulled = new ValueHandle((MemorySegment) pullLookupRefEntityEdn.invoke(
                      handle.raw,
-                     local.allocateUtf8String(pattern),
-                     local.allocateUtf8String(attr),
+                     local.allocateFrom(pattern),
+                     local.allocateFrom(attr),
                      value))) {
                 return pulled.value();
             }
@@ -2556,7 +2556,7 @@ public final class Vev implements AutoCloseable {
                  ValueHandle pulled = new ValueHandle((MemorySegment) pullLookupRefEntityPrepared.invoke(
                      handle.raw,
                      pattern.raw,
-                     local.allocateUtf8String(attr),
+                     local.allocateFrom(attr),
                      value))) {
                 return pulled.value();
             }
@@ -2567,8 +2567,8 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined();
                  ValueHandle pulled = new ValueHandle((MemorySegment) pullLookupRefIntEdn.invoke(
                      handle.raw,
-                     local.allocateUtf8String(pattern),
-                     local.allocateUtf8String(attr),
+                     local.allocateFrom(pattern),
+                     local.allocateFrom(attr),
                      value))) {
                 return pulled.value();
             }
@@ -2581,7 +2581,7 @@ public final class Vev implements AutoCloseable {
                  ValueHandle pulled = new ValueHandle((MemorySegment) pullLookupRefIntPrepared.invoke(
                      handle.raw,
                      pattern.raw,
-                     local.allocateUtf8String(attr),
+                     local.allocateFrom(attr),
                      value))) {
                 return pulled.value();
             }
@@ -2592,7 +2592,7 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined();
                  ValueHandle value = new ValueHandle((MemorySegment) pullManyEdn.invoke(
                      handle.raw,
-                     local.allocateUtf8String(pattern),
+                     local.allocateFrom(pattern),
                      longArray(local, entities),
                      entities.length))) {
                 return value.value();
@@ -2615,14 +2615,14 @@ public final class Vev implements AutoCloseable {
         public Object pullManyLookupRefString(String pattern, String attr, String... values) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                MemorySegment array = local.allocateArray(ValueLayout.ADDRESS, values.length);
+                MemorySegment array = local.allocate(ValueLayout.ADDRESS, values.length);
                 for (int i = 0; i < values.length; i++) {
-                    array.setAtIndex(ValueLayout.ADDRESS, i, local.allocateUtf8String(values[i]));
+                    array.setAtIndex(ValueLayout.ADDRESS, i, local.allocateFrom(values[i]));
                 }
                 try (ValueHandle value = new ValueHandle((MemorySegment) pullManyLookupRefStringEdn.invoke(
                          handle.raw,
-                         local.allocateUtf8String(pattern),
-                         local.allocateUtf8String(attr),
+                         local.allocateFrom(pattern),
+                         local.allocateFrom(attr),
                          array,
                          values.length))) {
                     return value.value();
@@ -2634,14 +2634,14 @@ public final class Vev implements AutoCloseable {
             requireOpen();
             pattern.requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                MemorySegment array = local.allocateArray(ValueLayout.ADDRESS, values.length);
+                MemorySegment array = local.allocate(ValueLayout.ADDRESS, values.length);
                 for (int i = 0; i < values.length; i++) {
-                    array.setAtIndex(ValueLayout.ADDRESS, i, local.allocateUtf8String(values[i]));
+                    array.setAtIndex(ValueLayout.ADDRESS, i, local.allocateFrom(values[i]));
                 }
                 try (ValueHandle value = new ValueHandle((MemorySegment) pullManyLookupRefStringPrepared.invoke(
                          handle.raw,
                          pattern.raw,
-                         local.allocateUtf8String(attr),
+                         local.allocateFrom(attr),
                          array,
                          values.length))) {
                     return value.value();
@@ -2652,14 +2652,14 @@ public final class Vev implements AutoCloseable {
         public Object pullManyLookupRefUuid(String pattern, String attr, UUID... values) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                MemorySegment array = local.allocateArray(ValueLayout.ADDRESS, values.length);
+                MemorySegment array = local.allocate(ValueLayout.ADDRESS, values.length);
                 for (int i = 0; i < values.length; i++) {
-                    array.setAtIndex(ValueLayout.ADDRESS, i, local.allocateUtf8String(values[i].toString()));
+                    array.setAtIndex(ValueLayout.ADDRESS, i, local.allocateFrom(values[i].toString()));
                 }
                 try (ValueHandle value = new ValueHandle((MemorySegment) pullManyLookupRefUuidEdn.invoke(
                          handle.raw,
-                         local.allocateUtf8String(pattern),
-                         local.allocateUtf8String(attr),
+                         local.allocateFrom(pattern),
+                         local.allocateFrom(attr),
                          array,
                          values.length))) {
                     return value.value();
@@ -2671,14 +2671,14 @@ public final class Vev implements AutoCloseable {
             requireOpen();
             pattern.requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                MemorySegment array = local.allocateArray(ValueLayout.ADDRESS, values.length);
+                MemorySegment array = local.allocate(ValueLayout.ADDRESS, values.length);
                 for (int i = 0; i < values.length; i++) {
-                    array.setAtIndex(ValueLayout.ADDRESS, i, local.allocateUtf8String(values[i].toString()));
+                    array.setAtIndex(ValueLayout.ADDRESS, i, local.allocateFrom(values[i].toString()));
                 }
                 try (ValueHandle value = new ValueHandle((MemorySegment) pullManyLookupRefUuidPrepared.invoke(
                          handle.raw,
                          pattern.raw,
-                         local.allocateUtf8String(attr),
+                         local.allocateFrom(attr),
                          array,
                          values.length))) {
                     return value.value();
@@ -2718,7 +2718,7 @@ public final class Vev implements AutoCloseable {
         public boolean contains(String attr) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                return (boolean) entityContains.invoke(handle.raw, local.allocateUtf8String(attr));
+                return (boolean) entityContains.invoke(handle.raw, local.allocateFrom(attr));
             }
         }
 
@@ -2727,7 +2727,7 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined();
                  ValueHandle value = new ValueHandle((MemorySegment) entityGet.invoke(
                      handle.raw,
-                     local.allocateUtf8String(attr)))) {
+                     local.allocateFrom(attr)))) {
                 return value.value();
             }
         }
@@ -2737,7 +2737,7 @@ public final class Vev implements AutoCloseable {
             try (Arena local = Arena.ofConfined();
                  ValueHandle value = new ValueHandle((MemorySegment) entityValues.invoke(
                      handle.raw,
-                     local.allocateUtf8String(attr)))) {
+                     local.allocateFrom(attr)))) {
                 return value.value();
             }
         }
@@ -2745,7 +2745,7 @@ public final class Vev implements AutoCloseable {
         public EntityView ref(String attr) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                MemorySegment raw = (MemorySegment) entityRef.invoke(handle.raw, local.allocateUtf8String(attr));
+                MemorySegment raw = (MemorySegment) entityRef.invoke(handle.raw, local.allocateFrom(attr));
                 if (isNull(raw)) throw new IllegalStateException("failed to create referenced entity view");
                 return new EntityView(raw);
             }
@@ -2754,7 +2754,7 @@ public final class Vev implements AutoCloseable {
         public long[] refs(String attr) throws Throwable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
-                MemorySegment raw = (MemorySegment) entityRefs.invoke(handle.raw, local.allocateUtf8String(attr));
+                MemorySegment raw = (MemorySegment) entityRefs.invoke(handle.raw, local.allocateFrom(attr));
                 if (isNull(raw)) return null;
                 try {
                     int count = (int) u64ArrayCount.invoke(raw);
@@ -2882,7 +2882,7 @@ public final class Vev implements AutoCloseable {
 
         public TxBuilder addString(long e, String attr, String value) throws Throwable {
             try (Arena local = Arena.ofConfined()) {
-                boolean ok = (boolean) txAddString.invoke(raw, e, local.allocateUtf8String(attr), local.allocateUtf8String(value));
+                boolean ok = (boolean) txAddString.invoke(raw, e, local.allocateFrom(attr), local.allocateFrom(value));
                 if (!ok) throw new IllegalStateException("failed to add string tx datom");
                 return this;
             }
@@ -2890,7 +2890,7 @@ public final class Vev implements AutoCloseable {
 
         public TxBuilder addKeyword(long e, String attr, String value) throws Throwable {
             try (Arena local = Arena.ofConfined()) {
-                boolean ok = (boolean) txAddKeyword.invoke(raw, e, local.allocateUtf8String(attr), local.allocateUtf8String(value));
+                boolean ok = (boolean) txAddKeyword.invoke(raw, e, local.allocateFrom(attr), local.allocateFrom(value));
                 if (!ok) throw new IllegalStateException("failed to add keyword tx datom");
                 return this;
             }
@@ -2898,7 +2898,7 @@ public final class Vev implements AutoCloseable {
 
         public TxBuilder addSymbol(long e, String attr, String value) throws Throwable {
             try (Arena local = Arena.ofConfined()) {
-                boolean ok = (boolean) txAddSymbol.invoke(raw, e, local.allocateUtf8String(attr), local.allocateUtf8String(value));
+                boolean ok = (boolean) txAddSymbol.invoke(raw, e, local.allocateFrom(attr), local.allocateFrom(value));
                 if (!ok) throw new IllegalStateException("failed to add symbol tx datom");
                 return this;
             }
@@ -2906,7 +2906,7 @@ public final class Vev implements AutoCloseable {
 
         public TxBuilder addEntity(long e, String attr, long value) throws Throwable {
             try (Arena local = Arena.ofConfined()) {
-                boolean ok = (boolean) txAddEntity.invoke(raw, e, local.allocateUtf8String(attr), value);
+                boolean ok = (boolean) txAddEntity.invoke(raw, e, local.allocateFrom(attr), value);
                 if (!ok) throw new IllegalStateException("failed to add entity tx datom");
                 return this;
             }
@@ -2914,7 +2914,7 @@ public final class Vev implements AutoCloseable {
 
         public TxBuilder addInt(long e, String attr, long value) throws Throwable {
             try (Arena local = Arena.ofConfined()) {
-                boolean ok = (boolean) txAddInt.invoke(raw, e, local.allocateUtf8String(attr), value);
+                boolean ok = (boolean) txAddInt.invoke(raw, e, local.allocateFrom(attr), value);
                 if (!ok) throw new IllegalStateException("failed to add int tx datom");
                 return this;
             }
@@ -2922,7 +2922,7 @@ public final class Vev implements AutoCloseable {
 
         public TxBuilder addBool(long e, String attr, boolean value) throws Throwable {
             try (Arena local = Arena.ofConfined()) {
-                boolean ok = (boolean) txAddBool.invoke(raw, e, local.allocateUtf8String(attr), value);
+                boolean ok = (boolean) txAddBool.invoke(raw, e, local.allocateFrom(attr), value);
                 if (!ok) throw new IllegalStateException("failed to add bool tx datom");
                 return this;
             }
@@ -2952,7 +2952,7 @@ public final class Vev implements AutoCloseable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
                 stmtClear.invoke(raw);
-                boolean ok = (boolean) stmtBindString.invoke(raw, local.allocateUtf8String(value));
+                boolean ok = (boolean) stmtBindString.invoke(raw, local.allocateFrom(value));
                 if (!ok) throw new IllegalStateException("failed to bind string");
                 return this;
             }
@@ -2962,9 +2962,9 @@ public final class Vev implements AutoCloseable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
                 stmtClear.invoke(raw);
-                MemorySegment array = local.allocateArray(ValueLayout.ADDRESS, values.length);
+                MemorySegment array = local.allocate(ValueLayout.ADDRESS, values.length);
                 for (int i = 0; i < values.length; i++) {
-                    array.setAtIndex(ValueLayout.ADDRESS, i, local.allocateUtf8String(values[i]));
+                    array.setAtIndex(ValueLayout.ADDRESS, i, local.allocateFrom(values[i]));
                 }
                 boolean ok = (boolean) stmtBindStringCollection.invoke(raw, array, values.length);
                 if (!ok) throw new IllegalStateException("failed to bind string collection");
@@ -2976,8 +2976,8 @@ public final class Vev implements AutoCloseable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
                 stmtClear.invoke(raw);
-                boolean ok = (boolean) stmtBindPullPatternEdn.invoke(raw, local.allocateUtf8String(pattern));
-                ok = ok && (boolean) stmtBindString.invoke(raw, local.allocateUtf8String(value));
+                boolean ok = (boolean) stmtBindPullPatternEdn.invoke(raw, local.allocateFrom(pattern));
+                ok = ok && (boolean) stmtBindString.invoke(raw, local.allocateFrom(value));
                 if (!ok) throw new IllegalStateException("failed to bind pull pattern and string");
                 return this;
             }

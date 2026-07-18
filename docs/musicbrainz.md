@@ -32,7 +32,7 @@ Local source builds require:
 - `kvist`
 - Odin
 - Clang and an archiver for the bundled SQLite build
-- Java 21 and Clojure CLI for the Clojure workshop
+- Java 25 and Clojure CLI for the Clojure workshop
 
 Applications use Vev store paths and Vev APIs. They do not create SQLite
 schemas, issue SQL, or otherwise manage SQLite directly. See

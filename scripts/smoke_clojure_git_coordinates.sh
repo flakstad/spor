@@ -39,8 +39,7 @@ cat > "$TMP_DIR/deps.edn" <<EOF
  :deps {com.vevdb/vev-clj
         {:git/url "$GIT_URL"
          :git/sha "$GIT_SHA"}}
- :aliases {:run {:jvm-opts ["--enable-preview"
-                            "--enable-native-access=ALL-UNNAMED"]}}}
+ :aliases {:run {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]}}}
 EOF
 
 (

@@ -63,14 +63,12 @@ mkdir -p "$JAVA_OUT"
 
 if [[ ! -f "$JAVA_OUT/com/vevdb/Vev.class" || "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" -nt "$JAVA_OUT/com/vevdb/Vev.class" ]]; then
   javac \
-    --enable-preview \
-    --release 21 \
+    --release 25 \
     -d "$JAVA_OUT" \
     "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java"
 fi
 
 clojure \
-  -J--enable-preview \
   -J--enable-native-access=ALL-UNNAMED \
   -Sdeps "{:paths [\"$JAVA_OUT\" \"$ROOT/clients/clojure/src\"]}" \
   -M "$ROOT/scripts/musicbrainz_clojure_vev_matrix.clj" \
