@@ -347,22 +347,24 @@
       (set! passed^ false))))
 
 (defn validate-data-pull-tuple! [label: string, result: Data, passed: ^bool]
-  (let [ok (and (kdata.vector? result)
+  (let [[pulled] result
+        ok (and (kdata.vector? result)
                 (= (count result) 1)
-                (kdata.map? (kdata.nth result 0)))]
+                (kdata.map? pulled))]
     (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=\n" label ok (if ok 1 0))
     (when (not ok)
       (set! passed^ false))))
 
 (defn validate-data-int-tuple! [label: string, result: Data, year: i64, month: i64, day: i64, passed: ^bool]
-  (let [ok (and (kdata.vector? result)
+  (let [[actual-year actual-month actual-day] result
+        ok (and (kdata.vector? result)
                 (= (count result) 3)
-                (kdata.int? (kdata.nth result 0))
-                (kdata.int? (kdata.nth result 1))
-                (kdata.int? (kdata.nth result 2))
-                (= (kdata.int (kdata.nth result 0)) year)
-                (= (kdata.int (kdata.nth result 1)) month)
-                (= (kdata.int (kdata.nth result 2)) day))]
+                (kdata.int? actual-year)
+                (kdata.int? actual-month)
+                (kdata.int? actual-day)
+                (= (kdata.int actual-year) year)
+                (= (kdata.int actual-month) month)
+                (= (kdata.int actual-day) day))]
     (fmt.printf "source=kvist section=%s ok=%v rows=%d expected=1 error=\n" label ok (if ok 1 0))
     (when (not ok)
       (set! passed^ false))))
@@ -385,24 +387,13 @@
     (when (not ok)
       (set! passed^ false))))
 
-(defn data-row-string? [row: Data, index: int, expected: string] -> bool
-  (and (kdata.vector? row)
-       (< index (count row))
-       (kdata.string? (kdata.nth row index))
-       (= (kdata.string (kdata.nth row index)) expected)))
-
-(defn data-row-float? [row: Data, index: int, expected: f64] -> bool
-  (and (kdata.vector? row)
-       (< index (count row))
-       (kdata.float? (kdata.nth row index))
-       (= (kdata.float (kdata.nth row index)) expected)))
-
 (defn data-relation-has-name-score? [result: Data, name: string, score: f64] -> bool
-  (for [index (arr.range 0 (count result))]
-    (let [row (kdata.item-at result index)]
-      (when (and (data-row-string? row 1 name)
-                 (data-row-float? row 3 score))
-        (return true))))
+  (for [[_ actual-name _ actual-score] result]
+    (when (and (kdata.string? actual-name)
+               (= (kdata.string actual-name) name)
+               (kdata.float? actual-score)
+               (= (kdata.float actual-score) score))
+      (return true)))
   false)
 
 (defn validate-data-relation-result! [label: string, result: Data, expected: int, contents-ok: bool, passed: ^bool]
@@ -633,29 +624,26 @@
     2 passed))
 
 (defn data-collection-contains-keyword? [value: Data, expected: string] -> bool
-  (for [index (arr.range 0 (core.count value))]
-    (let [item (kdata.item-at value index)]
-      (when (and (kdata.keyword? item)
-                 (= (kdata.keyword item) expected))
-        (return true))))
+  (for [item value]
+    (when (and (kdata.keyword? item)
+               (= (kdata.keyword item) expected))
+      (return true)))
   false)
 
 (defn data-string-collections-equal? [left: Data, right: Data] -> bool
   (when (not (= (core.count left) (core.count right)))
     (return false))
-  (for [index (arr.range 0 (core.count left))]
-    (let [item (kdata.item-at left index)]
-      (when (not (kdata.string? item))
-        (return false))
-      (let [expected (kdata.string item)
-            found false]
-        (for [right-index (arr.range 0 (core.count right))]
-          (let [candidate (kdata.item-at right right-index)]
-            (when (and (kdata.string? candidate)
-                       (= (kdata.string candidate) expected))
-              (set! found true))))
-        (when (not found)
-          (return false)))))
+  (for [item left]
+    (when (not (kdata.string? item))
+      (return false))
+    (let [expected (kdata.string item)
+          found false]
+      (for [candidate right]
+        (when (and (kdata.string? candidate)
+                   (= (kdata.string candidate) expected))
+          (set! found true)))
+      (when (not found)
+        (return false))))
   true)
 
 (defn workshop-unique-attrs? [result: Data] -> bool

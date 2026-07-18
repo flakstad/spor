@@ -184,6 +184,8 @@ strings:
 ```clojure
 (package main)
 
+(import data "kvist:data")
+(import fmt "core:fmt")
 (import d "../src/vev_app")
 
 (def artists
@@ -205,8 +207,10 @@ strings:
       (defer (d.close snapshot))
       (let [result (d.q artist-names snapshot)
             artist (d.pull snapshot artist-pattern 1)]
-        (defer (d.close result))
-        (defer (d.close artist))))))
+        (for [[name] result]
+          (fmt.println (data.string name)))
+        (let [{name :artist/name} artist]
+          (fmt.println (data.string name)))))))
 ```
 
 Durability changes only connection creation:
@@ -240,10 +244,44 @@ Use `q-text` only when a query arrives as EDN text at runtime:
 (d.q-text query-text snapshot input-text)
 ```
 
+High-level query and pull results are ordinary immutable `Data`. Destructure
+known tuple, relation-row, return-map, and nested pull shapes directly:
+
+```clojure
+(let [[name company] (d.q contact-tuple-query snapshot email)
+      {profile-name :contact/name
+       {friend-name :contact/name} :contact/knows}
+        (d.pull snapshot contact-profile-pattern entity)]
+  ...)
+
+(for [[name company] (d.q contacts-query snapshot)]
+  ...)
+
+(for [{name :name company :company}
+      (d.q contact-map-query snapshot email)]
+  ...)
+```
+
+Sequential destructuring supplies `nil` for a missing position, including an
+empty sequence. Validate counts or kinds first when missing data would be
+invalid. For optional map access, keywords are callable:
+
+```clojure
+(let [company (:contact/company profile)
+      fallback (:contact/company profile "Independent")]
+  ...)
+```
+
+This ergonomic `Data` style is the public and dynamic boundary. Vev keeps typed
+columns, native result builders, storage indexes, and ownership-sensitive query
+inputs inside the engine where their native representation is deliberate.
+Explicit conversions such as `data.int` and `data.string` remain the boundary
+from `Data` to native Kvist values.
+
 The database handle is an immutable snapshot and can be passed through normal
-Kvist code. Native values own resources, so the owner closes each connection,
-DB snapshot, query result, and pulled value exactly once with `d.close`. The
-complete in-memory and durable application is
+Kvist code. Native handles own resources, so the owner closes each connection
+and DB snapshot exactly once with `d.close`; immutable `Data` results are
+managed values. The complete in-memory and durable application is
 `examples/kvist/contact_book.kvist`.
 
 ## Python

@@ -108,7 +108,11 @@
   (d.q contact-names-query db))
 
 (defn has-name? [result: Data, name: string] -> bool
-  (contains? result [name]))
+  (for [[candidate] result]
+    (when (and (kdata.string? candidate)
+               (= (kdata.string candidate) name))
+      (return true)))
+  false)
 
 (defn assert-contact-names! [result: Data, expected-count: int, require-katherine: bool]
   (when (not (and (= (count result) expected-count)
@@ -146,21 +150,36 @@
                     (kdata.includes? collection-find "Ada Lovelace")
                     (kdata.includes? collection-find "Grace Hopper")))
       (fail! "collection find returned the wrong contacts"))
-    (when (not (and (= (count tuple-find) 2)
-                    (= (kdata.string (kdata.nth tuple-find 0)) "Ada Lovelace")
-                    (= (kdata.string (kdata.nth tuple-find 1)) "Analytical Engines")))
-      (fail! "tuple find returned the wrong contact"))
+    (let [[tuple-name tuple-company missing-tuple-position] tuple-find]
+      (when (not (and (= (count tuple-find) 2)
+                      (kdata.string? tuple-name)
+                      (kdata.string? tuple-company)
+                      (= (kdata.string tuple-name) "Ada Lovelace")
+                      (= (kdata.string tuple-company) "Analytical Engines")
+                      (kdata.nil? missing-tuple-position)))
+        (fail! "tuple find returned the wrong contact")))
     (when (not (= (kdata.string scalar-find) "Ada Lovelace"))
       (fail! "scalar find returned the wrong contact"))
-    (let [contact (kdata.item-at map-find 0)]
-      (when (not (and (= (kdata.string (get contact :name)) "Ada Lovelace")
-                      (= (kdata.string (get contact :company)) "Analytical Engines")))
+    (let [map-ok false]
+      (for [{name :name company :company} map-find]
+        (when (and (kdata.string? name)
+                   (kdata.string? company)
+                   (= (kdata.string name) "Ada Lovelace")
+                   (= (kdata.string company) "Analytical Engines"))
+          (set! map-ok true)))
+      (when (not map-ok)
         (fail! "return map find returned the wrong contact")))
-    (let [name (get profile :contact/name)
-          knows (get profile :contact/knows)
-          friend (get knows :contact/name)]
-      (when (not (and (= (kdata.string name) "Ada Lovelace")
-                      (= (kdata.string friend) "Grace Hopper")))
+    (let [{profile-name :contact/name
+           {friend-name :contact/name} :contact/knows}
+          profile
+          optional-company (:contact/company profile)
+          [empty-position] '[]]
+      (when (not (and (kdata.string? profile-name)
+                      (kdata.string? friend-name)
+                      (= (kdata.string profile-name) "Ada Lovelace")
+                      (= (kdata.string friend-name) "Grace Hopper")
+                      (kdata.nil? optional-company)
+                      (kdata.nil? empty-position)))
         (fail! "pull returned the wrong contact")))))
 
 (defn run-in-memory! []

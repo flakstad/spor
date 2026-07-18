@@ -122,17 +122,17 @@
     passed))
 
 (defn validate-int-int-row! [label: string, result: Data, expected-left: i64, expected-right: i64, passed: ^bool]
-  (let [row (if (= (count result) 1)
-              (kdata.item-at result 0)
-              (kdata.from-nil))]
-    (report! label
-      (and (kdata.vector? row)
-           (= (count row) 2)
-           (kdata.int? (kdata.nth row 0))
-           (kdata.int? (kdata.nth row 1))
-           (= (kdata.int (kdata.nth row 0)) expected-left)
-           (= (kdata.int (kdata.nth row 1)) expected-right))
-      passed)))
+  (let [ok false]
+    (when (= (count result) 1)
+      (for [[left right :as row] result]
+        (set! ok
+          (and (kdata.vector? row)
+               (= (count row) 2)
+               (kdata.int? left)
+               (kdata.int? right)
+               (= (kdata.int left) expected-left)
+               (= (kdata.int right) expected-right)))))
+    (report! label ok passed)))
 
 (defn validate-random-name! [label: string, random-result: Data, names-result: Data, passed: ^bool]
   (report! label
@@ -141,12 +141,11 @@
     passed))
 
 (defn relation-has-name? [names: Data, expected: Data] -> bool
-  (for [i (arr.range 0 (count names))]
-    (let [row (kdata.item-at names i)]
-      (when (and (kdata.vector? row)
-                 (= (count row) 1)
-                 (= (kdata.nth row 0) expected))
-        (return true))))
+  (for [[name :as row] names]
+    (when (and (kdata.vector? row)
+               (= (count row) 1)
+               (= name expected))
+      (return true)))
   false)
 
 (defn validate-float-vector! [label: string, result: Data, expected: []f64, passed: ^bool]
@@ -166,11 +165,10 @@
                      (= (count random-result) expected-count))
         ok ok-base]
     (when ok-base
-      (for [i (arr.range 0 (count random-result))]
-        (let [item (kdata.nth random-result i)]
-          (when (or (not (kdata.string? item))
-                    (not (relation-has-name? names-result item)))
-            (set! ok false)))))
+      (for [item random-result]
+        (when (or (not (kdata.string? item))
+                  (not (relation-has-name? names-result item)))
+          (set! ok false))))
     (report! label ok passed)))
 
 (defn validate-sampled-name-vector! [label: string, sample-result: Data, names-result: Data, expected-count: int, passed: ^bool]
@@ -178,14 +176,16 @@
                      (= (count sample-result) expected-count))
         ok ok-base]
     (when ok-base
-      (for [i (arr.range 0 (count sample-result))]
-        (let [item (kdata.nth sample-result i)]
-          (when (or (not (kdata.string? item))
-                    (not (relation-has-name? names-result item)))
-            (set! ok false))
-          (for [j (arr.range (+ i 1) (count sample-result))]
-            (when (= item (kdata.nth sample-result j))
-              (set! ok false))))))
+      (for [item sample-result]
+        (when (or (not (kdata.string? item))
+                  (not (relation-has-name? names-result item)))
+          (set! ok false))
+        (let [matches 0]
+          (for [candidate sample-result]
+            (when (= item candidate)
+              (inc! matches)))
+          (when (> matches 1)
+            (set! ok false)))))
     (report! label ok passed)))
 
 (defn schema-name-modes [values: []d.Value] -> d.Native-Query-Function-Result

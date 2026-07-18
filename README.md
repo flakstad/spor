@@ -58,6 +58,7 @@ written as native data:
 ```clojure
 (package main)
 
+(import data "kvist:data")
 (import fmt "core:fmt")
 (import d "../../src/vev_app")
 
@@ -67,19 +68,21 @@ written as native data:
             [{:db/id 1 :user/name "Ada"}])
         db (d.db conn)                            ; 2
         names (d.q                                ; 3
-                [:find ?name
-                 :where [?e :user/name ?name]]
+                '[:find ?name
+                  :where [?e :user/name ?name]]
                 db)]
-    (fmt.println names.rows)))
+    (for [[name] names]                           ; 4
+      (fmt.println (data.string name)))))
 ```
 
 1. Transaction maps are Kvist data, not encoded text.
 2. `db` returns the connection's current immutable database value.
-3. The query is also data, with the database value passed after it.
+3. Static Datalog stays quoted because its symbols are literal query data.
+4. Query relations are `Data`; rows can be iterated and destructured directly.
 
 This minimal program exits immediately. Long-running applications close owning
-query results, DB values, and connections with `d.close`; the complete contact
-book below demonstrates those lifetimes.
+DB values and connections with `d.close`; immutable `Data` query results are
+managed values. The complete contact book below demonstrates those lifetimes.
 
 ### Clojure
 

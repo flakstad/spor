@@ -59,6 +59,15 @@ literals. Static symbolic Datalog queries remain quoted:
   db)
 ```
 
+At Vev's public and dynamic Kvist boundary, query and pull `Data` should use
+structural destructuring, direct iteration, `match`, and callable keyword
+lookup. Known tuple and relation shapes can be consumed without manual
+`data.nth` traversal, while explicit `data.int`, `data.string`, and similar
+conversions still mark the transition to native values. Inside the engine,
+typed columns, native result builders, EDN nodes, storage indexes, and
+ownership-sensitive query-input classification retain their deliberate native
+representations.
+
 The 379-test Vev engine suite passes with the current Kvist compiler.
 
 ## Active Scale Work

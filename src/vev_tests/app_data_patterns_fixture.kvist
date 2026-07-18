@@ -1,0 +1,81 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import fmt "core:fmt")
+(import os "core:os")
+(import kdata "kvist:data")
+(import d "../vev_app")
+
+(def test-path "/tmp/vev-app-data-patterns.sqlite")
+
+(def tx-ids-query
+  '[:find [?tx ...]
+    :in ?log
+    :where [(tx-ids ?log 0 9223372036854775807) [?tx ...]]])
+
+(def tx-data-query
+  '[:find [?e ...]
+    :in ?log ?tx
+    :where [(tx-data ?log ?tx) [[?e _ _ _ _] ...]]])
+
+(defn remove-test-store! []
+  (os.remove test-path)
+  (os.remove "/tmp/vev-app-data-patterns.sqlite-wal")
+  (os.remove "/tmp/vev-app-data-patterns.sqlite-shm"))
+
+(defn fail! [message: string]
+  (fmt.eprintln message)
+  (os.exit 1))
+
+(defn run-success! [log-value: d.Log]
+  (let [tx-ids: Data (d.q tx-ids-query log-value)
+        tx: i64 -1]
+    (for [tx-value tx-ids]
+      (when (kdata.int? tx-value)
+        (set! tx (kdata.int tx-value))))
+    (let [entities: Data (d.q tx-data-query log-value tx)
+          found-entity false]
+      (for [entity entities]
+        (when (and (kdata.int? entity)
+                   (= (kdata.int entity) 1))
+          (set! found-entity true)))
+      (when (not (and (= (count tx-ids) 1)
+                      (>= tx 0)
+                      found-entity))
+        (fail! "transaction-log Data results changed"))
+      (fmt.println "app-data-patterns: ok"))))
+
+(defn run-error! [mode: string, log-value: d.Log]
+  (cond
+    (= mode "non-vector")
+      (d.q 'not-a-vector log-value)
+    (= mode "unnamed")
+      (d.q '[:find ?x :where [(:not-a-symbol ?log) ?x]] log-value)
+    (= mode "unsupported")
+      (d.q '[:find ?x :where [(unknown-log-op ?log) ?x]] log-value)
+    (= mode "tx-ids-arity")
+      (d.q '[:find ?x :where [(tx-ids ?log 0) ?x]] log-value)
+    (= mode "tx-ids-range")
+      (d.q '[:find ?x :where [(tx-ids ?log "bad" 10) ?x]] log-value)
+    (= mode "tx-data-arity")
+      (d.q '[:find ?x :where [(tx-data ?log) ?x]] log-value)
+    (= mode "tx-data-negative")
+      (d.q '[:find ?x :where [(tx-data ?log -1) ?x]] log-value)
+    (= mode "extra-input")
+      (d.q tx-data-query log-value 1 2)
+    :else
+      (fail! "unknown error fixture mode")))
+
+(defn main []
+  (remove-test-store!)
+  (defer (remove-test-store!))
+  (let [conn (d.connect test-path)]
+    (defer (d.close conn))
+    (d.transact conn [{:db/id 1 :name "Ada"}])
+    (let [log-value (d.log conn)
+          mode (if (> (count os.args) 1) os.args[1] "success")]
+      (if (= mode "success")
+        (run-success! log-value)
+        (run-error! mode log-value)))))

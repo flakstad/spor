@@ -258,16 +258,16 @@
   (when (not (kdata.vector? query))
     (panic "log query must be a vector"))
   (let [in-where false]
-    (for [index (arr.range 0 (count query))]
-      (let [item (kdata.nth query index)]
-        (if (and (kdata.keyword? item)
-                 (= (kdata.keyword item) ":where"))
-          (set! in-where true)
-          (when (and in-where
-                     (kdata.vector? item)
-                     (> (count item) 0)
-                     (kdata.list? (kdata.nth item 0)))
-            (return (kdata.nth item 0))))))
+    (for [item query]
+      (if (and (kdata.keyword? item)
+               (= (kdata.keyword item) ":where"))
+        (set! in-where true)
+        (when (and in-where
+                   (kdata.vector? item)
+                   (> (count item) 0))
+          (let [[call] item]
+            (when (kdata.list? call)
+              (return call))))))
   'nil))
 
 (defn- log-query-term-int [term: Data, input: Data, has-input: bool] -> [value: i64, ok: bool]
@@ -278,20 +278,12 @@
   (return 0 false))
 
 (defn- log-query-data [query: Data, log-value: Log, input: Data, has-input: bool] -> Data
-  (let [call (log-query-function-call query)]
-    (when (or (= (count call) 0)
-              (not (kdata.symbol? (kdata.nth call 0))))
-      (panic "log query requires a named function"))
-    (let [op (kdata.symbol (kdata.nth call 0))]
-      (when (not (or (= op "tx-ids") (= op "tx-data")))
-        (panic "unsupported Vev log query function"))
-      (cond
-        (= op "tx-ids")
-          (do
-            (when (not (= (count call) 4))
-              (panic "tx-ids expects log, start, and end arguments"))
-            (let [[start start-ok] (log-query-term-int (kdata.nth call 2) input has-input)
-                  [end end-ok] (log-query-term-int (kdata.nth call 3) input has-input)
+  (let [call (log-query-function-call query)
+        result: Data
+          (match call
+            ['tx-ids _ start-term end-term]
+            (let [[start start-ok] (log-query-term-int start-term input has-input)
+                  [end end-ok] (log-query-term-int end-term input has-input)
                   [ids ok error] (log-tx-ids (log-conn log-value))
                   out '#{}]
               (defer (delete ids))
@@ -302,12 +294,10 @@
               (for [tx ids]
                 (when (and (>= (i64 tx) start) (< (i64 tx) end))
                   (set! out (kdata.conj out (kdata.from-int (i64 tx))))))
-              out))
-        (= op "tx-data")
-          (do
-            (when (not (= (count call) 3))
-              (panic "tx-data expects log and transaction arguments"))
-            (let [[tx tx-ok] (log-query-term-int (kdata.nth call 2) input has-input)]
+              out)
+
+            ['tx-data _ tx-term]
+            (let [[tx tx-ok] (log-query-term-int tx-term input has-input)]
               (when (or (not tx-ok) (< tx 0))
                 (panic "transaction id must be non-negative"))
               (let [[text ok error] (log-tx-data (log-conn log-value) (u64 tx))]
@@ -316,12 +306,34 @@
                   (panic error))
                 (let [datoms (edn.read text) :defer-with kdata.release
                       out '#{}]
-                  (for [index (arr.range 0 (count datoms))]
-                    (let [datom (kdata.nth datoms index)]
-                      (when (and (kdata.vector? datom) (> (count datom) 0))
-                        (set! out (kdata.conj out (kdata.nth datom 0))))))
-                  out))))
-        :else 'nil))))
+                  (for [datom datoms]
+                    ; Sequential destructuring is permissive, so retain the
+                    ; persisted datom shape guard before consuming its entity.
+                    (when (and (kdata.vector? datom) (> (count datom) 0))
+                      (let [[entity] datom]
+                        (set! out (kdata.conj out entity)))))
+                  out)))
+
+            ['tx-ids & _]
+            :tx-ids-arity-error
+
+            ['tx-data & _]
+            :tx-data-arity-error
+
+            [(kind :symbol _) & _]
+            :unsupported-operation-error
+
+            :else
+            :unnamed-operation-error)]
+    (when (= result :tx-ids-arity-error)
+      (panic "tx-ids expects log, start, and end arguments"))
+    (when (= result :tx-data-arity-error)
+      (panic "tx-data expects log and transaction arguments"))
+    (when (= result :unsupported-operation-error)
+      (panic "unsupported Vev log query function"))
+    (when (= result :unnamed-operation-error)
+      (panic "log query requires a named function"))
+    result))
 
 (defn try-db [conn: Conn] -> [db: DB, ok: bool, error: string]
   (let [state (conn-state conn)]
