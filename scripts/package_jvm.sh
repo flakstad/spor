@@ -61,7 +61,7 @@ write_pom() {
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>dev.vevdb</groupId>
+  <groupId>com.vevdb</groupId>
   <artifactId>$artifact</artifactId>
   <version>$VERSION</version>
   <name>$artifact</name>
@@ -92,7 +92,7 @@ java_dependency_block() {
   cat <<EOF
   <dependencies>
     <dependency>
-      <groupId>dev.vevdb</groupId>
+      <groupId>com.vevdb</groupId>
       <artifactId>$NATIVE_ARTIFACT</artifactId>
       <version>$VERSION</version>
     </dependency>
@@ -104,7 +104,7 @@ clojure_dependency_block() {
   cat <<EOF
   <dependencies>
     <dependency>
-      <groupId>dev.vevdb</groupId>
+      <groupId>com.vevdb</groupId>
       <artifactId>vev-java</artifactId>
       <version>$VERSION</version>
     </dependency>
@@ -116,7 +116,7 @@ install_artifact() {
   local artifact="$1"
   local jar_path="$2"
   local pom_path="$3"
-  local artifact_dir="$M2_DIR/dev/vevdb/$artifact/$VERSION"
+  local artifact_dir="$M2_DIR/com/vevdb/$artifact/$VERSION"
 
   mkdir -p "$artifact_dir"
   cp "$jar_path" "$artifact_dir/$artifact-$VERSION.jar"
@@ -127,7 +127,7 @@ javac \
   --enable-preview \
   --release 21 \
   -d "$JAVA_CLASSES" \
-  "$ROOT/clients/java/src/main/java/dev/vevdb/vev/Vev.java"
+  "$ROOT/clients/java/src/main/java/com/vevdb/vev/Vev.java"
 
 jar --create \
   --date="$ARCHIVE_DATE" \

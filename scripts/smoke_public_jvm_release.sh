@@ -91,19 +91,19 @@ done
 expected_native_resources="$TMP_DIR/expected-native-resources"
 actual_native_resources="$TMP_DIR/actual-native-resources"
 cat > "$expected_native_resources" <<'EOF'
-dev/vevdb/vev/native/darwin-aarch64/libvev.dylib
-dev/vevdb/vev/native/darwin-x86_64/libvev.dylib
-dev/vevdb/vev/native/linux-aarch64/libvev.so
-dev/vevdb/vev/native/linux-x86_64/libvev.so
-dev/vevdb/vev/native/windows-x86_64/vev.dll
+com/vevdb/vev/native/darwin-aarch64/libvev.dylib
+com/vevdb/vev/native/darwin-x86_64/libvev.dylib
+com/vevdb/vev/native/linux-aarch64/libvev.so
+com/vevdb/vev/native/linux-x86_64/libvev.so
+com/vevdb/vev/native/windows-x86_64/vev.dll
 EOF
 jar --list --file "$DOWNLOAD_DIR/vev-java-$VERSION.jar" |
-  awk '/^dev\/vevdb\/vev\/native\/.*\/(libvev\.(dylib|so)|vev\.dll)$/ {print}' |
+  awk '/^com\/vevdb\/vev\/native\/.*\/(libvev\.(dylib|so)|vev\.dll)$/ {print}' |
   sort > "$actual_native_resources"
 diff -u "$expected_native_resources" "$actual_native_resources"
 
 for artifact in vev-java vev-clj; do
-  artifact_dir="$M2_DIR/dev/vevdb/$artifact/$VERSION"
+  artifact_dir="$M2_DIR/com/vevdb/$artifact/$VERSION"
   mkdir -p "$artifact_dir"
   cp \
     "$DOWNLOAD_DIR/$artifact-$VERSION.jar" \

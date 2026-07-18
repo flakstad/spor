@@ -10,12 +10,12 @@ STORE="${1:-${TMPDIR:-/tmp}/vev-contact-book-clojure.vev}"
 
 "$ROOT/scripts/build_native_library.sh" --if-needed >/dev/null
 
-if [[ ! -f "$JAVA_OUT/dev/vevdb/vev/Vev.class" || "$ROOT/clients/java/src/main/java/dev/vevdb/vev/Vev.java" -nt "$JAVA_OUT/dev/vevdb/vev/Vev.class" ]]; then
+if [[ ! -f "$JAVA_OUT/com/vevdb/vev/Vev.class" || "$ROOT/clients/java/src/main/java/com/vevdb/vev/Vev.java" -nt "$JAVA_OUT/com/vevdb/vev/Vev.class" ]]; then
   javac \
     --enable-preview \
     --release 21 \
     -d "$JAVA_OUT" \
-    "$ROOT/clients/java/src/main/java/dev/vevdb/vev/Vev.java"
+    "$ROOT/clients/java/src/main/java/com/vevdb/vev/Vev.java"
 fi
 
 clojure \

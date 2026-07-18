@@ -1,7 +1,7 @@
 // Copyright (c) Andreas Flakstad and Vev contributors
 // SPDX-License-Identifier: EPL-2.0
 
-package dev.vevdb.vev;
+package com.vevdb.vev;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -345,7 +345,7 @@ public final class Vev implements AutoCloseable {
     }
 
     private static Path extractBundledLibrary() {
-        String resource = "/dev/vevdb/vev/native/" + platformId() + "/" + platformLibraryName();
+        String resource = "/com/vevdb/vev/native/" + platformId() + "/" + platformLibraryName();
         try (InputStream input = Vev.class.getResourceAsStream(resource)) {
             if (input == null) {
                 throw new IllegalStateException(

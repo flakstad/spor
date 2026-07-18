@@ -80,7 +80,7 @@ cat > "$TMP_DIR/java/pom.xml" <<EOF
   </properties>
   <dependencies>
     <dependency>
-      <groupId>dev.vevdb</groupId>
+      <groupId>com.vevdb</groupId>
       <artifactId>vev-java</artifactId>
       <version>$VERSION</version>
     </dependency>
@@ -102,7 +102,7 @@ EOF
 cat > "$TMP_DIR/java/src/main/java/example/Main.java" <<'EOF'
 package example;
 
-import dev.vevdb.vev.Vev;
+import com.vevdb.vev.Vev;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -144,7 +144,7 @@ EOF
   MAVEN_OPTS="${MAVEN_OPTS:-} $TRUST_OPTIONS" \
     mvn --batch-mode --no-transfer-progress -Dmaven.repo.local="$M2_DIR" package
   VEV_CLASSPATH="$(
-    find "$M2_DIR/dev/vevdb" -type f -name "*.jar" -print |
+    find "$M2_DIR/com/vevdb" -type f -name "*.jar" -print |
       sort |
       paste -sd: -
   )"
@@ -158,7 +158,7 @@ EOF
 cat > "$TMP_DIR/clojure/deps.edn" <<EOF
 {$CLOJURE_LOCAL_REPO
  $CLOJURE_REPOSITORIES
- :deps {dev.vevdb/vev-clj {:mvn/version "$VERSION"}}
+ :deps {com.vevdb/vev-clj {:mvn/version "$VERSION"}}
  :aliases {:run {:jvm-opts ["--enable-preview"
                             "--enable-native-access=ALL-UNNAMED"]}}}
 EOF

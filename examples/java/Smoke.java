@@ -1,7 +1,7 @@
 // Copyright (c) Andreas Flakstad and Vev contributors
 // SPDX-License-Identifier: EPL-2.0
 
-package dev.vevdb.vev.examples;
+package com.vevdb.vev.examples;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,7 +10,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Arrays;
 import java.util.Map;
-import dev.vevdb.vev.Vev;
+import com.vevdb.vev.Vev;
 
 public final class Smoke {
     private static void deleteSqliteFiles(Path path) throws Exception {

@@ -29,13 +29,13 @@ trap cleanup EXIT
 
 cat > "$TMP_DIR/deps-java.edn" <<EOF
 {:mvn/local-repo "$M2_REPO"
- :deps {dev.vevdb/vev-java {:mvn/version "$VERSION"}}
+ :deps {com.vevdb/vev-java {:mvn/version "$VERSION"}}
  :aliases {:run {:jvm-opts ["--enable-preview"
                             "--enable-native-access=ALL-UNNAMED"]}}}
 EOF
 
 cat > "$TMP_DIR/java-smoke.clj" <<'EOF'
-(import '[dev.vevdb.vev Vev Vev$TxReportListener])
+(import '[com.vevdb.vev Vev Vev$TxReportListener])
 (with-open [vev (Vev/load)
             conn (.createConn vev)]
   (let [seen (atom 0)]
@@ -64,7 +64,7 @@ EOF
 
 cat > "$TMP_DIR/deps-clj.edn" <<EOF
 {:mvn/local-repo "$M2_REPO"
- :deps {dev.vevdb/vev-clj {:mvn/version "$VERSION"}}
+ :deps {com.vevdb/vev-clj {:mvn/version "$VERSION"}}
  :aliases {:run {:jvm-opts ["--enable-preview"
                             "--enable-native-access=ALL-UNNAMED"]}}}
 EOF

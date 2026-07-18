@@ -63,7 +63,7 @@ scripts/contact_book_package_clojure.sh
 ```
 
 That command creates a temporary project whose only VevDB dependency is
-`dev.vevdb/vev-clj`, backed by the locally built Maven artifacts.
+`com.vevdb/vev-clj`, backed by the locally built Maven artifacts.
 
 ## CLI
 
@@ -157,19 +157,19 @@ under `build/lib`. The intended published Clojure experience is a normal
 deps.edn dependency that pulls in and loads the platform native library itself:
 
 ```clojure
-{:deps {dev.vevdb/vev-clj {:mvn/version "0.1.0"}}}
+{:deps {com.vevdb/vev-clj {:mvn/version "0.1.0"}}}
 ```
 
 The same shape can be tested locally after `scripts/package_jvm.sh`:
 
 ```clojure
 {:mvn/local-repo "/path/to/vev/build/m2"
- :deps {dev.vevdb/vev-clj {:mvn/version "0.1.0"}}}
+ :deps {com.vevdb/vev-clj {:mvn/version "0.1.0"}}}
 ```
 
 The combined release gate runs `scripts/smoke_jvm_coordinates.sh` against a
 fresh Clojure project and a fresh Maven project. It verifies that
-`dev.vevdb/vev-clj` is enough for Clojure and `dev.vevdb:vev-java` is enough
+`com.vevdb/vev-clj` is enough for Clojure and `com.vevdb:vev-java` is enough
 for Java, including automatic extraction of the current platform library.
 
 DB snapshots are passable immutable values. The JVM wrapper has cleanup
@@ -392,7 +392,7 @@ let durable_rows = durable.q("[:find ?name :where [?e :user/name ?name]]", "[]")
 Java uses the Java 21 Foreign Function & Memory wrapper in `clients/java`:
 
 ```java
-import dev.vevdb.vev.Vev;
+import com.vevdb.vev.Vev;
 
 Vev vev = Vev.load();
 Vev.Connection conn = vev.createConn();
@@ -410,7 +410,7 @@ Local Java runs need Java 21 preview FFM flags:
 --enable-preview --enable-native-access=ALL-UNNAMED
 ```
 
-Planned Maven coordinate: `dev.vevdb:vev-java`.
+Planned Maven coordinate: `com.vevdb:vev-java`.
 That artifact is intended to pull in the platform native artifact
 transitively, so ordinary Java projects should also have a one-dependency VevDB
 setup.

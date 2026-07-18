@@ -31,7 +31,7 @@ trap cleanup EXIT
 
 cat > "$TMP_DIR/deps.edn" <<EOF
 {:mvn/local-repo "$M2_DIR"
- :deps {dev.vevdb/vev-clj
+ :deps {com.vevdb/vev-clj
         {:git/url "$GIT_URL"
          :git/sha "$GIT_SHA"}}
  :aliases {:run {:jvm-opts ["--enable-preview"

@@ -12,9 +12,9 @@ enabled. The amalgamation version and SHA3-256 checksum are pinned in
 
 The prebuilt distributions are self-contained:
 
-- Clojure users add `dev.vevdb/vev-clj`; it brings in `vev-java` and the
+- Clojure users add `com.vevdb/vev-clj`; it brings in `vev-java` and the
   bundled native VevDB library.
-- Java users add `dev.vevdb:vev-java`; its release jar contains the supported
+- Java users add `com.vevdb:vev-java`; its release jar contains the supported
   platform libraries.
 - CLI users unpack the platform `vevdb-cli` archive and place `vevdb` on
   `PATH`.

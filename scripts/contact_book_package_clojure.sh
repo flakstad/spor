@@ -18,7 +18,7 @@ cp "$ROOT/examples/clojure/contact_book.clj" "$TMP_DIR/contact_book.clj"
 cat > "$TMP_DIR/deps.edn" <<EOF
 {:mvn/local-repo "$ROOT/build/m2"
  :paths ["."]
- :deps {dev.vevdb/vev-clj {:mvn/version "$VERSION"}}
+ :deps {com.vevdb/vev-clj {:mvn/version "$VERSION"}}
  :aliases {:run {:jvm-opts ["--enable-preview"
                             "--enable-native-access=ALL-UNNAMED"]}}}
 EOF

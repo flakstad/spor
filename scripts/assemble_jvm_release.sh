@@ -54,7 +54,7 @@ write_pom() {
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>dev.vevdb</groupId>
+  <groupId>com.vevdb</groupId>
   <artifactId>$artifact</artifactId>
   <version>$VERSION</version>
   <name>$artifact</name>
@@ -83,7 +83,7 @@ EOF
 
 install_artifact() {
   local artifact="$1"
-  local artifact_dir="$M2_DIR/dev/vevdb/$artifact/$VERSION"
+  local artifact_dir="$M2_DIR/com/vevdb/$artifact/$VERSION"
 
   mkdir -p "$artifact_dir"
   cp "$OUT_DIR/$artifact-$VERSION.jar" "$artifact_dir/"
@@ -129,7 +129,7 @@ for jvm_dir in "${JVM_DIRS[@]}"; do
 done
 
 native_resource_count="$(
-  find "$STAGE/dev/vevdb/vev/native" -type f 2>/dev/null | wc -l | tr -d ' '
+  find "$STAGE/com/vevdb/vev/native" -type f 2>/dev/null | wc -l | tr -d ' '
 )"
 if [[ "$native_resource_count" -lt "${#JVM_DIRS[@]}" ]]; then
   echo "expected one distinct native resource from each platform JVM directory" >&2
@@ -147,7 +147,7 @@ write_pom "$OUT_DIR/vev-java-$VERSION.pom" "vev-java"
 write_pom "$OUT_DIR/vev-clj-$VERSION.pom" "vev-clj" "
   <dependencies>
     <dependency>
-      <groupId>dev.vevdb</groupId>
+      <groupId>com.vevdb</groupId>
       <artifactId>vev-java</artifactId>
       <version>$VERSION</version>
     </dependency>

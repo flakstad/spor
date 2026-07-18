@@ -29,7 +29,7 @@ connections. Kvist and Clojure expose Datomic-shaped `q`, `pull`, `transact`,
   hashes agree.
 - The combined release assembles one `vev-java` jar containing all verified
   platform-native resources. Fresh Java and Clojure consumers are then tested
-  with only `dev.vevdb:vev-java` or `dev.vevdb/vev-clj` coordinates; consumers
+  with only `com.vevdb:vev-java` or `com.vevdb/vev-clj` coordinates; consumers
   resolve them from a temporary Maven HTTPS repository and do not select a
   native artifact or configure a library path.
 - Tagged releases then run a post-publication acceptance check against only

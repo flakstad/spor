@@ -107,8 +107,8 @@ Deferred engine batch order:
    the resource layout consumed by the Java loader, and `scripts/package_jvm.sh`
    builds local Java/native/Clojure proof jars under `build/jvm` plus a local
    Maven repository under `build/m2`. The local proof now verifies both
-   one-dependency JVM paths: `dev.vevdb:vev-java` pulls the platform native
-   artifact, and `dev.vevdb/vev-clj` pulls Java.
+   one-dependency JVM paths: `com.vevdb:vev-java` pulls the platform native
+   artifact, and `com.vevdb/vev-clj` pulls Java.
    Java now exposes C ABI transaction-function registries through
    `TxFunctionRegistry`; Clojure exposes the Datomic-shaped `tx-fns` wrapper
    where callbacks receive `(db & args)` and return ordinary tx-data. Java and
@@ -461,9 +461,9 @@ surface.
 
 Next packaging work should use the canonical repository identity
 `https://github.com/vevdb/vev`. The JVM path should split the current examples
-into publishable clients: `dev.vevdb:vev-java` for the Java FFM wrapper,
-`dev.vevdb/vev-clj` for the Clojure API, and later platform native
-artifacts such as `dev.vevdb:vev-native-darwin-aarch64`. Local explicit
+into publishable clients: `com.vevdb:vev-java` for the Java FFM wrapper,
+`com.vevdb/vev-clj` for the Clojure API, and later platform native
+artifacts such as `com.vevdb:vev-native-darwin-aarch64`. Local explicit
 library paths and `VEV_LIB`-style overrides remain supported, but the current
 JVM proof path already works through a local Maven repo with bundled native
 resources on the classpath. Java and Clojure each have a one-dependency local

@@ -41,9 +41,9 @@ https://github.com/vevdb/vev
 That should drive public package coordinates once VevDB moves beyond local smoke
 clients:
 
-- Clojure deps coordinate: `dev.vevdb/vev-clj`
-- Java/Maven coordinate: `dev.vevdb:vev-java`
-- native JVM artifacts by platform: `dev.vevdb:vev-native-<platform>`
+- Clojure deps coordinate: `com.vevdb/vev-clj`
+- Java/Maven coordinate: `com.vevdb:vev-java`
+- native JVM artifacts by platform: `com.vevdb:vev-native-<platform>`
 - Rust crate name, if published: `vevdb`
 - Go module path: `github.com/vevdb/vev/clients/go`
 - Node package name, if published: `@vevdb/vev`
@@ -74,7 +74,7 @@ Prebuilt consumers therefore have no separate SQLite runtime dependency.
 
 The JVM path has bundled-native loading. The Java loader checks explicit path
 configuration, local `build/lib`, then classpath resources under
-`dev/vevdb/vev/native/<platform>/<library>`. Platform builds stage and test one
+`com/vevdb/vev/native/<platform>/<library>`. Platform builds stage and test one
 native resource each; the combined release merges all verified resources into
 the final `vev-java` jar:
 
@@ -83,7 +83,7 @@ the final `vev-java` jar:
 
 `scripts/smoke_jvm_coordinates.sh` verifies a fresh Maven project and a fresh
 Clojure project against a staged repository. The projects use only
-`dev.vevdb:vev-java` or `dev.vevdb/vev-clj`; no repository source classpath,
+`com.vevdb:vev-java` or `com.vevdb/vev-clj`; no repository source classpath,
 platform selection, SQLite installation, or explicit native-library path is
 present. The Java wrapper also checks the native ABI version before exposing a
 connection.
@@ -93,10 +93,10 @@ published dependency shapes can already be tested from outside the repo:
 
 ```clojure
 {:mvn/local-repo "/path/to/vev/build/m2"
- :deps {dev.vevdb/vev-clj {:mvn/version "0.1.0"}}}
+ :deps {com.vevdb/vev-clj {:mvn/version "0.1.0"}}}
 ```
 
-For Java, the matching local Maven dependency is `dev.vevdb:vev-java`. These
+For Java, the matching local Maven dependency is `com.vevdb:vev-java`. These
 are not published releases yet, but the one-dependency Clojure and Java paths
 are mechanically verified by the combined release gate.
 

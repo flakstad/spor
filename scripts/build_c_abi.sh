@@ -93,14 +93,14 @@ if command -v javac >/dev/null 2>&1 && command -v java >/dev/null 2>&1; then
     --enable-preview \
     --release 21 \
     -d "$JAVA_EXAMPLE_DIR" \
-    "$ROOT/clients/java/src/main/java/dev/vevdb/vev/Vev.java" \
+    "$ROOT/clients/java/src/main/java/com/vevdb/vev/Vev.java" \
     "$ROOT/examples/java/Smoke.java"
 
   java \
     --enable-preview \
     --enable-native-access=ALL-UNNAMED \
     -cp "$JAVA_EXAMPLE_DIR" \
-    dev.vevdb.vev.examples.Smoke "$LIB_PATH"
+    com.vevdb.vev.examples.Smoke "$LIB_PATH"
 
   if command -v clojure >/dev/null 2>&1; then
     clojure \

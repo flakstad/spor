@@ -14,15 +14,15 @@ pull in the Java wrapper, and the Java wrapper should pull in the right
 platform native artifact, then load the native library itself:
 
 ```clojure
-{:deps {dev.vevdb/vev-clj {:mvn/version "0.1.0"}}}
+{:deps {com.vevdb/vev-clj {:mvn/version "0.1.0"}}}
 ```
 
 The source repository can instead be consumed through a Git coordinate:
 
 ```clojure
 {:deps
- {io.github.vevdb/vev-clj
-  {:git/tag "v0.1.0"
+ {com.vevdb/vev-clj
+  {:git/tag "<release-tag>"
    :git/sha "<release-sha>"}}}
 ```
 
@@ -123,7 +123,7 @@ That local repository can be consumed from a separate test project:
 
 ```clojure
 {:mvn/local-repo "/path/to/vev/build/m2"
- :deps {dev.vevdb/vev-clj {:mvn/version "0.1.0"}}
+ :deps {com.vevdb/vev-clj {:mvn/version "0.1.0"}}
  :aliases {:run {:jvm-opts ["--enable-preview"
                             "--enable-native-access=ALL-UNNAMED"]}}}
 ```

@@ -21,7 +21,7 @@ The wrapper loads the native library in this order:
 2. `VEV_LIB=/path/to/libvev.dylib`
 3. the platform library under `build/lib`
 4. bundled classpath resource:
-   `dev/vevdb/vev/native/<platform>/<mapped-library-name>`
+   `com/vevdb/vev/native/<platform>/<mapped-library-name>`
 
 Java FFM is still a preview API, so local runs need:
 
@@ -32,7 +32,7 @@ Java FFM is still a preview API, so local runs need:
 Planned Maven coordinate:
 
 ```text
-dev.vevdb:vev-java
+com.vevdb:vev-java
 ```
 
 The Java artifact is intended to be a one-dependency entry point for Java
@@ -139,12 +139,14 @@ successful commits only.
 
 The Java package supports explicit native library paths, but normal consumers
 do not need one. The combined release merges each verified platform library
-into `dev.vevdb:vev-java` as classpath resources such as:
+into `com.vevdb:vev-java` as classpath resources such as:
 
 ```text
-dev/vevdb/vev/native/darwin-aarch64/libvev.dylib
-dev/vevdb/vev/native/darwin-x86_64/libvev.dylib
-dev/vevdb/vev/native/linux-x86_64/libvev.so
+com/vevdb/vev/native/darwin-aarch64/libvev.dylib
+com/vevdb/vev/native/darwin-x86_64/libvev.dylib
+com/vevdb/vev/native/linux-aarch64/libvev.so
+com/vevdb/vev/native/linux-x86_64/libvev.so
+com/vevdb/vev/native/windows-x86_64/vev.dll
 ```
 
 `scripts/stage_jvm_native.sh` creates that resource tree for one platform.
@@ -166,8 +168,8 @@ combined release writes the publishable `vev-java` and `vev-clj` artifacts
 after merging all platform resources.
 
 `scripts/smoke_jvm_coordinates.sh` verifies a fresh Maven project with only
-`dev.vevdb:vev-java` and a fresh Clojure project with only
-`dev.vevdb/vev-clj`. Neither consumer selects a platform artifact or configures
+`com.vevdb:vev-java` and a fresh Clojure project with only
+`com.vevdb/vev-clj`. Neither consumer selects a platform artifact or configures
 a native-library path.
 
 Durable stores are opened through VevDB APIs with paths such as `app.vev`. The
