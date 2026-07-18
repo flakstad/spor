@@ -16,6 +16,41 @@
     (os.remove shm-path))
   (return))
 
+(t.deftest sqlite-reopen-derives-next-entity-from-eavt-entry
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.storage-next-entity.sqlite"]
+    (remove-sqlite-files path)
+    (defer (remove-sqlite-files path))
+    (let [[store opened-ok opened-error] (vev.open-store path)
+          high (vev.transact-store-report-text (addr store) "[{:db/id 120 :item/state :state/old}]")
+          lower (vev.transact-store-report-text (addr store) "[{:db/id 113 :item/marker true}]")]
+      (t.is opened-ok opened-error)
+      (t.is high.ok high.error)
+      (t.is lower.ok lower.error)
+      (vev.delete-store-tx-report high)
+      (vev.delete-store-tx-report lower)
+      (vev.close-store store))
+    (let [[reopened reopened-ok reopened-error] (vev.open-store path)
+          [snapshot snapshot-ok snapshot-error] (vev.store-db (addr reopened))
+          [source source-ok source-error] (vev.store-db-read-source (addr snapshot))
+          [next-entity next-ok next-error] (vev.db-read-source-next-entity-id source)
+          replacement (vev.transact-store-report-text (addr reopened) "[[:db/add 120 :item/state :state/new]]")
+          result (vev.q-result-store-text (addr reopened) "[:find ?state :where [120 :item/state ?state]]")]
+      (t.is reopened-ok reopened-error)
+      (t.is snapshot-ok snapshot-error)
+      (t.is source-ok source-error)
+      (t.is next-ok next-error)
+      (t.is (= next-entity 121))
+      (t.is replacement.ok replacement.error)
+      (t.is result.result.ok result.result.error)
+      (t.is (= (count result.result.rows) 1))
+      (t.is (= result.result.rows[0].values[0].kind .Keyword))
+      (t.is (= result.result.rows[0].values[0].text ":state/new"))
+      (vev.delete-query-result result)
+      (vev.delete-store-tx-report replacement)
+      (vev.close-store-db snapshot)
+      (vev.close-store reopened))))
+
 (t.deftest sqlite-index-run-manifest-stores-entity-attr-prefix-ranges
   (defer (free_all context.allocator))
   (remove-sqlite-files "tmp.vev.storage-manifest-prefix.sqlite")

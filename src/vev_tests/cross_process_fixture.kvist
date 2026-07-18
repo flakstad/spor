@@ -1,0 +1,61 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import fmt "core:fmt")
+(import os "core:os")
+(import kdata "kvist:data")
+(import d "../vev_app")
+
+(def state-query
+  '[:find ?kind .
+    :where [?condition :ro/id "condition-main"]
+           [?condition :attention/kind ?kind]])
+
+(defn fail! [message: string]
+  (fmt.eprintln message)
+  (os.exit 1))
+
+(defn main []
+  (when (< (count os.args) 3)
+    (fail! "usage: cross-process-fixture <init|write|read> <path>"))
+  (let [mode os.args[1]
+        path os.args[2]
+        conn (d.connect path)]
+    (defer (d.close conn))
+    (cond
+      (= mode "init")
+        (do
+          (d.transact conn
+            [[:db/add 79 :db/ident :ro/id]
+             [:db/add 79 :db/valueType :db.type/string]
+             [:db/add 79 :db/unique :db.unique/identity]
+             [:db/add 81 :db/ident :attention/kind]
+             [:db/add 81 :db/valueType :db.type/keyword]
+             [:db/add 3 :db/ident :attention/note]
+             [:db/add 3 :db/valueType :db.type/string]
+             [:db/add 4 :db/ident :attention/party]
+             [:db/add 4 :db/valueType :db.type/string]
+             [:db/add 5 :db/ident :attention/not-before]
+             [:db/add 5 :db/valueType :db.type/instant]])
+          (d.transact conn
+            [{:db/id 120
+              :ro/id "condition-main"
+              :attention/kind :attention.kind/action}])
+          (d.transact conn [{:db/id 113 :fixture/value 1}]))
+      (= mode "write")
+        (d.transact conn
+          [[:db/add [:ro/id "condition-main"] :attention/kind :attention.kind/review]
+           [:db.fn/retractAttribute [:ro/id "condition-main"] :attention/note]
+           [:db.fn/retractAttribute [:ro/id "condition-main"] :attention/party]
+           [:db.fn/retractAttribute [:ro/id "condition-main"] :attention/not-before]])
+      (= mode "read")
+        (let [db (d.db conn)
+              value: Data (d.q state-query db)]
+          (defer (d.close db))
+          (when (not (and (kdata.keyword? value)
+                          (= (kdata.keyword value) ":attention.kind/review")))
+            (fail! (fmt.tprintf "expected review, got %s" (kdata.describe value)))))
+      :else
+        (fail! "unknown fixture mode"))))

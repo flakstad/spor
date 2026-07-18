@@ -2800,7 +2800,10 @@
   (let [view (db-read-source-index-view source .EAVT)
         position (- (db-index-view-count view) 1)]
     (while (>= position 0)
-      (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source position)]
+      ;; A view position is not necessarily a datom-log index. Durable
+      ;; manifest views map positions through their ordered index entries.
+      (let [entry (db-index-view-at view position)
+            [datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
         (when (not datom-ok)
           (return 0 false datom-error))
         (let [entity datom.e]
