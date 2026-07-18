@@ -20,21 +20,6 @@ The engine is written in [Kvist](https://github.com/kvist-lang/kvist), compiled
 to Odin, and exposed through a native C ABI. The repository includes APIs for
 Kvist, Clojure, Java, C, Python, Rust, Go, Node.js, and Odin.
 
-## Why VevDB
-
-“Vev” is an excellent metaphor: Norwegian for a loom, weave, or interconnected
-fabric, reflecting how the database weaves immutable facts together.
-
-But “Vev” is already used by several software companies, and the package name
-is occupied on registries such as npm and PyPI. Using VevDB preserves the
-meaning while making the project clearer, more searchable, and easier to
-distinguish across documentation, websites, and package ecosystems.
-
-The product is therefore called **VevDB**, while concise technical identifiers
-such as `vev.core`, `libvev`, `vev.h`, and `vev_*` remain where useful. The
-standalone command is `vevdb`. See [Naming](docs/naming.md) for the canonical
-mapping across ecosystems.
-
 ## Quick Start
 
 ### C
