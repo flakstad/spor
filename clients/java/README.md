@@ -1,6 +1,6 @@
-# Vev Java
+# VevDB for Java
 
-This package is the Java 21 Foreign Function & Memory wrapper for Vev's native
+This package is the Java 21 Foreign Function & Memory wrapper for VevDB's native
 C ABI. It is the lower JVM layer used by the Clojure package.
 
 Current local development:
@@ -105,7 +105,7 @@ try (Vev.DurableConnection durable = vev.connect("app.vev");
 }
 ```
 
-For explicit bulk ingest, pass several builders. Vev commits them as one
+For explicit bulk ingest, pass several builders. VevDB commits them as one
 ordinary durable transaction and returns one transaction report:
 
 ```java
@@ -170,6 +170,6 @@ after merging all platform resources.
 `dev.vevdb/vev-clj`. Neither consumer selects a platform artifact or configures
 a native-library path.
 
-Durable stores are opened through Vev APIs with paths such as `app.vev`. The
+Durable stores are opened through VevDB APIs with paths such as `app.vev`. The
 release native library includes SQLite with FTS5. Java and Clojure applications
-do not install or configure SQLite; they load Vev and call `connect`.
+do not install or configure SQLite; they load VevDB and call `connect`.

@@ -9,9 +9,9 @@ source "$ROOT/scripts/version.sh"
 VERSION="$(vev_version "$ROOT")"
 
 case "$(uname -s)" in
-  Darwin) OS="darwin"; EXE_NAME="vev"; FORMAT="tar.gz" ;;
-  Linux) OS="linux"; EXE_NAME="vev"; FORMAT="tar.gz" ;;
-  MINGW*|MSYS*|CYGWIN*) OS="windows"; EXE_NAME="vev.exe"; FORMAT="zip" ;;
+  Darwin) OS="darwin"; EXE_NAME="vevdb"; FORMAT="tar.gz" ;;
+  Linux) OS="linux"; EXE_NAME="vevdb"; FORMAT="tar.gz" ;;
+  MINGW*|MSYS*|CYGWIN*) OS="windows"; EXE_NAME="vevdb.exe"; FORMAT="zip" ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 case "$(uname -m)" in
@@ -21,8 +21,8 @@ case "$(uname -m)" in
 esac
 
 PLATFORM="$OS-$ARCH"
-ARCHIVE="${1:-$ROOT/build/release/cli/vev-cli-$PLATFORM-$VERSION.$FORMAT}"
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vev-cli-package.XXXXXX")"
+ARCHIVE="${1:-$ROOT/build/release/cli/vevdb-cli-$PLATFORM-$VERSION.$FORMAT}"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vevdb-cli-package.XXXXXX")"
 DB="$TMP_DIR/smoke.vev"
 
 cleanup() {
@@ -39,12 +39,12 @@ case "$FORMAT" in
   zip) unzip -q "$ARCHIVE" -d "$TMP_DIR" ;;
 esac
 
-CLI="$TMP_DIR/vev-$VERSION/bin/$EXE_NAME"
-[[ "$("$CLI" --version)" == "vev $VERSION" ]]
+CLI="$TMP_DIR/vevdb-$VERSION/bin/$EXE_NAME"
+[[ "$("$CLI" --version)" == "vevdb $VERSION" ]]
 "$CLI" transact "$DB" '[{:db/id 1 :user/name "Ada"}]' >/dev/null
 query="$("$CLI" query "$DB" '[:find ?name :where [?e :user/name ?name]]')"
 case "$query" in *'"Ada"'*) ;; *) echo "unexpected packaged CLI query: $query" >&2; exit 1 ;; esac
 
 "$ROOT/scripts/check_self_contained_native.sh" "$CLI" >/dev/null
 
-echo ":vev-cli-package-ok"
+echo ":vevdb-cli-package-ok"

@@ -1,9 +1,9 @@
 [package]
-name = "vev"
+name = "vevdb"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [[bin]]
-name = "vev-rust-smoke"
+name = "vevdb-rust-smoke"
 path = "src/main.rs"

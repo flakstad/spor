@@ -1,6 +1,6 @@
-# Vev Odin
+# VevDB for Odin
 
-Vev is authored in Kvist and lowers through Odin, but generated Odin is build
+VevDB is authored in Kvist and lowers through Odin, but generated Odin is build
 output, not the public Odin package surface.
 
 For Odin applications, the supported direction is a small wrapper over the C
@@ -8,10 +8,10 @@ ABI:
 
 - link against the platform library under `build/lib`
 - import functions matching `include/vev.h`
-- manage Vev handles explicitly, mirroring the C ABI ownership rules
+- manage VevDB handles explicitly, mirroring the C ABI ownership rules
 
 `clients/odin/smoke.odin` is the first concrete proof of that direction. It
-uses `core:dynlib` to load the Vev native library, opens an in-memory
+uses `core:dynlib` to load the VevDB native library, opens an in-memory
 connection, transacts EDN, runs a Datalog query, and frees returned C ABI
 strings.
 
@@ -51,12 +51,12 @@ scripts/smoke_odin_package.sh
 ```
 
 It builds the smoke wrapper into a temporary directory and runs it against the
-platform native Vev library, mirroring how an Odin application would dynamically
+platform native VevDB library, mirroring how an Odin application would dynamically
 load `libvev`.
 
 Directly depending on generated Odin should remain a development/debug escape
 hatch rather than the documented integration path.
 
-Durable stores are opened through Vev APIs with paths such as `app.vev`. The
+Durable stores are opened through VevDB APIs with paths such as `app.vev`. The
 release native library includes SQLite with FTS5; Odin application code does
 not install or configure SQLite.

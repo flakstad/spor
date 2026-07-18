@@ -1,16 +1,16 @@
 # Getting Started
 
-Vev is an embedded Datalog database for immutable DB values. The normal workflow
+VevDB is an embedded Datalog database for immutable DB values. The normal workflow
 is:
 
-1. create an in-memory connection or connect to a durable Vev store
+1. create an in-memory connection or connect to a durable VevDB store
 2. transact schema and data
 3. take an immutable DB value with `db`
 4. query, pull, or inspect entities from that DB value
 5. use `with` / `db-with` when you want a hypothetical DB without changing the
    connection
 
-Durable stores are opened with Vev paths such as `app.vev`. Vev currently uses
+Durable stores are opened with VevDB paths such as `app.vev`. VevDB currently uses
 SQLite internally for durability, but application code does not create SQLite
 tables or issue SQL.
 
@@ -46,7 +46,7 @@ Clojure, and Kvist. The Clojure and Kvist versions both:
 - transact schema and data
 - query and pull through an immutable DB value
 - prove that `db-with` does not mutate the original DB
-- use a durable Vev store in normal operation
+- use a durable VevDB store in normal operation
 - close, reopen, transact, and reopen again to verify persistence
 
 Run the Clojure and Kvist applications together:
@@ -62,21 +62,21 @@ through repository source paths:
 scripts/contact_book_package_clojure.sh
 ```
 
-That command creates a temporary project whose only Vev dependency is
+That command creates a temporary project whose only VevDB dependency is
 `dev.vevdb/vev-clj`, backed by the locally built Maven artifacts.
 
 ## CLI
 
-The CLI is a standalone executable with SQLite included. A release archive
-unpacks to `vev-<version>/bin/vev`; copy that executable onto `PATH`. A source
-build writes the same executable to `build/vev`:
+The VevDB CLI is a standalone executable with SQLite included. A release
+archive unpacks to `vevdb-<version>/bin/vevdb`; copy that executable onto
+`PATH`. A source build writes the same executable to `build/vevdb`:
 
 ```sh
-build/vev --version
-build/vev transact app.vev '[{:db/id 1 :user/name "Ada"}]'
-build/vev query app.vev '[:find ?name :where [?e :user/name ?name]]'
-build/vev pull app.vev '[:user/name]' 1
-build/vev info app.vev
+build/vevdb --version
+build/vevdb transact app.vev '[{:db/id 1 :user/name "Ada"}]'
+build/vevdb query app.vev '[:find ?name :where [?e :user/name ?name]]'
+build/vevdb pull app.vev '[:user/name]' 1
+build/vevdb info app.vev
 ```
 
 Query, transaction, and pull arguments can also be loaded from files with
@@ -275,7 +275,7 @@ invalid. For optional map access, keywords are callable:
   ...)
 ```
 
-This ergonomic `Data` style is the public and dynamic boundary. Vev keeps typed
+This ergonomic `Data` style is the public and dynamic boundary. VevDB keeps typed
 columns, native result builders, storage indexes, and ownership-sensitive query
 inputs inside the engine where their native representation is deliberate.
 Explicit conversions such as `data.int` and `data.string` remain the boundary
@@ -292,17 +292,17 @@ managed values. The complete in-memory and durable application is
 The Python client is a pure `ctypes` wrapper today:
 
 ```python
-import vev
+import vevdb
 
-with vev.create_conn() as conn:
+with vevdb.create_conn() as conn:
     conn.transact('[{:db/id 1 :user/name "Ada"}]')
     with conn.db() as db:
-        print(vev.q('[:find ?name :where [?e :user/name ?name]]', db))
-        print(db.pull('[:user/name]', vev.Entity(1)))
+        print(vevdb.q('[:find ?name :where [?e :user/name ?name]]', db))
+        print(db.pull('[:user/name]', vevdb.Entity(1)))
 
-with vev.connect("app.vev") as conn:
+with vevdb.connect("app.vev") as conn:
     conn.transact('[{:db/id 1 :user/name "Durable Ada"}]')
-    print(vev.q('[:find ?name :where [?e :user/name ?name]]', conn))
+    print(vevdb.q('[:find ?name :where [?e :user/name ?name]]', conn))
 ```
 
 `examples/python/contact_book.py` is a small app-style smoke that uses the same
@@ -315,7 +315,7 @@ scripts/smoke_real_app.sh
 
 `scripts/smoke_python_package.sh` validates the package metadata and simulates
 a future wheel layout by loading a bundled `native/<platform>/<library>` next
-to `vev.py`.
+to `vevdb.py`.
 
 ## Node/TypeScript
 
@@ -412,7 +412,7 @@ Local Java runs need Java 21 preview FFM flags:
 
 Planned Maven coordinate: `dev.vevdb:vev-java`.
 That artifact is intended to pull in the platform native artifact
-transitively, so ordinary Java projects should also have a one-dependency Vev
+transitively, so ordinary Java projects should also have a one-dependency VevDB
 setup.
 
 ## C
@@ -446,7 +446,7 @@ stabilize.
 
 ## Current Limitations
 
-- Vev is still pre-production.
+- VevDB is still pre-production.
 - Durable SQLite storage works, but the next storage milestone is shared
   immutable/chunked index storage rather than whole DB/index copying.
 - The C ABI is the portability boundary; higher-level clients are still being
@@ -477,6 +477,6 @@ scripts/smoke_odin_package.sh
 
 These build the self-contained native library under `build/lib`, local JVM
 proof artifacts under `build/jvm` and `build/m2`,
-`build/lib/pkgconfig/vev.pc`, `build/vev`, a standalone CLI archive under
+`build/lib/pkgconfig/vev.pc`, `build/vevdb`, a standalone CLI archive under
 `build/release/cli`, and temporary smoke artifacts or projects for the host
 wrappers.

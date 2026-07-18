@@ -42,7 +42,7 @@ write_pom() {
   <artifactId>$artifact</artifactId>
   <version>$VERSION</version>
   <name>$artifact</name>
-  <description>Vev embedded native database.</description>
+  <description>VevDB embedded native database.</description>
   <url>https://github.com/vevdb/vev</url>
   <licenses>
     <license>

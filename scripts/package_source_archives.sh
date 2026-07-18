@@ -26,8 +26,8 @@ archive() {
   printf '%s\n' "$out"
 }
 
-archive vev-python clients/python
-archive vev-rust clients/rust
+archive vevdb-python clients/python
+archive vevdb-rust clients/rust
 archive vev-node clients/node
 archive vev-go clients/go
 archive vev-odin clients/odin

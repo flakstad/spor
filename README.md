@@ -1,30 +1,45 @@
 <div align="center">
-  <img src="vev-logo-fuller.png" alt="Vev logo" width="432">
+  <img src="vev-logo-fuller.png" alt="VevDB logo" width="432">
 </div>
 
-# Vev DB
+# VevDB
 
 **A native, embedded Datalog database built around immutable database values.**
 
-Vev weaves immutable facts into a durable fabric of attributed entities and
+VevDB weaves immutable facts into a durable fabric of attributed entities and
 values. Facts accumulate through append-only transactions, producing immutable
 database snapshots that applications can query declaratively and pass around
 as ordinary values.
 
-Vev provides Datomic-style transactions, Datalog queries, pull expressions,
+VevDB provides Datomic-style transactions, Datalog queries, pull expressions,
 and snapshot semantics for both in-memory and durable databases. Durable stores
-use SQLite internally, while Vev's indexes and query engine implement the
+use SQLite internally, while VevDB's indexes and query engine implement the
 database model.
 
 The engine is written in [Kvist](https://github.com/kvist-lang/kvist), compiled
 to Odin, and exposed through a native C ABI. The repository includes APIs for
 Kvist, Clojure, Java, C, Python, Rust, Go, Node.js, and Odin.
 
+## Why VevDB
+
+“Vev” is an excellent metaphor: Norwegian for a loom, weave, or interconnected
+fabric, reflecting how the database weaves immutable facts together.
+
+But “Vev” is already used by several software companies, and the package name
+is occupied on registries such as npm and PyPI. Using VevDB preserves the
+meaning while making the project clearer, more searchable, and easier to
+distinguish across documentation, websites, and package ecosystems.
+
+The product is therefore called **VevDB**, while concise technical identifiers
+such as `vev.core`, `libvev`, `vev.h`, and `vev_*` remain where useful. The
+standalone command is `vevdb`. See [Naming](docs/naming.md) for the canonical
+mapping across ecosystems.
+
 ## Quick Start
 
 ### C
 
-Vev is an embedded native library with a stable C ABI:
+VevDB is an embedded native library with a stable C ABI:
 
 ```c
 #include <stdio.h>
@@ -45,14 +60,14 @@ int main(void) {
 }
 ```
 
-1. The process embeds an in-memory Vev connection.
+1. The process embeds an in-memory VevDB connection.
 2. Transactions cross the ABI as EDN data.
 3. Queries return EDN; typed result and prepared-query APIs are also available.
 4. The caller owns native handles and returned strings.
 
 ### Kvist
 
-Kvist uses Vev directly as a source package, with transactions and Datalog
+Kvist uses VevDB directly as a source package, with transactions and Datalog
 written as native data:
 
 ```clojure
@@ -115,13 +130,13 @@ query shape:
 5. `db-with` creates a hypothetical database value without changing `conn` or
    `db`.
 
-Use `connect` when the database should persist to a Vev store:
+Use `connect` when the database should persist to a VevDB store:
 
 ```clojure
 (def conn (d/connect "app.vev"))
 ```
 
-The application still uses Vev transactions and queries. It does not create
+The application still uses VevDB transactions and queries. It does not create
 SQLite tables, run migrations, or issue SQL.
 
 ### Java
@@ -145,14 +160,14 @@ Python uses EDN text at the language boundary and context managers for native
 handle lifetimes:
 
 ```python
-import vev
+import vevdb
 
-with vev.create_conn() as conn:                                    # 1
+with vevdb.create_conn() as conn:                                  # 1
     conn.transact('[{:db/id 1 :user/name "Ada"}]')                 # 2
     with conn.db() as db:                                          # 3
-        rows = vev.q(
+        rows = vevdb.q(
             '[:find ?name :where [?e :user/name ?name]]', db)      # 4
-        profile = db.pull('[:user/name]', vev.Entity(1))
+        profile = db.pull('[:user/name]', vevdb.Entity(1))
 ```
 
 1. The context manager closes the native connection.
@@ -165,7 +180,7 @@ with vev.create_conn() as conn:                                    # 1
 Rust wraps the same native handles with RAII:
 
 ```rust
-use vev::Conn;
+use vevdb::Conn;
 
 fn main() -> Result<(), String> {
     let conn = Conn::open_memory()?;                                // 1
@@ -256,7 +271,7 @@ for every supported language.
 
 ## Database Model
 
-Vev stores facts as datoms consisting of entity, attribute, value,
+VevDB stores facts as datoms consisting of entity, attribute, value,
 transaction, and added/retracted fields.
 
 - Transactions add and retract facts.
@@ -266,7 +281,7 @@ transaction, and added/retracted fields.
 - Pull expressions render entity data declaratively.
 - In-memory and durable connections expose the same database-value model.
 
-Vev follows Datomic and DataScript syntax and semantics where they apply to an
+VevDB follows Datomic and DataScript syntax and semantics where they apply to an
 embedded native database. This includes transaction maps and operation vectors,
 schema attributes, lookup refs, pull patterns, query inputs, predicates,
 aggregates, rules, and immutable `db-with` operations.
@@ -287,7 +302,7 @@ aggregates, rules, and immutable `db-with` operations.
 
 ## Build And Verify
 
-Building Vev from source requires Kvist, Odin, Clang, and an archiver. The
+Building VevDB from source requires Kvist, Odin, Clang, and an archiver. The
 build downloads and checksum-verifies a pinned SQLite amalgamation, then links
 it statically; users do not install SQLite separately. The normal `kvist`
 command should point to a built Kvist compiler.
@@ -345,28 +360,28 @@ library and SQLite deployment details.
 
 ## Acknowledgements
 
-Vev would not have been possible without
+VevDB would not have been possible without
 [Datomic](https://www.datomic.com/) and its articulation of datoms,
 transactions, immutable database values, and Datalog as a coherent programming
 model.
 
 [DataScript](https://github.com/tonsky/datascript) made that model available in
 a compact open-source implementation. Its behavior and test suite provide
-Vev's primary semantic compatibility reference.
+VevDB's primary semantic compatibility reference.
 
 [Datalevin](https://github.com/datalevin/datalevin) demonstrates how the same
 ideas can support a fast, durable database. Its query, indexing, storage, and
-benchmark work has been indispensable when shaping Vev's native engine.
+benchmark work has been indispensable when shaping VevDB's native engine.
 
 [Day of Datomic](https://github.com/Datomic/day-of-datomic) and the Datomic
 MusicBrainz sample turn the model into concrete, realistic exercises. They
-provide Vev with a practical standard for tutorial compatibility, correctness,
+provide VevDB with a practical standard for tutorial compatibility, correctness,
 and performance.
 
-Vev is deeply grateful to the authors and contributors of all four projects.
+VevDB is deeply grateful to the authors and contributors of all four projects.
 Copied or adapted open-source material remains under its original copyright
 and license terms.
 
 ## License
 
-Vev is licensed under the Eclipse Public License 2.0. See [LICENSE](LICENSE).
+VevDB is licensed under the Eclipse Public License 2.0. See [LICENSE](LICENSE).

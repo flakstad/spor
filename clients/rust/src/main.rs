@@ -1,4 +1,4 @@
-use vev::*;
+use vevdb::*;
 
 fn remove_sqlite_files(path: &str) {
     let _ = std::fs::remove_file(path);

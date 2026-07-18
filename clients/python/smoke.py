@@ -6,7 +6,7 @@ import pathlib
 import sys
 from datetime import datetime
 
-import vev
+import vevdb as vev
 
 
 def remove_sqlite_files(path: pathlib.Path) -> None:

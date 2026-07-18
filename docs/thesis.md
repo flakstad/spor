@@ -1,4 +1,4 @@
-# Vev Thesis
+# VevDB Thesis
 
 Vev exists to make immutable database values a normal programming model outside
 the Clojure ecosystem.

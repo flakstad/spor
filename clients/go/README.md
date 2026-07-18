@@ -1,6 +1,6 @@
-# Vev Go
+# VevDB for Go
 
-This is a cgo package over Vev's C ABI. The API is still smoke-level, but it is
+This is a cgo package over VevDB's C ABI. The API is still smoke-level, but it is
 now importable at the planned module path and has a smoke command under
 `cmd/vev-go-smoke`.
 
@@ -22,7 +22,7 @@ github.com/vevdb/vev/clients/go
 The first polished package should keep the same basic shape:
 
 - `Conn`, `DB`, durable connection, prepared query, statement, and result types
-- `CreateConn` for in-memory work and `Connect` for durable Vev stores
+- `CreateConn` for in-memory work and `Connect` for durable VevDB stores
 - explicit `Close` methods for native handles
 - EDN text APIs for parity with other hosts
 - prepared queries and typed statement bindings for repeated work
@@ -102,6 +102,6 @@ defer reports.Close()
 `scripts/smoke_go_package.sh` verifies that this package can be imported from a
 separate Go module using a local `replace` to this checkout.
 
-Durable stores are opened through Vev APIs with paths such as `app.vev`. The Go
+Durable stores are opened through VevDB APIs with paths such as `app.vev`. The Go
 package uses cgo over `libvev`, whose release build includes SQLite with FTS5.
 Go application code does not install or configure SQLite.

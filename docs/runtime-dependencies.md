@@ -1,9 +1,9 @@
 # Runtime Dependencies
 
-Vev applications use Vev APIs and Vev store files. They do not install SQLite,
+VevDB applications use VevDB APIs and VevDB store files. They do not install SQLite,
 set up SQLite schemas, run SQLite migrations, or issue SQL.
 
-Durable Vev stores are implemented on SQLite. Release builds compile the
+Durable VevDB stores are implemented on SQLite. Release builds compile the
 official SQLite amalgamation into `libvev` and the standalone CLI with FTS5
 enabled. The amalgamation version and SHA3-256 checksum are pinned in
 `scripts/build_sqlite.sh`.
@@ -13,10 +13,11 @@ enabled. The amalgamation version and SHA3-256 checksum are pinned in
 The prebuilt distributions are self-contained:
 
 - Clojure users add `dev.vevdb/vev-clj`; it brings in `vev-java` and the
-  bundled native Vev library.
+  bundled native VevDB library.
 - Java users add `dev.vevdb:vev-java`; its release jar contains the supported
   platform libraries.
-- CLI users unpack the platform `vev-cli` archive and place `vev` on `PATH`.
+- CLI users unpack the platform `vevdb-cli` archive and place `vevdb` on
+  `PATH`.
 - C ABI consumers unpack the native bundle containing `vev.h` and `libvev`.
 
 None of these consumers installs SQLite separately. Java and Clojure currently
@@ -34,7 +35,7 @@ Set `VEV_SQLITE_CACHE_DIR` to share the downloaded and compiled SQLite cache.
 Set `VEV_SQLITE_LIB_DIR` only when deliberately testing another compatible
 static SQLite build.
 
-Building Vev from source requires:
+Building VevDB from source requires:
 
 - Kvist and Odin
 - Clang
@@ -49,7 +50,7 @@ The release gate runs:
 
 ```sh
 scripts/check_self_contained_native.sh build/lib/libvev.dylib
-scripts/check_self_contained_native.sh build/vev
+scripts/check_self_contained_native.sh build/vevdb
 ```
 
 The check uses `otool`, `ldd`, or `objdump` according to the platform and fails
@@ -64,6 +65,6 @@ app.vev
 data/app.vev
 ```
 
-SQLite manages the file internally, but it is a Vev store from the
+SQLite manages the file internally, but it is a VevDB store from the
 application's point of view. The extension is not semantically important;
 `.vev` is the recommended convention.

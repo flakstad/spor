@@ -23,14 +23,14 @@ if [[ ! -f "$ROOT/build/lib/$LIB_NAME" ]]; then
   "$ROOT/scripts/build_c_abi.sh"
 fi
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vev-python-package.XXXXXX")"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vevdb-python-package.XXXXXX")"
 cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
 mkdir -p "$TMP_DIR/native/$OS-$ARCH"
-cp "$ROOT/clients/python/vev.py" "$TMP_DIR/vev.py"
+cp "$ROOT/clients/python/vevdb.py" "$TMP_DIR/vevdb.py"
 cp "$ROOT/clients/python/pyproject.toml" "$TMP_DIR/pyproject.toml"
 cp "$ROOT/clients/python/README.md" "$TMP_DIR/README.md"
 cp "$ROOT/build/lib/$LIB_NAME" "$TMP_DIR/native/$OS-$ARCH/$LIB_NAME"
@@ -42,20 +42,20 @@ import pathlib
 import tomllib
 
 metadata = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
-assert metadata["project"]["name"] == "vev", metadata
-assert metadata["tool"]["setuptools"]["py-modules"] == ["vev"], metadata
+assert metadata["project"]["name"] == "vevdb", metadata
+assert metadata["tool"]["setuptools"]["py-modules"] == ["vevdb"], metadata
 PY
   env -u VEV_LIB python3 - <<'PY'
-import vev
+import vevdb
 
-with vev.create_conn() as conn:
+with vevdb.create_conn() as conn:
     conn.transact('[{:db/id 1 :user/name "Ada"}]')
     result = conn.query_text('[:find ?name :where [?e :user/name ?name]]')
     assert '"Ada"' in result, result
-with vev.Library().create_conn() as conn:
+with vevdb.Library().create_conn() as conn:
     conn.transact('[{:db/id 2 :user/name "Grace"}]')
     result = conn.query_text('[:find ?name :where [?e :user/name ?name]]')
     assert '"Grace"' in result, result
-print(":vev-python-package-ok")
+print(":vevdb-python-package-ok")
 PY
 )

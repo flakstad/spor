@@ -53,14 +53,14 @@ mkdir -p "$(dirname "$OUT")"
 
 required_artifacts=(
   "$ROOT/build/lib/$LIB_NAME"
-  "$CLI_DIR/vev-cli-$PLATFORM-$VERSION.$CLI_FORMAT"
+  "$CLI_DIR/vevdb-cli-$PLATFORM-$VERSION.$CLI_FORMAT"
   "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"
   "$ROOT/include/vev.h"
   "$ROOT/build/jvm/vev-java-$VERSION.jar"
   "$ROOT/build/jvm/vev-native-$PLATFORM-$VERSION.jar"
   "$ROOT/build/jvm/vev-clj-$VERSION.jar"
-  "$SOURCE_DIR/vev-python-$VERSION.tar.gz"
-  "$SOURCE_DIR/vev-rust-$VERSION.tar.gz"
+  "$SOURCE_DIR/vevdb-python-$VERSION.tar.gz"
+  "$SOURCE_DIR/vevdb-rust-$VERSION.tar.gz"
   "$SOURCE_DIR/vev-node-$VERSION.tar.gz"
   "$SOURCE_DIR/vev-go-$VERSION.tar.gz"
   "$SOURCE_DIR/vev-odin-$VERSION.tar.gz"
@@ -117,14 +117,14 @@ artifact() {
   if [[ -n "$LINK_NAME" ]]; then
     artifact "vev-native-$PLATFORM-import" "native-import-library" "$ROOT/build/lib/$LINK_NAME"; printf ',\n'
   fi
-  artifact "vev-cli-$PLATFORM" "cli-bundle" "$CLI_DIR/vev-cli-$PLATFORM-$VERSION.$CLI_FORMAT"; printf ',\n'
+  artifact "vevdb-cli-$PLATFORM" "cli-bundle" "$CLI_DIR/vevdb-cli-$PLATFORM-$VERSION.$CLI_FORMAT"; printf ',\n'
   artifact "vev-native-$PLATFORM-bundle" "native-bundle" "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"; printf ',\n'
   artifact "vev-c-header" "c-header" "$ROOT/include/vev.h"; printf ',\n'
   artifact "vev-java" "jvm-jar" "$ROOT/build/jvm/vev-java-$VERSION.jar"; printf ',\n'
   artifact "vev-native-$PLATFORM-jvm" "jvm-native-jar" "$ROOT/build/jvm/vev-native-$PLATFORM-$VERSION.jar"; printf ',\n'
   artifact "vev-clj" "clojure-jar" "$ROOT/build/jvm/vev-clj-$VERSION.jar"; printf ',\n'
-  artifact "vev-python" "python-source-archive" "$SOURCE_DIR/vev-python-$VERSION.tar.gz"; printf ',\n'
-  artifact "vev-rust" "rust-source-archive" "$SOURCE_DIR/vev-rust-$VERSION.tar.gz"; printf ',\n'
+  artifact "vevdb-python" "python-source-archive" "$SOURCE_DIR/vevdb-python-$VERSION.tar.gz"; printf ',\n'
+  artifact "vevdb-rust" "rust-source-archive" "$SOURCE_DIR/vevdb-rust-$VERSION.tar.gz"; printf ',\n'
   artifact "vev-node" "node-source-archive" "$SOURCE_DIR/vev-node-$VERSION.tar.gz"; printf ',\n'
   artifact "vev-go" "go-source-archive" "$SOURCE_DIR/vev-go-$VERSION.tar.gz"; printf ',\n'
   artifact "vev-odin" "odin-source-archive" "$SOURCE_DIR/vev-odin-$VERSION.tar.gz"; printf ',\n'

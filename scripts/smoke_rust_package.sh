@@ -23,7 +23,7 @@ if [[ ! -f "$ROOT/build/lib/$LIB_NAME" ]]; then
   "$ROOT/scripts/build_c_abi.sh"
 fi
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vev-rust-package.XXXXXX")"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vevdb-rust-package.XXXXXX")"
 cleanup() {
   rm -rf "$TMP_DIR"
 }
@@ -31,18 +31,18 @@ trap cleanup EXIT
 
 cat > "$TMP_DIR/Cargo.toml" <<EOF
 [package]
-name = "vev-rust-package-smoke"
+name = "vevdb-rust-package-smoke"
 version = "$VERSION"
 edition = "2021"
 publish = false
 
 [dependencies]
-vev = { path = "$RUST_CLIENT_ROOT" }
+vevdb = { path = "$RUST_CLIENT_ROOT" }
 EOF
 
 mkdir -p "$TMP_DIR/src"
 cat > "$TMP_DIR/src/main.rs" <<'EOF'
-use vev::{Conn, DurableConn, Value};
+use vevdb::{Conn, DurableConn, Value};
 
 fn remove_store(path: &str) {
     let _ = std::fs::remove_file(path);
@@ -59,7 +59,7 @@ fn main() -> Result<(), String> {
         return Err(format!("unexpected in-memory rows: {rows:?}"));
     }
 
-    let path = "vev-rust-package.vev";
+    let path = "vevdb-rust-package.vev";
     remove_store(path);
     {
         let durable = DurableConn::open(path)?;
@@ -74,7 +74,7 @@ fn main() -> Result<(), String> {
         }
     }
     remove_store(path);
-    println!(":vev-rust-package-ok");
+    println!(":vevdb-rust-package-ok");
     Ok(())
 }
 EOF

@@ -12,16 +12,16 @@
 
 (def usage
   "usage:
-  vev --version
-  vev info <uri>
-  vev transact <uri> <tx-edn | @file>
-  vev query <uri> <query-edn | @file> [inputs-edn]
-  vev pull <uri> <pattern-edn | @file> <entity-id>
+  vevdb --version
+  vevdb info <uri>
+  vevdb transact <uri> <tx-edn | @file>
+  vevdb query <uri> <query-edn | @file> [inputs-edn]
+  vevdb pull <uri> <pattern-edn | @file> <entity-id>
 
 examples:
-  vev transact app.vev '[{:db/id 1 :user/name \"Ada\"}]'
-  vev query app.vev '[:find ?name :where [?e :user/name ?name]]'
-  vev pull app.vev '[:user/name]' 1
+  vevdb transact app.vev '[{:db/id 1 :user/name \"Ada\"}]'
+  vevdb query app.vev '[:find ?name :where [?e :user/name ?name]]'
+  vevdb pull app.vev '[:user/name]' 1
 ")
 
 (defn version [] -> string
@@ -161,7 +161,7 @@ examples:
              (or (= os.args[1] "-V")
                  (= os.args[1] "--version")
                  (= os.args[1] "version")))
-    (fmt.printf "vev %s\n" (version))
+    (fmt.printf "vevdb %s\n" (version))
     (return))
   (let [command os.args[1]
         code (cond

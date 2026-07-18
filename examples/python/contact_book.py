@@ -11,7 +11,7 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "clients" / "python"))
 
-import vev
+import vevdb
 
 
 SCHEMA = """
@@ -49,24 +49,24 @@ def remove_store(path: pathlib.Path) -> None:
             pass
 
 
-def seed(conn: vev.Connection | vev.DurableConnection) -> None:
+def seed(conn: vevdb.Connection | vevdb.DurableConnection) -> None:
     conn.transact(SCHEMA)
     conn.transact(DATA)
 
 
-def contact_names(source: vev.Connection | vev.DurableConnection | vev.DB) -> list[str]:
-    rows = vev.q(
+def contact_names(source: vevdb.Connection | vevdb.DurableConnection | vevdb.DB) -> list[str]:
+    rows = vevdb.q(
         '[:find ?name :where [?e :contact/name ?name]]',
         source,
     )
     return sorted(row[0] for row in rows)
 
 
-def assert_base_contacts(db: vev.DB) -> None:
+def assert_base_contacts(db: vevdb.DB) -> None:
     if contact_names(db) != ["Ada Lovelace", "Grace Hopper"]:
         raise RuntimeError("unexpected contact names")
 
-    rows = vev.q(
+    rows = vevdb.q(
         """
         [:find ?name
          :in $ ?email
@@ -81,7 +81,7 @@ def assert_base_contacts(db: vev.DB) -> None:
 
     profile = db.pull(
         "[:contact/name :contact/email {:contact/knows [:contact/name]}]",
-        vev.Entity(1),
+        vevdb.Entity(1),
     )
     if profile.get(":contact/name") != "Ada Lovelace":
         raise RuntimeError("pull returned the wrong contact")
@@ -90,7 +90,7 @@ def assert_base_contacts(db: vev.DB) -> None:
 
 
 def run_in_memory() -> None:
-    with vev.create_conn() as conn:
+    with vevdb.create_conn() as conn:
         seed(conn)
         with conn.db() as db:
             assert_base_contacts(db)
@@ -104,19 +104,19 @@ def run_in_memory() -> None:
 def run_durable(path: pathlib.Path) -> None:
     remove_store(path)
 
-    with vev.connect(path) as conn:
+    with vevdb.connect(path) as conn:
         seed(conn)
         with conn.db() as db:
             assert_base_contacts(db)
 
-    with vev.connect(path) as conn:
+    with vevdb.connect(path) as conn:
         if contact_names(conn) != ["Ada Lovelace", "Grace Hopper"]:
             raise RuntimeError("reopened durable store did not preserve contacts")
         conn.transact(KATHERINE)
         if "Katherine Johnson" not in contact_names(conn):
             raise RuntimeError("durable transaction did not update the connection DB")
 
-    with vev.connect(path) as conn:
+    with vevdb.connect(path) as conn:
         if "Katherine Johnson" not in contact_names(conn):
             raise RuntimeError("reopened durable store did not preserve the update")
 

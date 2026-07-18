@@ -54,7 +54,7 @@ scripts/build_c_abi.sh
 The script compiles `src/vev_abi/vev_abi.kvist` to Odin, builds
 the platform library under `build/lib`, compiles `clients/c/smoke.c`, runs the C smoke
 program, and runs the Python smoke program through the thin
-`clients/python/vev.py` adapter. When the relevant toolchains are available,
+`clients/python/vevdb.py` adapter. When the relevant toolchains are available,
 it also compiles and runs the Rust, Go, Node/TypeScript, Java, and Clojure
 smoke programs against the same shared library.
 
@@ -453,13 +453,13 @@ measure it separately from foreground transaction latency.
 ## Python Adapter
 
 The raw `ctypes` surface is intentionally hidden behind a small Python adapter
-in [vev.py](../clients/python/vev.py). It is still a smoke client, not a packaged
+in [vevdb.py](../clients/python/vevdb.py). It is still a smoke client, not a packaged
 library, but it shows the intended host-language shape:
 
 ```python
-import vev
+import vevdb
 
-with vev.create_conn() as conn:
+with vevdb.create_conn() as conn:
     conn.transact("""
     [{:db/id 1
       :user/name "Ada"

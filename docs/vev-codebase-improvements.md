@@ -1,4 +1,4 @@
-# Vev Codebase Improvements
+# VevDB Codebase Improvements
 
 This is the current ownership document for codebase findings. It is not a historical log; items are grouped by current disposition.
 
@@ -112,7 +112,7 @@ Status labels:
 - `done` Add a generic typed column-batch C ABI handle.
   Host adapters can now call `vev_query_db_prepared_column_batch_with_inputs` once and inspect `vev_column_batch_kind` instead of probing every exact-shape column API. The handle wraps the existing entity, string, entity/int, and entity/string/int flat layouts and exposes uniform borrowed pointer accessors.
 
-## Vev TODO
+## VevDB TODO
 
 - `done` Finish parser-owned AST/value cleanup.
   The EDN parser keeps AST strings as borrowed source text deliberately and now cleans parser-owned nested value containers on failed recursive value, serialized DB, datom, transaction argument, lookup-ref, CAS, and partial tx-data parse paths. Failed tx text parsing also rolls back entries appended to the caller's output array.

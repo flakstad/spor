@@ -49,7 +49,7 @@ write_pom() {
   <artifactId>$artifact</artifactId>
   <version>$VERSION</version>
   <name>$artifact</name>
-  <description>Vev local JVM proof artifact.</description>
+  <description>VevDB local JVM proof artifact.</description>
   <url>https://github.com/vevdb/vev</url>
   <licenses>
     <license>

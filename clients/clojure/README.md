@@ -1,8 +1,8 @@
-# Vev Clojure
+# VevDB for Clojure
 
-This is the Clojure package layer for Vev. It depends on the JVM wrapper in
+This is the Clojure package layer for VevDB. It depends on the JVM wrapper in
 `clients/java`, which uses Java 21 Foreign Function & Memory to call the native
-Vev shared library.
+VevDB shared library.
 
 The public API accepts ordinary Clojure data and serializes it to the same EDN
 text frontend used by C, Python, Rust, and Java callers.
@@ -27,7 +27,7 @@ The source repository can instead be consumed through a Git coordinate:
 ```
 
 Its `deps.edn` brings in the published `vev-java` artifact, which contains the
-native Vev engine. Both forms therefore provide the same self-contained
+native VevDB engine. Both forms therefore provide the same self-contained
 runtime.
 
 Application code should not pass Java paths or native library paths around:
@@ -91,8 +91,8 @@ future packaged shape by checking for bundled native resources after explicit
 local paths.
 
 The durable backend uses SQLite internally. Release builds link SQLite with
-FTS5 into the native Vev library, so Clojure users do not install or configure
-SQLite; application code opens a Vev store with `d/connect`.
+FTS5 into the native VevDB library, so Clojure users do not install or configure
+SQLite; application code opens a VevDB store with `d/connect`.
 
 ## Local Development
 
@@ -147,7 +147,7 @@ Until native artifacts are packaged, no-arg `create-conn` and one-arg
 `VEV_LIB`, then a local `build/lib` library, then a bundled platform resource.
 
 `q` uses Datomic/DataScript-style query-first argument order. The wrapper also
-accepts DB-first calls for compatibility with earlier Vev code, but new code
+accepts DB-first calls for compatibility with earlier VevDB code, but new code
 should follow the familiar query-then-sources shape:
 
 ```clojure

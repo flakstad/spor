@@ -11,8 +11,8 @@ KVIST_BIN="${KVIST_BIN:-kvist}"
 GENERATED_DIR="$ROOT/build/generated/vev_cli"
 
 case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) EXE_NAME="vev.exe" ;;
-  *) EXE_NAME="vev" ;;
+  MINGW*|MSYS*|CYGWIN*) EXE_NAME="vevdb.exe" ;;
+  *) EXE_NAME="vevdb" ;;
 esac
 
 OUTPUT="${VEV_CLI_OUTPUT:-$ROOT/build/$EXE_NAME}"

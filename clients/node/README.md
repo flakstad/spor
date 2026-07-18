@@ -1,6 +1,6 @@
-# Vev Node/TypeScript
+# VevDB for Node/TypeScript
 
-This is a Node N-API smoke client over Vev's C ABI. It contains a small native
+This is a Node N-API smoke client over VevDB's C ABI. It contains a small native
 addon plus a CommonJS wrapper and TypeScript declarations.
 
 Current local development:
@@ -51,7 +51,7 @@ try {
 ```
 
 `conn.queryText(...)` remains available for quick EDN text calls, but DB
-snapshots are the closer match to Vev's immutable database value model.
+snapshots are the closer match to VevDB's immutable database value model.
 Use `conn.prepare(...)` when reusing the same query many times.
 
 The package should continue to expose explicit native-addon loading for local
@@ -63,6 +63,6 @@ future package can place `vev_native.node` and the platform `libvev` in the same
 `scripts/smoke_node_package.sh` verifies the package metadata and package-like
 layout from a temporary directory without `VEV_NODE_NATIVE`.
 
-Durable stores are opened through Vev APIs with paths such as `app.vev`. The
-Node addon loads the Vev native library, whose release build includes SQLite
+Durable stores are opened through VevDB APIs with paths such as `app.vev`. The
+Node addon loads the VevDB native library, whose release build includes SQLite
 with FTS5. Node application code does not install or configure SQLite.

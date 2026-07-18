@@ -11,9 +11,9 @@ ARCHIVE_DATE="$(git -C "$ROOT" show -s --format=%cI HEAD)"
 OUT_DIR="$ROOT/build/release/cli"
 
 case "$(uname -s)" in
-  Darwin) OS="darwin"; EXE_NAME="vev"; FORMAT="tar.gz" ;;
-  Linux) OS="linux"; EXE_NAME="vev"; FORMAT="tar.gz" ;;
-  MINGW*|MSYS*|CYGWIN*) OS="windows"; EXE_NAME="vev.exe"; FORMAT="zip" ;;
+  Darwin) OS="darwin"; EXE_NAME="vevdb"; FORMAT="tar.gz" ;;
+  Linux) OS="linux"; EXE_NAME="vevdb"; FORMAT="tar.gz" ;;
+  MINGW*|MSYS*|CYGWIN*) OS="windows"; EXE_NAME="vevdb.exe"; FORMAT="zip" ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
@@ -25,7 +25,7 @@ esac
 
 PLATFORM="$OS-$ARCH"
 BINARY="$("$ROOT/scripts/build_cli.sh" --if-needed)"
-ARCHIVE="$OUT_DIR/vev-cli-$PLATFORM-$VERSION.$FORMAT"
+ARCHIVE="$OUT_DIR/vevdb-cli-$PLATFORM-$VERSION.$FORMAT"
 
 mkdir -p "$OUT_DIR"
 rm -f "$ARCHIVE"
@@ -43,7 +43,7 @@ binary_name, license_name, archive_name, version, date_text, archive_format, exe
 binary = pathlib.Path(binary_name).read_bytes()
 license_text = pathlib.Path(license_name).read_bytes()
 archive = pathlib.Path(archive_name)
-root = f"vev-{version}"
+root = f"vevdb-{version}"
 timestamp = int(datetime.datetime.fromisoformat(date_text).timestamp())
 
 if archive_format == "tar.gz":

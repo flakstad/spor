@@ -2,13 +2,13 @@
 
 ## Principle
 
-Interop is now part of the active compatibility gate, because Vev's primary
+Interop is now part of the active compatibility gate, because VevDB's primary
 long-term consumers are non-Kvist callers. Durable storage still waits, but the
 native ABI, EDN text APIs, prepared handles, and host wrappers must stay current
 with the semantic engine.
 
-Vev's primary source language is Kvist, with readable Odin output as a quality
-gate. Kvist users may consume Vev as a source package when that is the most
+VevDB's primary source language is Kvist, with readable Odin output as a quality
+gate. Kvist users may consume VevDB as a source package when that is the most
 direct integration path.
 
 For other native platforms and host languages, the primary integration artifact
@@ -38,16 +38,16 @@ The canonical repository is:
 https://github.com/vevdb/vev
 ```
 
-That should drive public package coordinates once Vev moves beyond local smoke
+That should drive public package coordinates once VevDB moves beyond local smoke
 clients:
 
 - Clojure deps coordinate: `dev.vevdb/vev-clj`
 - Java/Maven coordinate: `dev.vevdb:vev-java`
 - native JVM artifacts by platform: `dev.vevdb:vev-native-<platform>`
-- Rust crate name, if published: `vev`
+- Rust crate name, if published: `vevdb`
 - Go module path: `github.com/vevdb/vev/clients/go`
 - Node package name, if published: `@vevdb/vev`
-- Python package name, if published: `vev`
+- Python distribution and import name, if published: `vevdb`
 - C SDK: `include/vev.h`, `libvev`, and pkg-config package `vev`
 - Odin package: `clients/odin` currently has a dynamic C ABI smoke wrapper; a
   fuller Odin package should grow from that shape, not generated Odin
@@ -61,14 +61,14 @@ The C SDK path is `include/vev.h`, `libvev`, and `build/lib/pkgconfig/vev.pc`.
 including in-memory query and durable open/write/reopen/query through
 `vev_connect`.
 
-The CLI path builds `build/vev` from `src/vev_cli/main.kvist`. It exposes
+The CLI path builds `build/vevdb` from `src/vev_cli/main.kvist`. It exposes
 `--version` plus durable `info`, `transact`, `query`, and `pull` commands over
 the native Kvist implementation. Each platform release contains a standalone
-`vev-cli-<platform>-<version>` archive. `scripts/smoke_cli_package.sh` extracts
+`vevdb-cli-<platform>-<version>` archive. `scripts/smoke_cli_package.sh` extracts
 and exercises that artifact.
 
 Runtime dependency details are tracked in
-[`runtime-dependencies.md`](runtime-dependencies.md). Vev builds a pinned,
+[`runtime-dependencies.md`](runtime-dependencies.md). VevDB builds a pinned,
 checksum-verified SQLite amalgamation with FTS5 into the CLI and `libvev`.
 Prebuilt consumers therefore have no separate SQLite runtime dependency.
 
@@ -101,11 +101,12 @@ are not published releases yet, but the one-dependency Clojure and Java paths
 are mechanically verified by the combined release gate.
 
 The Python path has the same explicit-to-bundled fallback shape: explicit
-`vev.Library(path)`, `VEV_LIB`, repo `build/lib`, then
-`native/<platform>/<library>` next to `vev.py`. The public constructor shape is
-`vev.create_conn()` for in-memory work and `vev.connect("app.vev")` for durable
-stores; `vev.Library(path).create_conn()` is the explicit-library variant.
-`clients/python/pyproject.toml` defines the future `vev` package metadata, and
+`vevdb.Library(path)`, `VEV_LIB`, repo `build/lib`, then
+`native/<platform>/<library>` next to `vevdb.py`. The public constructor shape
+is `vevdb.create_conn()` for in-memory work and
+`vevdb.connect("app.vev")` for durable stores;
+`vevdb.Library(path).create_conn()` is the explicit-library variant.
+`clients/python/pyproject.toml` defines the future `vevdb` package metadata, and
 `scripts/smoke_python_package.sh` validates that metadata plus the temporary
 bundled-native package layout.
 
@@ -124,13 +125,13 @@ compatibility alias. `scripts/smoke_go_package.sh` verifies import from a
 separate temporary Go module using a local `replace`.
 
 The Rust path is a local Cargo package under `clients/rust`, already named
-`vev` with `publish = false`. It is still a smoke binary plus RAII wrapper in
-one package; before publication it should likely split into `vev-sys` for raw C
-ABI bindings and `vev` for the safe wrapper.
+`vevdb` with `publish = false`. It is still a smoke binary plus RAII wrapper in
+one package; before publication it should likely split into `vevdb-sys` for raw
+C ABI bindings and `vevdb` for the safe wrapper.
 
 Odin consumption should use the C ABI through a small wrapper for now.
 `clients/odin/smoke.odin` proves the dynamic-loading path against the platform
-native library. Vev is implemented in Kvist and lowers through Odin, but
+native library. VevDB is implemented in Kvist and lowers through Odin, but
 generated Odin is build output, not the public Odin package surface.
 `scripts/smoke_odin_package.sh` now verifies this focused Odin wrapper path
 from a temporary build output.
@@ -148,13 +149,13 @@ It should expose:
 - query
 - pull
 
-Kvist callers should get the best syntax Vev can offer: literal query,
+Kvist callers should get the best syntax VevDB can offer: literal query,
 transaction, and pull forms that lower directly to the same typed internal
 structures used by every other frontend.
 
 ## Query Frontends
 
-Vev should have one engine with multiple front doors:
+VevDB should have one engine with multiple front doors:
 
 - Kvist literal macros for Kvist applications
 - EDN string APIs for C/Odin/other host languages
@@ -186,11 +187,11 @@ vev_query_text(db, "[:find ?e :where [?e :name \"Ivan\"]]", inputs) -> result
 ```
 
 Direct host-side AST builders should wait until a real caller proves they are
-needed. A large struct-building ABI is more surface area than Vev needs now.
+needed. A large struct-building ABI is more surface area than VevDB needs now.
 
 ## SQL stance
 
-SQL should not be a phase-1 query surface. Vev's broader story is not
+SQL should not be a phase-1 query surface. VevDB's broader story is not
 "local-first instead of SQLite"; it is SQLite-like embedding for immutable
 facts, relationships, and Datalog-as-data.
 
@@ -202,7 +203,7 @@ second primary semantic model.
 
 The native library should be the primary binary artifact for non-Kvist
 consumers. It can link SQLite internally or depend on a platform SQLite library,
-but SQLite should remain an implementation detail behind Vev's storage adapter.
+but SQLite should remain an implementation detail behind VevDB's storage adapter.
 
 The CLI binary should stay thin:
 
@@ -212,7 +213,7 @@ The CLI binary should stay thin:
 - support debugging and operational workflows
 - exercise the same engine path as embedded users
 
-The CLI should not become the only supported way to use Vev from applications.
+The CLI should not become the only supported way to use VevDB from applications.
 
 ## C ABI
 
@@ -285,7 +286,7 @@ The important point is:
 
 ## Go
 
-Go is a strong host-language fit for Vev's embedded-native shape: CLIs,
+Go is a strong host-language fit for VevDB's embedded-native shape: CLIs,
 developer tools, local daemons, infrastructure agents, and application servers
 often accept a small native database dependency when it gives them simple
 deployment and predictable local reads.
@@ -336,9 +337,9 @@ For foreign consumers, the safest boundary is:
 
 This keeps the ABI stable even if internal ASTs evolve.
 
-It also helps preserve a possible future transport boundary if Vev later runs
+It also helps preserve a possible future transport boundary if VevDB later runs
 out of process.
 
-If Vev ever explores a transactor/peer split, these same explicit plain-data
+If VevDB ever explores a transactor/peer split, these same explicit plain-data
 boundaries will still be valuable. They should make the model more plausible
 without forcing the project to commit to it today.
