@@ -14,13 +14,18 @@ VERSION="$1"
 M2_DIR="$(cd "$2" && pwd)"
 GIT_URL="${VEV_CLJ_GIT_URL:-https://github.com/vevdb/vev-clj.git}"
 GIT_SHA="${VEV_CLJ_GIT_SHA:-}"
+GIT_REF="${VEV_CLJ_GIT_REF:-${GITHUB_HEAD_REF:-main}}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vev-clojure-git-coordinates.XXXXXX")"
 
 if [[ -z "$GIT_SHA" ]]; then
+  GIT_SHA="$(git ls-remote "$GIT_URL" "refs/heads/$GIT_REF" | awk 'NR == 1 {print $1}')"
+fi
+if [[ -z "$GIT_SHA" && "$GIT_REF" != "main" ]]; then
+  GIT_REF="main"
   GIT_SHA="$(git ls-remote "$GIT_URL" refs/heads/main | awk 'NR == 1 {print $1}')"
 fi
 if [[ -z "$GIT_SHA" ]]; then
-  echo "could not resolve vev-clj main from $GIT_URL" >&2
+  echo "could not resolve vev-clj $GIT_REF from $GIT_URL" >&2
   exit 1
 fi
 
