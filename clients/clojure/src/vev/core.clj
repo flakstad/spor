@@ -5,7 +5,7 @@
   (:require [clojure.edn :as edn]
             [clojure.set :as set])
   (:import [java.nio.file Path]
-           [com.vevdb.vev Vev Vev$ColumnResult Vev$DB Vev$Entity Vev$EntityView Vev$Keyword Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxFunction Vev$TxReportListener]))
+           [com.vevdb Vev Vev$ColumnResult Vev$DB Vev$Entity Vev$EntityView Vev$Keyword Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxFunction Vev$TxReportListener]))
 
 (defn- path [value]
   (cond

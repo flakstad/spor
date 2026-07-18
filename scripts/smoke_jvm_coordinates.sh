@@ -102,7 +102,7 @@ EOF
 cat > "$TMP_DIR/java/src/main/java/example/Main.java" <<'EOF'
 package example;
 
-import com.vevdb.vev.Vev;
+import com.vevdb.Vev;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;

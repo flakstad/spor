@@ -392,7 +392,7 @@ let durable_rows = durable.q("[:find ?name :where [?e :user/name ?name]]", "[]")
 Java uses the Java 21 Foreign Function & Memory wrapper in `clients/java`:
 
 ```java
-import com.vevdb.vev.Vev;
+import com.vevdb.Vev;
 
 Vev vev = Vev.load();
 Vev.Connection conn = vev.createConn();

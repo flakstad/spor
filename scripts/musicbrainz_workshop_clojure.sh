@@ -16,12 +16,12 @@ if [[ ! -f "$STORE" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$JAVA_OUT/com/vevdb/vev/Vev.class" || "$ROOT/clients/java/src/main/java/com/vevdb/vev/Vev.java" -nt "$JAVA_OUT/com/vevdb/vev/Vev.class" ]]; then
+if [[ ! -f "$JAVA_OUT/com/vevdb/Vev.class" || "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" -nt "$JAVA_OUT/com/vevdb/Vev.class" ]]; then
   javac \
     --enable-preview \
     --release 21 \
     -d "$JAVA_OUT" \
-    "$ROOT/clients/java/src/main/java/com/vevdb/vev/Vev.java"
+    "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java"
 fi
 
 clojure \

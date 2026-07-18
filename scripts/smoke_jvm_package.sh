@@ -35,7 +35,7 @@ cat > "$TMP_DIR/deps-java.edn" <<EOF
 EOF
 
 cat > "$TMP_DIR/java-smoke.clj" <<'EOF'
-(import '[com.vevdb.vev Vev Vev$TxReportListener])
+(import '[com.vevdb Vev Vev$TxReportListener])
 (with-open [vev (Vev/load)
             conn (.createConn vev)]
   (let [seen (atom 0)]

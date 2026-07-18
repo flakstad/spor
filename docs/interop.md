@@ -74,7 +74,7 @@ Prebuilt consumers therefore have no separate SQLite runtime dependency.
 
 The JVM path has bundled-native loading. The Java loader checks explicit path
 configuration, local `build/lib`, then classpath resources under
-`com/vevdb/vev/native/<platform>/<library>`. Platform builds stage and test one
+`com/vevdb/native/<platform>/<library>`. Platform builds stage and test one
 native resource each; the combined release merges all verified resources into
 the final `vev-java` jar:
 

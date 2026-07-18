@@ -21,7 +21,7 @@ The wrapper loads the native library in this order:
 2. `VEV_LIB=/path/to/libvev.dylib`
 3. the platform library under `build/lib`
 4. bundled classpath resource:
-   `com/vevdb/vev/native/<platform>/<mapped-library-name>`
+   `com/vevdb/native/<platform>/<mapped-library-name>`
 
 Java FFM is still a preview API, so local runs need:
 
@@ -142,11 +142,11 @@ do not need one. The combined release merges each verified platform library
 into `com.vevdb:vev-java` as classpath resources such as:
 
 ```text
-com/vevdb/vev/native/darwin-aarch64/libvev.dylib
-com/vevdb/vev/native/darwin-x86_64/libvev.dylib
-com/vevdb/vev/native/linux-aarch64/libvev.so
-com/vevdb/vev/native/linux-x86_64/libvev.so
-com/vevdb/vev/native/windows-x86_64/vev.dll
+com/vevdb/native/darwin-aarch64/libvev.dylib
+com/vevdb/native/darwin-x86_64/libvev.dylib
+com/vevdb/native/linux-aarch64/libvev.so
+com/vevdb/native/linux-x86_64/libvev.so
+com/vevdb/native/windows-x86_64/vev.dll
 ```
 
 `scripts/stage_jvm_native.sh` creates that resource tree for one platform.

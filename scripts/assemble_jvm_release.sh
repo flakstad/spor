@@ -129,7 +129,7 @@ for jvm_dir in "${JVM_DIRS[@]}"; do
 done
 
 native_resource_count="$(
-  find "$STAGE/com/vevdb/vev/native" -type f 2>/dev/null | wc -l | tr -d ' '
+  find "$STAGE/com/vevdb/native" -type f 2>/dev/null | wc -l | tr -d ' '
 )"
 if [[ "$native_resource_count" -lt "${#JVM_DIRS[@]}" ]]; then
   echo "expected one distinct native resource from each platform JVM directory" >&2

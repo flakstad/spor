@@ -41,7 +41,7 @@ case "$(uname -m)" in
 esac
 
 SOURCE="$LIB_DIR/$LIB_NAME"
-TARGET_DIR="$OUT_DIR/com/vevdb/vev/native/$OS-$ARCH"
+TARGET_DIR="$OUT_DIR/com/vevdb/native/$OS-$ARCH"
 TARGET="$TARGET_DIR/$LIB_NAME"
 
 if [[ ! -f "$SOURCE" ]]; then

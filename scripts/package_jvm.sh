@@ -127,7 +127,7 @@ javac \
   --enable-preview \
   --release 21 \
   -d "$JAVA_CLASSES" \
-  "$ROOT/clients/java/src/main/java/com/vevdb/vev/Vev.java"
+  "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java"
 
 jar --create \
   --date="$ARCHIVE_DATE" \
