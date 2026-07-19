@@ -684,6 +684,8 @@
         (return false))))
   true)
 
+;; Values passed here are borrowed. relation-column-add! clones text and
+;; compound values into the builder's owned columns.
 (defn query-relation-builder-add-column-row-with-values! [builder: ^Query-Relation-Builder, columns: []Relation-Column, row: int, values: []Value] -> bool
   (when (not (query-relation-builder-can-add-column-row-with-values? builder^ columns row values))
     (return false))
@@ -37018,14 +37020,9 @@
 
 (defn db-read-source-query-relation-value-ref-star-add-product! [builder: ^Query-Relation-Builder, options: []Result-Row, index: int, prefix: []Value] -> [ok: bool, error: string]
   (when (= index (count options))
-    (let [values (make [dynamic]Value 0 (count prefix))]
-      (for [value prefix]
-        (arr.push! values (value-owned value)))
-      (when (not (query-relation-builder-add-column-row-with-values! builder ([]Relation-Column []) 0 (slice values 0)))
-        (delete-owned-values-array values)
-        (return false "source value/ref/star projection produced unsupported typed relation values"))
-      (delete values)
-      (return true "")))
+    (when (not (query-relation-builder-add-column-row-with-values! builder ([]Relation-Column []) 0 prefix))
+      (return false "source value/ref/star projection produced unsupported typed relation values"))
+    (return true ""))
   (for [option options[index].values]
     (let [next (make [dynamic]Value 0 (+ (count prefix) 1))]
       (for [value prefix]
@@ -40452,9 +40449,9 @@
 (defn db-read-source-query-relation-three-attr-cardinality-one-merge-row! [builder: ^Query-Relation-Builder, query: Query, projection: Source-Three-Attr-Entity-Projection, first-value-source: Value, second-value-source: Value, third-value-source: Value] -> [ok: bool, error: string]
   (let [values (make [dynamic]Value 0 (count query.find))]
     (for [find-var query.find]
-      (arr.push! values (value-owned (source-three-attr-value-for-var projection find-var first-value-source second-value-source third-value-source))))
+      (arr.push! values (source-three-attr-value-for-var projection find-var first-value-source second-value-source third-value-source)))
     (when (not (query-relation-builder-add-column-row-with-values! builder ([]Relation-Column []) 0 (slice values 0)))
-      (delete-owned-values-array values)
+      (delete values)
       (return false "source three-attr projection produced unsupported typed relation values"))
     (delete values)
     (return true "")))
@@ -40729,11 +40726,11 @@
     (for [find-var query.find]
       (let [[clause-index clause-ok] (source-star-clause-index-for-value-var query find-var)]
         (when (not clause-ok)
-          (delete-owned-values-array values)
+          (delete values)
           (return false "source star projection find var missing from clauses"))
-        (arr.push! values (value-owned streams[clause-index].current.v))))
+        (arr.push! values streams[clause-index].current.v)))
     (when (not (query-relation-builder-add-column-row-with-values! builder ([]Relation-Column []) 0 (slice values 0)))
-      (delete-owned-values-array values)
+      (delete values)
       (return false "source star projection produced unsupported typed relation values"))
     (delete values)
     (return true "")))
