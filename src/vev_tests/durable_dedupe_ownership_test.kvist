@@ -29,6 +29,7 @@
         values (d.q '[:find ?value
                       :where [?entity :fixture/value ?value]] db)]
     (test.is (= (kdata.count values) 2))
+    (kdata.release values)
     (d.close db)
     (d.close conn))
   (remove-durable-dedupe-db))

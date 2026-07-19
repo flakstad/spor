@@ -12649,6 +12649,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (when (not advance-ok)
           (delete-source-index-datom-stream stream)
           (return false advance-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn overlay-ops-declare-cardinality-many? [ops: []Tx-Op, attr: string] -> bool

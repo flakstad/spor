@@ -383,6 +383,26 @@
   (delete query.aggregates)
   (delete query.return-map-keys))
 
+(defn delete-not-group-containers [group: Not-Group]
+  (for [nested group.not-groups]
+    (delete-not-group-containers nested))
+  (delete group.clauses)
+  (delete group.predicates)
+  (delete group.function-clauses)
+  (delete group.get-elses)
+  (delete-get-somes group.get-somes)
+  (delete group.grounds)
+  (delete group.rule-calls)
+  (delete group.not-groups)
+  (delete group.steps)
+  (delete group.join-vars))
+
+(defn delete-or-group-containers [group: Or-Group]
+  (for [branch group.branches]
+    (delete-not-group-containers branch))
+  (delete group.branches)
+  (delete group.join-vars))
+
 (defn delete-prepared-query-shallow [prepared: Prepared-Query]
   (for [predicate prepared.query.predicates]
     (delete predicate.terms))
@@ -390,6 +410,12 @@
     (delete function.terms)
     (delete function.out-vars)
     (delete-input-binding-shallow function.out-binding))
+  (for [group prepared.query.not-groups]
+    (delete-not-group-containers group))
+  (for [group prepared.query.or-groups]
+    (delete-or-group-containers group))
+  (for [aggregate prepared.query.aggregates]
+    (delete aggregate.args))
   (delete-query-shallow prepared.query)
   (when prepared.owns-source
     (data.release prepared.source-owner))
@@ -2418,7 +2444,7 @@
         (arr.push! dedupe-values value)))
     (let [[dedupe-key key-ok] (row-values-dedupe-key (slice dedupe-values 0))]
       (if key-ok
-        (return (string-owned dedupe-key) true)
+        (return dedupe-key true)
         (return "" false)))))
 
 (defn resolved-typed-flat-materialization-row-visible? [rel: Query-Relation, resolved: Resolved-Typed-Flat-Materialization, row: int, seen: (ptr (map string (struct {})))] -> [visible: bool, ok: bool]
@@ -2428,11 +2454,9 @@
     (when (not key-ok)
       (return false false))
     (when (set.contains? seen^ key)
+      (delete key)
       (return false true))
-    ;; Dedupe key helpers return transient formatter/literal strings. This
-    ;; cursor retains keys across rows and owns their cleanup, so retain an
-    ;; explicit copy rather than later freeing borrowed storage.
-    (set.add! seen^ (string-owned key))
+    (set.add! seen^ key)
     (return true true)))
 
 (defn typed-flat-materialization-cursor-next! [cursor: ^Typed-Flat-Materialization-Cursor, rel: Query-Relation, resolved: Resolved-Typed-Flat-Materialization] -> [row: int, found: bool, ok: bool]
@@ -4280,7 +4304,10 @@
 
 (defn row-values-dedupe-key [values: []Value] -> [key: string, ok: bool]
   (when (= (count values) 1)
-    (return (primitive-value-dedupe-key values[0])))
+    (let [[key key-ok] (primitive-value-dedupe-key values[0])]
+      (if key-ok
+        (return (string-owned key) true)
+        (return "" false))))
   (let [parts (make [dynamic]string 0 (count values))]
     (defer (delete parts))
     (for [value values]
@@ -9537,7 +9564,7 @@
         current-entity: u64 0
         has-current false
         i low]
-    (defer (delete-owned-string-set seen))
+    (defer (delete seen))
     (when (not range-ok)
       (delete values)
       (delete-relation-columns columns)
@@ -12290,10 +12317,14 @@
                 (let [out-value (if attr-ok attr-value get-else.default-value)]
                   (when (query-relation-typed-row-var-agrees? rel fallback-row get-else.out out-value)
                     (when (not (query-relation-builder-add-column-row-with-output-value! (addr builder) (slice attrs 0) (slice rel.typed-columns 0) fallback-row get-else.out out-value))
+                      (when attr-ok
+                        (delete-owned-value attr-value))
                       (delete attrs)
                       (delete attr-sources)
                       (delete-query-relation-builder builder)
-                      (return (query-relation-empty) false))))))
+                      (return (query-relation-empty) false))))
+                  (when attr-ok
+                    (delete-owned-value attr-value))))
             (mut! fallback-row += 1))
           (mut! stats^.source-index-scans += (count entities))))
       (query-stats-observe-source-operator! stats)
@@ -16418,29 +16449,28 @@
       (let [schemas (tuple-schemas-containing db data.a)]
         (defer (delete schemas))
         (for [schema schemas]
-          (defer (delete schema.attrs))
-          (when (not (schema-unique-identity? db schema.attr))
-            (continue))
-          (when (tuple-schema-already-seen? (slice seen 0) schema.attr)
-            (continue))
-          (arr.push! seen schema.attr)
-          (let [items (make [dynamic]Value 0 (count schema.attrs))
-                complete true]
-            (for [component schema.attrs]
-              (let [[value value-ok] (tempid-tuple-component-value db tx-data tempid component)]
-                (if value-ok
-                  (arr.push! items value)
-                  (set! complete false))))
-            (when complete
-              (let [tuple-value (value-vector (slice items 0))
-                    [entity entity-ok] (resolve-lookup-ref db schema.attr tuple-value)]
-                (when entity-ok
-                  (when (and has-found (not (= found entity)))
-                    (delete items)
-                    (return found false true))
-                  (set! found entity)
-                  (set! has-found true))))
-            (delete items)))))
+          (when (and (schema-unique-identity? db schema.attr)
+                     (not (tuple-schema-already-seen? (slice seen 0) schema.attr)))
+            (arr.push! seen schema.attr)
+            (let [items (make [dynamic]Value 0 (count schema.attrs))
+                  complete true]
+              (for [component schema.attrs]
+                (let [[value value-ok] (tempid-tuple-component-value db tx-data tempid component)]
+                  (if value-ok
+                    (arr.push! items value)
+                    (set! complete false))))
+              (when complete
+                (let [tuple-value (value-vector (slice items 0))
+                      [entity entity-ok] (resolve-lookup-ref db schema.attr tuple-value)]
+                  (when entity-ok
+                    (when (and has-found (not (= found entity)))
+                      (delete items)
+                      (delete schema.attrs)
+                      (return found false true))
+                    (set! found entity)
+                    (set! has-found true))))
+              (delete items)))
+          (delete schema.attrs))))
     (return found has-found false)))
 
 (defn tempid-upsert-entity [db: DB, tx-data: []Tx-Data, tempid: string] -> [e: u64, ok: bool, conflict: bool]
@@ -24842,7 +24872,7 @@
 (defn delete-typed-aggregate-accumulator [state: Typed-Aggregate-Accumulator]
   (delete state.aggregate-values)
   (delete state.distinct-values)
-  (delete state.seen-keys)
+  (delete-owned-string-set state.seen-keys)
   (delete-result-rows-owned-values state.seen-rows))
 
 (defn delete-typed-aggregate-accumulators [states: [dynamic]Typed-Aggregate-Accumulator]
@@ -24854,7 +24884,9 @@
   (let [[key key-ok] (row-values-dedupe-key values)]
     (if key-ok
       (if (set.contains? state^.seen-keys key)
-        true
+        (do
+          (delete key)
+          true)
         (do
           (set.add! state^.seen-keys key)
           false))
@@ -25607,7 +25639,7 @@
         seen-true false
         seen-false false
         trust-unique-bindings (query-can-trust-unique-bindings? query)]
-    (defer (delete seen))
+    (defer (delete-owned-string-set seen))
     (defer (delete seen-entities))
     (defer (delete seen-ints))
     (defer (delete seen-strings))
@@ -34903,7 +34935,8 @@
                 (when (not advance-ok)
                   (delete-source-index-datom-stream stream)
                   (delete-result-rows-owned-values rows)
-                  (return (result-set-error advance-error))))))))
+                  (return (result-set-error advance-error)))))
+            (delete-source-index-datom-stream stream))))
       (if (db-read-source-has-overlay? source)
         (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source projection.attr)]
           (when (not datoms-ok)
@@ -34920,7 +34953,8 @@
               (when (not advance-ok)
                 (delete-source-index-datom-stream stream)
                 (delete-result-rows-owned-values rows)
-                (return (result-set-error advance-error))))))))
+                (return (result-set-error advance-error)))))
+          (delete-source-index-datom-stream stream))))
     (result-set-ok rows)))
 
 (defn append-db-read-source-filtered-entity-attr-value-projection-row! [rows: ^[dynamic]Result-Row, query: Query, projection: Entity-Attr-Value-Projection, entity: u64, source-value: Value]
@@ -36256,6 +36290,7 @@
             (when (not advance-ok)
               (delete-source-index-datom-stream stream)
               (return false advance-error))))
+        (delete-source-index-datom-stream stream)
         (return true "")))
     (let [[projected-value projected-ok projected-error] (db-read-source-cardinality-one-value-fast-all-current source entity projection.value-attr)]
       (when (not (= projected-error ""))
@@ -36409,7 +36444,8 @@
                 (when (not advance-ok)
                   (delete-source-index-datom-stream stream)
                   (delete-result-rows-owned-values rows)
-                  (return (result-set-error advance-error))))))))
+                  (return (result-set-error advance-error)))))
+            (delete-source-index-datom-stream stream))))
       (if (db-read-source-has-overlay? source)
         (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source projection.attr)]
           (when (not datoms-ok)
@@ -36428,7 +36464,8 @@
               (when (not advance-ok)
                 (delete-source-index-datom-stream stream)
                 (delete-result-rows-owned-values rows)
-                (return (result-set-error advance-error))))))))
+                (return (result-set-error advance-error)))))
+          (delete-source-index-datom-stream stream))))
     (result-set-ok rows)))
 
 (defn source-entity-pull-datom-matches-filter? [projection: Source-Entity-Pull-Projection, datom: Datom] -> bool
@@ -36659,6 +36696,7 @@
           (delete-result-rows-owned-values rows)
           (delete-source-index-datom-stream stream)
           (return (result-set-error load-error)))))
+    (delete-source-index-datom-stream stream)
     (result-set-ok rows)))
 
 (defn db-read-source-fixed-entity-attr-value-projection-value [projection: Source-Fixed-Entity-Attr-Value-Projection, datom: Datom, name: string] -> Value
@@ -36695,6 +36733,7 @@
           (delete-result-rows-owned-values rows)
           (delete-source-index-datom-stream stream)
           (return (result-set-error load-error)))))
+    (delete-source-index-datom-stream stream)
     (result-set-ok rows)))
 
 (defn append-db-read-source-fixed-entity-two-attr-projection-row! [rows: ^[dynamic]Result-Row, query: Query, projection: Source-Fixed-Entity-Two-Attr-Projection, first-value-source: Value, second-value-source: Value]
@@ -36725,6 +36764,7 @@
             (delete-source-index-datom-stream second-stream)
             (delete-source-index-datom-stream first-stream)
             (return (result-set-error second-load-error)))))
+      (delete-source-index-datom-stream second-stream)
       )
       (set! first-stream.index (+ first-stream.index 1))
       (let [[first-load-ok first-load-error] (load-source-index-datom-stream-current! source (addr first-stream))]
@@ -36732,6 +36772,7 @@
           (delete-result-rows-owned-values rows)
           (delete-source-index-datom-stream first-stream)
           (return (result-set-error first-load-error)))))
+    (delete-source-index-datom-stream first-stream)
     (result-set-ok rows)))
 
 (defn q-db-read-source-fixed-entity-ref-attr-projection [source: DB-Read-Source, projection: Source-Fixed-Entity-Ref-Attr-Projection] -> Result-Set
@@ -37170,6 +37211,7 @@
         values ([]Value [out-first out-second out-third])
         [key key-ok] (row-values-dedupe-key values)]
     (when (and key-ok (set.contains? seen^ key))
+      (delete key)
       (return true))
     (when key-ok
       (set.add! seen^ key))
@@ -37198,6 +37240,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn append-db-read-source-multi-hop-ref-chain-hop2-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, hop1-entity: u64, first-value: Value, filter-value: Value] -> [ok: bool, error: string]
@@ -37215,6 +37258,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn append-db-read-source-multi-hop-ref-chain-hop1-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, first-entity: u64, first-value: Value, filter-value: Value] -> [ok: bool, error: string]
@@ -37232,6 +37276,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn append-db-read-source-multi-hop-ref-chain-first-value-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, first-entity: u64, filter-value: Value] -> [ok: bool, error: string]
@@ -37248,6 +37293,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn append-db-read-source-multi-hop-ref-chain-first-entity-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, first-entity: u64] -> [ok: bool, error: string]
@@ -37266,6 +37312,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn delete-source-multi-hop-ref-chain-links [links: [dynamic]Source-Multi-Hop-Ref-Chain-Link]
@@ -37926,8 +37973,9 @@
     (return (query-relation-empty) false ""))
   (let [attrs (arr.into [dynamic]string (slice query.find 0))
         builder (query-relation-builder (slice attrs 0))
-        seen (set.empty string) :defer
+        seen (set.empty string)
         [anchor-value anchor-value-ok anchor-value-error] (db-read-source-multi-hop-ref-chain-anchor-value source projection inputs)]
+    (defer (delete-owned-string-set seen))
     (when (not anchor-value-ok)
       (delete attrs)
       (delete-query-relation-builder builder)
@@ -38032,8 +38080,9 @@
     (return (query-relation-empty) false ""))
   (let [attrs (arr.into [dynamic]string (slice query.find 0))
         builder (query-relation-builder (slice attrs 0))
-        seen (set.empty string) :defer
+        seen (set.empty string)
         [anchor-value anchor-value-ok anchor-value-error] (db-read-source-multi-hop-ref-chain-anchor-value source projection inputs)]
+    (defer (delete-owned-string-set seen))
     (when (not anchor-value-ok)
       (delete attrs)
       (delete-query-relation-builder builder)
@@ -38192,8 +38241,9 @@
     (return (query-relation-empty) false ""))
   (let [attrs (arr.into [dynamic]string (slice query.find 0))
         builder (query-relation-builder (slice attrs 0))
-        seen (set.empty string) :defer
+        seen (set.empty string)
         [anchor-value anchor-value-ok anchor-value-error] (db-read-source-multi-hop-ref-chain-anchor-value source projection inputs)]
+    (defer (delete-owned-string-set seen))
     (when (not anchor-value-ok)
       (delete attrs)
       (delete-query-relation-builder builder)
@@ -38446,6 +38496,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn append-db-read-source-anchor-two-branch-hop-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Anchor-Two-Branch-Join-Projection, direct-items: []Source-Anchor-Direct-Entity-Value, direct-entity-heads: (map u64 int), first-entity: u64, first-value: Value, filter-value: Value] -> [ok: bool, error: string]
@@ -38463,6 +38514,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn append-db-read-source-anchor-two-branch-first-value-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Anchor-Two-Branch-Join-Projection, direct-items: []Source-Anchor-Direct-Entity-Value, direct-entity-heads: (map u64 int), first-entity: u64, filter-value: Value] -> [ok: bool, error: string]
@@ -38479,6 +38531,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn append-db-read-source-anchor-two-branch-first-entity-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Anchor-Two-Branch-Join-Projection, direct-items: []Source-Anchor-Direct-Entity-Value, direct-entity-heads: (map u64 int), first-entity: u64] -> [ok: bool, error: string]
@@ -38497,6 +38550,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn q-db-read-source-anchor-two-branch-join-projection [source: DB-Read-Source, query: Query, projection: Source-Anchor-Two-Branch-Join-Projection, inputs: []Query-Input] -> Result-Set
@@ -40017,6 +40071,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn append-distinct-source-entity-attr-value-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, entity: u64, attr: string] -> [ok: bool, error: string]
@@ -40031,6 +40086,7 @@
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
+    (delete-source-index-datom-stream stream)
     (return true "")))
 
 (defn source-index-datom-streams-active? [streams: []Source-Index-Datom-Stream] -> bool

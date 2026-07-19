@@ -100,7 +100,7 @@
     (= marker ":syms") (kdata.from-symbol key)
     :else (kdata.from-string key)))
 
-(defn query-data-return-map-marker [query: Data] -> string
+(defn query-data-return-map-marker [query: Data] -> string #borrowed
   (if (data.map? query)
     (cond
       (contains? query :keys) ":keys"
@@ -112,7 +112,9 @@
         (for [i (arr.range 0 (count query))]
           (let [item (kdata.nth query i)]
             (when (and (data.keyword? item)
-                       (contains? [":keys" ":strs" ":syms"] (data.keyword item)))
+                       (or (= (data.keyword item) ":keys")
+                           (= (data.keyword item) ":strs")
+                           (= (data.keyword item) ":syms")))
               (return (data.keyword item)))))
         "")
       "")))

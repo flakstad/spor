@@ -404,8 +404,8 @@
 (def- q-input
   (overload q-input-data q-input-string q-input-int q-input-i64 q-input-f64 q-input-bool q-input-value q-input-keyword))
 
-(defn- q-data-input-data [value: Data] -> Data #borrowed
-  value)
+(defn- q-data-input-data [value: Data] -> Data
+  (kdata.retain value))
 
 (defn- q-data-input-string [value: string] -> Data
   (kdata.from-string value))
@@ -611,12 +611,14 @@
             q-data-source-keyword))
 
 (defn- q-data-with-first-db [query: Data, source: DB, first: Data, rest: []vev.Query-Input] -> Data
+  (defer (kdata.release first))
   (let [out: Data
         (with-db-lock Data source
           (data-result-value source query (q-result-first-data query source first rest)))]
     out))
 
 (defn- q-data-with-first-log [query: Data, source: Log, first: Data, rest: []vev.Query-Input] -> Data
+  (defer (kdata.release first))
   (when (> (count rest) 0)
     (panic "log queries currently accept one value input"))
   (log-query-data query source first true))
