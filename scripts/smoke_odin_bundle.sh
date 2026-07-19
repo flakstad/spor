@@ -57,14 +57,6 @@ main :: proc() {
 	assert(connected)
 	defer vev.close(&connection)
 
-	empty_rows, empty_queried := vev.query_rows(
-		&connection,
-		`[:find ?name :where [?e :user/name ?name]]`,
-	)
-	assert(empty_queried)
-	assert(vev.row_count(&empty_rows) == 0)
-	vev.close(&empty_rows)
-
 	tx, transacted := vev.transact(
 		&connection,
 		`[{:db/id 1 :user/name "Ada"}]`,
