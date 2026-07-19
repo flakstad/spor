@@ -440,9 +440,10 @@ Current smoke clients:
 - Node/TypeScript: `clients/node`
 - Odin: `clients/odin`
 
-These are not polished published packages yet. They are kept under `clients/*`
-so the public host-language story can evolve in place while the engine and ABI
-stabilize.
+Python, Rust, Go, and Node remain source-oriented clients while their public
+package shapes stabilize. C is distributed as the platform native SDK, and
+Odin is distributed as a platform vendor bundle containing both its package and
+native engine.
 
 ## Current Limitations
 

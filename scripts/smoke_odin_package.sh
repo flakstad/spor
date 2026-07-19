@@ -29,9 +29,15 @@ cleanup() {
 trap cleanup EXIT
 
 odin check "$ROOT/clients/odin/vev" -no-entry-point
+mkdir -p "$TMP_DIR/vendor/vev/lib"
+cp "$ROOT/clients/odin/vev/doc.odin" "$TMP_DIR/vendor/vev/doc.odin"
+cp "$ROOT/clients/odin/vev/vev.odin" "$TMP_DIR/vendor/vev/vev.odin"
+cp "$ROOT/build/lib/$LIB_NAME" "$TMP_DIR/vendor/vev/lib/$LIB_NAME"
 odin build "$ROOT/clients/odin/example" -out:"$TMP_DIR/vev_odin_example$EXE_SUFFIX"
 PATH="$ROOT/build/lib:$PATH" \
-  "$TMP_DIR/vev_odin_example$EXE_SUFFIX" "$ROOT/build/lib/$LIB_NAME" >/dev/null
+  "$TMP_DIR/vev_odin_example$EXE_SUFFIX" \
+  "$TMP_DIR/vendor/vev" \
+  "$TMP_DIR/example.vev" >/dev/null
 
 odin build "$ROOT/clients/odin" -file -out:"$TMP_DIR/vev_odin_raw_smoke$EXE_SUFFIX"
 PATH="$ROOT/build/lib:$PATH" \

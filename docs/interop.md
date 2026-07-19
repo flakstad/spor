@@ -49,17 +49,18 @@ clients:
 - Node package name, if published: `@vevdb/vev`
 - Python distribution and import name, if published: `vevdb`
 - C SDK: `include/vev.h`, `libvev`, and pkg-config package `vev`
-- Odin package: `clients/odin` currently has a dynamic C ABI smoke wrapper; a
-  fuller Odin package should grow from that shape, not generated Odin
+- Odin package: platform-specific `vev-odin` vendor bundles contain the
+  handwritten package and matching native engine
 
 The first packaging pass still supports explicit local library paths and
-environment overrides, but several host package shapes now have concrete local
-proofs.
+environment overrides, while the C SDK, JVM artifacts, CLI, and Odin vendor
+bundle have release-shaped external-consumer proofs.
 
-The C SDK path is `include/vev.h`, `libvev`, and `build/lib/pkgconfig/vev.pc`.
-`scripts/smoke_c_package.sh` verifies that shape from a temporary C program,
-including in-memory query and durable open/write/reopen/query through
-`vev_connect`.
+The C SDK release is `vev-native-<platform>-<version>.zip`. It contains
+`include/vev.h`, `libvev`, relocatable `pkg-config` metadata, and a buildable
+basic example. `scripts/smoke_native_bundle.sh` extracts the archive and
+verifies both a generated external consumer and the packaged example,
+including durable open/write/reopen/query through `vev_connect`.
 
 The CLI path builds `build/vevdb` from `src/vev_cli/main.kvist`. It exposes
 `--version` plus durable `info`, `transact`, `query`, and `pull` commands over
@@ -129,12 +130,13 @@ The Rust path is a local Cargo package under `clients/rust`, already named
 one package; before publication it should likely split into `vevdb-sys` for raw
 C ABI bindings and `vevdb` for the safe wrapper.
 
-Odin consumption should use the C ABI through a small wrapper for now.
-`clients/odin/smoke.odin` proves the dynamic-loading path against the platform
-native library. VevDB is implemented in Kvist and lowers through Odin, but
-generated Odin is build output, not the public Odin package surface.
-`scripts/smoke_odin_package.sh` now verifies this focused Odin wrapper path
-from a temporary build output.
+Odin consumption uses the handwritten `vev` package rather than generated
+engine output. Each `vev-odin-<platform>-<version>.zip` release asset contains
+that package plus the matching native engine under `vev/lib`. Applications
+vendor the directory and call `load_bundled`; durable connections, transactions,
+and typed query-row traversal are available without a separate native install.
+`scripts/smoke_odin_bundle.sh` builds and runs a fresh external consumer using
+only the extracted bundle.
 
 ## Native API
 

@@ -220,31 +220,32 @@ try {
 
 ### Odin
 
-Odin can bind the C ABI directly:
+Download the platform-specific `vev-odin-<platform>-<version>.zip` release
+asset, unpack its `vev` directory under `vendor/`, and import the package:
 
 ```odin
 import "core:fmt"
-
-foreign import vev "system:vev"
-
-foreign vev {
-    vev_conn_open_memory :: proc "c" () -> rawptr ---
-    vev_conn_close       :: proc "c" (conn: rawptr) ---
-    vev_transact_edn     :: proc "c" (conn: rawptr, tx: cstring) -> cstring ---
-    vev_query_edn        :: proc "c" (conn: rawptr, query: cstring) -> cstring ---
-    vev_string_free      :: proc "c" (text: cstring) ---
-}
+import vev "vendor/vev"
 
 main :: proc() {
-    conn := vev_conn_open_memory()
-    defer vev_conn_close(conn)
-    vev_string_free(vev_transact_edn(
-        conn, `[{:db/id 1 :user/name "Ada"}]`))
+    library, loaded := vev.load_bundled("vendor/vev")
+    assert(loaded)
+    defer vev.unload(&library)
 
-    rows := vev_query_edn(
-        conn, `[:find ?name :where [?e :user/name ?name]]`)
-    defer vev_string_free(rows)
-    fmt.println(string(rows))
+    conn, connected := vev.connect(&library, "app.vev")
+    assert(connected)
+    defer vev.close(&conn)
+
+    tx, transacted := vev.transact(
+        &conn, `[{:db/id 1 :user/name "Ada"}]`)
+    assert(transacted)
+    defer delete(tx)
+
+    rows, queried := vev.query_rows(
+        &conn, `[:find ?name :where [?e :user/name ?name]]`)
+    assert(queried)
+    defer vev.close(&rows)
+    fmt.println(vev.row_count(&rows))
 }
 ```
 

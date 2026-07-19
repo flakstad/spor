@@ -8,9 +8,10 @@ The package dynamically loads the VevDB C ABI, checks `VEV_ABI_VERSION`, and
 provides explicit Odin ownership around the native library and connections.
 SQLite with FTS5 is included in the native VevDB library.
 
-Odin intentionally has no official package manager. Vendor the `vev` directory
-in your source tree or pin this repository as a Git submodule. A project with
-this layout:
+Odin intentionally has no official package manager. Download the
+`vev-odin-<platform>-<version>.zip` asset from a VevDB release and unpack its
+`vev` directory under `vendor/`. The archive pins the Odin source and matching
+native engine as one dependency:
 
 ```text
 my-app/
@@ -19,6 +20,10 @@ my-app/
     vev/
       doc.odin
       vev.odin
+      README.md
+      LICENSE
+      lib/
+        libvev.dylib | libvev.so | vev.dll
 ```
 
 can use:
@@ -26,7 +31,7 @@ can use:
 ```odin
 import vev "vendor/vev"
 
-library, ok := vev.load("/path/to/libvev")
+library, ok := vev.load_bundled("vendor/vev")
 assert(ok)
 defer vev.unload(&library)
 
@@ -54,19 +59,45 @@ odin build . -collection:deps=vendor
 
 and import it as `import vev "deps:vev"`.
 
-The complete consumer example is in [`example`](example). Run it from the
-repository root after building the native library:
+Durable stores are first-class and expose typed result traversal:
 
-```sh
-scripts/build_c_abi.sh
-odin run clients/odin/example -- build/lib/libvev.dylib
+```odin
+connection, ok := vev.connect(&library, "app.vev")
+assert(ok)
+defer vev.close(&connection)
+
+tx, ok := vev.transact(&connection, `[{:db/id 1 :user/name "Ada"}]`)
+assert(ok)
+defer delete(tx)
+
+rows, ok := vev.query_rows(
+	&connection,
+	`[:find ?name :where [?e :user/name ?name]]`,
+)
+assert(ok)
+defer vev.close(&rows)
+
+name, ok := vev.value_edn(&rows, 0, 0)
+assert(ok)
+defer delete(name)
 ```
 
-Use `libvev.so` on Linux and `vev.dll` on Windows. Release native SDK archives
-contain the matching library, C header, `pkg-config` metadata, license, and no
-external SQLite runtime dependency.
+Each `query_rows` call takes a fresh immutable DB snapshot. An application,
+REPL, or VevDB CLI can therefore share the same durable store, while retained
+result handles continue to represent the query basis they captured.
 
-The release-shaped package proof checks the package, runs the consumer example,
+The complete consumer example is in [`example`](example). Run it from the
+repository root after packaging the vendor bundle:
+
+```sh
+scripts/package_odin_bundle.sh
+scripts/smoke_odin_bundle.sh
+```
+
+SQLite is included in the bundled native engine; users do not install SQLite
+or configure a native library path.
+
+The local package proof checks the source package, runs the consumer example,
 and also runs the lower-level ABI coverage program:
 
 ```sh

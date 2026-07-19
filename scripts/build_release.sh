@@ -27,6 +27,8 @@ release_step cli "$ROOT/scripts/package_cli.sh" >/dev/null
 release_step cli-smoke "$ROOT/scripts/smoke_cli_package.sh" >/dev/null
 release_step native-bundle "$ROOT/scripts/package_native_bundle.sh" >/dev/null
 release_step native-bundle-smoke "$ROOT/scripts/smoke_native_bundle.sh" >/dev/null
+release_step odin-bundle "$ROOT/scripts/package_odin_bundle.sh" >/dev/null
+release_step odin-bundle-smoke "$ROOT/scripts/smoke_odin_bundle.sh" >/dev/null
 release_step source-archives "$ROOT/scripts/package_source_archives.sh" >/dev/null
 release_step jvm-packages "$ROOT/scripts/package_jvm.sh" >/dev/null
 release_step jvm-reproducibility "$ROOT/scripts/verify_jvm_reproducibility.sh" >/dev/null
