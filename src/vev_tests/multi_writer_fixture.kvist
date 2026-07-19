@@ -1,0 +1,43 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import fmt "core:fmt")
+(import os "core:os")
+(import d "../vev_app")
+
+(defn fail! [message: string]
+  (fmt.eprintln message)
+  (os.exit 1))
+
+(defn main []
+  (when (< (count os.args) 2)
+    (fail! "usage: multi-writer-fixture <path>"))
+  (let [path os.args[1]]
+    (let [seed (d.connect path)]
+      (d.transact seed
+        '[[:db/add 10 :db/ident :entity/value]
+          [:db/add 10 :db/valueType :db.type/long]
+          [:db/add 10 :db/cardinality :db.cardinality/one]
+          {:db/id 1 :entity/value 0}])
+      (d.close seed))
+    (let [first (d.connect path)]
+      (let [second (d.connect path)]
+        (d.transact first '[[:db/add 1 :entity/value 1]])
+        (d.transact second '[[:db/add 1 :entity/value 2]])
+        (d.transact first '[[:db/add 1 :entity/value 3]])
+        (d.transact second '[[:db/add 1 :entity/value 4]])
+        (d.close second))
+      (d.close first))
+    (let [reopened (d.connect path)]
+      (let [db (d.db reopened)
+            result (d.q-text "[:find ?value . :where [1 :entity/value ?value]]" db)]
+        (when (not (and (= (count result.rows) 1)
+                        (= (count result.rows[0].values) 1)
+                        (= result.rows[0].values[0].kind .Int)
+                        (= result.rows[0].values[0].int-value 4)))
+          (fail! "expected final value 4"))
+        (d.close result)
+        (d.close db))
+      (d.close reopened))))

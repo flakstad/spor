@@ -4136,10 +4136,12 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (when (or (= (rawptr conn) nil) (not (abi-sqlite-conn-ok (rawptr conn))))
     (return (Vev-DB nil)))
   (let [store (sqlite-conn-ptr conn)]
-    (let [[snapshot snapshot-ok _] (vev.sqlite-store-db store)]
+    (let [[snapshot snapshot-ok snapshot-error] (vev.sqlite-store-db store)]
       (if snapshot-ok
         (Vev-DB (abi-alloc-db snapshot))
-        (Vev-DB nil)))))
+        (if (= snapshot-error "sqlite DB has no Vev index roots")
+          (Vev-DB (abi-alloc-db (vev.empty-shared-store-db-for-sqlite-bootstrap)))
+          (Vev-DB nil))))))
 
 @export
 (defn vev_sqlite_conn_listen_tx_report :abi "c" [conn: Vev-SQLite-Conn, name: cstring, callback: rawptr, user: rawptr] -> bool

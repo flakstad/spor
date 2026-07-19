@@ -323,6 +323,22 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     }
     vev_string_free(info);
 
+    db = vev_connection_db(durable);
+    if (db == NULL) {
+        fprintf(stderr, "failed to take a DB value from an empty durable store\n");
+        goto cleanup;
+    }
+    result = vev_query_db_prepared_result_with_inputs(db, all_emails, "[]");
+    int empty_rows = result_row_count_or_error("sqlite-empty", result);
+    if (empty_rows != 0) {
+        fprintf(stderr, "unexpected empty durable row count\n");
+        goto cleanup;
+    }
+    vev_result_free(result);
+    result = NULL;
+    vev_db_release(db);
+    db = NULL;
+
     report = vev_connection_transact_edn_report(
         durable,
         "[{:db/id 1 :user/name \"Durable Ada\" :user/email \"durable-ada@example.com\"}]");

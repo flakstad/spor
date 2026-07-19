@@ -5,13 +5,7 @@
 
 (import fmt "core:fmt")
 (import os "core:os")
-(import data "kvist:data")
 (import d "../vev_app")
-
-(def state-query
-  '[:find ?kind .
-    :where [?condition :ro/id "condition-main"]
-           [?condition :attention/kind ?kind]])
 
 (defn fail! [message: string]
   (fmt.eprintln message)
@@ -19,7 +13,7 @@
 
 (defn main []
   (when (< (count os.args) 3)
-    (fail! "usage: cross-process-fixture <init|write|read> <path>"))
+    (fail! "usage: cross-process-fixture <init|write|read|write-loop|watch|write-a|write-b|verify-writers> <path> [ready-path]"))
   (let [mode os.args[1]
         path os.args[2]
         conn (d.connect path)]
@@ -38,11 +32,17 @@
              [:db/add 4 :db/ident :attention/party]
              [:db/add 4 :db/valueType :db.type/string]
              [:db/add 5 :db/ident :attention/not-before]
-             [:db/add 5 :db/valueType :db.type/instant]])
+             [:db/add 5 :db/valueType :db.type/instant]
+             [:db/add 6 :db/ident :fixture/counter]
+             [:db/add 6 :db/valueType :db.type/long]
+             [:db/add 6 :db/cardinality :db.cardinality/one]
+             [:db/add 7 :db/ident :fixture/worker]
+             [:db/add 7 :db/valueType :db.type/long]])
           (d.transact conn
             [{:db/id 120
               :ro/id "condition-main"
-              :attention/kind :attention.kind/action}])
+              :attention/kind :attention.kind/action}
+             {:db/id 200 :fixture/counter 0}])
           (d.transact conn [{:db/id 113 :fixture/value 1}]))
       (= mode "write")
         (d.transact conn
@@ -52,10 +52,72 @@
            [:db.fn/retractAttribute [:ro/id "condition-main"] :attention/not-before]])
       (= mode "read")
         (let [db (d.db conn)
-              value: Data (d.q state-query db)]
+              result (d.q-text
+                       "[:find ?kind .
+                         :where [?condition :ro/id \"condition-main\"]
+                                [?condition :attention/kind ?kind]]"
+                       db)]
           (defer (d.close db))
-          (when (not (and (data.keyword? value)
-                          (= (data.keyword value) ":attention.kind/review")))
-            (fail! (fmt.tprintf "expected review, got %s" (data.describe value)))))
+          (defer (d.close result))
+          (when (not (and (= (count result.rows) 1)
+                          (= (count result.rows[0].values) 1)
+                          (= result.rows[0].values[0].kind .Keyword)
+                          (= result.rows[0].values[0].text ":attention.kind/review")))
+            (fail! "expected review")))
+      (= mode "write-loop")
+        (let [value 1]
+          (while (<= value 50)
+            (d.transact conn [[:db/add 200 :fixture/counter value]])
+            (inc! value)))
+      (= mode "write-a")
+        (let [offset 1]
+          (while (<= offset 30)
+            (d.transact conn [[:db/add (+ 1000 offset) :fixture/worker 1]])
+            (inc! offset)))
+      (= mode "write-b")
+        (let [offset 1]
+          (while (<= offset 30)
+            (d.transact conn [[:db/add (+ 2000 offset) :fixture/worker 2]])
+            (inc! offset)))
+      (= mode "verify-writers")
+        (let [db (d.db conn)
+              result (d.q-text
+                       "[:find (count ?entity) . :where [?entity :fixture/worker]]"
+                       db)]
+          (defer (d.close db))
+          (defer (d.close result))
+          (when (not (and (= (count result.rows) 1)
+                          (= (count result.rows[0].values) 1)
+                          (= result.rows[0].values[0].kind .Int)
+                          (= result.rows[0].values[0].int-value 60)))
+            (fail! "expected 60 concurrent writer entities")))
+      (= mode "watch")
+        (do
+          (when (< (count os.args) 4)
+            (fail! "watch mode requires a ready-path"))
+          (let [ready-path os.args[3]
+                write-error (os.write_entire_file ready-path "ready")]
+            (when (!= write-error nil)
+              (fail! "failed to write reader ready marker")))
+          (let [last-value: i64 0
+                iterations 0]
+            (while (and (< last-value 50) (< iterations 100000))
+              (let [db (d.db conn)
+                    result (d.q-text
+                             "[:find ?value . :where [200 :fixture/counter ?value]]"
+                             db)]
+                (defer (d.close db))
+                (defer (d.close result))
+                (when (not (and (= (count result.rows) 1)
+                                (= (count result.rows[0].values) 1)
+                                (= result.rows[0].values[0].kind .Int)))
+                  (fail! "expected counter integer"))
+                (let [current result.rows[0].values[0].int-value]
+                  (when (< current last-value)
+                    (fail! (fmt.tprintf "counter moved backwards from %d to %d" last-value current)))
+                  (set! last-value current)))
+              (inc! iterations))
+            (when (not (= last-value 50))
+              (fail! (fmt.tprintf "reader did not observe final counter value, got %d" last-value)))))
       :else
         (fail! "unknown fixture mode"))))

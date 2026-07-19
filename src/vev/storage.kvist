@@ -9013,6 +9013,36 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (when owns-tx
     (sqlite-rollback-raw handle)))
 
+(def sqlite-write-basis-changed-error "SQLite write basis changed while waiting for the writer lock")
+
+(defn sqlite-write-source-current? [handle: rawptr, source: DB-Read-Source] -> [current: bool, ok: bool, error: string]
+  (case source.kind
+    .SQLite-Snapshot
+      (let [[latest latest-ok latest-error] (sqlite-latest-index-root-basis-raw handle)]
+        (if latest-ok
+          (return (= latest source.sqlite-snapshot^.basis-tx) true "")
+          (return false false latest-error)))
+    .Shared-Resident-Datoms-And-Indexes
+      (let [[_ latest-ok latest-error] (sqlite-latest-index-root-basis-raw handle)]
+        (if latest-ok
+          (return false true "")
+          (if (= latest-error "sqlite DB has no Vev index roots")
+            (return true true "")
+            (return false false latest-error))))
+    .SQLite-Tx-Ops-Overlay
+      (sqlite-write-source-current? handle source.overlay-base^)
+    .SQLite-Datom-Overlay
+      (sqlite-write-source-current? handle source.overlay-base^)
+    .SQLite-Datom-Log-Overlay
+      (sqlite-write-source-current? handle source.overlay-base^)
+    .Shared-Tx-Ops-Overlay
+      (sqlite-write-source-current? handle source.overlay-base^)
+    .Shared-Datom-Overlay
+      (sqlite-write-source-current? handle source.overlay-base^)
+    .Shared-Datom-Log-Overlay
+      (sqlite-write-source-current? handle source.overlay-base^)
+     (return false false "SQLite durable write requires a SQLite or empty shared source")))
+
 (defn append-source-direct-sqlite-conn-from-source-plan-published-mode [store: ^SQLite-Conn, source: DB-Read-Source, tx: u64, tx-data: []Datom, tx-meta: []Tx-Meta, plan: SQLite-Durable-Append-Plan, profile: ^SQLite-Direct-Write-Profile, owns-tx: bool] -> [published: SQLite-Durable-Published-Root, ok: bool, error: string]
   (let [handle store^.handle]
     (when owns-tx
@@ -9021,6 +9051,13 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (set! profile^.append-begin-us (+ profile^.append-begin-us (sqlite-profile-elapsed-us begin-start)))
         (when (not begin-ok)
           (return (SQLite-Durable-Published-Root {}) false begin-error))))
+    (let [[source-current current-ok current-error] (sqlite-write-source-current? handle source)]
+      (when (not current-ok)
+        (sqlite-rollback-if-owned! handle owns-tx)
+        (return (SQLite-Durable-Published-Root {}) false current-error))
+      (when (not source-current)
+        (sqlite-rollback-if-owned! handle owns-tx)
+        (return (SQLite-Durable-Published-Root {}) false sqlite-write-basis-changed-error)))
     (let [tx-start (time.now)
           [write-stmts write-stmts-ok write-stmts-error] (sqlite-conn-direct-write-stmts store)]
       (when (not write-stmts-ok)
@@ -13832,7 +13869,36 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (transact-sqlite-store-report-direct-tx-data-with-before-mode store before tx-data owns-sqlite-tx)))
 
 (defn transact-sqlite-store-report-direct-tx-data [store: ^SQLite-Conn, tx-data: []Tx-Data] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
-  (transact-sqlite-store-report-direct-tx-data-mode store tx-data true))
+  (when store^.resident-loaded
+    (return (Store-Tx-Report {}) false true ""))
+  (let [[begin-ok begin-error] (sqlite-begin-immediate-raw store^.handle)]
+    (when (not begin-ok)
+      (return (Store-Tx-Report {}) false false begin-error)))
+  ;; The write lock must be held before selecting the transaction basis.
+  ;; Another connection may have committed since any of these caches were
+  ;; populated.
+  (sqlite-conn-invalidate-write-state-cache! store)
+  (sqlite-conn-invalidate-direct-attr-cache! store)
+  (sqlite-conn-invalidate-log-metadata-cache! store)
+  (sqlite-conn-invalidate-current-root-cache! store)
+  (let [[direct-report direct-used direct-ok direct-error]
+        (transact-sqlite-store-report-direct-tx-data-mode store tx-data false)]
+    (when (or (not direct-ok) (not direct-used))
+      (sqlite-rollback-raw store^.handle)
+      (return direct-report direct-used direct-ok direct-error))
+    (when (not direct-report.ok)
+      (sqlite-rollback-raw store^.handle)
+      (return direct-report true true ""))
+    (let [[commit-ok commit-error] (sqlite-commit-raw store^.handle)]
+      (when (not commit-ok)
+        (sqlite-rollback-raw store^.handle)
+        (sqlite-conn-invalidate-write-state-cache! store)
+        (sqlite-conn-invalidate-direct-attr-cache! store)
+        (sqlite-conn-invalidate-log-metadata-cache! store)
+        (sqlite-conn-invalidate-current-root-cache! store)
+        (delete-store-tx-report direct-report)
+        (return (Store-Tx-Report {}) false false commit-error))
+      (return direct-report true true ""))))
 
 (defn transact-sqlite-store-report-direct-tx-data-open-tx [store: ^SQLite-Conn, tx-data: []Tx-Data] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (transact-sqlite-store-report-direct-tx-data-mode store tx-data false))
@@ -15457,12 +15523,29 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (return (sqlite-commit-source-overlay-report-mode store overlay-report owns-sqlite-tx) true true ""))))
 
 (defn transact-sqlite-store-report-tx-data-with-source-string-fns [store: ^SQLite-Conn, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
-  (let [[direct-report direct-used direct-ok direct-error] (transact-sqlite-store-report-tx-data-with-source-string-fns-mode store tx-data registry true)]
-    (when direct-ok
-      (when direct-used
-        (return direct-report)))
-    (when (not direct-ok)
-      (return (failed-sqlite-store-tx-report store direct-error))))
+  (when store^.source-only
+    (return (failed-sqlite-store-tx-report store "SQLite source connection is read-only; open a writable SQLite connection to transact")))
+  (when (not store^.resident-loaded)
+    (let [attempt 0]
+      (while (< attempt 16)
+        (let [[direct-report direct-used direct-ok direct-error]
+              (transact-sqlite-store-report-tx-data-with-source-string-fns-mode store tx-data registry true)]
+          (when (not direct-ok)
+            (return (failed-sqlite-store-tx-report store direct-error)))
+          (when direct-used
+            (if (and (not direct-report.ok)
+                     (= direct-report.error sqlite-write-basis-changed-error))
+              (do
+                (delete-store-tx-report direct-report)
+                (sqlite-conn-invalidate-write-state-cache! store)
+                (sqlite-conn-invalidate-direct-attr-cache! store)
+                (sqlite-conn-invalidate-log-metadata-cache! store)
+                (sqlite-conn-invalidate-current-root-cache! store)
+                (inc! attempt)
+                (continue))
+              (return direct-report)))
+          (return (failed-sqlite-store-tx-report store "unsupported source-backed durable transaction shape"))))
+      (return (failed-sqlite-store-tx-report store "SQLite transaction basis kept changing while retrying transaction functions"))))
   (when (not store^.resident-loaded)
     (return (failed-sqlite-store-tx-report store "unsupported source-backed durable transaction shape")))
   (store-tx-report-from-temp-resident-report (transact-sqlite-tx-data store tx-data)))
@@ -15869,6 +15952,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (set! store^.direct-write-profile.append-begin-us (+ store^.direct-write-profile.append-begin-us (sqlite-profile-elapsed-us begin-start)))
       (when (not begin-ok)
         (return out-reports false begin-error)))
+    (sqlite-conn-invalidate-write-state-cache! store)
+    (sqlite-conn-invalidate-direct-attr-cache! store)
+    (sqlite-conn-invalidate-log-metadata-cache! store)
+    (sqlite-conn-invalidate-current-root-cache! store)
     (let [[group-state state-ok state-error] (sqlite-logical-group-state-open store)]
       (when (not state-ok)
         (rollback-sqlite-logical-group! store out-reports)
