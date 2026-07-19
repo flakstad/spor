@@ -14,6 +14,7 @@
   "usage:
   vevdb --version
   vevdb info <uri>
+  vevdb confirm-entity-partitions <uri>
   vevdb transact <uri> <tx-edn | @file>
   vevdb query <uri> <query-edn | @file> [inputs-edn]
   vevdb pull <uri> <pattern-edn | @file> <entity-id>
@@ -65,6 +66,16 @@ examples:
       (fmt.print tx-count)
       (fmt.println "}")
       0))))
+
+(defn command-confirm-entity-partitions [uri: string] -> int
+  (let [[ok error] (vev.confirm-sqlite-entity-partition-layout! uri)]
+    (if ok
+      (do
+        (fmt.println "confirmed separated entity and transaction partitions")
+        0)
+      (do
+        (cli.eprintln error)
+        1))))
 
 (defn command-transact [uri: string, tx-arg: string] -> int
   (let [[tx-text text-ok text-error] (read-text-arg tx-arg)]
@@ -167,6 +178,8 @@ examples:
         code (cond
                (and (= command "info") (= (len os.args) 3))
                  (command-info os.args[2])
+               (and (= command "confirm-entity-partitions") (= (len os.args) 3))
+                 (command-confirm-entity-partitions os.args[2])
                (and (= command "transact") (= (len os.args) 4))
                  (command-transact os.args[2] os.args[3])
                (and (= command "query") (= (len os.args) 4))

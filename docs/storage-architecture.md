@@ -17,6 +17,21 @@ SQLite stores:
 - persisted logical index chunks for EAVT, AEVT, AVET, and VAET
 - root rows that identify the visible chunk root for each index at a basis tx
 
+New stores also record `entity-partition-layout=separated-v1`. This is a
+compatibility boundary, not decorative metadata: ordinary entity allocation
+must remain below `tx-partition-base`, while transaction ids occupy that base
+and above. A non-empty store without the marker is refused because datoms alone
+cannot reliably prove that an allocator-era entity/transaction collision never
+occurred. After preserving a backup and auditing or migrating such a store, an
+operator may make the explicit assertion with:
+
+```sh
+vevdb confirm-entity-partitions app.vev
+```
+
+Empty legacy stores are marked automatically. Vev never silently stamps a
+non-empty legacy store during normal open.
+
 Normal durable store APIs now return `Store-DB` and `Store-Tx-Report` values.
 Those values are source/root-backed handles where possible, not rebuilt resident
 `DB` values. Reopened durable reads can open persisted root metadata, use

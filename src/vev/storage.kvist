@@ -312,6 +312,59 @@ INSERT OR REPLACE INTO vev_meta (key, value) VALUES ('storage-architecture', 've
 `
 
 SQLITE_SCHEMA_VERSION :: \"1\"
+SQLITE_ENTITY_PARTITION_LAYOUT :: \"separated-v1\"
+
+sqlite_entity_partition_layout_current :: proc(db: ^SQLite3) -> bool {
+    stmt: ^SQLite3_Stmt
+    sql := \"SELECT 1 FROM vev_meta WHERE key = 'entity-partition-layout' AND value = ? LIMIT 1\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return false
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return false
+    }
+    defer _ = sqlite3_finalize(stmt)
+    if sqlite_bind_text_borrowed(stmt, 1, SQLITE_ENTITY_PARTITION_LAYOUT) != SQLITE_OK {
+        return false
+    }
+    return sqlite3_step(stmt) == SQLITE_ROW
+}
+
+sqlite_mark_entity_partition_layout_current :: proc(db: ^SQLite3) -> (bool, string) {
+    return sqlite_exec_ok(
+        db,
+        \"INSERT OR REPLACE INTO vev_meta (key, value) VALUES ('entity-partition-layout', 'separated-v1')\",
+    )
+}
+
+sqlite_require_entity_partition_layout :: proc(db: ^SQLite3) -> (bool, string) {
+    if sqlite_entity_partition_layout_current(db) {
+        return true, \"\"
+    }
+    stmt: ^SQLite3_Stmt
+    sql := \"SELECT 1 FROM vev_datoms LIMIT 1\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return false, \"failed to allocate sqlite entity-partition probe\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return false, sqlite_error_text(db, \"sqlite prepare entity-partition probe failed\")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    rc := sqlite3_step(stmt)
+    if rc == SQLITE_DONE {
+        return sqlite_mark_entity_partition_layout_current(db)
+    }
+    if rc != SQLITE_ROW {
+        return false, sqlite_error_text(db, \"sqlite entity-partition probe failed\")
+    }
+    return false, strings.clone(
+        \"legacy Vev database has no separated entity-partition marker; keep a backup and explicitly confirm or migrate it before opening\",
+    )
+}
 
 sqlite_schema_version_current :: proc(db: ^SQLite3) -> bool {
     stmt: ^SQLite3_Stmt
@@ -358,6 +411,11 @@ sqlite_open_initialized :: proc(path: string) -> (^SQLite3, bool, string) {
         return nil, false, err
     }
     if sqlite_schema_version_current(db) {
+        partition_ok, partition_error := sqlite_require_entity_partition_layout(db)
+        if !partition_ok {
+            _ = sqlite3_close(db)
+            return nil, false, partition_error
+        }
         return db, true, \"\"
     }
     log_index_ok, log_index_error := sqlite_ensure_datom_log_index_column(db)
@@ -411,6 +469,11 @@ sqlite_open_initialized :: proc(path: string) -> (^SQLite3, bool, string) {
     if !version_ok {
         _ = sqlite3_close(db)
         return nil, false, version_error
+    }
+    partition_ok, partition_error := sqlite_require_entity_partition_layout(db)
+    if !partition_ok {
+        _ = sqlite3_close(db)
+        return nil, false, partition_error
     }
     return db, true, \"\"
 }
@@ -1002,6 +1065,50 @@ sqlite_meta_value_raw :: proc(handle: rawptr, key: string) -> (string, bool, str
         return \"\", false, \"sqlite metadata key was not found\"
     }
     return \"\", false, sqlite_error_text(db, \"sqlite metadata read failed\")
+}
+
+sqlite_confirm_entity_partition_layout_raw :: proc(path: string) -> (bool, string) {
+    db: ^SQLite3
+    path_c, path_c_ok := sqlite_cstring(path)
+    if !path_c_ok {
+        return false, \"failed to allocate sqlite path\"
+    }
+    defer delete(path_c)
+    if sqlite3_open(path_c, &db) != SQLITE_OK {
+        msg := sqlite_error_text(db, \"sqlite open failed\")
+        if db != nil {
+            _ = sqlite3_close(db)
+        }
+        return false, msg
+    }
+    defer _ = sqlite3_close(db)
+    format, format_ok, format_error := sqlite_meta_value_raw(rawptr(db), \"format\")
+    if !format_ok {
+        return false, format_error
+    }
+    defer delete(format)
+    if format != \"vev-snapshot-text-v1\" {
+        return false, strings.clone(\"database is not a supported Vev SQLite store\")
+    }
+    return sqlite_mark_entity_partition_layout_current(db)
+}
+
+sqlite_clear_entity_partition_layout_for_test_raw :: proc(path: string) -> (bool, string) {
+    db: ^SQLite3
+    path_c, path_c_ok := sqlite_cstring(path)
+    if !path_c_ok {
+        return false, \"failed to allocate sqlite path\"
+    }
+    defer delete(path_c)
+    if sqlite3_open(path_c, &db) != SQLITE_OK {
+        msg := sqlite_error_text(db, \"sqlite open failed\")
+        if db != nil {
+            _ = sqlite3_close(db)
+        }
+        return false, msg
+    }
+    defer _ = sqlite3_close(db)
+    return sqlite_exec_ok(db, \"DELETE FROM vev_meta WHERE key = 'entity-partition-layout'\")
 }
 
 sqlite_index_root_count_raw :: proc(handle: rawptr) -> (u64, bool, string) {
@@ -9465,6 +9572,24 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (let [[value value-ok value-error] (sqlite-meta-value-raw handle "storage-architecture")]
       (sqlite-close-live-raw handle)
       (return value value-ok value-error))))
+
+(defn sqlite-entity-partition-layout [path: string] -> [layout: string, ok: bool, error: string]
+  (let [[handle open-ok open-error] (sqlite-open-live-raw path)]
+    (when (not open-ok)
+      (return "" false open-error))
+    (let [[value value-ok value-error] (sqlite-meta-value-raw handle "entity-partition-layout")]
+      (sqlite-close-live-raw handle)
+      (return value value-ok value-error))))
+
+(defn confirm-sqlite-entity-partition-layout!
+  "Mark a backed-up legacy SQLite store as using separated entity and
+  transaction partitions. This explicit compatibility assertion is required
+  because allocator-era collisions cannot be inferred reliably from datoms."
+  [path: string] -> [ok: bool, error: string]
+  (sqlite-confirm-entity-partition-layout-raw path))
+
+(defn sqlite-clear-entity-partition-layout-for-test! [path: string] -> [ok: bool, error: string]
+  (sqlite-clear-entity-partition-layout-for-test-raw path))
 
 (defn sqlite-index-root-count [path: string] -> [root-count: u64, ok: bool, error: string]
   (let [[handle open-ok open-error] (sqlite-open-live-raw path)]

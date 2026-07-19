@@ -5,6 +5,7 @@
 
 (import fmt "core:fmt")
 (import os "core:os")
+(import strings "core:strings")
 (import t "kvist:test")
 (import vev "../vev")
 
@@ -15,6 +16,50 @@
     (os.remove wal-path)
     (os.remove shm-path))
   (return))
+
+(t.deftest sqlite-new-store-records-separated-entity-partitions
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.storage-entity-partitions-new.sqlite"]
+    (remove-sqlite-files path)
+    (defer (remove-sqlite-files path))
+    (let [[store opened-ok opened-error] (vev.open-store path)
+          [layout layout-ok layout-error] (vev.sqlite-entity-partition-layout path)]
+      (t.is opened-ok opened-error)
+      (t.is layout-ok layout-error)
+      (t.is (= layout "separated-v1"))
+      (delete layout)
+      (vev.close-store store))))
+
+(t.deftest sqlite-nonempty-unmarked-store-requires-explicit-confirmation
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.storage-entity-partitions-legacy.sqlite"]
+    (remove-sqlite-files path)
+    (defer (remove-sqlite-files path))
+    (let [[store opened-ok opened-error] (vev.open-store path)
+          report (vev.transact-store-report-text (addr store) "[{:db/id 120 :item/state :state/old}]")]
+      (t.is opened-ok opened-error)
+      (t.is report.ok report.error)
+      (vev.delete-store-tx-report report)
+      (vev.close-store store))
+    (let [[clear-ok clear-error] (vev.sqlite-clear-entity-partition-layout-for-test! path)]
+      (t.is clear-ok clear-error))
+    (let [[legacy legacy-ok legacy-error] (vev.open-store path)]
+      (t.is (not legacy-ok))
+      (t.is (strings.contains legacy-error "explicitly confirm or migrate"))
+      (vev.close-store legacy))
+    (let [[confirm-ok confirm-error] (vev.confirm-sqlite-entity-partition-layout! path)]
+      (t.is confirm-ok confirm-error))
+    (let [[reopened reopened-ok reopened-error] (vev.open-store path)
+          [snapshot snapshot-ok snapshot-error] (vev.store-db (addr reopened))
+          [source source-ok source-error] (vev.store-db-read-source (addr snapshot))
+          [next-entity next-ok next-error] (vev.db-read-source-next-entity-id source)]
+      (t.is reopened-ok reopened-error)
+      (t.is snapshot-ok snapshot-error)
+      (t.is source-ok source-error)
+      (t.is next-ok next-error)
+      (t.is (= next-entity 121))
+      (vev.close-store-db snapshot)
+      (vev.close-store reopened))))
 
 (t.deftest sqlite-reopen-derives-next-entity-from-eavt-entry
   (defer (free_all context.allocator))
