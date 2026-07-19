@@ -1,0 +1,223 @@
+name: Verify or publish Maven Central deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_id:
+        description: Central Portal deployment UUID
+        required: true
+        type: string
+      version:
+        description: Maven artifact version
+        required: true
+        type: string
+      publish:
+        description: Publish after staged consumer tests pass
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Validate and test staged coordinates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+
+      - name: Wait for Portal validation
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+        run: |
+          test -n "$CENTRAL_USERNAME"
+          test -n "$CENTRAL_PASSWORD"
+          [[ "$DEPLOYMENT_ID" =~ ^[0-9a-f-]{36}$ ]]
+          bearer="$(
+            printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" |
+              base64 |
+              tr -d '\n'
+          )"
+          for attempt in $(seq 1 30); do
+            curl \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --request POST \
+              --header "Authorization: Bearer $bearer" \
+              "https://central.sonatype.com/api/v1/publisher/status?id=$DEPLOYMENT_ID" \
+              > central-status.json
+            state="$(jq -r '.deploymentState' central-status.json)"
+            echo "Central deployment state: $state"
+            case "$state" in
+              VALIDATED) exit 0 ;;
+              FAILED)
+                jq '{deploymentId, deploymentName, deploymentState, errors}' central-status.json
+                exit 1
+                ;;
+              PENDING|VALIDATING) sleep 10 ;;
+              *)
+                echo "unexpected pre-publication state: $state" >&2
+                exit 1
+                ;;
+            esac
+          done
+          echo "Central validation timed out" >&2
+          exit 1
+
+      - name: Download and validate staged artifacts
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]+$ ]]
+          bearer="$(
+            printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" |
+              base64 |
+              tr -d '\n'
+          )"
+          base="https://central.sonatype.com/api/v1/publisher/deployment/$DEPLOYMENT_ID/download"
+          mkdir -p staged
+          for artifact in vev-java vev-clj; do
+            for suffix in .pom .jar -sources.jar -javadoc.jar; do
+              file="$artifact-$VERSION$suffix"
+              curl \
+                --fail-with-body \
+                --silent \
+                --show-error \
+                --header "Authorization: Bearer $bearer" \
+                --output "staged/$file" \
+                "$base/com/vevdb/$artifact/$VERSION/$file"
+            done
+          done
+          scripts/validate_maven_central_inputs.sh "$VERSION" staged
+
+      - name: Smoke fresh Java and Clojure staged consumers
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          m2="$RUNNER_TEMP/staged-m2"
+          for artifact in vev-java vev-clj; do
+            target="$m2/com/vevdb/$artifact/$VERSION"
+            mkdir -p "$target"
+            cp "staged/$artifact-$VERSION.jar" "$target/"
+            cp "staged/$artifact-$VERSION.pom" "$target/"
+          done
+          env -u VEV_LIB scripts/smoke_jvm_coordinates.sh "$VERSION" "$m2"
+
+      - name: Publish validated deployment
+        if: ${{ inputs.publish }}
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+        run: |
+          bearer="$(
+            printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" |
+              base64 |
+              tr -d '\n'
+          )"
+          curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --request POST \
+            --header "Authorization: Bearer $bearer" \
+            "https://central.sonatype.com/api/v1/publisher/deployment/$DEPLOYMENT_ID"
+          echo "Central publication requested"
+
+      - name: Wait for publication
+        if: ${{ inputs.publish }}
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+        run: |
+          bearer="$(
+            printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" |
+              base64 |
+              tr -d '\n'
+          )"
+          for attempt in $(seq 1 60); do
+            status="$(
+              curl \
+                --fail-with-body \
+                --silent \
+                --show-error \
+                --request POST \
+                --header "Authorization: Bearer $bearer" \
+                "https://central.sonatype.com/api/v1/publisher/status?id=$DEPLOYMENT_ID"
+            )"
+            state="$(jq -r '.deploymentState' <<<"$status")"
+            echo "Central deployment state: $state"
+            case "$state" in
+              PUBLISHED) exit 0 ;;
+              FAILED)
+                jq '{deploymentId, deploymentName, deploymentState, errors}' <<<"$status"
+                exit 1
+                ;;
+              PUBLISHING) sleep 10 ;;
+              *)
+                echo "unexpected publication state: $state" >&2
+                exit 1
+                ;;
+            esac
+          done
+          echo "Central publication timed out" >&2
+          exit 1
+
+      - name: Smoke public Maven Central consumers
+        if: ${{ inputs.publish }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          base="https://repo1.maven.org/maven2"
+          pom="com/vevdb/vev-clj/$VERSION/vev-clj-$VERSION.pom"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error --head "$base/$pom" >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" -eq 60 ]]; then
+              echo "Maven Central synchronization timed out" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          empty_m2="$RUNNER_TEMP/public-m2"
+          mkdir -p "$empty_m2"
+          VEV_MAVEN_REPOSITORY_URL="$base" \
+            VEV_MAVEN_CACHE="$empty_m2" \
+            env -u VEV_LIB \
+            scripts/smoke_jvm_coordinates.sh "$VERSION" "$empty_m2"
+
+      - name: Record result
+        env:
+          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+          VERSION: ${{ inputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          {
+            echo "## Maven Central deployment verified"
+            echo
+            echo "- Deployment ID: \`$DEPLOYMENT_ID\`"
+            echo "- Version: \`$VERSION\`"
+            echo "- Publication requested: \`$PUBLISH\`"
+            echo "- Java staged consumer: passed"
+            echo "- Clojure staged consumer: passed"
+          } >> "$GITHUB_STEP_SUMMARY"
