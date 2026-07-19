@@ -27,7 +27,7 @@
       (delete source)
       prepared)))
 
-(defn prepared-runtime-pull-text [] -> vev.Prepared-Pull-Pattern
+(defn prepared-runtime-pull-text [] -> (owned vev.Prepared-Pull-Pattern)
   (let [[source source-error] (strings.clone "[:user/name]")]
     (assert (= source-error nil))
     (let [prepared (vev.prepare-pull-pattern-text source)]

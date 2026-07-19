@@ -240,8 +240,27 @@ Status labels:
 - `kvist-done` Better macro-time collection utilities.
   Kvist macros now have a macro-time `reduce` helper over source form collections, plus macro-time `+` for numeric accumulators. Literal tx/pull-style macros can fold over option and clause forms instead of enumerating every ordering by hand.
 
-- `not-now` Scoped owned aggregate helpers.
-  Benchmarks and ABI execution paths often allocate several related owned arrays/values and then carry long cleanup blocks. Kvist already has `:defer` and `:defer-with` for local cleanup, and the remaining hard cases are Vev-specific ownership-transfer paths where arrays are handed to result/statement handles. Prefer small Vev-local builder structs and cleanup functions if a concrete cluster becomes painful; do not add general Kvist support now.
+- `kvist-done` Ownership-qualified boundaries and managed native aggregates.
+  Kvist now supports `(owned T)` and `(borrowed T)` procedure contracts plus
+  statically resolved `managed: :unique` and `managed: :shared` native struct
+  protocols. `Prepared-Pull-Pattern` is the first Vev migration: it no longer
+  carries an `owns-source` bit or requires manual cleanup at ten internal call
+  sites. Its constructors return an owned unique value, consumers borrow it,
+  and deterministic scope cleanup invokes its destructor. The older delete
+  helper remains as a consuming compatibility shim. The same pass corrected
+  `query-relation-builder-add-binding!` to declare that it consumes `Binding`;
+  this removed a real double-free exposed by tracked tests. Continue migrating
+  aggregates incrementally, prioritizing runtime ownership booleans and APIs
+  where a single value has one unambiguous owner.
+
+  The audit also made two previously ungated test files executable again.
+  `index_storage_test.kvist` still has 35 failures on untouched Vev main because
+  its transaction-partition expectations and manual shared-snapshot cleanup
+  predate the current storage model. `source_branch_test.kvist` likewise has ten
+  unchanged baseline failures around typed-plan counters and legacy result
+  ownership. These are not regressions from managed ownership; keep them as a
+  separate modernization task rather than changing semantics opportunistically
+  during ownership migration.
 
 ## Later Architecture
 

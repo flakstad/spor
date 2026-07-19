@@ -790,7 +790,8 @@
   error: string
   pattern: [dynamic]Pull-Spec
   source-owner: Data
-  owns-source: bool
+} {
+  managed: :unique
 })
 
 (defenum Query-Input-Kind [

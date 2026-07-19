@@ -1,0 +1,18 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev-tests)
+
+(import t "kvist:test")
+(import vev "../vev")
+
+(t.deftest prepared-pull-pattern-has-deterministic-managed-lifetime
+  (let [prepared (vev.prepare-pull-pattern-text "[:user/name]")]
+    (t.is prepared.ok prepared.error)
+    (t.is (= (count prepared.pattern) 1))
+    (t.is (= prepared.pattern[0].a ":user/name"))))
+
+(t.deftest prepared-pull-pattern-error-has-safe-empty-owner
+  (let [prepared (vev.prepare-pull-pattern-text "not-edn [")]
+    (t.is (not prepared.ok))
+    (t.is (= (count prepared.pattern) 0))))

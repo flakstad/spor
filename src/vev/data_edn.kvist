@@ -317,13 +317,12 @@
       (return (make [dynamic]Pull-Spec) false "pull pattern must be a vector"))
     (edn-pull-specs doc doc.root)))
 
-(defn prepare-pull-pattern-data [value: Data] -> Prepared-Pull-Pattern
+(defn prepare-pull-pattern-data [value: Data] -> (owned Prepared-Pull-Pattern)
   (let [[pattern ok error] (parse-pull-pattern-data value)]
     (Prepared-Pull-Pattern {ok: ok
                             error: error
                             pattern: pattern
-                            source-owner: (data.retain value)
-                            owns-source: true})))
+                            source-owner: (kdata.retain value)})))
 
 (defn prepare-tx-data [value: Data] -> Prepared-Tx-Data
   (let [doc (edn-doc-from-data value)
@@ -457,12 +456,10 @@
 (defn pull-store-db-value-data [snapshot: ^Store-DB, value: Data, entity: u64] -> [out: Value, ok: bool, error: string]
   (let [prepared (prepare-pull-pattern-data value)
         [result-value result-ok result-error] (pull-store-db-value-prepared snapshot prepared entity)]
-    (delete-prepared-pull-pattern-shallow prepared)
     (return result-value result-ok result-error)))
 
 (defn pull-store-db-lookup-ref-value-data [snapshot: ^Store-DB, value: Data, attr: string, lookup-value: Value] -> [out: Value, ok: bool, error: string]
   (let [prepared (prepare-pull-pattern-data value)
         [result-value result-ok result-error]
           (pull-store-db-lookup-ref-value-prepared snapshot prepared attr lookup-value)]
-    (delete-prepared-pull-pattern-shallow prepared)
     (return result-value result-ok result-error)))

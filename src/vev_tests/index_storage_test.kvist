@@ -3,6 +3,7 @@
 
 (package vev-tests)
 
+(import arr "kvist:arr")
 (import t "kvist:test")
 (import vev "../vev")
 
