@@ -66,17 +66,17 @@
 (defn run-in-memory! []
   (with-open [conn (d/create-conn)]
     (seed! conn)
-    (with-open [db (d/db conn)]
+    (let [db (d/db conn)
+          next-db (d/db-with db katherine)]
       (assert-base-contacts! db)
-      (with-open [next-db (d/db-with db katherine)]
-        (assert (some #{"Katherine Johnson"} (contact-names next-db)))
-        (assert (not-any? #{"Katherine Johnson"} (contact-names db)))))))
+      (assert (some #{"Katherine Johnson"} (contact-names next-db)))
+      (assert (not-any? #{"Katherine Johnson"} (contact-names db))))))
 
 (defn run-durable! [path]
   (remove-store! path)
   (with-open [conn (d/connect path)]
     (seed! conn)
-    (with-open [db (d/db conn)]
+    (let [db (d/db conn)]
       (assert-base-contacts! db)))
   (with-open [conn (d/connect path)]
     (assert (= ["Ada Lovelace" "Grace Hopper"] (contact-names conn)))

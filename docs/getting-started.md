@@ -172,10 +172,11 @@ fresh Clojure project and a fresh Maven project. It verifies that
 `com.vevdb/vev-clj` is enough for Clojure and `com.vevdb:vev-java` is enough
 for Java, including automatic extraction of the current platform library.
 
-DB snapshots are passable immutable values. The JVM wrapper has cleanup
-fallbacks, so examples use normal Clojure binding style. Long-running services
-or tight loops that create many connections, prepared queries, or DB snapshots
-can still call `.close` explicitly.
+DB snapshots are passable immutable values with JVM-managed cleanup. Use them
+like Datomic DB values; they do not normally need `with-open`. Explicitly
+closing a DB snapshot is only useful when a tight loop needs deterministic
+release. Connections and explicitly allocated helpers such as prepared queries
+should still be closed when their application lifecycle ends.
 
 ## Kvist
 

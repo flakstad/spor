@@ -310,10 +310,15 @@ ordinary transaction:
   (d/transact-bulk durable [first second]))
 ```
 
-The wrapper has JVM cleanup fallback for native handles, so examples use normal
-Clojure values. In long-running processes or tight loops that create many
-connections, DB snapshots, prepared queries, or pull patterns, call `.close`
-explicitly when a handle is no longer needed.
+DB snapshots are immutable values and use JVM-managed cleanup for their native
+handles. Use them like Datomic DB values; they do not normally need
+`with-open`. Explicitly closing a DB snapshot is only useful when a tight loop
+needs deterministic release.
+
+Connections and explicitly allocated helpers such as transaction builders,
+function registries, prepared queries, and prepared pull patterns own
+long-lived resources. Close those when their application lifecycle ends;
+`with-open` remains useful at those explicit resource boundaries.
 
 The current package is deliberately thin:
 
@@ -323,8 +328,8 @@ The current package is deliberately thin:
 - `rows` returns an ordered vector of row vectors
 - entity ids are converted to integers
 - pull maps are converted to Clojure maps
-- immutable DB snapshots are passable values with JVM cleaner fallback; they
-  still implement `AutoCloseable` for explicit cleanup in tight loops
+- immutable DB snapshots are ordinary passable values with JVM-managed cleanup;
+  they still implement `AutoCloseable` for optional deterministic cleanup
 
 Run through the top-level ABI smoke script:
 
