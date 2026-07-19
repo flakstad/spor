@@ -217,7 +217,10 @@ Status labels:
   Kvist already has `assoc` and `update` for shallow struct copy-with-field-changed code, including threaded forms such as `(-> spec (assoc .children children))`. Pull spec variants and similar record updates can use those helpers instead of hand-copying records.
 
 - `kvist-done` Ownership-transfer annotations for consuming helper functions.
-  Kvist now supports `(consumes param-name...)` in `defn` declarations. An ordinary helper like `value-vector-owned(items: [dynamic]Value) -> Value` can mark `(consumes items)`, and call sites transfer ownership when passing an owned local to that parameter.
+  Kvist now infers consuming parameters from ordinary bodies. A helper like
+  `value-vector-owned(items: [dynamic]Value) -> Value` becomes consuming when
+  it explicitly deletes `items` or transfers it through a proven owning
+  result; callers then move tracked owned locals without a declaration form.
 
 - `not-now` Static lookup tables shared between macro and runtime code.
   Predicate/function/aggregate operator tables exist as macro allow-lists and runtime string dispatch. A Vev-local macro source of truth could reduce recognition-list drift, but it would not remove the runtime behavior dispatch and is not worth the extra abstraction right now.
@@ -240,18 +243,18 @@ Status labels:
 - `kvist-done` Better macro-time collection utilities.
   Kvist macros now have a macro-time `reduce` helper over source form collections, plus macro-time `+` for numeric accumulators. Literal tx/pull-style macros can fold over option and clause forms instead of enumerating every ordering by hand.
 
-- `kvist-done` Ownership-qualified boundaries and managed native aggregates.
-  Kvist now supports `(owned T)` and `(borrowed T)` procedure contracts plus
-  statically resolved `managed: :unique` and `managed: :shared` native struct
-  protocols. `Prepared-Pull-Pattern` is the first Vev migration: it no longer
-  carries an `owns-source` bit or requires manual cleanup at ten internal call
-  sites. Its constructors return an owned unique value, consumers borrow it,
-  and deterministic scope cleanup invokes its destructor. The older delete
-  helper remains as a consuming compatibility shim. The same pass corrected
-  `query-relation-builder-add-binding!` to declare that it consumes `Binding`;
-  this removed a real double-free exposed by tracked tests. Continue migrating
-  aggregates incrementally, prioritizing runtime ownership booleans and APIs
-  where a single value has one unambiguous owner.
+- `kvist-done` Inferred lifetime boundaries without a managed-type protocol.
+  Kvist infers allocating results, borrowed views, and consuming parameters
+  from ordinary bodies. Vev does not annotate types or install behavior through
+  `Type-destroy`/`Type-clone` naming. `Prepared-Pull-Pattern` intentionally
+  retains its explicit `owns-source` bit and cleanup procedure because it is an
+  opaque native aggregate assembled outside a typed Data-decoding boundary.
+  Its internal owning scopes use ordinary `defer` cleanup. Likewise,
+  `query-relation-builder-add-binding!` deletes a rejected binding explicitly;
+  the compiler infers that consuming path for callers without changing the
+  `Binding` type. Continue removing redundant cleanup only where inference is
+  proven by executable lifetime tests, not by adding Vev-specific compiler
+  behavior.
 
   The audit also made two previously ungated test files executable again.
   `index_storage_test.kvist` still has 35 failures on untouched Vev main because

@@ -254,7 +254,7 @@
       (return "" false "transaction log requires a durable connection"))
     (vev.sqlite-conn-tx-data-text (addr store^.sqlite) tx))))
 
-(defn- log-query-function-call [query: Data] -> Data #borrowed
+(defn- log-query-function-call [query: Data] -> Data
   (when (not (kdata.vector? query))
     (panic "log query must be a vector"))
   (let [in-where false]

@@ -468,15 +468,11 @@
     (delete-pull-spec-containers-shallow (slice spec.pattern 0))
     (delete spec.pattern)))
 
-(defn Prepared-Pull-Pattern-destroy [prepared: Prepared-Pull-Pattern]
+(defn delete-prepared-pull-pattern-shallow [prepared: Prepared-Pull-Pattern]
   (delete-pull-spec-containers-shallow (slice prepared.pattern 0))
   (delete prepared.pattern)
-  (data.release prepared.source-owner))
-
-(defn delete-prepared-pull-pattern-shallow [prepared: (owned Prepared-Pull-Pattern)]
-  ;; Compatibility shim. The owned parameter's generated cleanup invokes the
-  ;; managed destructor.
-  (discard prepared))
+  (when prepared.owns-source
+    (data.release prepared.source-owner)))
 
 (defn delete-prepared-tx-data-shallow [prepared: Prepared-Tx-Data]
   (delete-owned-tx-data prepared.tx-data))
@@ -658,7 +654,7 @@
   (delete builder.tuples)
   (delete-relation-columns builder.typed-columns))
 
-(defn query-relation-builder-add-binding! [builder: ^Query-Relation-Builder, attrs: []string, binding: (owned Binding), keep-tuple: bool] -> bool
+(defn query-relation-builder-add-binding! [builder: ^Query-Relation-Builder, attrs: []string, binding: Binding, keep-tuple: bool] -> bool
   (when builder^.typed-ok
     (if (binding-can-add-to-relation-columns? attrs (slice builder^.typed-columns 0) binding)
       (do
@@ -667,7 +663,7 @@
       (return false)))
   (if keep-tuple
     (arr.push! builder^.tuples binding)
-    (discard binding))
+    (delete binding.items))
   true)
 
 (defn query-relation-builder-add-column-row! [builder: ^Query-Relation-Builder, columns: []Relation-Column, row: int] -> bool
@@ -27449,6 +27445,7 @@
             (delete binding.items)
             (for [next next-bindings]
               (when (not (query-relation-builder-add-binding! (addr builder) (slice attrs 0) next false))
+                (delete next.items)
                 (delete next-bindings)
                 (delete attrs)
                 (delete attr-sources)
@@ -28440,6 +28437,7 @@
             (delete binding.items)
             (for [next rule-bindings]
               (when (not (query-relation-builder-add-binding! (addr builder) (slice attrs 0) next false))
+                (delete next.items)
                 (delete rule-bindings)
                 (delete attrs)
                 (delete attr-sources)
@@ -28693,6 +28691,7 @@
             (delete binding.items)
             (for [next expanded]
               (when (not (query-relation-builder-add-binding! (addr builder) (slice attrs 0) next false))
+                (delete next.items)
                 (delete expanded)
                 (delete attrs)
                 (delete attr-sources)

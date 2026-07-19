@@ -14935,6 +14935,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 
 (defn pull-store-db-value-text [snapshot: ^Store-DB, pattern-text: string, entity: u64] -> [value: Value, ok: bool, error: string]
   (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
     (pull-store-db-value-prepared snapshot prepared entity)))
 
 (defn pull-store-db-lookup-ref-value-pattern [snapshot: ^Store-DB, pattern: []Pull-Spec, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
@@ -14955,6 +14956,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 
 (defn pull-store-db-lookup-ref-value-text [snapshot: ^Store-DB, pattern-text: string, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
   (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
     (pull-store-db-lookup-ref-value-prepared snapshot prepared attr lookup-value)))
 
 (defn pull-many-store-db-value-pattern [snapshot: ^Store-DB, pattern: []Pull-Spec, entities: []u64] -> [value: Value, ok: bool, error: string]
@@ -14983,6 +14985,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 
 (defn pull-many-store-db-value-text [snapshot: ^Store-DB, pattern-text: string, entities: []u64] -> [value: Value, ok: bool, error: string]
   (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
     (pull-many-store-db-value-prepared snapshot prepared entities)))
 
 (defn pull-many-store-db-lookup-refs-value-prepared [snapshot: ^Store-DB, prepared: Prepared-Pull-Pattern, attrs: []string, lookup-values: []Value] -> [value: Value, ok: bool, error: string]
@@ -15017,6 +15020,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 
 (defn pull-many-store-db-lookup-refs-value-text [snapshot: ^Store-DB, pattern-text: string, attrs: []string, lookup-values: []Value] -> [value: Value, ok: bool, error: string]
   (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
     (pull-many-store-db-lookup-refs-value-prepared snapshot prepared attrs lookup-values)))
 
 (defn sqlite-open-db-snapshot [path: string, page-size: int] -> [snapshot: SQLite-DB-Snapshot, ok: bool, error: string]

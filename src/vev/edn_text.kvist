@@ -982,7 +982,7 @@
                       pattern: pattern}))
         (return true "")))))
 
-(defn prepare-pull-pattern-text [text: string] -> (owned Prepared-Pull-Pattern)
+(defn prepare-pull-pattern-text [text: string] -> Prepared-Pull-Pattern
   (let [[value read-error read-ok] (edn.try-read text)]
     (if read-ok
       (prepare-pull-pattern-data value)
@@ -1052,6 +1052,7 @@
 
 (defn pull-text-with-fns [db: DB, pattern-text: string, entity: u64, registry: []Native-Query-Fn] -> Pull-Result
   (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
     (pull-prepared-with-fns db prepared entity registry)))
 
 (defn pull-text [db: DB, pattern-text: string, entity: u64] -> Pull-Result
@@ -1065,6 +1066,7 @@
 
 (defn pull-text-lookup-ref-with-fns [db: DB, pattern-text: string, attr: string, value: Value, registry: []Native-Query-Fn] -> Pull-Result
   (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
     (pull-prepared-lookup-ref-with-fns db prepared attr value registry)))
 
 (defn pull-text-lookup-ref [db: DB, pattern-text: string, attr: string, value: Value] -> Pull-Result
@@ -1078,6 +1080,7 @@
 
 (defn pull-many-text-with-fns [db: DB, pattern-text: string, entities: []u64, registry: []Native-Query-Fn] -> [dynamic]Pull-Result
   (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
     (pull-many-prepared-with-fns db prepared entities registry)))
 
 (defn pull-many-text [db: DB, pattern-text: string, entities: []u64] -> [dynamic]Pull-Result
@@ -1093,6 +1096,7 @@
 
 (defn pull-many-text-lookup-refs-with-fns [db: DB, pattern-text: string, attrs: []string, values: []Value, registry: []Native-Query-Fn] -> [dynamic]Pull-Result
   (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
     (pull-many-prepared-lookup-refs-with-fns db prepared attrs values registry)))
 
 (defn pull-many-text-lookup-refs [db: DB, pattern-text: string, attrs: []string, values: []Value] -> [dynamic]Pull-Result
