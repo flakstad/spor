@@ -88,17 +88,17 @@ platform selection, SQLite installation, or explicit native-library path is
 present. The Java wrapper also checks the native ABI version before exposing a
 connection.
 
-It also writes a local Maven repository under `build/m2`, so the future
-published dependency shapes can already be tested from outside the repo:
+It also writes a local Maven repository under `build/m2`, so release candidates
+can be tested from outside the repo before publication:
 
 ```clojure
 {:mvn/local-repo "/path/to/vev/build/m2"
  :deps {com.vevdb/vev-clj {:mvn/version "0.2.0-rc.2"}}}
 ```
 
-For Java, the matching local Maven dependency is `com.vevdb:vev-java`. These
-are not published releases yet, but the one-dependency Clojure and Java paths
-are mechanically verified by the combined release gate.
+For Java, the matching Maven dependency is `com.vevdb:vev-java`. Both
+coordinates are published on Maven Central, and the one-dependency Clojure and
+Java paths are mechanically verified by the combined release gate.
 
 The Python path has the same explicit-to-bundled fallback shape: explicit
 `vevdb.Library(path)`, `VEV_LIB`, repo `build/lib`, then

@@ -564,9 +564,9 @@ connection or retained immutable DB snapshot.
 ## Java And Clojure Examples
 
 [Vev.java](../clients/java/src/main/java/com/vevdb/Vev.java) is the Java 25 Foreign
-Function & Memory wrapper over the platform native Vev library. It is not published yet, but it
-now lives under the planned client package layout. The wrapper exposes the same
-core host shape as Python and Rust:
+Function & Memory wrapper over the platform native Vev library. It is published
+as `com.vevdb:vev-java` on Maven Central. The wrapper exposes the same core host
+shape as Python and Rust:
 
 - `Vev`, `Connection`, `DB`, `PreparedQuery`, `Statement`, and `ResultSet`
   close their native handles explicitly

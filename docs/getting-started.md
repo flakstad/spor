@@ -411,10 +411,9 @@ Local Java runs need Java 25 and native access for the unnamed module:
 --enable-native-access=ALL-UNNAMED
 ```
 
-Planned Maven coordinate: `com.vevdb:vev-java`.
-That artifact is intended to pull in the platform native artifact
-transitively, so ordinary Java projects should also have a one-dependency VevDB
-setup.
+The Maven Central coordinate is `com.vevdb:vev-java`. The artifact contains
+the supported platform native libraries, so ordinary Java projects have a
+one-dependency VevDB setup.
 
 ## C
 

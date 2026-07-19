@@ -85,10 +85,9 @@ function on either in-memory or durable connections:
 (.close tx)
 ```
 
-The current repo has not published the Java/Clojure/native artifacts yet, so
-local development still has extra setup. The Java loader already supports the
-future packaged shape by checking for bundled native resources after explicit
-local paths.
+The Java and Clojure artifacts are published on Maven Central. The Java loader
+checks for its bundled native resource after explicit local paths, so the
+single dependency above is sufficient for a normal application.
 
 The durable backend uses SQLite internally. Release builds link SQLite with
 FTS5 into the native VevDB library, so Clojure users do not install or configure
@@ -141,8 +140,8 @@ clojure -M:clj-dev
 Then open `examples/clojure/getting_started.clj` and evaluate the forms inside
 its `(comment ...)` block one at a time. That command is a repo
 smoke/development concern, not the desired public API.
-Until native artifacts are packaged, no-arg `create-conn` and one-arg
-`connect` resolve the native library from the `vev.library` JVM property, then
+No-arg `create-conn` and one-arg `connect` resolve the native library from the
+`vev.library` JVM property, then
 `VEV_LIB`, then a local `build/lib` library, then a bundled platform resource.
 
 `q` uses Datomic/DataScript-style query-first argument order. The wrapper also

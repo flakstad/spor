@@ -37,6 +37,24 @@ SQLite amalgamation with FTS5 in the native library. Application code does not
 install SQLite, create SQLite tables, run migrations, issue SQL, or configure
 SQLite schemas.
 
+## Concurrent Access
+
+Several connections, including connections in separate processes, can open the
+same durable VevDB store. Readers and one active writer can proceed
+concurrently through SQLite's WAL mode. Multiple writers are serialized at the
+transaction boundary; after acquiring the writer lock, VevDB refreshes its
+transaction basis and durable index roots before assigning the next tx id.
+
+A DB value remains an immutable snapshot. A long-running program, REPL, or
+VevDB CLI process therefore calls `db` again on its connection to observe
+commits made through another connection. Existing DB values continue to show
+the basis they captured. This is the same rule after a local transaction: keep
+an old DB value for a stable view, or obtain a new one for current facts.
+
+Opening a new durable store also yields a valid empty DB value before its first
+transaction. Querying that value returns empty results; callers do not need a
+bootstrap transaction merely to obtain a database snapshot.
+
 Durable stores can be configured with `configure-store-durability!`:
 
 - `:strict`: asks the backend for stricter commit synchronization
