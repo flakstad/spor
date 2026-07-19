@@ -3560,6 +3560,41 @@
       (return input.value true)
     :else (return (Value {}) false)))
 
+(defn query-input-source-value-owned [input: Query-Input] -> [value: Value, ok: bool]
+  (cond
+    (= input.kind .Relation)
+      (let [rows (make [dynamic]Value)]
+        (when (> input.width 0)
+          (let [row_count (/ (count input.values) input.width)]
+            (for [row 0..<row_count]
+              (let [items (make [dynamic]Value 0 input.width)
+                    offset (* row input.width)]
+                (for [index 0..<input.width]
+                  (arr.push! items (value-owned input.values[(+ offset index)])))
+                (arr.push! rows (value-vector-owned items))))))
+        (return (value-vector-owned rows) true))
+    (= input.kind .Collection)
+      (let [items (make [dynamic]Value 0 (count input.values))]
+        (for [value input.values]
+          (arr.push! items (value-owned value)))
+        (return (value-vector-owned items) true))
+    (and (= input.kind .Scalar)
+         (= input.value.kind .Map))
+      (let [rows (make [dynamic]Value 0 (/ (count input.value.items) 2))
+            row_count (/ (count input.value.items) 2)]
+        (for [row 0..<row_count]
+          (let [offset (* row 2)
+                items (make [dynamic]Value 0 2)]
+            (arr.push! items (value-owned input.value.items[offset]))
+            (arr.push! items (value-owned input.value.items[(+ offset 1)]))
+            (arr.push! rows (value-vector-owned items))))
+        (return (value-vector-owned rows) true))
+    (and (= input.kind .Scalar)
+         (or (= input.value.kind .Vector)
+             (= input.value.kind .Set)))
+      (return (value-owned input.value) true)
+    :else (return (Value {}) false)))
+
 (defn query-input-bound-value [db: DB, name: string, input: Query-Input] -> [value: Value, ok: bool]
   (when (query-source-input-name? name)
     (return (query-input-source-value input)))
@@ -8110,26 +8145,6 @@
           (set! input-index (+ input-index 1)))))
   (return -1 false))
 
-(defn delete-query-input-source-value-temporary [input: Query-Input, value: Value]
-  (cond
-    (= input.kind .Relation)
-      (do
-        (for [row value.items]
-          (when (= row.kind .Vector)
-            (delete row.items)))
-        (delete value.items))
-    (= input.kind .Collection)
-      (delete value.items)
-    (and (= input.kind .Scalar)
-         (= input.value.kind .Map))
-      (do
-        (for [row value.items]
-          (when (= row.kind .Vector)
-            (delete row.items)))
-        (delete value.items))
-    :else
-      (do)))
-
 (defn append-db-read-source-query-input-sources! [out: ^[dynamic]DB-Read-Named-Source, owned-values: ^[dynamic]Value, query-value: Query, inputs: []Query-Input] -> [ok: bool, error: string]
   (let [specs (db-read-source-query-input-specs query-value) :defer]
     (for [spec specs]
@@ -8143,11 +8158,10 @@
           (when (>= input-index (count inputs))
             (return false (fmt.tprintf "DB read source is not bound: %s" spec.name)))
           (let [input inputs[input-index]
-                [source-value source-value-ok] (query-input-source-value input)]
+                [source-value source-value-ok] (query-input-source-value-owned input)]
             (when (not source-value-ok)
               (return false (fmt.tprintf "query source is not a collection: %s" spec.name)))
-            (arr.push! owned-values^ (value-owned source-value))
-            (delete-query-input-source-value-temporary input source-value)
+            (arr.push! owned-values^ source-value)
             (arr.push! out^
               (db-read-named-source
                 spec.name
