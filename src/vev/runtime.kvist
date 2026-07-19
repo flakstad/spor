@@ -1315,12 +1315,15 @@
         (when (not value-ok)
           (delete out.items)
           (return (Binding {}) false))
-        (binding-store! (addr out) attr value)))
+        (binding-store! (addr out) attr (value-owned value))))
     (return out true)))
 
 (defn query-relation-materialized-bindings [rel: Query-Relation] -> [dynamic]Binding
   (when (> (count rel.tuples) 0)
-    (return (clone-bindings (slice rel.tuples 0))))
+    (let [owned (make [dynamic]Binding 0 (count rel.tuples))]
+      (for [binding rel.tuples]
+        (arr.push! owned (db-read-source-clone-binding-owned binding)))
+      (return owned)))
   (let [out (make [dynamic]Binding 0 (query-relation-row-count rel))]
     (when rel.has-typed-columns
       (let [row 0]
@@ -2699,8 +2702,9 @@
           (return (make [dynamic]Result-Row) false pull-columns-error))
         (defer (delete pull-columns))
       (let [out (make [dynamic]Result-Row 0 rel.typed-rows)
-            seen (set.empty string) :defer
+            seen (set.empty string)
             trust-unique-bindings (query-can-trust-unique-bindings? query-value)]
+        (defer (delete-owned-string-set seen))
         (for [row (arr.range 0 rel.typed-rows)]
           (let [values (make [dynamic]Value 0 (count query-value.find))
                 dedupe-values (make [dynamic]Value)
@@ -2747,7 +2751,9 @@
                     (when (not already-seen)
                       (set.add! seen key)
                       (arr.push! out (Result-Row {values: values pulls: pulls}))
-                      (set! pushed true)))
+                      (set! pushed true))
+                    (when already-seen
+                      (delete key)))
                   (when (not (row-values-exist? (slice out 0) (slice dedupe-values 0)))
                     (arr.push! out (Result-Row {values: values pulls: pulls}))
                     (set! pushed true)))))
@@ -4352,7 +4358,7 @@
           (when (not pull-ok)
             (return "" false))
           (arr.push! pull-parts (fmt.tprintf "%d:%s;" (count pull-key) pull-key))))
-      (return (fmt.tprintf "rv:%d:%s:rp:%d:%s" (count values-key) values-key (count pulls) (core-strings.concatenate (slice pull-parts 0))) true))))
+      (return (string-owned (fmt.tprintf "rv:%d:%s:rp:%d:%s" (count values-key) values-key (count pulls) (core-strings.concatenate (slice pull-parts 0)))) true))))
 
 (defn two-primitive-values-dedupe-key [first: Value, second: Value] -> [key: string, ok: bool]
   (cond
@@ -8107,12 +8113,20 @@
 (defn delete-query-input-source-value-temporary [input: Query-Input, value: Value]
   (cond
     (= input.kind .Relation)
-      (delete-value-containers-shallow value)
+      (do
+        (for [row value.items]
+          (when (= row.kind .Vector)
+            (delete row.items)))
+        (delete value.items))
     (= input.kind .Collection)
-      (delete-value-containers-shallow value)
+      (delete value.items)
     (and (= input.kind .Scalar)
          (= input.value.kind .Map))
-      (delete-value-containers-shallow value)
+      (do
+        (for [row value.items]
+          (when (= row.kind .Vector)
+            (delete row.items)))
+        (delete value.items))
     :else
       (do)))
 
@@ -8741,7 +8755,7 @@
 
 (defn db-read-source-aggregate-result-rows-for-bindings-with-sources-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, bindings: []Binding, registry: []Native-Query-Fn] -> Result-Set
   (let [rows (make [dynamic]Result-Row)
-        seen-groups (make [dynamic]Result-Row) :defer]
+        seen-groups (make [dynamic]Result-Row)]
     (defer (delete-result-rows-owned-values seen-groups))
     (when (= (count query-value.find) 0)
       (let [values (make [dynamic]Value 0 (count query-value.aggregates))
@@ -25598,7 +25612,7 @@
     (aggregate-rows-for-typed-relation query rel)))
 
 (defn append-aggregate-rows-with-sources-and-fns! [rows: ^[dynamic]Result-Row, db: DB, sources: []DB-Source, query: Query, inputs: []Query-Input, bindings: []Binding, registry: []Native-Query-Fn]
-  (let [seen-groups (make [dynamic]Result-Row) :defer]
+  (let [seen-groups (make [dynamic]Result-Row)]
     (defer (delete-result-rows-owned-values seen-groups))
     (for [binding bindings]
       (let [[group-values ok] (binding-values-for-vars binding (slice query.find 0))]

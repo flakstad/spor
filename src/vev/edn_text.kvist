@@ -3802,6 +3802,12 @@
   (when (= ref.kind .LookupRef)
     (delete-owned-value ref.lookup-value)))
 
+(defn parser-tx-edn-entity-owned [ref: Tx-EDN-Entity] -> Tx-EDN-Entity
+  (let [out ref]
+    (when (= ref.kind .LookupRef)
+      (set! out.lookup-value (value-owned ref.lookup-value)))
+    out))
+
 (defn datom-from-edn-node [doc: EDN-Doc, node-index: int] -> [datom: Datom, ok: bool, error: string]
   (when (or (= node-index -1)
             (not (= doc.nodes[node-index].kind .Vector))
@@ -4097,7 +4103,11 @@
     (for [entry (edn-child-pairs doc map-node)]
       (when (= entry.value -1)
         (return false "tx map value missing"))
-      (let [[item-ok item-error] (append-edn-tx-map-attr! out doc ref entry.key entry.value map-group)]
+      (let [item-ref (parser-tx-edn-entity-owned ref)
+            before-count (count out^)
+            [item-ok item-error] (append-edn-tx-map-attr! out doc item-ref entry.key entry.value map-group)]
+        (when (= (count out^) before-count)
+          (delete-parser-tx-edn-entity-owned-values item-ref))
         (when (not item-ok)
           (return false item-error))))
     (return true "")))
@@ -4109,8 +4119,8 @@
     (when (not ref-ok)
       (return false ref-error))
     (let [[items-ok items-error] (append-edn-tx-map-items! out doc map-node ref map-group)]
+      (delete-parser-tx-edn-entity-owned-values ref)
       (when (not items-ok)
-        (delete-parser-tx-edn-entity-owned-values ref)
         (return false items-error))
       (return true ""))))
 
