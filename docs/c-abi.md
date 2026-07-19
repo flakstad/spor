@@ -67,11 +67,17 @@ PKG_CONFIG_PATH="$PWD/build/lib/pkgconfig" \
   -o build/examples/c/vev_c_smoke
 ```
 
-For now the C SDK is the public header plus the native library:
+Each `vev-native-<platform>-<version>.zip` release asset is a relocatable C SDK
+containing:
 
 - `include/vev.h`
-- the platform library under `build/lib`
-- `build/lib/pkgconfig/vev.pc`
+- the platform native library and Windows import library where applicable
+- `lib/pkgconfig/vev.pc`
+- `README.md`, `LICENSE`, and `examples/basic.c`
+
+`scripts/smoke_native_bundle.sh` extracts this exact archive, compiles a fresh
+consumer and the packaged example, and runs both without a repository
+classpath or system SQLite dependency.
 
 ## ABI Benchmark
 
@@ -408,6 +414,12 @@ vev_result_t durable_rows =
     vev_query_db_prepared_result_with_inputs(durable_db, durable_query, "[]");
 vev_result_free(durable_rows);
 vev_db_release(durable_db);
+
+const char *rendered_rows = vev_connection_query_edn(
+    durable,
+    "[:find ?name :where [?e :user/name ?name]]");
+vev_string_free(rendered_rows);
+
 vev_connection_close(durable);
 vev_prepared_query_free(durable_query);
 ```
@@ -437,6 +449,11 @@ DB snapshots from `vev_connection_db` follow the same immutable owned-handle
 contract as `vev_conn_db`. The backend-specific
 `vev_sqlite_conn_*` functions remain available for storage tests and migration,
 but new host APIs should prefer `vev_connect` / `vev_connection_*`.
+`vev_connection_query_edn` and
+`vev_connection_query_edn_with_inputs` are compact conveniences that obtain a
+fresh immutable snapshot and return an owned rendered result string. Callers
+free it with `vev_string_free`; prepared/typed result APIs remain preferable
+for repeated or high-volume queries.
 `vev_connection_backend` and `vev_connection_path` return owned diagnostic
 strings; callers free them with `vev_string_free`. `vev_connection_basis_t`
 returns the Datomic-style basis transaction visible to the connection.

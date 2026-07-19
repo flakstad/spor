@@ -118,6 +118,13 @@ vev_u64_array_t vev_connection_tx_ids(vev_connection_t conn);
 const char *vev_connection_info_edn(vev_connection_t conn);
 void vev_connection_close(vev_connection_t conn);
 vev_db_t vev_connection_db(vev_connection_t conn);
+const char *vev_connection_query_edn(
+    vev_connection_t conn,
+    const char *query_text);
+const char *vev_connection_query_edn_with_inputs(
+    vev_connection_t conn,
+    const char *query_text,
+    const char *inputs_text);
 vev_tx_report_t vev_connection_transact_edn_report(
     vev_connection_t conn,
     const char *tx_text);

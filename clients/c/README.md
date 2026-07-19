@@ -15,6 +15,26 @@ That builds:
 - the platform library under `build/lib`
 - `build/lib/pkgconfig/vev.pc`
 
+For applications, download the `vev-native-<platform>-<version>.zip` archive
+from a VevDB release. It is a relocatable C SDK containing the header, matching
+native/import library, `pkg-config` metadata, this README, and
+`examples/basic.c`. No VevDB source checkout or SQLite installation is needed.
+
+After extracting it:
+
+```sh
+export VEV_SDK="$PWD/vev-<version>"
+PKG_CONFIG_PATH="$VEV_SDK/lib/pkgconfig" \
+  clang "$VEV_SDK/examples/basic.c" \
+  $(PKG_CONFIG_PATH="$VEV_SDK/lib/pkgconfig" pkg-config --cflags --libs vev) \
+  -Wl,-rpath,"$VEV_SDK/lib" \
+  -o basic
+./basic example.vev
+```
+
+On Windows, compile against `include/vev.h` and `lib/vev.lib`, and keep
+`lib/vev.dll` on `PATH` or beside the application executable.
+
 Manual compile example:
 
 ```sh
@@ -34,3 +54,7 @@ freed with the matching `vev_*_free` function documented in `include/vev.h`.
 Durable stores are opened through VevDB APIs, for example with a path like
 `app.vev`. SQLite with FTS5 is statically included in release builds; no
 SQLite installation or schema setup is required by the C application.
+
+`vev_connection_query_edn` is the compact durable query entry point for simple
+applications. Prepared queries, typed results, immutable DB snapshots, pull,
+and typed transaction builders remain available when more control is needed.

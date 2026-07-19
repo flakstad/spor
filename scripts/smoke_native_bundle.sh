@@ -38,3 +38,22 @@ fi
 
 BUNDLE="$TMP_DIR/vev-$VERSION"
 "$ROOT/scripts/smoke_c_package.sh" "$BUNDLE"
+
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    clang \
+      -I"$BUNDLE/include" \
+      "$BUNDLE/examples/basic.c" \
+      "$BUNDLE/lib/vev.lib" \
+      -o "$TMP_DIR/basic.exe"
+    PATH="$BUNDLE/lib:$PATH" "$TMP_DIR/basic.exe" "$TMP_DIR/basic.vev" >/dev/null
+    ;;
+  *)
+    PKG_CONFIG_PATH="$BUNDLE/lib/pkgconfig" \
+      clang "$BUNDLE/examples/basic.c" \
+      $(PKG_CONFIG_PATH="$BUNDLE/lib/pkgconfig" pkg-config --cflags --libs vev) \
+      -Wl,-rpath,"$BUNDLE/lib" \
+      -o "$TMP_DIR/basic"
+    "$TMP_DIR/basic" "$TMP_DIR/basic.vev" >/dev/null
+    ;;
+esac

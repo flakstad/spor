@@ -348,6 +348,18 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     }
     vev_tx_report_free(report);
     report = NULL;
+    const char *durable_query = vev_connection_query_edn(
+        durable,
+        "[:find ?name :where [?e :user/name ?name]]");
+    if (durable_query == NULL || strstr(durable_query, "\"Durable Ada\"") == NULL) {
+        fprintf(stderr, "unexpected durable convenience query: %s\n",
+                durable_query != NULL ? durable_query : "<null>");
+        if (durable_query != NULL) {
+            vev_string_free(durable_query);
+        }
+        goto cleanup;
+    }
+    vev_string_free(durable_query);
     first_basis = vev_connection_basis_t(durable);
     if (first_basis == 0) {
         fprintf(stderr, "unexpected durable basis after first tx\n");

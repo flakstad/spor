@@ -34,9 +34,12 @@ rm -rf "$STAGE_DIR"
 mkdir -p \
   "$OUT_DIR" \
   "$STAGE_DIR/$BUNDLE_ROOT/include" \
-  "$STAGE_DIR/$BUNDLE_ROOT/lib/pkgconfig"
+  "$STAGE_DIR/$BUNDLE_ROOT/lib/pkgconfig" \
+  "$STAGE_DIR/$BUNDLE_ROOT/examples"
 
 cp "$ROOT/include/vev.h" "$STAGE_DIR/$BUNDLE_ROOT/include/vev.h"
+cp "$ROOT/clients/c/README.md" "$STAGE_DIR/$BUNDLE_ROOT/README.md"
+cp "$ROOT/clients/c/example.c" "$STAGE_DIR/$BUNDLE_ROOT/examples/basic.c"
 cp "$ROOT/build/lib/$LIB_NAME" "$STAGE_DIR/$BUNDLE_ROOT/lib/$LIB_NAME"
 if [[ -n "$LINK_NAME" ]]; then
   cp "$ROOT/build/lib/$LINK_NAME" "$STAGE_DIR/$BUNDLE_ROOT/lib/$LINK_NAME"

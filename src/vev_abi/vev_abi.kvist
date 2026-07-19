@@ -7,6 +7,7 @@
 (import edn "kvist:edn")
 (import runtime "base:runtime")
 (import set "kvist:set")
+(import fmt "core:fmt")
 (import strings "core:strings")
 (import vev "../vev")
 
@@ -4058,6 +4059,43 @@ abi_free_stmt :: proc(stmt: rawptr) {
 (defn vev_connection_db :abi "c" [conn: Vev-Connection] -> Vev-DB
   (odin "context = runtime.default_context()")
   (vev_sqlite_conn_db (connection-as-sqlite conn)))
+
+@export
+(defn vev_connection_query_edn_with_inputs :abi "c" [conn: Vev-Connection, query-text: cstring, inputs-text: cstring] -> cstring
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr conn) nil)
+            (= query-text nil)
+            (= inputs-text nil)
+            (not (abi-sqlite-conn-ok (rawptr conn))))
+    (return (c-string-owned "[:vev/error \"invalid durable connection, query, or inputs\"]")))
+  (let [query (text-from-c query-text)
+        inputs (text-from-c inputs-text)
+        [snapshot snapshot-ok snapshot-error] (vev.sqlite-store-db (sqlite-conn-ptr (connection-as-sqlite conn)))]
+    (defer (delete query))
+    (defer (delete inputs))
+    (when (not snapshot-ok)
+      (if (= snapshot-error "sqlite DB has no Vev index roots")
+        (set! snapshot (vev.empty-shared-store-db-for-sqlite-bootstrap))
+        (let [error-text (fmt.tprintf "[:vev/error %q]" snapshot-error)
+              out (c-string-owned error-text)]
+          (delete error-text)
+          (return out))))
+    (defer (vev.close-store-db snapshot))
+    (let [[value value-ok value-error] (vev.q-store-db-value-text-with-input-text (addr snapshot) query inputs)]
+      (when (not value-ok)
+        (let [error-text (fmt.tprintf "[:vev/error %q]" value-error)
+              out (c-string-owned error-text)]
+          (delete error-text)
+          (return out)))
+      (let [text (vev.value-serializable-text value)
+            out (c-string-owned text)]
+        (vev.delete-owned-value value)
+        out))))
+
+@export
+(defn vev_connection_query_edn :abi "c" [conn: Vev-Connection, query-text: cstring] -> cstring
+  (odin "context = runtime.default_context()")
+  (vev_connection_query_edn_with_inputs conn query-text (cstring "[]")))
 
 @export
 (defn vev_connection_transact_edn_report :abi "c" [conn: Vev-Connection, tx-text: cstring] -> Vev-Tx-Report
