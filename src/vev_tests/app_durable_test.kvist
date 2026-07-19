@@ -37,6 +37,16 @@
            [?project :project/workspace ?workspace]
            [?workspace :entity/id ?workspace-id]])
 
+(def collection-properties-query
+  '[:find ?property-id ?label ?type ?order
+    :in $ ?collection-id
+    :where [?collection :entity/id ?collection-id]
+           [?property :property/collection ?collection]
+           [?property :entity/id ?property-id]
+           [?property :property/label ?label]
+           [?property :property/type ?type]
+           [?property :property/order ?order]])
+
 (defn remove-app-test-db []
   (os.remove app-test-path)
   (os.remove "/tmp/vev-app-durable-test.sqlite-wal")
@@ -84,6 +94,45 @@
       (test.is (= (kdata.string result) "workspace-main"))
       (d.close db))
     (d.close conn))
+  (remove-app-test-db))
+
+(test.deftest durable-app-query-projects-several-attributes-from-multiple-ref-children
+  (remove-app-test-db)
+  (let [conn (d.connect app-test-path)]
+    (d.transact conn
+      '[[:db/add 10 :db/ident :entity/id]
+        [:db/add 10 :db/valueType :db.type/string]
+        [:db/add 10 :db/unique :db.unique/identity]
+        [:db/add 11 :db/ident :property/collection]
+        [:db/add 11 :db/valueType :db.type/ref]
+        [:db/add 12 :db/ident :property/label]
+        [:db/add 12 :db/valueType :db.type/string]
+        [:db/add 13 :db/ident :property/type]
+        [:db/add 13 :db/valueType :db.type/keyword]
+        [:db/add 14 :db/ident :property/order]
+        [:db/add 14 :db/valueType :db.type/long]])
+    (d.transact conn
+      '[{:db/id "collection" :entity/id "collection-main"}
+        {:db/id "first"
+         :entity/id "property-first"
+         :property/collection [:entity/id "collection-main"]
+         :property/label "First"
+         :property/type :property.type/text
+         :property/order 0}
+        {:db/id "second"
+         :entity/id "property-second"
+         :property/collection [:entity/id "collection-main"]
+         :property/label "Second"
+         :property/type :property.type/date
+         :property/order 1}])
+    (d.close conn))
+  (let [reopened (d.connect app-test-path)]
+    (let [db (d.db reopened)
+          rows (d.q collection-properties-query db "collection-main")]
+      (test.is (= (kdata.count rows) 2))
+      (kdata.release rows)
+      (d.close db))
+    (d.close reopened))
   (remove-app-test-db))
 
 (test.deftest durable-app-connection-serializes-concurrent-reads-and-writes

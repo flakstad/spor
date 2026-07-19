@@ -36718,8 +36718,7 @@
     (while stream.has-current
       (when (not (row-values-exist? (slice rows 0) ([]Value [(value-entity stream.current.e)])))
         (append-entity-row! (addr rows) stream.current.e))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-result-rows-owned-values rows)
           (delete-source-index-datom-stream stream)
@@ -36755,8 +36754,7 @@
       (return (result-set-error stream-error)))
     (while stream.has-current
       (append-db-read-source-fixed-entity-attr-value-projection-row! (addr rows) query projection stream.current)
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-result-rows-owned-values rows)
           (delete-source-index-datom-stream stream)
@@ -36785,8 +36783,7 @@
         (return (result-set-error second-error)))
       (while second-stream.has-current
         (append-db-read-source-fixed-entity-two-attr-projection-row! (addr rows) query projection first-stream.current.v second-stream.current.v)
-        (set! second-stream.index (+ second-stream.index 1))
-        (let [[second-load-ok second-load-error] (load-source-index-datom-stream-current! source (addr second-stream))]
+        (let [[second-load-ok second-load-error] (advance-source-index-datom-stream! source (addr second-stream))]
           (when (not second-load-ok)
             (delete-result-rows-owned-values rows)
             (delete-source-index-datom-stream second-stream)
@@ -36794,8 +36791,7 @@
             (return (result-set-error second-load-error)))))
       (delete-source-index-datom-stream second-stream)
       )
-      (set! first-stream.index (+ first-stream.index 1))
-      (let [[first-load-ok first-load-error] (load-source-index-datom-stream-current! source (addr first-stream))]
+      (let [[first-load-ok first-load-error] (advance-source-index-datom-stream! source (addr first-stream))]
         (when (not first-load-ok)
           (delete-result-rows-owned-values rows)
           (delete-source-index-datom-stream first-stream)
@@ -36815,8 +36811,7 @@
             (delete-result-rows-owned-values rows)
             (delete-source-index-datom-stream ref-stream)
             (return (result-set-error append-error)))))
-      (set! ref-stream.index (+ ref-stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr ref-stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr ref-stream))]
         (when (not load-ok)
           (delete-result-rows-owned-values rows)
           (delete-source-index-datom-stream ref-stream)
@@ -36853,8 +36848,7 @@
                   (delete-result-rows-owned-values rows)
                   (delete-source-index-datom-stream ref-stream)
                   (return (result-set-error append-error))))
-              (set! ref-stream.index (+ ref-stream.index 1))
-              (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr ref-stream))]
+              (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr ref-stream))]
                 (when (not load-ok)
                   (delete-result-rows-owned-values rows)
                   (delete-source-index-datom-stream ref-stream)
@@ -37173,8 +37167,7 @@
                   (delete-result-rows-owned-values rows)
                   (delete-source-index-datom-stream ref-stream)
                   (return (result-set-error append-error))))
-              (set! ref-stream.index (+ ref-stream.index 1))
-              (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr ref-stream))]
+              (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr ref-stream))]
                 (when (not load-ok)
                   (delete-result-rows-owned-values rows)
                   (delete-source-index-datom-stream ref-stream)
@@ -37263,8 +37256,7 @@
       (return false stream-error))
     (while stream.has-current
       (append-db-read-source-multi-hop-ref-chain-row! rows query projection stream.current.v first-value filter-value)
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -37281,8 +37273,7 @@
           (when (not append-ok)
             (delete-source-index-datom-stream stream)
             (return false append-error))))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -37299,8 +37290,7 @@
           (when (not append-ok)
             (delete-source-index-datom-stream stream)
             (return false append-error))))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -37316,8 +37306,7 @@
         (when (not append-ok)
           (delete-source-index-datom-stream stream)
           (return false append-error)))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -37335,8 +37324,7 @@
           (when (not append-ok)
             (delete-source-index-datom-stream stream)
             (return false append-error))))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -38399,8 +38387,7 @@
                   (delete-result-rows-owned-values rows)
                   (delete-source-index-datom-stream ref-stream)
                   (return (result-set-error append-error))))
-              (set! ref-stream.index (+ ref-stream.index 1))
-              (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr ref-stream))]
+              (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr ref-stream))]
                 (when (not load-ok)
                   (delete-result-rows-owned-values rows)
                   (delete-source-index-datom-stream ref-stream)
@@ -38482,15 +38469,13 @@
           (return (make [dynamic]Source-Anchor-Direct-Entity-Value) false value-error))
         (while value-stream.has-current
           (arr.push! out (Source-Anchor-Direct-Entity-Value {entity: direct-stream.current.e value: (value-owned value-stream.current.v) next: -1}))
-          (set! value-stream.index (+ value-stream.index 1))
-          (let [[value-load-ok value-load-error] (load-source-index-datom-stream-current! source (addr value-stream))]
+          (let [[value-load-ok value-load-error] (advance-source-index-datom-stream! source (addr value-stream))]
             (when (not value-load-ok)
               (delete-source-index-datom-stream value-stream)
               (delete-source-index-datom-stream direct-stream)
               (delete-source-anchor-direct-entity-values out)
               (return (make [dynamic]Source-Anchor-Direct-Entity-Value) false value-load-error)))))
-      (set! direct-stream.index (+ direct-stream.index 1))
-      (let [[direct-load-ok direct-load-error] (load-source-index-datom-stream-current! source (addr direct-stream))]
+      (let [[direct-load-ok direct-load-error] (advance-source-index-datom-stream! source (addr direct-stream))]
         (when (not direct-load-ok)
           (delete-source-index-datom-stream direct-stream)
           (delete-source-anchor-direct-entity-values out)
@@ -38519,8 +38504,7 @@
               (while (>= direct-index 0)
                 (append-db-read-source-anchor-two-branch-row! rows query projection direct-items[direct-index].value first-value filter-value)
                 (set! direct-index direct-items[direct-index].next))))))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -38537,8 +38521,7 @@
           (when (not append-ok)
             (delete-source-index-datom-stream stream)
             (return false append-error))))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -38554,8 +38537,7 @@
         (when (not append-ok)
           (delete-source-index-datom-stream stream)
           (return false append-error)))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -38573,8 +38555,7 @@
           (when (not append-ok)
             (delete-source-index-datom-stream stream)
             (return false append-error))))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -38612,8 +38593,7 @@
                     (delete-source-anchor-direct-entity-values direct-items)
                     (delete-result-rows-owned-values rows)
                     (return (result-set-error append-error))))
-                (set! first-stream.index (+ first-stream.index 1))
-                (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr first-stream))]
+                (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr first-stream))]
                   (when (not load-ok)
                     (delete-source-index-datom-stream first-stream)
                     (delete-source-anchor-direct-entity-values direct-items)
@@ -40094,8 +40074,7 @@
       (return false stream-error))
     (while stream.has-current
       (arr.push! option-row^.values (value-owned stream.current.v))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -40109,8 +40088,7 @@
     (while stream.has-current
       (when (not (row-values-exist? (slice rows^ 0) ([]Value [stream.current.v])))
         (append-distinct-single-value-row! rows (value-owned stream.current.v)))
-      (set! stream.index (+ stream.index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr stream))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not load-ok)
           (delete-source-index-datom-stream stream)
           (return false load-error))))
@@ -40143,8 +40121,7 @@
   (for [_ stream-index streams^]
     (while (and streams^[stream-index].has-current
                 (< streams^[stream-index].current.e entity))
-      (set! streams^[stream-index].index (+ streams^[stream-index].index 1))
-      (let [[load-ok load-error] (load-source-index-datom-stream-current! source (addr streams^[stream-index]))]
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr streams^[stream-index]))]
         (when (not load-ok)
           (return false load-error)))))
   (return true ""))
