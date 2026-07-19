@@ -123,7 +123,7 @@ same version of `com.vevdb:vev-java`.
 9. Wait for the state `PUBLISHED`, then resolve both coordinates anonymously
    from `https://repo1.maven.org/maven2/` into another empty cache.
 
-The recommended first publication under `com.vevdb` is `0.2.0-rc.1`, followed
+The recommended first publication under `com.vevdb` is `0.2.0-rc.2`, followed
 by `0.2.0` after consumer validation.
 
 ## Official references

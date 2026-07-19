@@ -157,14 +157,14 @@ under `build/lib`. The intended published Clojure experience is a normal
 deps.edn dependency that pulls in and loads the platform native library itself:
 
 ```clojure
-{:deps {com.vevdb/vev-clj {:mvn/version "0.2.0-rc.1"}}}
+{:deps {com.vevdb/vev-clj {:mvn/version "0.2.0-rc.2"}}}
 ```
 
 The same shape can be tested locally after `scripts/package_jvm.sh`:
 
 ```clojure
 {:mvn/local-repo "/path/to/vev/build/m2"
- :deps {com.vevdb/vev-clj {:mvn/version "0.2.0-rc.1"}}}
+ :deps {com.vevdb/vev-clj {:mvn/version "0.2.0-rc.2"}}}
 ```
 
 The combined release gate runs `scripts/smoke_jvm_coordinates.sh` against a
