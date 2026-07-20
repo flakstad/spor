@@ -30,6 +30,7 @@ import java.util.Set;
 import java.lang.ref.Cleaner;
 import java.util.UUID;
 import java.util.Date;
+import java.util.concurrent.CompletableFuture;
 
 public final class Vev implements AutoCloseable {
     private static final Linker LINKER = Linker.nativeLinker();
@@ -89,6 +90,7 @@ public final class Vev implements AutoCloseable {
     private final MethodHandle connectionInfoEdn;
     private final MethodHandle connectionClose;
     private final MethodHandle connectionDb;
+    private final MethodHandle connectionLatestDb;
     private final MethodHandle connectionTransactEdnReport;
     private final MethodHandle connectionTransactEdnReportWithTxFns;
     private final MethodHandle connectionTxCommitReport;
@@ -450,6 +452,7 @@ public final class Vev implements AutoCloseable {
         this.connectionInfoEdn = downcall("vev_connection_info_edn", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.connectionClose = downcall("vev_connection_close", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
         this.connectionDb = downcall("vev_connection_db", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        this.connectionLatestDb = downcall("vev_connection_latest_db", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.connectionTransactEdnReport = downcall("vev_connection_transact_edn_report", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.connectionTransactEdnReportWithTxFns = downcall("vev_connection_transact_edn_report_with_tx_fns", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.connectionTxCommitReport = downcall("vev_connection_tx_commit_report", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
@@ -1274,6 +1277,34 @@ public final class Vev implements AutoCloseable {
         return out;
     }
 
+    @FunctionalInterface
+    private interface DBSupplier {
+        DB get() throws Throwable;
+    }
+
+    private CompletableFuture<DB> syncFuture(DB current, long t, DBSupplier supplier) throws Throwable {
+        if (t < 0) throw new IllegalArgumentException("sync t must be non-negative");
+        if (current.basisT() >= t) return CompletableFuture.completedFuture(current);
+        current.close();
+        CompletableFuture<DB> result = new CompletableFuture<>();
+        Thread.startVirtualThread(() -> {
+            try {
+                while (!result.isDone()) {
+                    DB snapshot = supplier.get();
+                    if (snapshot.basisT() >= t) {
+                        result.complete(snapshot);
+                        return;
+                    }
+                    snapshot.close();
+                    Thread.sleep(10);
+                }
+            } catch (Throwable error) {
+                result.completeExceptionally(error);
+            }
+        });
+        return result;
+    }
+
     private static final class NativeHandle implements Runnable {
         private final MethodHandle closeHandle;
         private MemorySegment raw;
@@ -1742,6 +1773,14 @@ public final class Vev implements AutoCloseable {
             return new DB(db);
         }
 
+        public CompletableFuture<DB> sync() throws Throwable {
+            return CompletableFuture.completedFuture(db());
+        }
+
+        public CompletableFuture<DB> sync(long t) throws Throwable {
+            return syncFuture(db(), t, this::db);
+        }
+
         public Log log() throws Throwable {
             return new Log(db());
         }
@@ -1912,6 +1951,21 @@ public final class Vev implements AutoCloseable {
             MemorySegment db = (MemorySegment) connectionDb.invoke(raw);
             if (isNull(db)) throw new IllegalStateException("failed to retain DB snapshot");
             return new DB(db);
+        }
+
+        private DB latestDb() throws Throwable {
+            requireOpen();
+            MemorySegment db = (MemorySegment) connectionLatestDb.invoke(raw);
+            if (isNull(db)) throw new IllegalStateException("failed to acquire latest DB snapshot");
+            return new DB(db);
+        }
+
+        public CompletableFuture<DB> sync() throws Throwable {
+            return CompletableFuture.completedFuture(latestDb());
+        }
+
+        public CompletableFuture<DB> sync(long t) throws Throwable {
+            return syncFuture(latestDb(), t, this::latestDb);
         }
 
         public Log log() throws Throwable {

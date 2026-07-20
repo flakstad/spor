@@ -2,9 +2,11 @@
 ;; SPDX-License-Identifier: EPL-2.0
 
 (ns vev.core
+  (:refer-clojure :exclude [sync])
   (:require [clojure.edn :as edn]
             [clojure.set :as set])
   (:import [java.nio.file Path]
+           [java.util.function Function]
            [com.vevdb Vev Vev$ColumnResult Vev$DB Vev$Datom Vev$Entity Vev$EntityView Vev$Keyword Vev$Log Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxFunction Vev$TxReportListener]))
 
 (defn- path [value]
@@ -374,6 +376,41 @@
     :else
     (throw (ex-info "expected Vev connection" {:source conn}))))
 
+(defn- db-future [conn native-future]
+  (.thenApply native-future
+              (reify Function
+                (apply [_ native-db]
+                  (->DB (:engine conn) native-db)))))
+
+(defn sync
+  "Return a future yielding a DB coordinated with other connections.
+
+  With no `t`, captures a DB containing every transaction complete when this
+  function was called. With `t`, completes once the connection can acquire a DB
+  whose basis t is at least `t`."
+  ([conn]
+   (cond
+     (instance? Conn conn)
+     (db-future conn (.sync (:native conn)))
+
+     (instance? DurableConn conn)
+     (db-future conn (.sync (:native conn)))
+
+     :else
+     (throw (ex-info "expected Vev connection" {:source conn}))))
+  ([conn t]
+   (when-not (and (integer? t) (not (neg? t)))
+     (throw (ex-info "sync t must be a non-negative integer" {:t t})))
+   (cond
+     (instance? Conn conn)
+     (db-future conn (.sync (:native conn) (long t)))
+
+     (instance? DurableConn conn)
+     (db-future conn (.sync (:native conn) (long t)))
+
+     :else
+     (throw (ex-info "expected Vev connection" {:source conn})))))
+
 (defn connection-info
   "Return storage metadata for a durable connection."
   [conn]
@@ -533,7 +570,7 @@
   "Return AVET datoms for attr from start inclusive to end exclusive."
   [^DB db attr start end]
   (let [values (.indexRange ^Vev$DB
-                (:native db)
+                            (:native db)
                             (native-index-value attr)
                             (native-index-value start)
                             (native-index-value end))]
@@ -544,7 +581,7 @@
   (or (= :db/id attr)
       (and (keyword? attr)
            (.contains ^Vev$EntityView
-            (.-native entity-view)
+                      (.-native entity-view)
                       (edn-text attr)))))
 
 (defn- entity-ref-value [^DB db value]
@@ -596,8 +633,8 @@
   [^EntityView entity-view]
   (doseq [[attr value] (entity-realized-map entity-view)
           :when (bit-test (.attrFlags ^Vev$EntityView
-                           (.-native entity-view)
-                                      (edn-text attr))
+                                     (.-native entity-view)
+                                     (edn-text attr))
                           2)]
     (if (set? value)
       (doseq [component value]

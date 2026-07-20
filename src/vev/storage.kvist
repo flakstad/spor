@@ -12379,6 +12379,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (return (Store-DB {kind: .SQLite-Snapshot sqlite-snapshot: sqlite-snapshot}) true "")
       (return (Store-DB {}) false snapshot-error))))
 
+(defn sqlite-store-db-latest [store: ^SQLite-Conn] -> [snapshot: Store-DB, ok: bool, error: string]
+  (let [[sqlite-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot store^.path sqlite-db-source-default-page-size)]
+    (when snapshot-ok
+      (return (Store-DB {kind: .SQLite-Snapshot sqlite-snapshot: sqlite-snapshot}) true ""))
+    (return (Store-DB {}) false snapshot-error)))
+
 (defn sqlite-lazy-store-db-at-basis [path: string, basis-tx: u64] -> Store-DB
   (Store-DB {kind: .SQLite-Lazy-Snapshot
              sqlite-lazy-path: (string-owned path)

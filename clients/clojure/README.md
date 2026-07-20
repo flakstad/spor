@@ -315,6 +315,16 @@ Identity and raw index access use the Datomic names and argument order:
 Returned datoms support keyword lookup and indexed access, for example
 `(:v datom)` and `(nth datom 2)`.
 
+Use `db` for ordinary reads. When coordinating with another connection or
+process, `sync` returns a future in the Datomic shape:
+
+```clojure
+(def coordinated-db @(d/sync conn known-basis-t))
+```
+
+The two-argument form waits for a DB whose basis is at least the supplied `t`.
+The no-argument form captures all transactions complete when it is called.
+
 Transaction functions follow Datomic's installed-ident model: the DB contains
 the function ident, while the host registry supplies the executable callback for
 this process.

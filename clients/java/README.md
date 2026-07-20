@@ -101,6 +101,17 @@ try (Vev.DB db = conn.db();
 `java.time.Instant`, or `null`. It returns ordinary Java lists and maps with
 the Datomic-shaped `{:t ..., :data ...}` structure.
 
+Connections also expose Datomic-shaped synchronization futures:
+
+```java
+try (Vev.DB coordinated = conn.sync(knownBasisT).get()) {
+    System.out.println(coordinated.basisT());
+}
+```
+
+Prefer `db()` for ordinary reads. `sync()` and `sync(long)` are for
+coordination with other connections or processes.
+
 Transaction functions use a host registry plus a Datomic-style installed ident
 in the DB:
 

@@ -97,7 +97,7 @@ Work through this batch in order:
    start-of-transaction DB rather than an intermediate DB.
 - [x] Expose existing engine functionality under Datomic's `entid`, `ident`,
    `datoms`, `seek-datoms`, `rseek-datoms`, and `index-range` names.
-- [ ] Implement Datomic-shaped `sync`: immediate/current snapshots where possible
+- [x] Implement Datomic-shaped `sync`: immediate/current snapshots where possible
    and basis-`t` coordination for durable connections shared by processes.
 - [ ] Keep executable stored-function policy explicit. Do not persist arbitrary
    host-language code or present host callback registration as Datomic stored

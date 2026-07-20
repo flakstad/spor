@@ -1294,6 +1294,10 @@ Raw index access is available through `vev_db_datoms_value` (exact, forward
 seek, or reverse seek mode) and `vev_db_index_range_value`. Both return owned
 value handles containing ordered datom values and work with resident, durable,
 filtered, and history DB handles.
+
+`vev_connection_latest_db` opens an owned snapshot at the latest committed
+durable root, bypassing connection-local write caches. The Java and Clojure
+`sync` implementations use it to coordinate across connections and processes.
 - `vev_entity_found`
 - `vev_entity_id`
 - `vev_entity_contains`

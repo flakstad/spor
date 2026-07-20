@@ -4078,6 +4078,18 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (vev_sqlite_conn_db (connection-as-sqlite conn)))
 
 @export
+(defn vev_connection_latest_db :abi "c" [conn: Vev-Connection] -> Vev-DB
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr conn) nil) (not (abi-sqlite-conn-ok (rawptr conn))))
+    (return (Vev-DB nil)))
+  (let [[snapshot snapshot-ok snapshot-error] (vev.sqlite-store-db-latest (sqlite-conn-ptr (connection-as-sqlite conn)))]
+    (if snapshot-ok
+      (Vev-DB (abi-alloc-db snapshot))
+      (if (= snapshot-error "sqlite DB has no Vev index roots")
+        (Vev-DB (abi-alloc-db (vev.empty-shared-store-db-for-sqlite-bootstrap)))
+        (Vev-DB nil)))))
+
+@export
 (defn vev_connection_query_edn_with_inputs :abi "c" [conn: Vev-Connection, query-text: cstring, inputs-text: cstring] -> cstring
   (odin "context = runtime.default_context()")
   (when (or (= (rawptr conn) nil)

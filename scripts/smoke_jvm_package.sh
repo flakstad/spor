@@ -125,6 +125,17 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
   (assert (= #{["Ada"] ["Grace"]}
              (d/q '[:find ?name :where [?e :user/name ?name]]
                   (d/db conn))))
+  (with-open [captured @(d/sync conn)]
+    (assert (= (d/basis-t (d/db conn))
+               (d/basis-t captured))))
+  (let [target (inc (d/basis-t (d/db conn)))
+        coordinated (d/sync conn target)]
+    (assert (not (.isDone coordinated)))
+    (d/transact conn [[:db/add 1 :user/sync-marker true]])
+    (let [synced (deref coordinated 5000 ::timeout)]
+      (assert (not= ::timeout synced))
+      (assert (>= (d/basis-t synced) target))
+      (.close ^java.lang.AutoCloseable synced)))
   (let [snapshot (d/db conn)
         ada (d/entity snapshot 1)
         friend (:user/friend ada)]
@@ -213,17 +224,24 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
       path (.getAbsolutePath file)]
   (.delete file)
   (try
-    (with-open [conn (d/connect path)]
+    (with-open [conn (d/connect path)
+                writer (d/connect path)]
       (d/transact conn [{:db/id 80
                          :db/ident :item/score
                          :db/index true}
                         {:db/id 1 :item/score 10}
                         {:db/id 2 :item/score 20}])
-      (let [snapshot (d/db conn)]
-        (assert (= [10 20]
-                   (mapv :v (d/datoms snapshot :avet :item/score))))
-        (assert (= [20]
-                   (mapv :v (d/index-range snapshot :item/score 15 nil))))))
+      (let [target (inc (d/basis-t (d/db conn)))
+            coordinated (d/sync conn target)]
+        (d/transact writer [[:db/add 3 :item/score 30]])
+        (let [synced (deref coordinated 5000 ::timeout)]
+          (assert (not= ::timeout synced))
+          (assert (>= (d/basis-t synced) target))
+          (assert (= [10 20]
+                     (mapv :v (d/index-range synced :item/score nil 30))))
+          (assert (= [20 30]
+                     (mapv :v (d/index-range synced :item/score 15 nil))))
+          (.close ^java.lang.AutoCloseable synced))))
     (finally
       (doseq [suffix ["" "-wal" "-shm"]]
         (java.nio.file.Files/deleteIfExists
