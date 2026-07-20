@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       deployment_id:
-        description: Central Portal deployment UUID
-        required: true
+        description: Central Portal deployment UUID (blank resolves by version)
+        required: false
+        default: ""
         type: string
       version:
         description: Maven artifact version
@@ -38,11 +39,63 @@ jobs:
         with:
           cli: latest
 
+      - name: Resolve Central deployment
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          REQUESTED_DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          test -n "$CENTRAL_USERNAME"
+          test -n "$CENTRAL_PASSWORD"
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]+$ ]]
+          deployment_id="$REQUESTED_DEPLOYMENT_ID"
+          if [[ -z "$deployment_id" ]]; then
+            bearer="$(
+              printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" |
+                base64 |
+                tr -d '\n'
+            )"
+            deployment_name="VevDB-$VERSION"
+            for attempt in $(seq 1 30); do
+              deployments="$(
+                curl \
+                  --fail-with-body \
+                  --silent \
+                  --show-error \
+                  --get \
+                  --header "Authorization: Bearer $bearer" \
+                  --data-urlencode "deploymentName=$deployment_name" \
+                  --data-urlencode "sortField=createTimestamp" \
+                  --data-urlencode "sortDirection=desc" \
+                  --data-urlencode "size=20" \
+                  "https://central.sonatype.com/api/v1/publisher/deployments"
+              )"
+              deployment_id="$(
+                jq -r \
+                  --arg name "$deployment_name" \
+                  '[.deployments[]
+                    | select(.deploymentName == $name)
+                    | select(.deploymentState == "VALIDATING"
+                             or .deploymentState == "VALIDATED")]
+                   | first
+                   | .deploymentId // empty' \
+                  <<<"$deployments"
+              )"
+              if [[ -n "$deployment_id" ]]; then
+                break
+              fi
+              sleep 10
+            done
+          fi
+          [[ "$deployment_id" =~ ^[0-9a-f-]{36}$ ]]
+          echo "DEPLOYMENT_ID=$deployment_id" >> "$GITHUB_ENV"
+          echo "Resolved Central deployment: $deployment_id"
+
       - name: Wait for Portal validation
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
         run: |
           test -n "$CENTRAL_USERNAME"
           test -n "$CENTRAL_PASSWORD"
@@ -83,7 +136,6 @@ jobs:
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
           VERSION: ${{ inputs.version }}
         run: |
           [[ "$VERSION" =~ ^[0-9A-Za-z._-]+$ ]]
@@ -126,7 +178,6 @@ jobs:
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
         run: |
           bearer="$(
             printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" |
@@ -147,7 +198,6 @@ jobs:
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
         run: |
           bearer="$(
             printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" |
@@ -208,7 +258,6 @@ jobs:
 
       - name: Record result
         env:
-          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
           VERSION: ${{ inputs.version }}
           PUBLISH: ${{ inputs.publish }}
         run: |
