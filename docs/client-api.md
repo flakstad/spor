@@ -48,10 +48,15 @@ clients should place advanced facilities in an `advanced`/`internal` namespace
 or an unmistakably low-level type rather than mixing them into the ordinary DB
 API.
 
-The supported constructors are `create-conn`/`createConn`/`CreateConn` (or the
-idiomatic equivalent) for in-memory use and `connect` for durable use. The
-redundant `open_memory` family and public SQLite-specific constructors are not
-part of host-client APIs. SQLite remains an implementation detail.
+The canonical constructors are `create-conn`/`createConn`/`CreateConn` (or the
+idiomatic equivalent) for in-memory use and `connect` for durable use. Released
+`open_memory` spellings remain compatibility helpers. SQLite remains an
+implementation detail, while explicitly SQLite-named compatibility entry
+points remain available for migration, testing, and debugging.
+
+Do not remove an existing public symbol merely because it is non-canonical.
+Removal requires an explicit compatibility decision after checking whether it
+is an alias or the only route to a capability.
 
 ## Core operation set
 

@@ -322,6 +322,10 @@
          (.close engine)
          (throw error))))))
 
+(def open
+  "Compatibility alias for `create-conn`."
+  create-conn)
+
 (defn connect
   "Open a durable Vev connection.
 
@@ -342,6 +346,16 @@
        (catch Throwable error
          (.close engine)
          (throw error))))))
+
+(defn open-sqlite
+  "Open the legacy SQLite-specific Vev connection.
+
+  Prefer `connect` for application code. This compatibility entry point is
+  retained for storage migration, testing, and debugging."
+  ([sqlite-path]
+   (connect sqlite-path))
+  ([lib-path sqlite-path]
+   (connect lib-path sqlite-path)))
 
 (defn db
   "Return an immutable DB snapshot from a connection."

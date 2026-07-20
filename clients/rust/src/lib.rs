@@ -495,6 +495,11 @@ impl Conn {
         }
     }
 
+    /// Compatibility alias for [`Conn::create`].
+    pub fn open_memory() -> Result<Self, String> {
+        Self::create()
+    }
+
     pub fn from_db(db: &Db) -> Result<Self, String> {
         // Resident/in-memory compatibility only. Durable DB handles are
         // immutable values and should be queried directly.

@@ -51,6 +51,8 @@ assert(ok)
 defer vev.close(&result)
 ```
 
+`open_memory` remains as a compatibility alias for `create_conn`.
+
 For a shared dependency directory, expose a collection at build time:
 
 ```sh

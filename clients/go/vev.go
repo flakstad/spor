@@ -47,6 +47,11 @@ func CreateConn() (*Conn, error) {
 	return &Conn{raw: raw}, nil
 }
 
+// OpenMemory is a compatibility alias for CreateConn.
+func OpenMemory() (*Conn, error) {
+	return CreateConn()
+}
+
 func ConnFromDB(db *DB) (*Conn, error) {
 	// Resident/in-memory compatibility only. Durable DB handles are immutable
 	// values and should be queried directly.

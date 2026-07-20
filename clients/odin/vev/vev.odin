@@ -215,6 +215,9 @@ create_conn :: proc(library: ^Library) -> (connection: Connection, ok: bool) {
 	return Connection{library = library, handle = handle}, true
 }
 
+// Compatibility alias for create_conn.
+open_memory :: create_conn
+
 close_memory :: proc(connection: ^Connection) {
 	if connection == nil || connection.handle == nil {
 		return

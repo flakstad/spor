@@ -37,6 +37,8 @@ let result = db.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
 let pulled = db.pull("[:user/name]", 1)?;
 ```
 
+`Conn::open_memory()` remains as a compatibility alias for `Conn::create()`.
+
 `q` returns a `Value` with the Datomic find shape: `Value::Set` for
 relations, `Value::Vector` for collections and tuples, and the scalar value or
 `Value::Nil` for scalar finds.

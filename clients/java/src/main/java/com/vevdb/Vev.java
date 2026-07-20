@@ -679,6 +679,13 @@ public final class Vev implements AutoCloseable {
         return new Connection(raw);
     }
 
+    /**
+     * Compatibility alias for {@link #createConn()}.
+     */
+    public Connection openMemory() throws Throwable {
+        return createConn();
+    }
+
     public DurableConnection connect(Path path) throws Throwable {
         return connect(path.toString());
     }
@@ -695,6 +702,32 @@ public final class Vev implements AutoCloseable {
             }
             return new DurableConnection(raw);
         }
+    }
+
+    /**
+     * Opens the legacy SQLite-specific connection used by storage migration,
+     * testing, and debugging. Application code should normally use
+     * {@link #connect(Path)}.
+     */
+    public SQLiteConnection openSqlite(Path path) throws Throwable {
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment raw = (MemorySegment) sqliteConnOpen.invoke(local.allocateFrom(path.toString()));
+            if (isNull(raw)) throw new IllegalStateException("failed to open SQLite-backed Vev connection");
+            boolean ok = (boolean) sqliteConnOk.invoke(raw);
+            if (!ok) {
+                String error = ownedString((MemorySegment) sqliteConnError.invoke(raw));
+                closeHandle(sqliteConnClose, raw);
+                throw new IllegalStateException(error);
+            }
+            return new SQLiteConnection(raw);
+        }
+    }
+
+    /**
+     * String-path overload of {@link #openSqlite(Path)}.
+     */
+    public SQLiteConnection openSqlite(String path) throws Throwable {
+        return openSqlite(Path.of(path));
     }
 
     public Connection connFromDb(DB db) throws Throwable {

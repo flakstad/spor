@@ -222,6 +222,10 @@ class Library:
     def connect(self, uri: str | pathlib.Path) -> "DurableConnection":
         return DurableConnection(self, uri)
 
+    def open_sqlite(self, path: str | pathlib.Path) -> "SQLiteConnection":
+        """Open the legacy SQLite-specific connection for migration or debugging."""
+        return SQLiteConnection(self, path)
+
     def _configure(self) -> None:
         lib = self.lib
 
@@ -1183,8 +1187,18 @@ def create_conn() -> "Connection":
     return Connection(default_library())
 
 
+def open_memory() -> "Connection":
+    """Compatibility alias for create_conn()."""
+    return create_conn()
+
+
 def connect(uri: str | pathlib.Path) -> "DurableConnection":
     return DurableConnection(default_library(), uri)
+
+
+def open_sqlite(path: str | pathlib.Path) -> "SQLiteConnection":
+    """Open the legacy SQLite-specific connection for migration or debugging."""
+    return SQLiteConnection(default_library(), path)
 
 
 def q(

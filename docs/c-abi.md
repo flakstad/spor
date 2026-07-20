@@ -643,8 +643,8 @@ java --enable-native-access=ALL-UNNAMED ...
 ```
 
 The Java wrapper exposes `Vev.load(path)` and `createConn()` for in-memory
-work. Durable connections use `connect(path)` and query through immutable DB
-snapshots:
+work, with `openMemory()` retained as a compatibility alias. Durable
+connections use `connect(path)` and query through immutable DB snapshots:
 
 ```java
 try (Vev.DurableConnection durable = vev.connect("app.vev")) {
