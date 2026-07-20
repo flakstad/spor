@@ -5602,6 +5602,11 @@
 (defstruct DB-Read-Source {
   kind: DB-Read-Source-Kind
   db: ^DB
+  filter-has-as-of: bool
+  filter-as-of-tx: u64
+  filter-has-since: bool
+  filter-since-tx: u64
+  filter-history: bool
   shared-datoms: ^Shared-Datom-Log
   shared-indexes: ^Shared-DB-Int-Indexes
   sqlite-snapshot: ^SQLite-DB-Snapshot
@@ -5810,7 +5815,7 @@
       (sqlite-db-snapshot-datom-at-log-index source.sqlite-snapshot entry)
      (return (Datom {}) false "unknown DB read source")))
 
-(defn db-read-source-datom-current-at-entry? [source: DB-Read-Source, entry: int] -> [current: bool, ok: bool, error: string]
+(defn db-read-source-datom-unfiltered-current-at-entry? [source: DB-Read-Source, entry: int] -> [current: bool, ok: bool, error: string]
   (case source.kind
     .Resident
       (do
@@ -5980,6 +5985,53 @@
                 (delete-owned-datom candidate)))
             (return (and found latest-added (= latest-tx datom.tx)) true ""))))
      (return false false "unknown DB read source")))
+
+(defn db-read-source-datom-current-at-entry? [source: DB-Read-Source, entry: int] -> [current: bool, ok: bool, error: string]
+  (when (or source.filter-has-as-of
+            source.filter-has-since
+            source.filter-history)
+    (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
+      (when (not datom-ok)
+        (return false false datom-error))
+      (defer (delete-owned-datom datom))
+      (when (and source.filter-has-as-of
+                 (> datom.tx source.filter-as-of-tx))
+        (return false true ""))
+      (when (and source.filter-has-since
+                 (<= datom.tx source.filter-since-tx))
+        (return false true ""))
+      (when source.filter-history
+        (return true true ""))
+      (when source.filter-has-as-of
+        (when (not datom.added)
+          (return false true ""))
+        (let [[range-low range-high range-exists range-ok range-error] (db-read-source-eavt-entity-range source datom.e)]
+          (when (not range-ok)
+            (return false false range-error))
+          (when (not range-exists)
+            (return false true ""))
+          (let [view (db-read-source-index-view source .EAVT)
+                latest-tx: u64 0
+                latest-added false
+                found false]
+            (for [pos (arr.range range-low range-high)]
+              (let [candidate-entry (db-index-view-at view pos)
+                    [candidate candidate-ok candidate-error] (db-read-source-datom-at-entry source candidate-entry)]
+                (when (not candidate-ok)
+                  (return false false candidate-error))
+                (let [matches (and (<= candidate.tx source.filter-as-of-tx)
+                                   (= candidate.e datom.e)
+                                   (= candidate.a datom.a)
+                                   (value-equal? candidate.v datom.v))]
+                  (when matches
+                    (when (or (not found)
+                              (> candidate.tx latest-tx))
+                      (set! latest-tx candidate.tx)
+                      (set! latest-added candidate.added)
+                      (set! found true))))
+                (delete-owned-datom candidate)))
+            (return (and found latest-added (= latest-tx datom.tx)) true ""))))))
+  (db-read-source-datom-unfiltered-current-at-entry? source entry))
 
 (defn lower-bound-index-view-values [db: DB, view: DB-Index-View, values: []Value] -> int
   (let [order (public-index-order-text view.order)
@@ -6198,20 +6250,34 @@
                       added: (= op.kind .Add)})]
     (arr.push! out^ (datom-owned datom))))
 
+(defn db-read-source-filter-allows-tx? [source: DB-Read-Source, tx: u64] -> bool
+  (and (or (not source.filter-has-as-of)
+           (<= tx source.filter-as-of-tx))
+       (or (not source.filter-has-since)
+           (> tx source.filter-since-tx))))
+
 (defn db-read-source-apply-overlay-ops! [out: ^[dynamic]Datom, source: DB-Read-Source, order: Public-Index-Order, values: []Value]
-  (for [op source.overlay-ops^]
-    (when (tx-op-index-values-match? op order values)
-      (remove-datom-fact! out op.e op.a op.v)
-      (when (= op.kind .Add)
-        (append-owned-datom-from-tx-op! out op source.overlay-tx)))))
+  (when (db-read-source-filter-allows-tx? source source.overlay-tx)
+    (for [op source.overlay-ops^]
+      (when (tx-op-index-values-match? op order values)
+        (if source.filter-history
+          (append-owned-log-datom-from-tx-op! out op source.overlay-tx)
+          (do
+            (remove-datom-fact! out op.e op.a op.v)
+            (when (= op.kind .Add)
+              (append-owned-datom-from-tx-op! out op source.overlay-tx))))))))
 
 (defn db-read-source-apply-overlay-datoms! [out: ^[dynamic]Datom, source: DB-Read-Source, order: Public-Index-Order, values: []Value]
   (let [order-text (public-index-order-text order)]
     (for [datom source.overlay-datoms^]
-      (when (datom-matches-index-values? datom order-text values)
-        (remove-datom-fact! out datom.e datom.a datom.v)
-        (when datom.added
-          (arr.push! out^ (datom-owned datom)))))))
+      (when (and (db-read-source-filter-allows-tx? source datom.tx)
+                 (datom-matches-index-values? datom order-text values))
+        (if source.filter-history
+          (arr.push! out^ (datom-owned datom))
+          (do
+            (remove-datom-fact! out datom.e datom.a datom.v)
+            (when datom.added
+              (arr.push! out^ (datom-owned datom)))))))))
 
 (defn db-read-source-apply-overlay-log! [out: ^[dynamic]Datom, source: DB-Read-Source, order: Public-Index-Order, values: []Value]
   (let [order-text (public-index-order-text order)
@@ -6219,12 +6285,16 @@
     (while (< index source.overlay-log^.count)
       (let [[datom datom-ok] (shared-datom-log-at source.overlay-log^ index)]
         (when datom-ok
-          (if (datom-matches-index-values? datom order-text values)
+          (if (and (db-read-source-filter-allows-tx? source datom.tx)
+                   (datom-matches-index-values? datom order-text values))
             (do
-              (remove-datom-fact! out datom.e datom.a datom.v)
-              (if datom.added
+              (if source.filter-history
                 (arr.push! out^ datom)
-                (delete-owned-datom datom)))
+                (do
+                  (remove-datom-fact! out datom.e datom.a datom.v)
+                  (if datom.added
+                    (arr.push! out^ datom)
+                    (delete-owned-datom datom)))))
             (delete-owned-datom datom))))
       (set! index (+ index 1)))))
 
@@ -7339,34 +7409,46 @@
       true)))
 
 (defn db-read-source-apply-overlay-ops-for-clause-scan! [out: ^[dynamic]Datom, source: DB-Read-Source, scan: Clause-Index-Scan]
-  (for [op source.overlay-ops^]
-    (let [candidate (Datom {e: op.e
-                            a: op.a
-                            v: op.v
-                            tx: source.overlay-tx
-                            added: (= op.kind .Add)})]
-      (when (db-read-source-clause-index-scan-candidate? scan candidate)
-        (remove-datom-fact! out op.e op.a op.v)
-        (when (= op.kind .Add)
-          (append-owned-datom-from-tx-op! out op source.overlay-tx))))))
+  (when (db-read-source-filter-allows-tx? source source.overlay-tx)
+    (for [op source.overlay-ops^]
+      (let [candidate (Datom {e: op.e
+                              a: op.a
+                              v: op.v
+                              tx: source.overlay-tx
+                              added: (= op.kind .Add)})]
+        (when (db-read-source-clause-index-scan-candidate? scan candidate)
+          (if source.filter-history
+            (append-owned-log-datom-from-tx-op! out op source.overlay-tx)
+            (do
+              (remove-datom-fact! out op.e op.a op.v)
+              (when (= op.kind .Add)
+                (append-owned-datom-from-tx-op! out op source.overlay-tx)))))))))
 
 (defn db-read-source-apply-overlay-datoms-for-clause-scan! [out: ^[dynamic]Datom, source: DB-Read-Source, scan: Clause-Index-Scan]
   (for [datom source.overlay-datoms^]
-    (when (db-read-source-clause-index-scan-candidate? scan datom)
-      (remove-datom-fact! out datom.e datom.a datom.v)
-      (when datom.added
-        (arr.push! out^ (datom-owned datom))))))
+    (when (and (db-read-source-filter-allows-tx? source datom.tx)
+               (db-read-source-clause-index-scan-candidate? scan datom))
+      (if source.filter-history
+        (arr.push! out^ (datom-owned datom))
+        (do
+          (remove-datom-fact! out datom.e datom.a datom.v)
+          (when datom.added
+            (arr.push! out^ (datom-owned datom))))))))
 
 (defn db-read-source-apply-overlay-log-for-clause-scan! [out: ^[dynamic]Datom, source: DB-Read-Source, scan: Clause-Index-Scan]
   (for [index (arr.range 0 source.overlay-log^.count)]
     (let [[datom datom-ok] (shared-datom-log-at source.overlay-log^ index)]
       (when datom-ok
-        (if (db-read-source-clause-index-scan-candidate? scan datom)
+        (if (and (db-read-source-filter-allows-tx? source datom.tx)
+                 (db-read-source-clause-index-scan-candidate? scan datom))
           (do
-            (remove-datom-fact! out datom.e datom.a datom.v)
-            (if datom.added
+            (if source.filter-history
               (arr.push! out^ datom)
-              (delete-owned-datom datom)))
+              (do
+                (remove-datom-fact! out datom.e datom.a datom.v)
+                (if datom.added
+                  (arr.push! out^ datom)
+                  (delete-owned-datom datom)))))
           (delete-owned-datom datom))))))
 
 (defn db-read-source-apply-inline-overlay-for-clause-scan! [out: ^[dynamic]Datom, source: DB-Read-Source, scan: Clause-Index-Scan]

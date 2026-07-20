@@ -88,6 +88,9 @@ unsafe extern "C" {
         tx_count: c_int,
     ) -> VevTxReportArray;
     fn vev_db_release(db: VevDb);
+    fn vev_db_as_of(db: VevDb, tx: c_ulonglong) -> VevDb;
+    fn vev_db_since(db: VevDb, tx: c_ulonglong) -> VevDb;
+    fn vev_db_history(db: VevDb) -> VevDb;
     fn vev_u64_array_free(array: VevU64Array);
     fn vev_u64_array_count(array: VevU64Array) -> c_int;
     fn vev_u64_array_value(array: VevU64Array, index: c_int) -> c_ulonglong;
@@ -905,6 +908,33 @@ impl Db {
         let raw = unsafe { vev_db_with_edn(self.raw, tx.as_ptr()) };
         if raw.is_null() {
             Err("failed to create DB snapshot".to_string())
+        } else {
+            Ok(Db { raw })
+        }
+    }
+
+    pub fn as_of(&self, tx: u64) -> Result<Db, String> {
+        let raw = unsafe { vev_db_as_of(self.raw, tx as c_ulonglong) };
+        if raw.is_null() {
+            Err("failed to create as-of DB".to_string())
+        } else {
+            Ok(Db { raw })
+        }
+    }
+
+    pub fn since(&self, tx: u64) -> Result<Db, String> {
+        let raw = unsafe { vev_db_since(self.raw, tx as c_ulonglong) };
+        if raw.is_null() {
+            Err("failed to create since DB".to_string())
+        } else {
+            Ok(Db { raw })
+        }
+    }
+
+    pub fn history(&self) -> Result<Db, String> {
+        let raw = unsafe { vev_db_history(self.raw) };
+        if raw.is_null() {
+            Err("failed to create history DB".to_string())
         } else {
             Ok(Db { raw })
         }

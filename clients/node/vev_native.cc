@@ -85,6 +85,30 @@ T *external_arg(napi_env env, napi_callback_info info, size_t index) {
   return static_cast<T *>(data);
 }
 
+bool uint64_arg(napi_env env, napi_value value, unsigned long long *out) {
+  napi_valuetype type;
+  if (!ok(env, napi_typeof(env, value, &type))) {
+    return false;
+  }
+  if (type == napi_bigint) {
+    bool lossless = false;
+    if (!ok(env, napi_get_value_bigint_uint64(env, value, out, &lossless))) {
+      return false;
+    }
+    if (!lossless) {
+      throw_error(env, "transaction id is outside the unsigned 64-bit range");
+      return false;
+    }
+    return true;
+  }
+  double number = 0;
+  if (!ok(env, napi_get_value_double(env, value, &number)) || number < 0) {
+    return false;
+  }
+  *out = static_cast<unsigned long long>(number);
+  return true;
+}
+
 napi_value owned_string(napi_env env, const char *text) {
   napi_value out;
   const char *safe = text ? text : "";
@@ -694,6 +718,43 @@ napi_value db_with_report(napi_env env, napi_callback_info info) {
   return out;
 }
 
+napi_value db_as_of(napi_env env, napi_callback_info info) {
+  DB *snapshot = external_arg<DB>(env, info, 0);
+  size_t argc = 2;
+  napi_value args[2];
+  unsigned long long tx = 0;
+  ok(env, napi_get_cb_info(env, info, &argc, args, nullptr, nullptr));
+  if (argc < 2 || !snapshot || !snapshot->raw ||
+      !uint64_arg(env, args[1], &tx)) {
+    throw_error(env, "invalid as-of arguments");
+    return nullptr;
+  }
+  return wrap_db(env, vev_db_as_of(snapshot->raw, tx));
+}
+
+napi_value db_since(napi_env env, napi_callback_info info) {
+  DB *snapshot = external_arg<DB>(env, info, 0);
+  size_t argc = 2;
+  napi_value args[2];
+  unsigned long long tx = 0;
+  ok(env, napi_get_cb_info(env, info, &argc, args, nullptr, nullptr));
+  if (argc < 2 || !snapshot || !snapshot->raw ||
+      !uint64_arg(env, args[1], &tx)) {
+    throw_error(env, "invalid since arguments");
+    return nullptr;
+  }
+  return wrap_db(env, vev_db_since(snapshot->raw, tx));
+}
+
+napi_value db_history(napi_env env, napi_callback_info info) {
+  DB *snapshot = external_arg<DB>(env, info, 0);
+  if (!snapshot || !snapshot->raw) {
+    throw_error(env, "invalid history arguments");
+    return nullptr;
+  }
+  return wrap_db(env, vev_db_history(snapshot->raw));
+}
+
 napi_value pull(napi_env env, napi_callback_info info) {
   DB *snapshot = external_arg<DB>(env, info, 0);
   char *pattern = string_arg(env, info, 1);
@@ -813,6 +874,9 @@ napi_value init(napi_env env, napi_value exports) {
       {"dbQueryPreparedRows", nullptr, db_query_prepared_rows, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"dbQ", nullptr, db_q, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"dbWithReport", nullptr, db_with_report, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"dbAsOf", nullptr, db_as_of, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"dbSince", nullptr, db_since, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"dbHistory", nullptr, db_history, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"pull", nullptr, pull, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"pullLookupRefString", nullptr, pull_lookup_ref_string, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"pullMany", nullptr, pull_many, nullptr, nullptr, nullptr, napi_default, nullptr},

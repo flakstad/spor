@@ -807,4 +807,22 @@
        (vev.db-with-store-db-data (db-ptr ~db) ~tx-form))
      (db-lock ~db)))
 
+(defn as-of [db: DB, tx: u64] -> DB
+  (db-handle
+    (with-db-lock vev.Store-DB db
+      (vev.as-of-store-db (db-ptr db) tx))
+    (db-lock db)))
+
+(defn since [db: DB, tx: u64] -> DB
+  (db-handle
+    (with-db-lock vev.Store-DB db
+      (vev.since-store-db (db-ptr db) tx))
+    (db-lock db)))
+
+(defn history [db: DB] -> DB
+  (db-handle
+    (with-db-lock vev.Store-DB db
+      (vev.history-store-db (db-ptr db)))
+    (db-lock db)))
+
 (def close (overload close-conn close-db close-result close-value))

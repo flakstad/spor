@@ -8283,6 +8283,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defenum Store-DB-Kind [
   Empty
   Resident
+  Filtered
   SQLite-Snapshot
   SQLite-Lazy-Snapshot
   SQLite-Root-Snapshot
@@ -8298,6 +8299,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defstruct Store-DB {
   kind: Store-DB-Kind
   resident: DB
+  filtered-base: ^Store-DB
+  filter-has-as-of: bool
+  filter-as-of-tx: u64
+  filter-has-since: bool
+  filter-since-tx: u64
+  filter-history: bool
   sqlite-snapshot: SQLite-DB-Snapshot
   sqlite-lazy-path: string
   sqlite-lazy-basis-tx: u64
@@ -14104,6 +14111,16 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (case snapshot.kind
     .Resident (Store-DB {kind: .Resident
                          resident: (clone-db snapshot.resident)})
+    .Filtered
+      (let [base (alloc Store-DB)]
+        (set! base^ (retain-store-db snapshot.filtered-base^))
+        (Store-DB {kind: .Filtered
+                   filtered-base: base
+                   filter-has-as-of: snapshot.filter-has-as-of
+                   filter-as-of-tx: snapshot.filter-as-of-tx
+                   filter-has-since: snapshot.filter-has-since
+                   filter-since-tx: snapshot.filter-since-tx
+                   filter-history: snapshot.filter-history}))
     .SQLite-Snapshot
       (let [[root-backed root-backed-ok] (sqlite-root-store-db-from-open-snapshot snapshot.sqlite-snapshot)]
         (if root-backed-ok
@@ -14309,6 +14326,16 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn store-db-read-source [snapshot: ^Store-DB] -> [source: DB-Read-Source, ok: bool, error: string]
   (case snapshot^.kind
     .Resident (return (resident-db-read-source (addr snapshot^.resident)) true "")
+    .Filtered
+      (let [[base-source base-ok base-error] (store-db-read-source snapshot^.filtered-base)]
+        (when (not base-ok)
+          (return base-source false base-error))
+        (set! base-source.filter-has-as-of snapshot^.filter-has-as-of)
+        (set! base-source.filter-as-of-tx snapshot^.filter-as-of-tx)
+        (set! base-source.filter-has-since snapshot^.filter-has-since)
+        (set! base-source.filter-since-tx snapshot^.filter-since-tx)
+        (set! base-source.filter-history snapshot^.filter-history)
+        (return base-source true ""))
     .SQLite-Snapshot (return (sqlite-db-read-source (addr snapshot^.sqlite-snapshot)) true "")
     .SQLite-Lazy-Snapshot
       (let [path (string-owned snapshot^.sqlite-lazy-path)
@@ -14536,6 +14563,30 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (with-tx-data db tx-data)))
 
 (defn with-store-db-report-tx-data [snapshot: ^Store-DB, tx-data: []Tx-Data] -> Store-Tx-Report
+  (when (= snapshot^.kind .Filtered)
+    (when snapshot^.filter-history
+      (return (failed-store-tx-report snapshot^ "history DB values cannot be used with transactions")))
+    (let [report (with-store-db-report-tx-data snapshot^.filtered-base tx-data)]
+      (when report.ok
+        (let [filtered-before (filtered-store-db
+                                (addr report.db-before)
+                                snapshot^.filter-has-as-of
+                                snapshot^.filter-as-of-tx
+                                snapshot^.filter-has-since
+                                snapshot^.filter-since-tx
+                                false)
+              filtered-after (filtered-store-db
+                               (addr report.db-after)
+                               snapshot^.filter-has-as-of
+                               snapshot^.filter-as-of-tx
+                               snapshot^.filter-has-since
+                               snapshot^.filter-since-tx
+                               false)]
+          (close-store-db report.db-before)
+          (close-store-db report.db-after)
+          (set! report.db-before filtered-before)
+          (set! report.db-after filtered-after)))
+      (return report)))
   (when (source-backed-store-db? snapshot)
     (let [[report used ok error] (with-store-db-source-overlay-report-tx-data snapshot tx-data)]
       (when ok
@@ -14653,7 +14704,8 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           out)))))
 
 (defn source-backed-store-db? [snapshot: ^Store-DB] -> bool
-  (or (= snapshot^.kind .Shared-Snapshot)
+  (or (= snapshot^.kind .Filtered)
+      (= snapshot^.kind .Shared-Snapshot)
       (= snapshot^.kind .SQLite-Snapshot)
       (= snapshot^.kind .SQLite-Lazy-Snapshot)
       (= snapshot^.kind .SQLite-Root-Snapshot)
@@ -14663,6 +14715,49 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (= snapshot^.kind .SQLite-Datom-Overlay)
       (= snapshot^.kind .Shared-Datom-Log-Overlay)
       (= snapshot^.kind .SQLite-Datom-Log-Overlay)))
+
+(defn filtered-store-db [snapshot: ^Store-DB, has-as-of: bool, as-of-tx: u64, has-since: bool, since-tx: u64, history: bool] -> Store-DB
+  (let [base (Store-DB {})
+        next-has-as-of has-as-of
+        next-as-of-tx as-of-tx
+        next-has-since has-since
+        next-since-tx since-tx
+        next-history history]
+    (if (= snapshot^.kind .Filtered)
+      (do
+        (set! base (retain-store-db snapshot^.filtered-base^))
+        (when snapshot^.filter-has-as-of
+          (if next-has-as-of
+            (set! next-as-of-tx (min next-as-of-tx snapshot^.filter-as-of-tx))
+            (do
+              (set! next-has-as-of true)
+              (set! next-as-of-tx snapshot^.filter-as-of-tx))))
+        (when snapshot^.filter-has-since
+          (if next-has-since
+            (set! next-since-tx (max next-since-tx snapshot^.filter-since-tx))
+            (do
+              (set! next-has-since true)
+              (set! next-since-tx snapshot^.filter-since-tx))))
+        (set! next-history (or next-history snapshot^.filter-history)))
+      (set! base (retain-store-db snapshot^)))
+    (let [base-ptr (alloc Store-DB)]
+      (set! base-ptr^ base)
+      (Store-DB {kind: .Filtered
+                 filtered-base: base-ptr
+                 filter-has-as-of: next-has-as-of
+                 filter-as-of-tx: next-as-of-tx
+                 filter-has-since: next-has-since
+                 filter-since-tx: next-since-tx
+                 filter-history: next-history}))))
+
+(defn as-of-store-db [snapshot: ^Store-DB, tx: u64] -> Store-DB
+  (filtered-store-db snapshot true tx false 0 false))
+
+(defn since-store-db [snapshot: ^Store-DB, tx: u64] -> Store-DB
+  (filtered-store-db snapshot false 0 true tx false))
+
+(defn history-store-db [snapshot: ^Store-DB] -> Store-DB
+  (filtered-store-db snapshot false 0 false 0 true))
 
 (defn with-store-db-text [snapshot: ^Store-DB, text: string] -> Tx-Report
   (when (source-backed-store-db? snapshot)
@@ -14836,6 +14931,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
               ""))))
 
 (defn store-db-entity [snapshot: ^Store-DB, entity-id: u64] -> [entity: Store-Entity, ok: bool, error: string]
+  (when (and (= snapshot^.kind .Filtered)
+             snapshot^.filter-history)
+    (return (Store-Entity {}) false "history DB values do not support entity views"))
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
     (when (not source-ok)
       (return (Store-Entity {}) false source-error))
@@ -15127,6 +15225,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn close-store-db! [snapshot: ^Store-DB]
   (case snapshot^.kind
     .Resident (delete-owned-db snapshot^.resident)
+    .Filtered
+      (do
+        (close-store-db! snapshot^.filtered-base)
+        (free snapshot^.filtered-base))
     .SQLite-Snapshot (close-sqlite-db-snapshot! (addr snapshot^.sqlite-snapshot))
     .SQLite-Lazy-Snapshot (delete snapshot^.sqlite-lazy-path)
     .SQLite-Root-Snapshot

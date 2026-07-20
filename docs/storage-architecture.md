@@ -101,9 +101,10 @@ raw resident index slices.
    semantics and should not make ordinary small commits do surprising foreground
    merge work.
 
-6. Preserve future history/as-of support.
-   Append-only log semantics and basis-root metadata must remain clear enough to
-   add historical database values later.
+6. Extend historical database values.
+   Transaction-id `as-of`, `since`, and `history` views now use the append-only
+   log and immutable indexes. Add instant-to-transaction resolution and retain
+   the same semantics through future storage-layout changes.
 
 ## Non-Goals
 

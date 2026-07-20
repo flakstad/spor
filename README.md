@@ -106,6 +106,7 @@ query shape:
 
 (def next-db               ; 5
   (d/db-with db [{:db/id 3 :user/name "Katherine"}]))
+
 ```
 
 1. `create-conn` creates an in-memory database connection.
@@ -283,6 +284,8 @@ aggregates, rules, and immutable `db-with` operations.
 - In-memory databases with no SQLite requirement.
 - Durable local stores backed internally by SQLite.
 - Immutable database snapshots and hypothetical `db-with` values.
+- Composable `as-of`, `since`, and `history` database views over resident and
+  durable snapshots.
 - EAVT, AEVT, AVET, and VAET indexes with range and seek operations.
 - Datomic-flavored Datalog with predicates, functions, aggregates, rules,
   negation, disjunction, relation inputs, and pull expressions.

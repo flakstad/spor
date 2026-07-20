@@ -109,6 +109,9 @@ public final class Vev implements AutoCloseable {
     private final MethodHandle sqliteConnPreparedColumnBatchWithInputs;
     private final MethodHandle dbRetain;
     private final MethodHandle dbRelease;
+    private final MethodHandle dbAsOf;
+    private final MethodHandle dbSince;
+    private final MethodHandle dbHistory;
     private final MethodHandle withEdn;
     private final MethodHandle withEdnReport;
     private final MethodHandle dbWithEdn;
@@ -428,6 +431,9 @@ public final class Vev implements AutoCloseable {
         this.sqliteConnPreparedColumnBatchWithInputs = downcall("vev_sqlite_conn_prepared_column_batch_with_inputs", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbRetain = downcall("vev_db_retain", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbRelease = downcall("vev_db_release", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+        this.dbAsOf = downcall("vev_db_as_of", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+        this.dbSince = downcall("vev_db_since", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+        this.dbHistory = downcall("vev_db_history", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.withEdn = downcall("vev_with_edn", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.withEdnReport = downcall("vev_with_edn_report", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbWithEdn = downcall("vev_db_with_edn", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
@@ -1993,6 +1999,27 @@ public final class Vev implements AutoCloseable {
                      local.allocateFrom(inputs)))) {
                 return value.value();
             }
+        }
+
+        public DB asOf(long tx) throws Throwable {
+            requireOpen();
+            MemorySegment filtered = (MemorySegment) dbAsOf.invoke(handle.raw, tx);
+            if (isNull(filtered)) throw new IllegalStateException("failed to create as-of DB");
+            return new DB(filtered);
+        }
+
+        public DB since(long tx) throws Throwable {
+            requireOpen();
+            MemorySegment filtered = (MemorySegment) dbSince.invoke(handle.raw, tx);
+            if (isNull(filtered)) throw new IllegalStateException("failed to create since DB");
+            return new DB(filtered);
+        }
+
+        public DB history() throws Throwable {
+            requireOpen();
+            MemorySegment filtered = (MemorySegment) dbHistory.invoke(handle.raw);
+            if (isNull(filtered)) throw new IllegalStateException("failed to create history DB");
+            return new DB(filtered);
         }
 
         public EntityView entity(long entity) throws Throwable {

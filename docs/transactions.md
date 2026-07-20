@@ -72,6 +72,38 @@ query them through transaction history instead of adding mechanically updated
 `created-at` and `updated-at` attributes to every entity. Domain timestamps
 remain appropriate when they describe a distinct business event.
 
+## Historical database values
+
+Vev exposes the three Datomic-shaped database filters:
+
+- `as-of(db, tx)` includes facts in effect at transaction `tx`, inclusive.
+- `since(db, tx)` includes current assertions made after `tx`, exclusive.
+- `history(db)` exposes assertions and retractions across the database value's
+  history. Five-position data clauses can bind transaction and added/retracted
+  status.
+
+The filters return immutable DB values and compose. For example, applying
+`history` to an `as-of` DB exposes the fact history only through that inclusive
+transaction boundary. Applying `db-with` to an `as-of` or `since` value keeps
+the time filter; a history DB cannot be used as the point-in-time basis for an
+entity view or transaction.
+
+The first public time-point form is a Vev transaction id (`u64`, or the host
+language's corresponding integer). Resolving `#inst`/native date values to a
+transaction boundary remains a follow-up API. For durable databases the view
+is backed by the persisted append-only datom indexes, so it remains available
+after close and reopen rather than depending on an old in-process handle.
+
+Public spellings follow each host language:
+
+- Kvist: `d.as-of`, `d.since`, `d.history`
+- C: `vev_db_as_of`, `vev_db_since`, `vev_db_history`
+- Clojure: `d/as-of`, `d/since`, `d/history`
+- Java and Node: `db.asOf`, `db.since`, `db.history`
+- Python: `db.as_of`, `db.since`, `db.history`
+- Rust: `db.as_of`, `db.since`, `db.history`
+- Go: `db.AsOf`, `db.Since`, `db.History`
+
 Conceptually, each datom is associated with:
 
 - entity `e`

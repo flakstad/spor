@@ -336,6 +336,19 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     }
     vev_result_free(result);
     result = NULL;
+    vev_db_t as_of_db = vev_db_as_of(db, 0);
+    vev_db_t since_db = vev_db_since(db, 0);
+    vev_db_t history_db = vev_db_history(db);
+    if (as_of_db == NULL || since_db == NULL || history_db == NULL) {
+        fprintf(stderr, "failed to create filtered DB values\n");
+        if (as_of_db != NULL) vev_db_release(as_of_db);
+        if (since_db != NULL) vev_db_release(since_db);
+        if (history_db != NULL) vev_db_release(history_db);
+        goto cleanup;
+    }
+    vev_db_release(as_of_db);
+    vev_db_release(since_db);
+    vev_db_release(history_db);
     vev_db_release(db);
     db = NULL;
 

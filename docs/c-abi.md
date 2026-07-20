@@ -467,6 +467,19 @@ the latest logical index roots into fresh bounded ordered roots without loading
 a resident DB, so applications can schedule maintenance after write bursts and
 measure it separately from foreground transaction latency.
 
+Immutable DB handles support Datomic-shaped time views:
+
+```c
+vev_db_t earlier = vev_db_as_of(db, tx);  /* inclusive */
+vev_db_t recent = vev_db_since(db, tx);   /* exclusive */
+vev_db_t all = vev_db_history(db);
+```
+
+Each returned handle is independently owned and released with
+`vev_db_release`. History handles expose assertion and retraction datoms to
+queries, including the optional transaction and added fields in five-position
+data clauses.
+
 ## Python Adapter
 
 The raw `ctypes` surface is intentionally hidden behind a small Python adapter

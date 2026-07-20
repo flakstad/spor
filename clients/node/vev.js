@@ -196,6 +196,21 @@ class DB {
     };
   }
 
+  asOf(tx) {
+    this._requireOpen();
+    return new DB(native.dbAsOf(this._handle, tx));
+  }
+
+  since(tx) {
+    this._requireOpen();
+    return new DB(native.dbSince(this._handle, tx));
+  }
+
+  history() {
+    this._requireOpen();
+    return new DB(native.dbHistory(this._handle));
+  }
+
   pull(pattern, entity) {
     this._requireOpen();
     return native.pull(this._handle, String(pattern), Number(entity));

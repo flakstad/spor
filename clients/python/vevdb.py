@@ -301,6 +301,12 @@ class Library:
         ]
         lib.vev_sqlite_conn_transact_many_edn_reports.restype = ctypes.c_void_p
         lib.vev_db_release.argtypes = [ctypes.c_void_p]
+        lib.vev_db_as_of.argtypes = [ctypes.c_void_p, ctypes.c_ulonglong]
+        lib.vev_db_as_of.restype = ctypes.c_void_p
+        lib.vev_db_since.argtypes = [ctypes.c_void_p, ctypes.c_ulonglong]
+        lib.vev_db_since.restype = ctypes.c_void_p
+        lib.vev_db_history.argtypes = [ctypes.c_void_p]
+        lib.vev_db_history.restype = ctypes.c_void_p
         lib.vev_with_edn.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
         lib.vev_with_edn.restype = ctypes.c_void_p
         lib.vev_with_edn_report.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
@@ -1620,6 +1626,30 @@ class DB:
         handle = self._library.lib.vev_db_with_edn(self._handle, _bytes(tx_edn))
         if not handle:
             raise VevError("failed to create DB snapshot")
+        return DB(self._library, handle)
+
+    def as_of(self, tx: int) -> "DB":
+        """Return the database as of transaction `tx`, inclusive."""
+        self._require_open()
+        handle = self._library.lib.vev_db_as_of(self._handle, int(tx))
+        if not handle:
+            raise VevError("failed to create as-of DB")
+        return DB(self._library, handle)
+
+    def since(self, tx: int) -> "DB":
+        """Return facts asserted after transaction `tx`, exclusive."""
+        self._require_open()
+        handle = self._library.lib.vev_db_since(self._handle, int(tx))
+        if not handle:
+            raise VevError("failed to create since DB")
+        return DB(self._library, handle)
+
+    def history(self) -> "DB":
+        """Return all assertions and retractions across this DB's history."""
+        self._require_open()
+        handle = self._library.lib.vev_db_history(self._handle)
+        if not handle:
+            raise VevError("failed to create history DB")
         return DB(self._library, handle)
 
     def entity(self, entity: int | Entity) -> "EntityView":

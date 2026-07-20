@@ -570,6 +570,21 @@
     (->DB (:engine db) (.dbWith (:native db) (:native tx)))
     (->DB (:engine db) (.dbWith (:native db) (edn-text tx)))))
 
+(defn as-of
+  "Return a DB value containing facts in effect at transaction `tx`, inclusive."
+  [^DB db tx]
+  (->DB (:engine db) (.asOf (:native db) (long tx))))
+
+(defn since
+  "Return a DB value containing facts asserted after transaction `tx`, exclusive."
+  [^DB db tx]
+  (->DB (:engine db) (.since (:native db) (long tx))))
+
+(defn history
+  "Return a history DB containing assertions and retractions across time."
+  [^DB db]
+  (->DB (:engine db) (.history (:native db))))
+
 (defn tx-builder
   "Create a native transaction builder for direct typed bulk tx construction."
   ([source]

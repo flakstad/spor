@@ -1,0 +1,107 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import fmt "core:fmt")
+(import os "core:os")
+(import kdata "kvist:data")
+(import d "../vev_app")
+
+(def test-path "/tmp/vev-history-api.sqlite")
+
+(defn remove-test-store! []
+  (os.remove test-path)
+  (os.remove "/tmp/vev-history-api.sqlite-wal")
+  (os.remove "/tmp/vev-history-api.sqlite-shm"))
+
+(defn fail! [message: string]
+  (fmt.eprintln message)
+  (os.exit 1))
+
+(defn first-tx-id [conn: d.Conn] -> u64
+  (let [ids: Data
+          (d.q
+            '[:find [?tx ...]
+              :in ?log
+              :where [(tx-ids ?log 0 9223372036854775807) [?tx ...]]]
+            (d.log conn))]
+    (for [id ids]
+      (when (kdata.int? id)
+        (return (u64 (kdata.int id)))))
+    0))
+
+(defn query-name-count [db: d.DB, name: string] -> int
+  (let [rows: Data
+          (d.q
+            '[:find ?name
+              :in $ ?expected
+              :where [1 :user/name ?name]
+                     [(= ?name ?expected)]]
+            db
+            (kdata.from-string name))]
+    (count rows)))
+
+(defn main []
+  (remove-test-store!)
+  (defer (remove-test-store!))
+  (let [conn (d.connect test-path)]
+    (defer (d.close conn))
+    (d.transact conn [[:db/add 1 :user/name "Ada"]])
+    (let [tx1 (first-tx-id conn)]
+      (d.transact conn [[:db/retract 1 :user/name "Ada"]
+                        [:db/add 1 :user/name "Grace"]])
+      (let [db (d.db conn) :defer-with d.close
+            as-of-db (d.as-of db tx1) :defer-with d.close
+            since-db (d.since db tx1) :defer-with d.close
+            history-db (d.history db) :defer-with d.close
+            history-as-of-db (d.history as-of-db) :defer-with d.close
+            hypothetical-as-of-db
+              (d.db-with as-of-db [[:db/add 1 :user/name "Future"]])
+              :defer-with d.close
+            history-rows: Data
+              (d.q
+                '[:find ?name ?tx ?added
+                  :where [1 :user/name ?name ?tx ?added]]
+                history-db)
+            early-history-rows: Data
+              (d.q
+                '[:find ?name ?tx ?added
+                  :where [1 :user/name ?name ?tx ?added]]
+                history-as-of-db)]
+        (when (not (= (query-name-count as-of-db "Ada") 1))
+          (fail! "as-of did not restore the earlier assertion"))
+        (when (not (= (query-name-count as-of-db "Grace") 0))
+          (fail! "as-of exposed a later assertion"))
+        (when (not (= (query-name-count since-db "Ada") 0))
+          (fail! "since exposed an assertion at or before its exclusive bound"))
+        (when (not (= (query-name-count since-db "Grace") 1))
+          (fail! "since did not expose the later assertion"))
+        (when (not (= (count history-rows) 3))
+          (fail! "history did not expose both assertions and the retraction"))
+        (when (not (= (count early-history-rows) 1))
+          (fail! "as-of and history filters did not compose"))
+        (when (not (= (query-name-count hypothetical-as-of-db "Future") 0))
+          (fail! "db-with escaped the as-of filter"))
+        (fmt.println "history-api durable: ok"))))
+  (let [conn (d.create-conn)]
+    (defer (d.close conn))
+    (d.transact conn [[:db/add 1 :user/name "Ada"]])
+    (d.transact conn [[:db/retract 1 :user/name "Ada"]
+                      [:db/add 1 :user/name "Grace"]])
+    (let [db (d.db conn) :defer-with d.close
+          as-of-db (d.as-of db (u64 4611686018427387904)) :defer-with d.close
+          since-db (d.since db (u64 4611686018427387904)) :defer-with d.close
+          history-db (d.history db) :defer-with d.close
+          history-rows: Data
+            (d.q
+              '[:find ?name ?tx ?added
+                :where [1 :user/name ?name ?tx ?added]]
+              history-db)]
+      (when (not (= (query-name-count as-of-db "Ada") 1))
+        (fail! "resident as-of did not restore the earlier assertion"))
+      (when (not (= (query-name-count since-db "Grace") 1))
+        (fail! "resident since did not expose the later assertion"))
+      (when (not (= (count history-rows) 3))
+        (fail! "resident history did not expose the full fact history"))
+      (fmt.println "history-api resident: ok"))))

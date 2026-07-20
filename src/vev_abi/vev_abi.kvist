@@ -4318,6 +4318,27 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (Vev-DB (abi-retain-db (rawptr db))))
 
 @export
+(defn vev_db_as_of :abi "c" [db: Vev-DB, tx: u64] -> Vev-DB
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return (Vev-DB nil)))
+  (Vev-DB (abi-alloc-db (vev.as-of-store-db (store-db-ptr db) tx))))
+
+@export
+(defn vev_db_since :abi "c" [db: Vev-DB, tx: u64] -> Vev-DB
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return (Vev-DB nil)))
+  (Vev-DB (abi-alloc-db (vev.since-store-db (store-db-ptr db) tx))))
+
+@export
+(defn vev_db_history :abi "c" [db: Vev-DB] -> Vev-DB
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return (Vev-DB nil)))
+  (Vev-DB (abi-alloc-db (vev.history-store-db (store-db-ptr db)))))
+
+@export
 (defn vev_with_edn :abi "c" [db: Vev-DB, tx-text: cstring] -> cstring
   (odin "context = runtime.default_context()")
   (when (or (= (rawptr db) nil) (= tx-text nil))
