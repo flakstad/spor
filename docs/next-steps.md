@@ -10,23 +10,19 @@ names, argument order, result shapes, and documented semantics should not
 diverge without an explicit recorded exception. Do not fill gaps in
 `vev.core` with APIs that Datomic does not provide.
 
-## Next Release
+## First Stable Release
 
-1. Choose the next prerelease version, update coordinated version metadata,
-   and tag the same tested source state in every affected repository.
-2. Run the complete cross-platform release gate on macOS arm64, Linux x86-64,
-   and Windows x86-64.
-3. Stage and publish the matching `vev-java` and `vev-clj` artifacts to Maven
-   Central. Validate them using clean dependency caches, no `VEV_LIB`, no
-   repository-local classpath, and no system SQLite installation.
-4. Run the post-publication acceptance workflow using only public GitHub
-   release files and Maven Central coordinates.
-5. Promote a release candidate to the first stable release only after the
-   public artifacts have passed real Clojure, Kvist, CLI, Java, C, and Odin
-   use.
+`0.2.0-rc.3` is the current public prerelease. Before promoting it:
 
-Maven Central artifacts are immutable. Never reuse `0.2.0-rc.2`; the current
-`main` branch requires a new version.
+1. Exercise the public artifacts in real Clojure, Kvist, CLI, Java, C, and Odin
+   projects, and fix release-blocking compatibility or packaging problems.
+2. Run the complete five-platform release gate and public-coordinate acceptance
+   after every release-candidate change.
+3. Choose a new coordinated version for every changed release. Maven Central
+   artifacts and Git tags are immutable; never reuse `0.2.0-rc.3`.
+4. Promote to `0.2.0` only when the public prerelease has no known
+   release-blocking issue, then repeat GitHub and Maven Central publication and
+   clean-cache acceptance for the stable coordinates.
 
 ## Datomic API Direction
 
