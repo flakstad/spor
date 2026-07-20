@@ -78,6 +78,40 @@ representations.
 
 The 379-test Vev engine suite passes with the current Kvist compiler.
 
+## Active Datomic API parity workstream
+
+VevDB's Clojure API should copy Datomic's public API where the operation has a
+meaningful embedded equivalent. It should not fill gaps with helper functions
+under the Datomic-shaped `vev.core` namespace.
+
+Work through this batch in order:
+
+- [x] Replace the thin entity wrapper with Datomic-style entity behavior:
+   `(entity db eid)`, keyword/map lookup, associative and seqable collection
+   behavior, lazy reference traversal, `entity-db`, and Datomic-shaped `touch`.
+   Remove the invented `entity-get`, `entity-values`, `entity-ref`,
+   `entity-refs`, `entity-id`, and `entity-found?` functions, plus the
+   one-argument `entity` overload.
+- [ ] Port Datomic's intra-transaction regression cases and make an explicit,
+   tested decision about transaction functions observing the
+   start-of-transaction DB rather than an intermediate DB.
+- [ ] Expose existing engine functionality under Datomic's `entid`, `ident`,
+   `datoms`, `seek-datoms`, `rseek-datoms`, and `index-range` names.
+- [ ] Implement Datomic-shaped `sync`: immediate/current snapshots where possible
+   and basis-`t` coordination for durable connections shared by processes.
+- [ ] Keep executable stored-function policy explicit. Do not persist arbitrary
+   host-language code or present host callback registration as Datomic stored
+   functions. Review the non-Datomic `tx-fns` surface before calling this area
+   complete.
+- [ ] Add focused multi-process and interrupted-commit coverage for serialized
+   writers, monotonic transaction coordinates, immutable retained snapshots,
+   and `sync` visibility.
+
+The compatibility reference is the current Datomic Clojure API. Embedded
+architecture may change implementation and timing, but not names, argument
+order, result shapes, or documented semantics without an explicit recorded
+exception.
+
 ## Active Scale Work
 
 Ro's outline benchmark is the current application-scale workload:

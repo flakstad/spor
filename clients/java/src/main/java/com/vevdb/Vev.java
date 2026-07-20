@@ -133,6 +133,7 @@ public final class Vev implements AutoCloseable {
     private final MethodHandle entityFound;
     private final MethodHandle entityId;
     private final MethodHandle entityContains;
+    private final MethodHandle entityAttrFlags;
     private final MethodHandle entityGet;
     private final MethodHandle entityValues;
     private final MethodHandle entityRef;
@@ -491,6 +492,7 @@ public final class Vev implements AutoCloseable {
         this.entityFound = downcall("vev_entity_found", FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS));
         this.entityId = downcall("vev_entity_id", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
         this.entityContains = downcall("vev_entity_contains", FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        this.entityAttrFlags = downcall("vev_entity_attr_flags", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.entityGet = downcall("vev_entity_get", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.entityValues = downcall("vev_entity_values", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.entityRef = downcall("vev_entity_ref", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
@@ -2941,6 +2943,13 @@ public final class Vev implements AutoCloseable {
             requireOpen();
             try (Arena local = Arena.ofConfined()) {
                 return (boolean) entityContains.invoke(handle.raw, local.allocateFrom(attr));
+            }
+        }
+
+        public int attrFlags(String attr) throws Throwable {
+            requireOpen();
+            try (Arena local = Arena.ofConfined()) {
+                return (int) entityAttrFlags.invoke(handle.raw, local.allocateFrom(attr));
             }
         }
 

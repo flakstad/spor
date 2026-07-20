@@ -15198,6 +15198,28 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (delete-owned-value value))
     value-ok))
 
+(defn store-entity-attr-flags [entity: ^Store-Entity, attr: string] -> [flags: int, ok: bool, error: string]
+  ;; Bit 0: ref, bit 1: cardinality-many, bit 2: component.
+  (when (reverse-attr? attr)
+    (return 3 true ""))
+  (let [[source source-ok source-error] (store-db-read-source (addr entity^.db))]
+    (when (not source-ok)
+      (return 0 false source-error))
+    (let [[ref ref-ok ref-error] (db-read-source-schema-ref? source attr)]
+      (when (not ref-ok)
+        (return 0 false ref-error))
+      (let [[many many-ok many-error] (db-read-source-schema-cardinality-many? source attr)]
+        (when (not many-ok)
+          (return 0 false many-error))
+        (let [[component component-ok component-error] (db-read-source-schema-component? source attr)]
+          (when (not component-ok)
+            (return 0 false component-error))
+          (return (+ (if ref 1 0)
+                     (if many 2 0)
+                     (if component 4 0))
+                  true
+                  ""))))))
+
 (defn store-entity-ref [entity: ^Store-Entity, attr: string] -> [ref: Store-Entity, ok: bool, error: string]
   (let [[value value-ok value-error] (store-entity-first-value entity attr)]
     (when (not value-ok)

@@ -4561,6 +4561,16 @@ abi_free_stmt :: proc(stmt: rawptr) {
     out))
 
 @export
+(defn vev_entity_attr_flags :abi "c" [entity: Vev-Entity, attr: cstring] -> int
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr entity) nil) (= attr nil))
+    (return 0))
+  (let [attr-text (text-from-c attr)
+        [flags flags-ok _] (vev.store-entity-attr-flags (entity-ptr entity) attr-text)]
+    (delete attr-text)
+    (if flags-ok flags 0)))
+
+@export
 (defn vev_entity_get :abi "c" [entity: Vev-Entity, attr: cstring] -> Vev-Value-Handle
   (odin "context = runtime.default_context()")
   (when (or (= (rawptr entity) nil) (= attr nil))

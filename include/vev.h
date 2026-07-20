@@ -238,6 +238,7 @@ void vev_entity_free(vev_entity_t entity);
 bool vev_entity_found(vev_entity_t entity);
 unsigned long long vev_entity_id(vev_entity_t entity);
 bool vev_entity_contains(vev_entity_t entity, const char *attr);
+int vev_entity_attr_flags(vev_entity_t entity, const char *attr);
 vev_value_handle_t vev_entity_get(vev_entity_t entity, const char *attr);
 vev_value_handle_t vev_entity_values(vev_entity_t entity, const char *attr);
 vev_entity_t vev_entity_ref(vev_entity_t entity, const char *attr);

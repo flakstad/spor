@@ -47,7 +47,11 @@ cat > "$TMP_DIR/java-smoke.clj" <<'EOF'
       (assert (= 1 @seen)))
     (.transact conn "[[:db/add 1 :user/listener \"after-close\"]]")
     (assert (= 1 @seen)))
-  (.transact conn "[{:db/id 1 :user/name \"Ada\"}]")
+  (.transact conn
+             "[{:db/id 90 :db/ident :user/friend :db/valueType :db.type/ref}
+               {:db/id 91 :db/ident :user/tags :db/cardinality :db.cardinality/many}
+               {:db/id 1 :user/name \"Ada\" :user/friend 2 :user/tags [\"pioneer\"]}
+               {:db/id 2 :user/name \"Grace\"}]")
   (with-open [db (.db conn)]
     (let [basis (.basisT db)
           relation (.query vev (java.util.Map/of
@@ -61,13 +65,16 @@ cat > "$TMP_DIR/java-smoke.clj" <<'EOF'
       (assert (nil? (.asOfT db)))
       (assert (nil? (.sinceT db)))
       (assert (false? (.isHistory db)))
+      (with-open [ada (.entity db 1)]
+        (assert (= 1 (bit-and 1 (.attrFlags ada ":user/friend"))))
+        (assert (= 2 (bit-and 2 (.attrFlags ada ":user/tags")))))
       (with-open [log (.log conn)]
         (assert (= 3 (count (.txRange log nil nil)))))
       (with-open [earlier (.asOf db (dec basis))
                   history (.history db)]
         (assert (= (dec basis) (.asOfT earlier)))
         (assert (.isHistory history)))
-      (assert (= #{["Ada"]} (set (map vec relation))))
+      (assert (= #{["Ada"] ["Grace"]} (set (map vec relation))))
       (assert (= "Ada" scalar))))
   (println :vev-java-package-ok))
 EOF
@@ -92,10 +99,42 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
       (assert (= 1 (count @seen))))
     (d/transact conn [[:db/add 1 :user/listener "after-close"]])
     (assert (= 1 (count @seen))))
-  (d/transact conn [{:db/id 1 :user/name "Ada"}])
-  (assert (= #{["Ada"]}
+  (d/transact conn
+              [{:db/id 90
+                :db/ident :user/friend
+                :db/valueType :db.type/ref}
+               {:db/id 91
+                :db/ident :user/tags
+                :db/cardinality :db.cardinality/many}
+               {:db/id 92
+                :db/ident :user/email
+                :db/unique :db.unique/identity}
+               {:db/id 1
+                :user/name "Ada"
+                :user/email "ada@example.com"
+                :user/friend 2
+                :user/tags ["pioneer"]}
+               {:db/id 2
+                :user/name "Grace"}])
+  (assert (= #{["Ada"] ["Grace"]}
              (d/q '[:find ?name :where [?e :user/name ?name]]
                   (d/db conn))))
+  (let [snapshot (d/db conn)
+        ada (d/entity snapshot 1)
+        friend (:user/friend ada)]
+    (assert (= 1 (:db/id ada)))
+    (assert (= "Ada" (:user/name ada)))
+    (assert (= #{"pioneer"} (:user/tags ada)))
+    (assert (= 2 (:db/id friend)))
+    (assert (= "Grace" (:user/name friend)))
+    (assert (contains? ada :user/name))
+    (assert (not (map? ada)))
+    (assert (= "Ada" (:user/name (into {} ada))))
+    (assert (identical? snapshot (d/entity-db ada)))
+    (assert (identical? ada (d/touch ada)))
+    (assert (= 999 (:db/id (d/entity snapshot 999))))
+    (assert (nil? (d/entity snapshot :user/missing)))
+    (assert (nil? (d/entity snapshot [:user/email "missing@example.com"]))))
   (with-open [fns (d/tx-fns conn {:user/set-name
                                   (fn [db e name]
                                     [[:db/add e :user/name name]])})]

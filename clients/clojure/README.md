@@ -287,8 +287,9 @@ view sees:
 (let [db (d/db conn)
       ada (d/entity db 1)]
   (:user/name ada)
-  (d/entity-values ada :user/email)
-  (d/entity-ref ada :user/friend)
+  (:user/email ada)
+  (:user/name (:user/friend ada))
+  (d/entity-db ada)
   (d/touch ada))
 ```
 

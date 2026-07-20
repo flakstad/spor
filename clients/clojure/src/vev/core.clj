@@ -161,18 +161,53 @@
   (close [_]
     (.close ^java.lang.AutoCloseable native)))
 
-(declare entity-get)
+(declare entity-contains? entity-value entity-realized-map touch)
 
-(deftype EntityView [^Vev engine native]
+(deftype EntityView [^DB db ^Vev$EntityView native cache]
   java.lang.AutoCloseable
   (close [_]
     (.close ^java.lang.AutoCloseable native))
+  clojure.lang.Associative
+  (containsKey [this key]
+    (entity-contains? this key))
+  (entryAt [this key]
+    (when (entity-contains? this key)
+      (clojure.lang.MapEntry/create key (entity-value this key))))
+  (assoc [this key value]
+    (assoc (entity-realized-map this) key value))
   clojure.lang.ILookup
   (valAt [this key]
-    (entity-get this key))
+    (entity-value this key))
   (valAt [this key not-found]
-    (let [value (entity-get this key)]
-      (if (nil? value) not-found value))))
+    (if (entity-contains? this key)
+      (entity-value this key)
+      not-found))
+  clojure.lang.IPersistentCollection
+  (cons [this value]
+    (conj (entity-realized-map this) value))
+  (empty [_]
+    {})
+  (equiv [this other]
+    (= (entity-realized-map this) other))
+  clojure.lang.Counted
+  (count [this]
+    (count (entity-realized-map this)))
+  clojure.lang.IHashEq
+  (hasheq [this]
+    (clojure.lang.Util/hasheq (entity-realized-map this)))
+  clojure.lang.Seqable
+  (seq [this]
+    (seq (entity-realized-map this)))
+  Iterable
+  (iterator [this]
+    (.iterator ^Iterable (entity-realized-map this)))
+  Object
+  (equals [this other]
+    (= (entity-realized-map this) other))
+  (hashCode [this]
+    (hash (entity-realized-map this)))
+  (toString [this]
+    (str (entity-realized-map this))))
 
 (defn retain-db
   "Return another owned handle to the same immutable DB value."
@@ -327,72 +362,114 @@
   [^DB db]
   (->Conn (:engine db) (.connFromDb (:engine db) (:native db))))
 
+(defn- entity-view [db native]
+  (EntityView. db native (atom {})))
+
 (defn entity
-  "Create an entity id value, or a DB-backed entity view.
+  "Return a Datomic-style entity view over an immutable DB value.
 
-  `(entity id)` returns an explicit entity id value for typed native APIs.
-  `(entity db id)` returns a Datomic-style entity view over an immutable DB
-  value. The view can be used with keyword lookup and closed explicitly when a
-  caller wants prompt native release."
-  ([id]
-   (Vev$Entity. (long id)))
-  ([^DB db eid]
-   (let [native (cond
-                  (integer? eid)
-                  (.entity ^Vev$DB (:native db) (long eid))
+  `eid` may be an entity id, ident, or lookup ref. Entity attributes are loaded
+  lazily through keyword lookup. An unresolved ident or lookup ref returns nil;
+  a numeric id always returns an entity view whose `:db/id` is that id."
+  [^DB db eid]
+  (let [lookup? (not (integer? eid))
+        native (cond
+                 (integer? eid)
+                 (.entity ^Vev$DB (:native db) (long eid))
 
-                  (keyword? eid)
-                  (.entityIdent ^Vev$DB (:native db) (edn-text eid))
+                 (keyword? eid)
+                 (.entityIdent ^Vev$DB (:native db) (edn-text eid))
 
-                  (and (vector? eid)
-                       (= 2 (count eid))
-                       (keyword? (first eid))
-                       (string? (second eid)))
-                  (.entityLookupRefString ^Vev$DB (:native db)
-                                          (edn-text (first eid))
-                                          (second eid))
+                 (and (vector? eid)
+                      (= 2 (count eid))
+                      (keyword? (first eid))
+                      (string? (second eid)))
+                 (.entityLookupRefString ^Vev$DB (:native db)
+                                         (edn-text (first eid))
+                                         (second eid))
 
-                  :else
-                  (throw (ex-info "unsupported entity id"
-                                  {:eid eid
-                                   :supported #{:integer :ident-keyword :string-lookup-ref}})))]
-     (EntityView. (:engine db) native))))
+                 :else
+                 (throw (ex-info "unsupported entity id"
+                                 {:eid eid
+                                  :supported #{:integer :ident-keyword :string-lookup-ref}})))]
+    (if (and lookup? (not (.found ^Vev$EntityView native)))
+      (do
+        (.close ^Vev$EntityView native)
+        nil)
+      (entity-view db native))))
 
-(defn entity-found?
-  "Return true when a DB-backed entity view resolved to an entity."
+(defn entity-db
+  "Return the immutable DB value used to create an entity."
   [^EntityView entity-view]
-  (.found ^Vev$EntityView (.-native entity-view)))
+  (.-db entity-view))
 
-(defn entity-id
-  "Return the entity id for a DB-backed entity view."
+(defn- entity-contains?
+  [^EntityView entity-view attr]
+  (or (= :db/id attr)
+      (and (keyword? attr)
+           (.contains ^Vev$EntityView
+                      (.-native entity-view)
+                      (edn-text attr)))))
+
+(defn- entity-ref-value [^DB db value]
+  (if (instance? Vev$Entity value)
+    (entity db (.id ^Vev$Entity value))
+    (clj-value value)))
+
+(defn- entity-value
+  [^EntityView entity-view attr]
+  (if (= :db/id attr)
+    (.id ^Vev$EntityView (.-native entity-view))
+    (when (keyword? attr)
+      (let [cache (.-cache entity-view)]
+        (if (contains? @cache attr)
+          (get @cache attr)
+          (when (entity-contains? entity-view attr)
+            (let [native (.-native entity-view)
+                  attr-text (edn-text attr)
+                  flags (.attrFlags ^Vev$EntityView native attr-text)
+                  ref? (bit-test flags 0)
+                  many? (bit-test flags 1)
+                  raw-values (.values ^Vev$EntityView native attr-text)
+                  values (map #(if ref?
+                                 (entity-ref-value (.-db entity-view) %)
+                                 (clj-value %))
+                              raw-values)
+                  value (if many?
+                          (set values)
+                          (first values))]
+              (swap! cache assoc attr value)
+              value)))))))
+
+(defn- entity-realized-map
   [^EntityView entity-view]
-  (.id ^Vev$EntityView (.-native entity-view)))
-
-(defn entity-get
-  "Read the first value for attr from a DB-backed entity view."
-  [^EntityView entity-view attr]
-  (clj-value (.get ^Vev$EntityView (.-native entity-view) (edn-text attr))))
-
-(defn entity-values
-  "Read all values for attr from a DB-backed entity view."
-  [^EntityView entity-view attr]
-  (vec (clj-value (.values ^Vev$EntityView (.-native entity-view) (edn-text attr)))))
-
-(defn entity-ref
-  "Read the first ref attr as another DB-backed entity view."
-  [^EntityView entity-view attr]
-  (EntityView. (.-engine entity-view)
-               (.ref ^Vev$EntityView (.-native entity-view) (edn-text attr))))
-
-(defn entity-refs
-  "Read all ref attr values as entity ids."
-  [^EntityView entity-view attr]
-  (vec (.refs ^Vev$EntityView (.-native entity-view) (edn-text attr))))
+  (let [attrs (->> (.touch ^Vev$EntityView (.-native entity-view))
+                   clj-value
+                   keys
+                   (remove #{:db/id}))]
+    (persistent!
+     (reduce (fn [out attr]
+               (assoc! out attr (entity-value entity-view attr)))
+             (transient {})
+             attrs))))
 
 (defn touch
-  "Return a realized map for a DB-backed entity view."
+  "Eagerly realize an entity's attributes and recursively realize components.
+
+  Returns the same entity value."
   [^EntityView entity-view]
-  (clj-value (.touch ^Vev$EntityView (.-native entity-view))))
+  (doseq [[attr value] (entity-realized-map entity-view)
+          :when (bit-test (.attrFlags ^Vev$EntityView
+                                     (.-native entity-view)
+                                     (edn-text attr))
+                          2)]
+    (if (set? value)
+      (doseq [component value]
+        (when (instance? EntityView component)
+          (touch component)))
+      (when (instance? EntityView value)
+        (touch value))))
+  entity-view)
 
 (defn- source-engine [source]
   (or (:engine source)
