@@ -99,7 +99,8 @@ the executable Datomic/Vev comparison.
 
 Public spellings follow each host language:
 
-- Kvist: `d.as-of`, `d.since`, `d.history`
+- Kvist: `d.as-of`, `d.since`, `d.history`; `as-of` and `since` are overloaded
+  for transaction coordinates and tagged `Data` read from `#inst` EDN
 - C: `vev_db_as_of`, `vev_db_since`, `vev_db_history`, plus
   `vev_db_as_of_instant_millis` and `vev_db_since_instant_millis`
 - Clojure: `d/as-of`, `d/since`, `d/history`

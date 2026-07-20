@@ -42,6 +42,9 @@
             (kdata.from-string name))]
     (count rows)))
 
+(defn instant-data [text: string] -> Data
+  (kdata.tagged "inst" (kdata.from-string text)))
+
 (defn main []
   (remove-test-store!)
   (defer (remove-test-store!))
@@ -110,4 +113,30 @@
         (fail! "resident since did not accept basis t"))
       (when (not (= (count history-rows) 3))
         (fail! "resident history did not expose the full fact history"))
-      (fmt.println "history-api resident: ok"))))
+      (fmt.println "history-api resident: ok")))
+  (let [conn (d.create-conn)]
+    (defer (d.close conn))
+    (d.transact conn [[:db/add 1 :user/name "Ada"]])
+    (let [first-db (d.db conn) :defer-with d.close
+          first-instant: Data
+            (d.q
+              '[:find ?instant .
+                :where [1 :user/name "Ada" ?tx]
+                       [?tx :db/txInstant ?instant]]
+              first-db)]
+      (d.transact conn [[:db/retract 1 :user/name "Ada"]
+                        [:db/add 1 :user/name "Grace"]])
+      (let [db (d.db conn) :defer-with d.close
+            exact (d.as-of db first-instant) :defer-with d.close
+            before (d.as-of db (instant-data "2000-01-01T00:00:00.000Z")) :defer-with d.close
+            after (d.as-of db (instant-data "2100-01-01T00:00:00.000Z")) :defer-with d.close
+            recent (d.since db first-instant) :defer-with d.close]
+        (when (not (= (query-name-count exact "Ada") 1))
+          (fail! "Kvist instant as-of did not include the exact transaction"))
+        (when (not (= (query-name-count before "Ada") 0))
+          (fail! "Kvist instant as-of before history was not empty"))
+        (when (not (= (query-name-count after "Grace") 1))
+          (fail! "Kvist instant as-of after history did not include the latest state"))
+        (when (not (= (query-name-count recent "Grace") 1))
+          (fail! "Kvist instant since did not use an exclusive boundary"))
+        (fmt.println "history-api Kvist instants: ok")))))

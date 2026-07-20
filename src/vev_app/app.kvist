@@ -807,17 +807,44 @@
        (vev.db-with-store-db-data (db-ptr ~db) ~tx-form))
      (db-lock ~db)))
 
-(defn as-of [db: DB, tx: u64] -> DB
+(defn as-of-t [db: DB, tx: u64] -> DB
   (db-handle
     (with-db-lock vev.Store-DB db
       (vev.as-of-store-db (db-ptr db) tx))
     (db-lock db)))
 
-(defn since [db: DB, tx: u64] -> DB
+(defn instant-time-point-millis [time-point: Data] -> i64
+  (let [[value ok error] (vev.data-owned-value time-point)]
+    (when (not ok)
+      (panic error))
+    (defer (vev.delete-owned-value value))
+    (when (not (= value.kind .Instant))
+      (panic "time point must be an #inst value"))
+    value.int-value))
+
+(defn as-of-data [db: DB, time-point: Data] -> DB
+  (let [unix-millis (instant-time-point-millis time-point)]
+    (db-handle
+      (with-db-lock vev.Store-DB db
+        (vev.as-of-store-db-instant-or-panic (db-ptr db) unix-millis))
+      (db-lock db))))
+
+(def as-of (overload as-of-t as-of-data))
+
+(defn since-t [db: DB, tx: u64] -> DB
   (db-handle
     (with-db-lock vev.Store-DB db
       (vev.since-store-db (db-ptr db) tx))
     (db-lock db)))
+
+(defn since-data [db: DB, time-point: Data] -> DB
+  (let [unix-millis (instant-time-point-millis time-point)]
+    (db-handle
+      (with-db-lock vev.Store-DB db
+        (vev.since-store-db-instant-or-panic (db-ptr db) unix-millis))
+      (db-lock db))))
+
+(def since (overload since-t since-data))
 
 (defn history [db: DB] -> DB
   (db-handle

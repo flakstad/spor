@@ -121,6 +121,7 @@ database and pass it as an input when necessary.
 
 | Language | Transaction coordinate | Native time point |
 | --- | --- | --- |
+| Kvist | `d.as-of db t`, `d.since db t` | The same functions with tagged `Data` read from `#inst` EDN |
 | Java | `db.asOf(long)`, `db.since(long)` (`t` or tx id) | `Date` or `Instant` overloads |
 | Python | `db.as_of(int)`, `db.since(int)` | `datetime` |
 | JavaScript | `db.asOf(number\|bigint)`, `db.since(...)` | `Date` |
@@ -130,6 +131,23 @@ database and pass it as an input when necessary.
 
 All returned DB handles are independently owned and should be closed or
 released according to the host binding.
+
+Kvist uses the same overloaded names. Its EDN tagged values are represented as
+`Data`, so a native instant can be constructed directly or read from EDN:
+
+```clojure
+(import data "kvist:data")
+(import d "vev_app")
+
+(defn inst [text: string] -> Data
+  (data.tagged "inst" (data.from-string text)))
+
+(let [earlier (d.as-of db (inst "2026-07-20T10:15:00.000Z"))
+      recent (d.since db (inst "2026-07-20T10:15:00.000Z"))]
+  ;; use the immutable DB values
+  (d.close earlier)
+  (d.close recent))
+```
 
 ## Compatibility references
 

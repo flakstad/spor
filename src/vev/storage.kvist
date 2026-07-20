@@ -14797,6 +14797,18 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (return (since-store-db snapshot tx) true "")
       (return (Store-DB {}) false resolved-error))))
 
+(defn as-of-store-db-instant-or-panic [snapshot: ^Store-DB, unix-millis: i64] -> Store-DB
+  (let [[db ok error] (as-of-store-db-instant snapshot unix-millis)]
+    (when (not ok)
+      (panic error))
+    db))
+
+(defn since-store-db-instant-or-panic [snapshot: ^Store-DB, unix-millis: i64] -> Store-DB
+  (let [[db ok error] (since-store-db-instant snapshot unix-millis)]
+    (when (not ok)
+      (panic error))
+    db))
+
 (defn history-store-db [snapshot: ^Store-DB] -> Store-DB
   (filtered-store-db snapshot false 0 false 0 true))
 
