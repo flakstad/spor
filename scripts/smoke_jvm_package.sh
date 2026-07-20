@@ -223,7 +223,8 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
                          :db/index true}
                         {:db/id 1 :item/score 10}
                         {:db/id 2 :item/score 20}])
-      (let [target (inc (d/basis-t (d/db conn)))
+      (let [target (with-open [snapshot (d/db conn)]
+                     (inc (d/basis-t snapshot)))
             coordinated (d/sync conn target)]
         (d/transact writer [[:db/add 3 :item/score 30]])
         (let [synced (deref coordinated 5000 ::timeout)]
