@@ -6,6 +6,7 @@ package vev
 import "core:dynlib"
 import "core:os"
 import "core:strings"
+import "core:time"
 
 ABI_VERSION :: 1
 
@@ -14,14 +15,31 @@ API :: struct {
 	abi_version: proc "c" () -> u32 `dynlib:"vev_abi_version"`,
 	open_memory: proc "c" () -> rawptr `dynlib:"vev_conn_open_memory"`,
 	close_conn: proc "c" (conn: rawptr) `dynlib:"vev_conn_close"`,
+	conn_db: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_conn_db"`,
 	transact_edn: proc "c" (conn: rawptr, tx_text: cstring) -> cstring `dynlib:"vev_transact_edn"`,
 	query_value_with_inputs: proc "c" (conn: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_query_value_with_inputs"`,
 	connect: proc "c" (uri: cstring) -> rawptr `dynlib:"vev_connect"`,
 	connection_ok: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_ok"`,
 	connection_error: proc "c" (conn: rawptr) -> cstring `dynlib:"vev_connection_error"`,
 	connection_close: proc "c" (conn: rawptr) `dynlib:"vev_connection_close"`,
+	connection_db: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_db"`,
 	connection_transact_edn_report: proc "c" (conn: rawptr, tx_text: cstring) -> rawptr `dynlib:"vev_connection_transact_edn_report"`,
 	connection_query_value_with_inputs: proc "c" (conn: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_connection_query_value_with_inputs"`,
+	db_release: proc "c" (db: rawptr) `dynlib:"vev_db_release"`,
+	db_basis_t: proc "c" (db: rawptr) -> u64 `dynlib:"vev_db_basis_t"`,
+	db_next_t: proc "c" (db: rawptr) -> u64 `dynlib:"vev_db_next_t"`,
+	db_has_as_of_t: proc "c" (db: rawptr) -> bool `dynlib:"vev_db_has_as_of_t"`,
+	db_as_of_t: proc "c" (db: rawptr) -> u64 `dynlib:"vev_db_as_of_t"`,
+	db_has_since_t: proc "c" (db: rawptr) -> bool `dynlib:"vev_db_has_since_t"`,
+	db_since_t: proc "c" (db: rawptr) -> u64 `dynlib:"vev_db_since_t"`,
+	db_is_history: proc "c" (db: rawptr) -> bool `dynlib:"vev_db_is_history"`,
+	db_as_of: proc "c" (db: rawptr, tx: u64) -> rawptr `dynlib:"vev_db_as_of"`,
+	db_as_of_instant_millis: proc "c" (db: rawptr, unix_millis: i64) -> rawptr `dynlib:"vev_db_as_of_instant_millis"`,
+	db_since: proc "c" (db: rawptr, tx: u64) -> rawptr `dynlib:"vev_db_since"`,
+	db_since_instant_millis: proc "c" (db: rawptr, unix_millis: i64) -> rawptr `dynlib:"vev_db_since_instant_millis"`,
+	db_history: proc "c" (db: rawptr) -> rawptr `dynlib:"vev_db_history"`,
+	db_tx_range_value: proc "c" (db: rawptr, start_kind: int, start_value: i64, end_kind: int, end_value: i64) -> rawptr `dynlib:"vev_db_tx_range_value"`,
+	db_query_value_with_inputs: proc "c" (db: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_db_query_value_with_inputs"`,
 	tx_report_edn: proc "c" (report: rawptr) -> cstring `dynlib:"vev_tx_report_edn"`,
 	tx_report_free: proc "c" (report: rawptr) `dynlib:"vev_tx_report_free"`,
 	value_handle_free: proc "c" (handle: rawptr) `dynlib:"vev_value_handle_free"`,
@@ -56,6 +74,15 @@ Connection :: struct {
 Durable_Connection :: struct {
 	library: ^Library,
 	handle: rawptr,
+}
+
+DB :: struct {
+	library: ^Library,
+	handle: rawptr,
+}
+
+Log :: struct {
+	database: DB,
 }
 
 Data :: struct {
@@ -105,14 +132,31 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	if library.api.abi_version == nil ||
 	   library.api.open_memory == nil ||
 	   library.api.close_conn == nil ||
+	   library.api.conn_db == nil ||
 	   library.api.transact_edn == nil ||
 	   library.api.query_value_with_inputs == nil ||
 	   library.api.connect == nil ||
 	   library.api.connection_ok == nil ||
 	   library.api.connection_error == nil ||
 	   library.api.connection_close == nil ||
+	   library.api.connection_db == nil ||
 	   library.api.connection_transact_edn_report == nil ||
 	   library.api.connection_query_value_with_inputs == nil ||
+	   library.api.db_release == nil ||
+	   library.api.db_basis_t == nil ||
+	   library.api.db_next_t == nil ||
+	   library.api.db_has_as_of_t == nil ||
+	   library.api.db_as_of_t == nil ||
+	   library.api.db_has_since_t == nil ||
+	   library.api.db_since_t == nil ||
+	   library.api.db_is_history == nil ||
+	   library.api.db_as_of == nil ||
+	   library.api.db_as_of_instant_millis == nil ||
+	   library.api.db_since == nil ||
+	   library.api.db_since_instant_millis == nil ||
+	   library.api.db_history == nil ||
+	   library.api.db_tx_range_value == nil ||
+	   library.api.db_query_value_with_inputs == nil ||
 	   library.api.tx_report_edn == nil ||
 	   library.api.tx_report_free == nil ||
 	   library.api.value_handle_free == nil ||
@@ -213,6 +257,202 @@ close_durable :: proc(connection: ^Durable_Connection) {
 	connection^ = {}
 }
 
+db_memory :: proc(connection: ^Connection) -> (database: DB, ok: bool) {
+	if connection == nil || connection.handle == nil {
+		return {}, false
+	}
+	handle := connection.library.api.conn_db(connection.handle)
+	if handle == nil {
+		return {}, false
+	}
+	return DB{library = connection.library, handle = handle}, true
+}
+
+db_durable :: proc(connection: ^Durable_Connection) -> (database: DB, ok: bool) {
+	if connection == nil || connection.handle == nil {
+		return {}, false
+	}
+	handle := connection.library.api.connection_db(connection.handle)
+	if handle == nil {
+		return {}, false
+	}
+	return DB{library = connection.library, handle = handle}, true
+}
+
+close_db :: proc(database: ^DB) {
+	if database == nil || database.handle == nil {
+		return
+	}
+	database.library.api.db_release(database.handle)
+	database^ = {}
+}
+
+basis_t :: proc(database: ^DB) -> (t: u64, ok: bool) {
+	if database == nil || database.handle == nil {
+		return 0, false
+	}
+	return database.library.api.db_basis_t(database.handle), true
+}
+
+next_t :: proc(database: ^DB) -> (t: u64, ok: bool) {
+	if database == nil || database.handle == nil {
+		return 0, false
+	}
+	return database.library.api.db_next_t(database.handle), true
+}
+
+as_of_t :: proc(database: ^DB) -> (t: u64, present: bool) {
+	if database == nil || database.handle == nil ||
+	   !database.library.api.db_has_as_of_t(database.handle) {
+		return 0, false
+	}
+	return database.library.api.db_as_of_t(database.handle), true
+}
+
+since_t :: proc(database: ^DB) -> (t: u64, present: bool) {
+	if database == nil || database.handle == nil ||
+	   !database.library.api.db_has_since_t(database.handle) {
+		return 0, false
+	}
+	return database.library.api.db_since_t(database.handle), true
+}
+
+is_history :: proc(database: ^DB) -> bool {
+	return database != nil &&
+	       database.handle != nil &&
+	       database.library.api.db_is_history(database.handle)
+}
+
+as_of_coordinate :: proc(database: ^DB, tx: u64) -> (filtered: DB, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	handle := database.library.api.db_as_of(database.handle, tx)
+	if handle == nil {
+		return {}, false
+	}
+	return DB{library = database.library, handle = handle}, true
+}
+
+as_of_time :: proc(database: ^DB, time_point: time.Time) -> (filtered: DB, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	unix_millis := time.to_unix_nanoseconds(time_point) / 1_000_000
+	handle := database.library.api.db_as_of_instant_millis(database.handle, unix_millis)
+	if handle == nil {
+		return {}, false
+	}
+	return DB{library = database.library, handle = handle}, true
+}
+
+since_coordinate :: proc(database: ^DB, tx: u64) -> (filtered: DB, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	handle := database.library.api.db_since(database.handle, tx)
+	if handle == nil {
+		return {}, false
+	}
+	return DB{library = database.library, handle = handle}, true
+}
+
+since_time :: proc(database: ^DB, time_point: time.Time) -> (filtered: DB, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	unix_millis := time.to_unix_nanoseconds(time_point) / 1_000_000
+	handle := database.library.api.db_since_instant_millis(database.handle, unix_millis)
+	if handle == nil {
+		return {}, false
+	}
+	return DB{library = database.library, handle = handle}, true
+}
+
+history :: proc(database: ^DB) -> (filtered: DB, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	handle := database.library.api.db_history(database.handle)
+	if handle == nil {
+		return {}, false
+	}
+	return DB{library = database.library, handle = handle}, true
+}
+
+log_memory :: proc(connection: ^Connection) -> (log_value: Log, ok: bool) {
+	database, retained := db_memory(connection)
+	if !retained {
+		return {}, false
+	}
+	return Log{database = database}, true
+}
+
+log_durable :: proc(connection: ^Durable_Connection) -> (log_value: Log, ok: bool) {
+	database, retained := db_durable(connection)
+	if !retained {
+		return {}, false
+	}
+	return Log{database = database}, true
+}
+
+close_log :: proc(log_value: ^Log) {
+	if log_value == nil {
+		return
+	}
+	close_db(&log_value.database)
+	log_value^ = {}
+}
+
+Time_Point :: union {
+	u64,
+	time.Time,
+}
+
+tx_range_bound :: proc(point: Maybe(Time_Point)) -> (kind: int, value: i64, ok: bool) {
+	switch item in point {
+	case nil:
+		return 0, 0, true
+	case Time_Point:
+		switch time_point in item {
+		case u64:
+			if time_point > u64(max(i64)) {
+				return 0, 0, false
+			}
+			return 1, i64(time_point), true
+		case time.Time:
+			return 2, time.to_unix_nanoseconds(time_point) / 1_000_000, true
+		}
+	}
+	return 0, 0, false
+}
+
+tx_range :: proc(
+	log_value: ^Log,
+	start: Maybe(Time_Point) = nil,
+	end: Maybe(Time_Point) = nil,
+) -> (transactions: Data, ok: bool) {
+	if log_value == nil || log_value.database.handle == nil {
+		return {}, false
+	}
+	start_kind, start_value, start_ok := tx_range_bound(start)
+	end_kind, end_value, end_ok := tx_range_bound(end)
+	if !start_ok || !end_ok {
+		return {}, false
+	}
+	handle := log_value.database.library.api.db_tx_range_value(
+		log_value.database.handle,
+		start_kind,
+		start_value,
+		end_kind,
+		end_value,
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = log_value.database.library, handle = handle}, true
+}
+
 transact_memory :: proc(
 	connection: ^Connection,
 	tx: string,
@@ -299,6 +539,27 @@ query_durable :: proc(
 		return {}, false
 	}
 	return Data{library = connection.library, handle = handle}, true
+}
+
+query_db :: proc(
+	database: ^DB,
+	query_text: string,
+	inputs := "[]",
+) -> (result: Data, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	query_cstring := strings.clone_to_cstring(query_text, context.temp_allocator)
+	inputs_cstring := strings.clone_to_cstring(inputs, context.temp_allocator)
+	handle := database.library.api.db_query_value_with_inputs(
+		database.handle,
+		query_cstring,
+		inputs_cstring,
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = database.library, handle = handle}, true
 }
 
 close_data :: proc(data: ^Data) {
@@ -464,7 +725,11 @@ as_string :: proc(
 	return strings.clone(string(native_result), allocator), true
 }
 
-close :: proc{close_memory, close_durable, close_data}
+db :: proc{db_memory, db_durable}
+log :: proc{log_memory, log_durable}
+as_of :: proc{as_of_coordinate, as_of_time}
+since :: proc{since_coordinate, since_time}
+close :: proc{close_memory, close_durable, close_db, close_log, close_data}
 transact :: proc{transact_memory, transact_durable}
-query :: proc{query_memory, query_durable}
+query :: proc{query_memory, query_durable, query_db}
 edn :: proc{edn_data, edn_value}
