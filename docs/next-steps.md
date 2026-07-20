@@ -12,19 +12,16 @@ diverge without an explicit recorded exception. Do not fill gaps in
 
 ## Next Release
 
-1. Synchronize the current client sources and documentation from `vev` into
-   the standalone `vev-clj` and `vev-java` repositories. Verify `vev-odin`
-   remains synchronized where the release changes its package.
-2. Choose the next prerelease version, update coordinated version metadata,
+1. Choose the next prerelease version, update coordinated version metadata,
    and tag the same tested source state in every affected repository.
-3. Run the complete cross-platform release gate on macOS arm64, Linux x86-64,
+2. Run the complete cross-platform release gate on macOS arm64, Linux x86-64,
    and Windows x86-64.
-4. Stage and publish the matching `vev-java` and `vev-clj` artifacts to Maven
+3. Stage and publish the matching `vev-java` and `vev-clj` artifacts to Maven
    Central. Validate them using clean dependency caches, no `VEV_LIB`, no
    repository-local classpath, and no system SQLite installation.
-5. Run the post-publication acceptance workflow using only public GitHub
+4. Run the post-publication acceptance workflow using only public GitHub
    release files and Maven Central coordinates.
-6. Promote a release candidate to the first stable release only after the
+5. Promote a release candidate to the first stable release only after the
    public artifacts have passed real Clojure, Kvist, CLI, Java, C, and Odin
    use.
 

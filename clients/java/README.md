@@ -101,6 +101,20 @@ try (Vev.DB db = conn.db();
 `java.time.Instant`, or `null`. It returns ordinary Java lists and maps with
 the Datomic-shaped `{:t ..., :data ...}` structure.
 
+Raw index access uses Datomic's index names and component ordering:
+
+```java
+for (Vev.Datom datom : db.datoms(":eavt", 1, ":user/name")) {
+    System.out.println(datom.v());
+}
+
+db.seekDatoms(":avet", ":user/email", "m");
+db.rseekDatoms(":avet", ":user/email", "m");
+db.indexRange(":user/email", "a", "n");
+```
+
+Each `Vev.Datom` contains `e`, `a`, `v`, `tx`, and `added`.
+
 Connections also expose Datomic-shaped synchronization futures:
 
 ```java
