@@ -150,7 +150,7 @@ import vevdb
 with vevdb.create_conn() as conn:                                  # 1
     conn.transact('[{:db/id 1 :user/name "Ada"}]')                 # 2
     with conn.db() as db:                                          # 3
-        rows = vevdb.q(
+        result = vevdb.q(
             '[:find ?name :where [?e :user/name ?name]]', db)      # 4
         profile = db.pull('[:user/name]', vevdb.Entity(1))
 ```
@@ -172,10 +172,10 @@ fn main() -> Result<(), String> {
     conn.transact(r#"[{:db/id 1 :user/name "Ada"}]"#);             // 2
 
     let db = conn.db()?;                                            // 3
-    let rows = db.q(
+    let result = db.q(
         "[:find ?name :where [?e :user/name ?name]]", "[]")?;      // 4
 
-    println!("{rows:?}");
+    println!("{result:?}");
     Ok(())
 }
 ```
@@ -346,6 +346,7 @@ library and SQLite deployment details.
 - [Pull](docs/pull-model.md)
 - [Indexes](docs/indexes.md)
 - [Durable storage](docs/storage.md)
+- [Client API contract](docs/client-api.md)
 - [C ABI](docs/c-abi.md)
 - [Language interop](docs/interop.md)
 - [Maven Central release recipe](docs/maven-central.md)

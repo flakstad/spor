@@ -46,13 +46,18 @@ try (Vev vev = Vev.load();
      Vev.Connection conn = vev.createConn()) {
     conn.transact("[{:db/id 1 :user/name \"Ada\"}]");
     try (Vev.DB db = conn.db()) {
-        System.out.println(vev.queryRows(Map.of(
+        System.out.println(vev.query(Map.of(
             "query", "[:find ?name :where [?e :user/name ?name]]",
             "args", List.of(db))));
         System.out.println(db.pull("[:user/name]", 1));
     }
 }
 ```
+
+`Vev.query` follows the Datomic request-map and `:find` result shape. Relation
+queries return a `Set` of tuple `List` values, collections and tuples return
+`List` values, and scalar finds return the scalar or `null`. Reusable prepared
+queries remain available through `queryResult`, `DB.query`, and `ResultSet`.
 
 DB snapshots can also produce entity views. The view is tied to the immutable
 DB value, not the live connection:

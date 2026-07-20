@@ -33,6 +33,7 @@ const VEV_VALUE_SYMBOL: c_int = 7;
 const VEV_VALUE_VECTOR: c_int = 8;
 const VEV_VALUE_MAP: c_int = 9;
 const VEV_VALUE_UUID: c_int = 10;
+const VEV_VALUE_SET: c_int = 11;
 const VEV_VALUE_INSTANT: c_int = 12;
 
 const VEV_COLUMN_BATCH_ENTITY: c_int = 1;
@@ -195,6 +196,11 @@ unsafe extern "C" {
         query: VevPreparedQuery,
         inputs_text: *const c_char,
     ) -> VevResult;
+    fn vev_db_query_value_with_inputs(
+        db: VevDb,
+        query_text: *const c_char,
+        inputs_text: *const c_char,
+    ) -> VevValueHandle;
     fn vev_query_db_prepared_column_batch_with_inputs(
         db: VevDb,
         query: VevPreparedQuery,
@@ -297,6 +303,7 @@ pub enum Value {
     Uuid(String),
     Instant(i64),
     Vector(Vec<Value>),
+    Set(Vec<Value>),
     Map(Vec<(Value, Value)>),
 }
 
@@ -410,6 +417,14 @@ impl Library {
                 }
                 Value::Vector(out)
             }
+            VEV_VALUE_SET => {
+                let count = unsafe { vev_value_item_count(value) };
+                let mut out = Vec::with_capacity(count as usize);
+                for index in 0..count {
+                    out.push(unsafe { Self::value_to_rust(vev_value_item(value, index)) });
+                }
+                Value::Set(out)
+            }
             VEV_VALUE_MAP => {
                 let count = unsafe { vev_value_map_count(value) };
                 let mut out = Vec::with_capacity(count as usize);
@@ -499,9 +514,9 @@ impl Conn {
         }
     }
 
-    pub fn q(&self, query: &str, inputs: &str) -> Result<Vec<Vec<Value>>, String> {
-        let query = self.prepare(query)?;
-        Ok(query.query_conn(self, inputs)?.rows())
+    pub fn q(&self, query: &str, inputs: &str) -> Result<Value, String> {
+        let db = self.db()?;
+        db.q(query, inputs)
     }
 
     pub fn prepare(&self, query: &str) -> Result<PreparedQuery, String> {
@@ -652,7 +667,7 @@ impl DurableConn {
         }
     }
 
-    pub fn q(&self, query: &str, inputs: &str) -> Result<Vec<Vec<Value>>, String> {
+    pub fn q(&self, query: &str, inputs: &str) -> Result<Value, String> {
         let db = self.db()?;
         db.q(query, inputs)
     }
@@ -840,9 +855,12 @@ pub struct Db {
 }
 
 impl Db {
-    pub fn q(&self, query: &str, inputs: &str) -> Result<Vec<Vec<Value>>, String> {
-        let query = PreparedQuery::new(query)?;
-        Ok(query.query_db(self, inputs)?.rows())
+    pub fn q(&self, query: &str, inputs: &str) -> Result<Value, String> {
+        let query = cstring(query);
+        let inputs = cstring(inputs);
+        let raw =
+            unsafe { vev_db_query_value_with_inputs(self.raw, query.as_ptr(), inputs.as_ptr()) };
+        Ok(ValueHandle::new(raw)?.value())
     }
 
     pub fn query_columns(

@@ -45,9 +45,16 @@ console.log("input-collection:", collection);
 mustContain("collection query", collection, `"Ada"`, `"Grace"`);
 
 const oneShotRows = conn.q('[:find ?name :where [?e :user/name ?name]]');
-const oneShotNames = oneShotRows.map((row) => row[0]).sort();
+if (!(oneShotRows instanceof Set)) {
+  throw new Error("one-shot relation query did not return a Set");
+}
+const oneShotNames = Array.from(oneShotRows, (row) => row[0]).sort();
 if (JSON.stringify(oneShotNames) !== JSON.stringify(["Ada", "Grace"])) {
   throw new Error(`unexpected one-shot query rows: ${JSON.stringify(oneShotRows)}`);
+}
+const scalarName = conn.q('[:find ?name . :where [1 :user/name ?name]]');
+if (scalarName !== "Ada") {
+  throw new Error(`unexpected scalar query result: ${scalarName}`);
 }
 
 const query = conn.prepare(`

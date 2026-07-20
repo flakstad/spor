@@ -861,6 +861,45 @@ cleanup:
     return ok;
 }
 
+static int run_shaped_query_value_smoke(vev_db_t db) {
+    for (int i = 0; i < 128; i++) {
+        vev_value_handle_t scalar = vev_db_query_value_with_inputs(
+            db,
+            "[:find ?name . :where [1 :user/name ?name]]",
+            "[]");
+        if (scalar == NULL) return 0;
+        vev_value_t value = vev_value_handle_value(scalar);
+        int ok = vev_value_kind(value) == VEV_VALUE_STRING &&
+                 vev_value_text_equals(value, "Ada");
+        vev_value_handle_free(scalar);
+        if (!ok) return 0;
+    }
+
+    vev_value_handle_t tuple = vev_db_query_value(
+        db,
+        "[:find [?name ?age] :where [1 :user/name ?name] [1 :user/age ?age]]");
+    vev_value_handle_t collection = vev_db_query_value(
+        db,
+        "[:find [?name ...] :where [?e :user/name ?name]]");
+    vev_value_handle_t relation = vev_db_query_value(
+        db,
+        "[:find ?name :where [?e :user/name ?name]]");
+    int ok =
+        tuple != NULL &&
+        vev_value_kind(vev_value_handle_value(tuple)) == VEV_VALUE_VECTOR &&
+        vev_value_item_count(vev_value_handle_value(tuple)) == 2 &&
+        collection != NULL &&
+        vev_value_kind(vev_value_handle_value(collection)) == VEV_VALUE_VECTOR &&
+        vev_value_item_count(vev_value_handle_value(collection)) == 2 &&
+        relation != NULL &&
+        vev_value_kind(vev_value_handle_value(relation)) == VEV_VALUE_SET &&
+        vev_value_item_count(vev_value_handle_value(relation)) == 2;
+    if (tuple != NULL) vev_value_handle_free(tuple);
+    if (collection != NULL) vev_value_handle_free(collection);
+    if (relation != NULL) vev_value_handle_free(relation);
+    return ok;
+}
+
 int main(void) {
     printf("version: %s\n", vev_version());
     if (vev_abi_version() != VEV_ABI_VERSION) {
@@ -3097,6 +3136,15 @@ int main(void) {
     snapshot = retained_snapshot;
     if (snapshot == NULL) {
         fprintf(stderr, "failed to retain DB snapshot copy\n");
+        vev_prepared_query_free(all_emails);
+        vev_stmt_free(stmt);
+        vev_prepared_query_free(query);
+        vev_conn_close(conn);
+        return 1;
+    }
+    if (!run_shaped_query_value_smoke(snapshot)) {
+        fprintf(stderr, "Datomic-shaped query value smoke failed\n");
+        vev_db_release(snapshot);
         vev_prepared_query_free(all_emails);
         vev_stmt_free(stmt);
         vev_prepared_query_free(query);

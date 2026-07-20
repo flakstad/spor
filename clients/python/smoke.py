@@ -66,6 +66,12 @@ def main() -> int:
         )
         if sorted(row[0] for row in one_shot_rows) != ["Ada", "Grace"]:
             raise RuntimeError("unexpected one-shot query rows")
+        scalar = vev.q(
+            '[:find ?name . :where [1 :user/name ?name]]',
+            conn,
+        )
+        if scalar != "Ada":
+            raise RuntimeError(f"unexpected scalar query result: {scalar!r}")
 
         conn.transact(
             """

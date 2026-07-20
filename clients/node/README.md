@@ -52,6 +52,8 @@ try {
 
 `conn.queryText(...)` remains available for quick EDN text calls, but DB
 snapshots are the closer match to VevDB's immutable database value model.
+`q` follows Datomic `:find` shapes: relations are `Set` values, collections
+and tuples are arrays, and scalar finds return the scalar or `null`.
 Use `conn.prepare(...)` when reusing the same query many times.
 
 The package should continue to expose explicit native-addon loading for local

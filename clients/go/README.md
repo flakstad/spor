@@ -48,14 +48,17 @@ if err != nil {
 }
 defer db.Close()
 
-rows, err := db.Q(`[:find ?name :where [?e :user/name ?name]]`, "[]")
+result, err := db.Q(`[:find ?name :where [?e :user/name ?name]]`, "[]")
 if err != nil {
     return err
 }
-defer rows.Close()
 
 pulled, err := db.Pull("[:user/name]", 1)
 ```
+
+`Q` returns the query's Datomic find shape as a `Value`; relation queries are
+`SetValue`, collections and tuples are `[]Value`, and scalar finds return the
+scalar value or `nil`.
 
 Use `vev.Prepare(...)` and `db.QueryRows(...)` when reusing the same query many
 times.

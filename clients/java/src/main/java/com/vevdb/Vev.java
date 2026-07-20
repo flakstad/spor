@@ -176,6 +176,7 @@ public final class Vev implements AutoCloseable {
     private final MethodHandle queryPreparedResultWithInputs;
     private final MethodHandle queryDbPreparedResultWithInputs;
     private final MethodHandle queryDbPreparedResultWithInputsAndFns;
+    private final MethodHandle dbQueryValueWithInputs;
     private final MethodHandle queryRelationDbPreparedResultWithInputs;
     private final MethodHandle queryRelationDbPreparedRowCountWithInputs;
     private final MethodHandle queryDbPreparedProfileEdnWithInputs;
@@ -494,6 +495,7 @@ public final class Vev implements AutoCloseable {
         this.queryPreparedResultWithInputs = downcall("vev_query_prepared_result_with_inputs", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.queryDbPreparedResultWithInputs = downcall("vev_query_db_prepared_result_with_inputs", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.queryDbPreparedResultWithInputsAndFns = downcall("vev_query_db_prepared_result_with_inputs_and_fns", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        this.dbQueryValueWithInputs = downcall("vev_db_query_value_with_inputs", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.queryRelationDbPreparedResultWithInputs = downcall("vev_query_relation_db_prepared_result_with_inputs", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.queryRelationDbPreparedRowCountWithInputs = downcall("vev_query_relation_db_prepared_row_count_with_inputs", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.queryDbPreparedProfileEdnWithInputs = downcall("vev_query_db_prepared_profile_edn_with_inputs", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
@@ -720,7 +722,40 @@ public final class Vev implements AutoCloseable {
         }
     }
 
-    public ResultSet query(Map<String, ?> request) throws Throwable {
+    public Object query(Map<String, ?> request) throws Throwable {
+        Object query = request.get("query");
+        Object args = request.get("args");
+        if (!(query instanceof String queryText)) {
+            throw new IllegalArgumentException("query request requires string key: query");
+        }
+        if (!(args instanceof List<?> argList) || argList.isEmpty()) {
+            throw new IllegalArgumentException("query request requires non-empty list key: args");
+        }
+
+        Object source = argList.get(0);
+        String inputs = inputsEdn(argList.subList(1, argList.size()));
+        if (source instanceof Connection conn) {
+            try (DB db = conn.db()) {
+                return db.q(queryText, inputs);
+            }
+        }
+        if (source instanceof DurableConnection conn) {
+            try (DB db = conn.db()) {
+                return db.q(queryText, inputs);
+            }
+        }
+        if (source instanceof SQLiteConnection conn) {
+            try (DB db = conn.db()) {
+                return db.q(queryText, inputs);
+            }
+        }
+        if (source instanceof DB db) {
+            return db.q(queryText, inputs);
+        }
+        throw new IllegalArgumentException("query request first arg must be a Vev connection or DB");
+    }
+
+    public ResultSet queryResult(Map<String, ?> request) throws Throwable {
         Object query = request.get("query");
         Object args = request.get("args");
         if (!(query instanceof String queryText)) {
@@ -754,7 +789,7 @@ public final class Vev implements AutoCloseable {
     }
 
     public List<List<Object>> queryRows(Map<String, ?> request) throws Throwable {
-        try (ResultSet result = query(request)) {
+        try (ResultSet result = queryResult(request)) {
             return result.rows();
         }
     }
@@ -1947,6 +1982,17 @@ public final class Vev implements AutoCloseable {
             MemorySegment retained = (MemorySegment) dbRetain.invoke(handle.raw);
             if (isNull(retained)) throw new IllegalStateException("failed to retain DB snapshot");
             return new DB(retained);
+        }
+
+        public Object q(String query, String inputs) throws Throwable {
+            requireOpen();
+            try (Arena local = Arena.ofConfined();
+                 ValueHandle value = new ValueHandle((MemorySegment) dbQueryValueWithInputs.invoke(
+                     handle.raw,
+                     local.allocateFrom(query),
+                     local.allocateFrom(inputs)))) {
+                return value.value();
+            }
         }
 
         public EntityView entity(long entity) throws Throwable {

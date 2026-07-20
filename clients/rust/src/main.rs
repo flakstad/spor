@@ -46,15 +46,23 @@ fn main() -> Result<(), String> {
         return Err("unexpected collection query output".to_string());
     }
 
-    let mut one_shot_rows = conn.q(r#"[:find ?name :where [?e :user/name ?name]]"#, "[]")?;
+    let Value::Set(mut one_shot_rows) =
+        conn.q(r#"[:find ?name :where [?e :user/name ?name]]"#, "[]")?
+    else {
+        return Err("one-shot connection query did not return a relation set".to_string());
+    };
     one_shot_rows.sort_by(|left, right| format!("{left:?}").cmp(&format!("{right:?}")));
     if one_shot_rows
         != vec![
-            vec![Value::String("Ada".to_string())],
-            vec![Value::String("Grace".to_string())],
+            Value::Vector(vec![Value::String("Ada".to_string())]),
+            Value::Vector(vec![Value::String("Grace".to_string())]),
         ]
     {
         return Err("unexpected one-shot connection query rows".to_string());
+    }
+    let scalar_name = conn.q(r#"[:find ?name . :where [1 :user/name ?name]]"#, "[]")?;
+    if scalar_name != Value::String("Ada".to_string()) {
+        return Err(format!("unexpected scalar query result: {scalar_name:?}"));
     }
 
     conn.transact(
@@ -324,12 +332,16 @@ fn main() -> Result<(), String> {
     if current_rows != 3 || snapshot_rows != 2 {
         return Err("unexpected snapshot row counts".to_string());
     }
-    let mut snapshot_names = snapshot.q(r#"[:find ?name :where [?e :user/name ?name]]"#, "[]")?;
+    let Value::Set(mut snapshot_names) =
+        snapshot.q(r#"[:find ?name :where [?e :user/name ?name]]"#, "[]")?
+    else {
+        return Err("one-shot DB query did not return a relation set".to_string());
+    };
     snapshot_names.sort_by(|left, right| format!("{left:?}").cmp(&format!("{right:?}")));
     if snapshot_names
         != vec![
-            vec![Value::String("Ada".to_string())],
-            vec![Value::String("Grace".to_string())],
+            Value::Vector(vec![Value::String("Ada".to_string())]),
+            Value::Vector(vec![Value::String("Grace".to_string())]),
         ]
     {
         return Err("unexpected one-shot DB query rows".to_string());
@@ -518,7 +530,11 @@ fn main() -> Result<(), String> {
             r#"[:find ?name :where [?e :user/email "durable-ada@example.com"] [?e :user/name ?name]]"#,
             "[]",
         )?;
-        if live_rows != 2 || durable_q_rows != vec![vec![Value::String("Durable Ada".to_string())]]
+        if live_rows != 2
+            || durable_q_rows
+                != Value::Set(vec![Value::Vector(vec![Value::String(
+                    "Durable Ada".to_string(),
+                )])])
         {
             remove_sqlite_files(sqlite_path);
             return Err("unexpected SQLite live row count".to_string());

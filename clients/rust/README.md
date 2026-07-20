@@ -33,9 +33,13 @@ let conn = Conn::open_memory()?;
 conn.transact(r#"[{:db/id 1 :user/name "Ada"}]"#);
 
 let db = conn.db()?;
-let rows = db.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
+let result = db.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
 let pulled = db.pull("[:user/name]", 1)?;
 ```
+
+`q` returns a `Value` with the Datomic find shape: `Value::Set` for
+relations, `Value::Vector` for collections and tuples, and the scalar value or
+`Value::Nil` for scalar finds.
 
 Prepared queries remain available when a query is reused:
 
@@ -77,5 +81,5 @@ Rust application code does not install or configure SQLite.
 ```rust
 let durable = DurableConn::open("app.vev")?;
 durable.transact(r#"[{:db/id 1 :user/name "Durable Ada"}]"#)?;
-let rows = durable.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
+let result = durable.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
 ```

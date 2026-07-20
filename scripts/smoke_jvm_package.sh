@@ -49,10 +49,14 @@ cat > "$TMP_DIR/java-smoke.clj" <<'EOF'
     (assert (= 1 @seen)))
   (.transact conn "[{:db/id 1 :user/name \"Ada\"}]")
   (with-open [db (.db conn)]
-    (let [rows (.queryRows vev (java.util.Map/of
-                                 "query" "[:find ?name :where [?e :user/name ?name]]"
-                                 "args" (java.util.List/of db)))]
-      (assert (= [["Ada"]] (vec (map vec rows))))))
+    (let [relation (.query vev (java.util.Map/of
+                                "query" "[:find ?name :where [?e :user/name ?name]]"
+                                "args" (java.util.List/of db)))
+          scalar (.query vev (java.util.Map/of
+                              "query" "[:find ?name . :where [1 :user/name ?name]]"
+                              "args" (java.util.List/of db)))]
+      (assert (= #{["Ada"]} (set (map vec relation))))
+      (assert (= "Ada" scalar))))
   (println :vev-java-package-ok))
 EOF
 

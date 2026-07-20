@@ -635,13 +635,13 @@ try (Vev.DurableConnection durable = vev.connect("app.vev")) {
 }
 ```
 
-Java callers that want a Datomic-style request-map shape can run a one-shot
-query through `Vev.queryRows`, or use `Vev.queryMaps` for `:keys`/`:strs`/
-`:syms` return-map queries:
+Java callers can run a Datomic-style request-map query through `Vev.query`.
+`Vev.queryMaps` remains an explicit row-oriented convenience for `:keys`,
+`:strs`, and `:syms` queries:
 
 ```java
 try (Vev.DB db = conn.db()) {
-    List<List<Object>> rows = vev.queryRows(Map.of(
+    Object result = vev.query(Map.of(
         "query", """
             [:find ?name
              :in $ ?email
@@ -1044,10 +1044,26 @@ stable `:error-code` keyword for host-facing malformed-input handling.
 Statement execution failures from direct visitor calls are available through
 `vev_stmt_error`.
 
+## Datomic-shaped Query Values
+
+Primary host-language `q`/`query` APIs should use the owned value-handle query
+functions:
+
+- `vev_query_value_with_inputs` for an in-memory connection
+- `vev_connection_query_value_with_inputs` for a durable connection
+- `vev_db_query_value_with_inputs` for an immutable DB snapshot
+
+The returned value follows the query's `:find` shape: a relation is a set of
+tuple vectors, a collection is a vector, a tuple is a vector or nil, and a
+scalar is the scalar value or nil. Release the result with
+`vev_value_handle_free`. The no-input variants use `[]`.
+
 ## Result Handles
 
-The string-returning query helpers are convenient, but host libraries should use
-result handles for normal row consumption.
+Result handles remain the lower-level interface for reusable prepared queries,
+typed column access, statements, visitors, and streaming-style row processing.
+They should not determine the shape or naming of a host language's primary
+`q`/`query` API.
 
 Current result-handle accessors:
 

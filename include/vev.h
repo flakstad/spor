@@ -378,6 +378,13 @@ const char *vev_query_db_prepared_with_inputs(
     vev_db_t db,
     vev_prepared_query_t query,
     const char *inputs_text);
+vev_value_handle_t vev_db_query_value(
+    vev_db_t db,
+    const char *query_text);
+vev_value_handle_t vev_db_query_value_with_inputs(
+    vev_db_t db,
+    const char *query_text,
+    const char *inputs_text);
 vev_result_t vev_query_db_prepared_result_with_inputs(
     vev_db_t db,
     vev_prepared_query_t query,

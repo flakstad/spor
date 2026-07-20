@@ -82,7 +82,7 @@ func (c *Conn) QueryText(query string, inputs string) string {
 	return ownedString(C.vev_query_edn_with_inputs(c.raw, queryText, inputsText))
 }
 
-func (c *Conn) Q(queryText string, inputs string) (*ResultSet, error) {
+func (c *Conn) Q(queryText string, inputs string) (Value, error) {
 	db, err := c.DB()
 	if err != nil {
 		return nil, err
@@ -205,7 +205,7 @@ func (c *DurableConn) DB() (*DB, error) {
 	return &DB{raw: raw}, nil
 }
 
-func (c *DurableConn) Q(queryText string, inputs string) (*ResultSet, error) {
+func (c *DurableConn) Q(queryText string, inputs string) (Value, error) {
 	db, err := c.DB()
 	if err != nil {
 		return nil, err
@@ -363,13 +363,17 @@ func (db *DB) QueryText(queryText string, inputs string) (string, error) {
 	return db.QueryPrepared(query, inputs), nil
 }
 
-func (db *DB) Q(queryText string, inputs string) (*ResultSet, error) {
-	query, err := Prepare(queryText)
+func (db *DB) Q(queryText string, inputs string) (Value, error) {
+	query := cstring(queryText)
+	inputsText := cstring(inputs)
+	defer C.free(unsafe.Pointer(query))
+	defer C.free(unsafe.Pointer(inputsText))
+	handle, err := newValueHandle(C.vev_db_query_value_with_inputs(db.raw, query, inputsText))
 	if err != nil {
 		return nil, err
 	}
-	defer query.Close()
-	return db.QueryRows(query, inputs)
+	defer handle.Close()
+	return handle.Value(), nil
 }
 
 func (db *DB) QueryRows(query *PreparedQuery, inputs string) (*ResultSet, error) {
@@ -738,6 +742,7 @@ type MapEntry struct {
 }
 
 type MapValue []MapEntry
+type SetValue []Value
 type Value any
 
 type ColumnResult struct {
@@ -891,6 +896,13 @@ func valueFromC(value C.vev_value_t) Value {
 	case C.VEV_VALUE_VECTOR:
 		count := int(C.vev_value_item_count(value))
 		out := make([]Value, 0, count)
+		for i := 0; i < count; i++ {
+			out = append(out, valueFromC(C.vev_value_item(value, C.int(i))))
+		}
+		return out
+	case C.VEV_VALUE_SET:
+		count := int(C.vev_value_item_count(value))
+		out := make(SetValue, 0, count)
 		for i := 0; i < count; i++ {
 			out = append(out, valueFromC(C.vev_value_item(value, C.int(i))))
 		}
@@ -1174,17 +1186,22 @@ func Smoke() {
 	fmt.Println("input-collection:", result)
 	mustContain("collection query", result, `"Ada"`, `"Grace"`)
 
-	oneShotRows, err := conn.Q(`[:find ?name :where [?e :user/name ?name]]`, "[]")
+	oneShotResult, err := conn.Q(`[:find ?name :where [?e :user/name ?name]]`, "[]")
 	if err != nil {
 		panic(err)
 	}
 	oneShotNames := []string{}
-	for _, row := range oneShotRows.Rows() {
+	for _, item := range oneShotResult.(SetValue) {
+		row := item.([]Value)
 		oneShotNames = append(oneShotNames, row[0].(string))
 	}
 	sort.Strings(oneShotNames)
 	mustEqual("one-shot query rows", oneShotNames, []string{"Ada", "Grace"})
-	oneShotRows.Close()
+	scalarName, err := conn.Q(`[:find ?name . :where [1 :user/name ?name]]`, "[]")
+	if err != nil {
+		panic(err)
+	}
+	mustEqual("scalar query result", scalarName, "Ada")
 
 	query, err := Prepare(`
 		[:find ?e ?email

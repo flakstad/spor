@@ -54,9 +54,11 @@ fn main() -> Result<(), String> {
     let conn = Conn::open_memory()?;
     conn.transact(r#"[{:db/id 1 :user/name "Ada"}]"#);
     let db = conn.db()?;
-    let rows = db.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
-    if rows != vec![vec![Value::String("Ada".to_string())]] {
-        return Err(format!("unexpected in-memory rows: {rows:?}"));
+    let result = db.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
+    if result != Value::Set(vec![
+        Value::Vector(vec![Value::String("Ada".to_string())]),
+    ]) {
+        return Err(format!("unexpected in-memory result: {result:?}"));
     }
 
     let path = "vevdb-rust-package.vev";
@@ -67,10 +69,12 @@ fn main() -> Result<(), String> {
     }
     {
         let durable = DurableConn::open(path)?;
-        let rows = durable.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
-        if rows != vec![vec![Value::String("Durable Ada".to_string())]] {
+        let result = durable.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
+        if result != Value::Set(vec![
+            Value::Vector(vec![Value::String("Durable Ada".to_string())]),
+        ]) {
             remove_store(path);
-            return Err(format!("unexpected durable rows: {rows:?}"));
+            return Err(format!("unexpected durable result: {result:?}"));
         }
     }
     remove_store(path);

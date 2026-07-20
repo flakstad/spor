@@ -193,14 +193,95 @@
         (delete-value-containers-shallow parsed)
         (return owned true "")))))
 
-(defn query-result-shaped-value [source: DB-Read-Source, query-source: Data, result: Result-Set] -> [value: Value, ok: bool, error: string]
+(defn datomic-query-value-owned [value: Value] -> Value
+  (case value.kind
+    .Entity (value-int (i64 value.entity))
+    .Vector
+      (let [items (make [dynamic]Value 0 (count value.items))]
+        (for [item value.items]
+          (arr.push! items (datomic-query-value-owned item)))
+        (value-vector-owned items))
+    .Map
+      (let [items (make [dynamic]Value 0 (count value.items))]
+        (for [item value.items]
+          (arr.push! items (datomic-query-value-owned item)))
+        (value-map-owned items))
+    .Set
+      (let [items (make [dynamic]Value 0 (count value.items))]
+        (for [item value.items]
+          (arr.push! items (datomic-query-value-owned item)))
+        (value-set-owned items))
+    (value-owned value)))
+
+(defn delete-owned-value-items [items: [dynamic]Value]
+  (for [item items]
+    (delete-owned-value item))
+  (delete items))
+
+(defn query-result-row-shaped-value [source: DB-Read-Source, row: Result-Row] -> [value: Value, ok: bool, error: string]
+  (let [items (make [dynamic]Value)]
+    (for [value row.values]
+      (arr.push! items (datomic-query-value-owned value)))
+    (for [pulled row.pulls]
+      (let [[rendered rendered-ok rendered-error] (db-read-source-pull-result-value source pulled)]
+        (when (not rendered-ok)
+          (delete-owned-value-items items)
+          (return (Value {}) false rendered-error))
+        (arr.push! items (datomic-query-value-owned rendered))
+        (delete-owned-value rendered)))
+    (return (value-vector-owned items) true "")))
+
+(defn query-return-map-key-value [marker: string, key: string] -> Value
+  (cond
+    (= marker ":keys") (value-keyword (strings.concatenate ([]string [":" key])))
+    (= marker ":syms") (value-symbol (string-owned key))
+    :else (value-string (string-owned key))))
+
+(defn query-result-row-return-map-value [query: Query, row: Value] -> Value
+  (let [items (make [dynamic]Value 0 (* 2 (count query.return-map-keys)))]
+    (for [key index query.return-map-keys]
+      (arr.push! items (query-return-map-key-value query.return-map-marker key))
+      (arr.push! items (datomic-query-value-owned row.items[index])))
+    (value-map-owned items)))
+
+(defn query-shaped-values [shape: Query-Data-Find-Shape, rows: [dynamic]Value] -> Value
+  (case shape
+    .Collection
+      (let [items (make [dynamic]Value 0 (count rows))]
+        (for [row rows]
+          (arr.push! items (datomic-query-value-owned row.items[0])))
+        (delete-owned-value-items rows)
+        (value-vector-owned items))
+    .Tuple
+      (let [out (if (> (count rows) 0)
+                  (datomic-query-value-owned rows[0])
+                  (value-nil))]
+        (delete-owned-value-items rows)
+        out)
+    .Scalar
+      (let [out (if (and (> (count rows) 0) (> (count rows[0].items) 0))
+                  (datomic-query-value-owned rows[0].items[0])
+                  (value-nil))]
+        (delete-owned-value-items rows)
+        out)
+    .Relation (value-set-owned rows)
+    (value-set-owned rows)))
+
+(defn query-result-shaped-value [source: DB-Read-Source, query-source: Data, query: Query, result: Result-Set] -> [value: Value, ok: bool, error: string]
   (when (not result.ok)
     (return (Value {}) false result.error))
-  (let [[shaped shaped-ok shaped-error] (query-result-data-value source query-source result)]
-    (defer (kdata.release shaped))
-    (when (not shaped-ok)
-      (return (Value {}) false shaped-error))
-    (data-owned-value shaped)))
+  (let [rows (make [dynamic]Value)]
+    (for [row result.rows]
+      (let [[row-value row-ok row-error] (query-result-row-shaped-value source row)]
+        (when (not row-ok)
+          (delete-owned-value-items rows)
+          (return (Value {}) false row-error))
+        (if query.has-return-map
+          (do
+            (arr.push! rows (query-result-row-return-map-value query row-value))
+            (delete-owned-value row-value))
+          (arr.push! rows row-value))))
+    (return (query-shaped-values (query-data-find-shape query-source) rows) true "")))
 
 (defn query-result-data [snapshot: ^Store-DB, query-source: Data, result: Query-Result] -> [value: Data, ok: bool, error: string]
   (when (not result.result.ok)

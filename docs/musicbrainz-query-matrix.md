@@ -195,7 +195,7 @@ These workshop shapes are covered by passing Vev tests:
 | Query profiling | `music_brainz.clj` query-stats walkthrough | Vev profile assertions on tutorial-shaped joins |
 | Query-stats final production query | `music_brainz.clj` John Lennon pre-1970 tracks | real Datomic comparison row plus mini profile assertion |
 | Clause-order profiling | `music_brainz.clj` comparison examples | `bench/musicbrainz_query_profile.kvist` |
-| Host-facing `d/query` equivalent with `:query`/`:args` | `music_brainz.clj` | Clojure `vev/query` and Java `Vev.queryRows(Map.of(...))` request-map wrappers |
+| Host-facing `d/query` equivalent with `:query`/`:args` | `music_brainz.clj` | Clojure `vev/query` and Java `Vev.query(Map.of(...))` request-map wrappers |
 | Return-map rows | `music_brainz.clj` | `:keys`, `:strs`, and `:syms` have restored-sample Datomic comparison rows plus Clojure/Java wrapper coverage |
 
 ## Pending Tutorial Coverage

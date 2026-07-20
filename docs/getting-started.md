@@ -357,8 +357,7 @@ conn.Transact(`[{:db/id 1 :user/name "Ada"}]`)
 db, err := conn.DB()
 defer db.Close()
 
-rows, err := db.Q(`[:find ?name :where [?e :user/name ?name]]`, "[]")
-defer rows.Close()
+result, err := db.Q(`[:find ?name :where [?e :user/name ?name]]`, "[]")
 
 pulled, err := db.Pull("[:user/name]", 1)
 
@@ -380,12 +379,12 @@ let conn = Conn::open_memory()?;
 conn.transact(r#"[{:db/id 1 :user/name "Ada"}]"#);
 
 let db = conn.db()?;
-let rows = db.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
+let result = db.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
 let pulled = db.pull("[:user/name]", 1)?;
 
 let durable = DurableConn::open("app.vev")?;
 durable.transact(r#"[{:db/id 1 :user/name "Durable Ada"}]"#)?;
-let durable_rows = durable.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
+let durable_result = durable.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;
 ```
 
 ## Java
@@ -399,7 +398,7 @@ Vev vev = Vev.load();
 Vev.Connection conn = vev.createConn();
 conn.transact("[{:db/id 1 :user/name \"Ada\"}]");
 Vev.DB db = conn.db();
-System.out.println(vev.queryRows(java.util.Map.of(
+System.out.println(vev.query(java.util.Map.of(
     "query", "[:find ?name :where [?e :user/name ?name]]",
     "args", java.util.List.of(db))));
 System.out.println(db.pull("[:user/name]", 1));

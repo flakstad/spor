@@ -49,6 +49,9 @@ with vevdb.connect("app.vev") as conn:
 
 `conn.query_text(...)` remains available as a convenience, but the DB-snapshot
 shape is the closer match to Datomic/DataScript's immutable database values.
+`q` also follows the query's `:find` shape: relation queries return a set of
+tuples, collections return lists, tuples return lists or `None`, and scalars
+return the scalar or `None`.
 Use `conn.prepare(...)` when reusing the same query many times.
 
 Typed builders can be committed in one durable bulk transaction when callers

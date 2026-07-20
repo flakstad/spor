@@ -182,12 +182,8 @@ class DB {
   }
 
   q(query, inputs = "[]") {
-    const prepared = new PreparedQuery(native.prepare(String(query)));
-    try {
-      return this.rows(prepared, inputs);
-    } finally {
-      prepared.close();
-    }
+    this._requireOpen();
+    return native.dbQ(this._handle, String(query), String(inputs));
   }
 
   withReport(tx) {

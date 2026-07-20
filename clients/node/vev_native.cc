@@ -175,6 +175,28 @@ napi_value js_value(napi_env env, vev_value_t value) {
     }
     return out;
   }
+  case VEV_VALUE_SET: {
+    napi_value global;
+    napi_value set_constructor;
+    if (!ok(env, napi_get_global(env, &global)) ||
+        !ok(env, napi_get_named_property(env, global, "Set", &set_constructor)) ||
+        !ok(env, napi_new_instance(env, set_constructor, 0, nullptr, &out))) {
+      return nullptr;
+    }
+    napi_value add;
+    if (!ok(env, napi_get_named_property(env, out, "add", &add))) {
+      return nullptr;
+    }
+    int count = vev_value_item_count(value);
+    for (int i = 0; i < count; i++) {
+      napi_value item = js_value(env, vev_value_item(value, i));
+      napi_value ignored;
+      if (!item || !ok(env, napi_call_function(env, out, add, 1, &item, &ignored))) {
+        return nullptr;
+      }
+    }
+    return out;
+  }
   case VEV_VALUE_MAP: {
     int count = vev_value_map_count(value);
     if (!ok(env, napi_create_object(env, &out))) {
@@ -588,6 +610,29 @@ napi_value db_query_prepared_rows(napi_env env, napi_callback_info info) {
   return result_rows(env, result);
 }
 
+napi_value db_q(napi_env env, napi_callback_info info) {
+  DB *snapshot = external_arg<DB>(env, info, 0);
+  char *query = string_arg(env, info, 1);
+  char *inputs = string_arg(env, info, 2);
+  if (!snapshot || !snapshot->raw || !query || !inputs) {
+    free(query);
+    free(inputs);
+    throw_error(env, "invalid DB query arguments");
+    return nullptr;
+  }
+  vev_value_handle_t handle =
+      vev_db_query_value_with_inputs(snapshot->raw, query, inputs);
+  free(query);
+  free(inputs);
+  if (!handle) {
+    throw_error(env, "query failed");
+    return nullptr;
+  }
+  napi_value out = js_value(env, vev_value_handle_value(handle));
+  vev_value_handle_free(handle);
+  return out;
+}
+
 napi_value db_with_report(napi_env env, napi_callback_info info) {
   DB *snapshot = external_arg<DB>(env, info, 0);
   char *tx = string_arg(env, info, 1);
@@ -766,6 +811,7 @@ napi_value init(napi_env env, napi_value exports) {
       {"queryPreparedRows", nullptr, query_prepared_rows, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"dbQueryPrepared", nullptr, db_query_prepared, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"dbQueryPreparedRows", nullptr, db_query_prepared_rows, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"dbQ", nullptr, db_q, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"dbWithReport", nullptr, db_with_report, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"pull", nullptr, pull, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"pullLookupRefString", nullptr, pull_lookup_ref_string, nullptr, nullptr, nullptr, napi_default, nullptr},

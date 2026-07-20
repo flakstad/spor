@@ -105,14 +105,21 @@ import com.vevdb.Vev;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class Main {
-    private static void assertRows(Vev vev, Vev.DB db) throws Throwable {
-        List<List<Object>> rows = vev.queryRows(Map.of(
+    private static void assertQuery(Vev vev, Vev.DB db) throws Throwable {
+        Object result = vev.query(Map.of(
             "query", "[:find ?name :where [?e :user/name ?name]]",
             "args", List.of(db)));
-        if (!rows.equals(List.of(List.of("Ada")))) {
-            throw new AssertionError(rows);
+        if (!result.equals(Set.of(List.of("Ada")))) {
+            throw new AssertionError(result);
+        }
+        Object scalar = vev.query(Map.of(
+            "query", "[:find ?name . :where [1 :user/name ?name]]",
+            "args", List.of(db)));
+        if (!scalar.equals("Ada")) {
+            throw new AssertionError(scalar);
         }
     }
 
@@ -120,7 +127,7 @@ public final class Main {
         try (Vev vev = Vev.load(); Vev.Connection conn = vev.createConn()) {
             conn.transact("[{:db/id 1 :user/name \"Ada\"}]");
             try (Vev.DB db = conn.db()) {
-                assertRows(vev, db);
+                assertQuery(vev, db);
             }
         }
         try (Vev vev = Vev.load();
@@ -129,7 +136,7 @@ public final class Main {
                 // Closing the report releases its native snapshots.
             }
             try (Vev.DB db = conn.db()) {
-                assertRows(vev, db);
+                assertQuery(vev, db);
             }
         }
         System.out.println("vev-java-coordinates-ok");

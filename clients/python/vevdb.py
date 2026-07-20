@@ -786,6 +786,12 @@ class Library:
         lib.vev_value_handle_value.restype = ctypes.c_void_p
         lib.vev_value_handle_edn.argtypes = [ctypes.c_void_p]
         lib.vev_value_handle_edn.restype = ctypes.c_void_p
+        lib.vev_db_query_value_with_inputs.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+        ]
+        lib.vev_db_query_value_with_inputs.restype = ctypes.c_void_p
 
         lib.vev_result_free.argtypes = [ctypes.c_void_p]
         lib.vev_result_ok.argtypes = [ctypes.c_void_p]
@@ -880,7 +886,27 @@ class Library:
                 )
                 for index in range(self.lib.vev_value_map_count(value))
             }
+        if kind == VEV_VALUE_SET:
+            return {
+                self._hashable_value(
+                    self.value_to_python(self.lib.vev_value_item(value, index))
+                )
+                for index in range(self.lib.vev_value_item_count(value))
+            }
         return self.owned_text(self.lib.vev_value_edn(value))
+
+    @classmethod
+    def _hashable_value(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return tuple(cls._hashable_value(item) for item in value)
+        if isinstance(value, dict):
+            return frozenset(
+                (cls._hashable_value(key), cls._hashable_value(item))
+                for key, item in value.items()
+            )
+        if isinstance(value, set):
+            return frozenset(cls._hashable_value(item) for item in value)
+        return value
 
     def _long_column(self, pointer: int, count: int) -> list[int]:
         if not pointer:
@@ -1148,7 +1174,7 @@ def q(
     query_edn: str,
     source: "Connection | DurableConnection | DB",
     inputs_edn: str = "[]",
-) -> list[list[Any]]:
+) -> Any:
     """Run a one-shot Datalog query.
 
     Prefer passing an immutable DB snapshot. Passing a connection is accepted as
@@ -1530,12 +1556,16 @@ class DB:
         )
         return Result(self._library, handle)
 
-    def q(self, query_edn: str, inputs_edn: str = "[]") -> list[list[Any]]:
-        """Run a one-shot Datalog query against this immutable DB value."""
+    def q(self, query_edn: str, inputs_edn: str = "[]") -> Any:
+        """Run a query and return the value specified by its Datomic find shape."""
         self._require_open()
-        with PreparedQuery(self._library, query_edn) as prepared:
-            with self.query(prepared, inputs_edn) as result:
-                return result.rows()
+        handle = self._library.lib.vev_db_query_value_with_inputs(
+            self._handle,
+            _bytes(query_edn),
+            _bytes(inputs_edn),
+        )
+        with ValueHandle(self._library, handle) as value:
+            return value.value()
 
     def query_with_rules(
         self, prepared: "PreparedQuery", rules_edn: str, inputs_edn: str = "[]"
