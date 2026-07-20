@@ -28,7 +28,7 @@ project can depend on `clients/rust` by path.
 Basic usage in the current smoke wrapper:
 
 ```rust
-let conn = Conn::open_memory()?;
+let conn = Conn::create()?;
 
 conn.transact(r#"[{:db/id 1 :user/name "Ada"}]"#);
 

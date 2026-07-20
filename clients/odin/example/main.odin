@@ -21,7 +21,7 @@ main :: proc() {
 	}
 	defer vev.unload(&library)
 
-	connection, opened := vev.open_memory(&library)
+	connection, opened := vev.create_conn(&library)
 	if !opened {
 		fmt.eprintln("could not open an in-memory VevDB connection")
 		os.exit(1)

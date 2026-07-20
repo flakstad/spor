@@ -10,7 +10,7 @@ fn main() -> Result<(), String> {
     let version = version();
     println!("version: {version}");
 
-    let conn = Conn::open_memory()?;
+    let conn = Conn::create()?;
     let tx = conn.transact_report(
         r#"[{:db/id 1 :user/name "Ada" :user/email "ada@example.com"}
             {:db/id 2 :user/name "Grace" :user/email "grace@example.com"}]"#,

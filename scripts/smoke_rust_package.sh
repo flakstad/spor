@@ -51,7 +51,7 @@ fn remove_store(path: &str) {
 }
 
 fn main() -> Result<(), String> {
-    let conn = Conn::open_memory()?;
+    let conn = Conn::create()?;
     conn.transact(r#"[{:db/id 1 :user/name "Ada"}]"#);
     let db = conn.db()?;
     let result = db.q("[:find ?name :where [?e :user/name ?name]]", "[]")?;

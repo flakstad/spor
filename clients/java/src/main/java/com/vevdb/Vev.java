@@ -673,10 +673,6 @@ public final class Vev implements AutoCloseable {
         this.valueMapValue = downcall("vev_value_map_value", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
     }
 
-    public Connection openMemory() throws Throwable {
-        return createConn();
-    }
-
     public Connection createConn() throws Throwable {
         MemorySegment raw = (MemorySegment) connOpenMemory.invoke();
         if (isNull(raw)) throw new IllegalStateException("failed to open Vev connection");
@@ -699,24 +695,6 @@ public final class Vev implements AutoCloseable {
             }
             return new DurableConnection(raw);
         }
-    }
-
-    public SQLiteConnection openSqlite(Path path) throws Throwable {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment raw = (MemorySegment) sqliteConnOpen.invoke(local.allocateFrom(path.toString()));
-            if (isNull(raw)) throw new IllegalStateException("failed to open SQLite-backed Vev connection");
-            boolean ok = (boolean) sqliteConnOk.invoke(raw);
-            if (!ok) {
-                String error = ownedString((MemorySegment) sqliteConnError.invoke(raw));
-                closeHandle(sqliteConnClose, raw);
-                throw new IllegalStateException(error);
-            }
-            return new SQLiteConnection(raw);
-        }
-    }
-
-    public SQLiteConnection openSqlite(String path) throws Throwable {
-        return openSqlite(Path.of(path));
     }
 
     public Connection connFromDb(DB db) throws Throwable {

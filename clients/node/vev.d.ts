@@ -44,5 +44,4 @@ export class PreparedQuery {
 
 export function connect(uri: string): DurableConn;
 export function createConn(): Conn;
-export function openMemory(): Conn;
-export function q(query: string, source: Conn | DurableConn | DB, inputs?: string): unknown[][];
+export function q(query: string, source: Conn | DurableConn | DB, inputs?: string): unknown;

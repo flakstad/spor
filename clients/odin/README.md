@@ -35,7 +35,7 @@ library, ok := vev.load_bundled("vendor/vev")
 assert(ok)
 defer vev.unload(&library)
 
-connection, ok := vev.open_memory(&library)
+connection, ok := vev.create_conn(&library)
 assert(ok)
 defer vev.close(&connection)
 

@@ -4,11 +4,14 @@ This is the forward-looking VevDB work plan. Completed work belongs in release
 notes, focused design documents, and Git history—not in this file.
 
 The current product and architecture are described in the
-[README](../README.md). The compatibility reference for Clojure remains the
-current Datomic API: embedded implementation details may differ, but public
-names, argument order, result shapes, and documented semantics should not
-diverge without an explicit recorded exception. Do not fill gaps in
-`vev.core` with APIs that Datomic does not provide.
+[README](../README.md). Datomic Peer is the semantic and naming reference for
+the primary API: embedded implementation details may differ, but public names,
+argument order, result shapes, and documented semantics should not diverge
+without an explicit recorded exception. Intentional DataScript-style helpers
+such as `listen`/`unlisten`, and clearly documented VevDB conveniences, may
+coexist with that core. Low-level row, result-handle, prepared-statement,
+column-batch, profiling, parser, FFI, and storage-backend machinery is not part
+of the ordinary public API unless explicitly approved.
 
 ## First Stable Release
 
@@ -26,11 +29,28 @@ diverge without an explicit recorded exception. Do not fill gaps in
 
 ## Datomic API Direction
 
-- Continue adopting useful Datomic functionality only where it has a clear
-  embedded equivalent.
+- Treat the lazy, associative Peer entity API—not the remote Client API—as the
+  model for VevDB entities. Preserve lookup by entity id, ident, or lookup ref;
+  keyword/map access; same-snapshot reference navigation; `entity-db`; and
+  recursive component realization through `touch`.
+- Keep `pull` and `pull-many` first-class beside entity access. Continue parity
+  for wildcard/component expansion, forward and reverse refs, nesting,
+  recursion, `:as`, `:default`, `:limit`, and named `:xform` behavior.
+- Add the missing Datomic-shaped transaction report stream:
+  `tx-report-queue` and `remove-tx-report-queue`. Keep the existing named
+  `listen`/`unlisten` helpers as a documented DataScript-style convenience over
+  post-commit reports. Do not describe them as Datomic Peer function names.
+- Add the most useful remaining embedded Peer operations in this order:
+  `attribute`, `db-stats`, `index-pull`, then `filter`/`is-filtered` and `qseq`
+  where their lazy semantics can be preserved.
+- Do not copy deployment- or transactor-specific Datomic operations that have
+  no embedded equivalent.
 - Keep entity values lazy and map-like, DB values immutable, and transaction
   coordinates consistent across Clojure, Java, Kvist, C, and Odin.
 - Add parity tests before adding or changing a Datomic-shaped public API.
+- Finish the client-surface audit described in
+  [Client API Contract](client-api.md): one small ordinary API per host, with
+  lower-level facilities moved behind internal/advanced namespaces or types.
 - Do not expose process-local callback registration as Datomic stored
   functions.
 - Do not persist or evaluate arbitrary host-language code. Stored functions
@@ -108,7 +128,8 @@ than reshaping the embedded API.
   processes.
 - Immutable retained DB values do not change as connections advance.
 - Engine and storage improvements must be general mechanisms.
-- The Clojure API remains Datomic-shaped and does not accumulate invented
-  convenience APIs.
+- The Clojure core remains Datomic-shaped. Additional helpers must be
+  intentional, documented, and clearly distinguishable from low-level
+  implementation machinery.
 - The CLI, packaged clients, and library all operate on the same database
   semantics and durable format.

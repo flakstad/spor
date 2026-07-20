@@ -120,9 +120,9 @@ bundled-native package layout.
 
 The Go path is a cgo package at `github.com/vevdb/vev/clients/go`. Its public
 constructor shape is `vev.CreateConn()` for in-memory work and
-`vev.Connect("app.vev")` for durable stores; `OpenMemory()` remains a
-compatibility alias. `scripts/smoke_go_package.sh` verifies import from a
-separate temporary Go module using a local `replace`.
+`vev.Connect("app.vev")` for durable stores.
+`scripts/smoke_go_package.sh` verifies import from a separate temporary Go
+module using a local `replace`.
 
 The Rust path is a local Cargo package under `clients/rust`, already named
 `vevdb` with `publish = false`. It is still a smoke binary plus RAII wrapper in

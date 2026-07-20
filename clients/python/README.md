@@ -98,8 +98,6 @@ with conn.db() as db:
         print(ada.id)
 ```
 
-`open_memory()` remains as a compatibility alias for `create_conn()`.
-
 The current API already wraps native handles with context managers for
 connections, DB snapshots, entity views, prepared queries, prepared pull patterns,
 statements, transaction reports, and durable VevDB connections.

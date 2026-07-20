@@ -486,7 +486,7 @@ pub struct Conn {
 }
 
 impl Conn {
-    pub fn open_memory() -> Result<Self, String> {
+    pub fn create() -> Result<Self, String> {
         let raw = unsafe { vev_conn_open_memory() };
         if raw.is_null() {
             Err("failed to open Vev connection".to_string())

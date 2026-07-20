@@ -204,7 +204,7 @@ unload :: proc(library: ^Library) {
 	library^ = {}
 }
 
-open_memory :: proc(library: ^Library) -> (connection: Connection, ok: bool) {
+create_conn :: proc(library: ^Library) -> (connection: Connection, ok: bool) {
 	if library == nil || library.api.open_memory == nil {
 		return {}, false
 	}

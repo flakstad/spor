@@ -100,8 +100,6 @@ reports, _ := durable.TransactLogicalBulk([]*vev.TxBuilder{first, second})
 defer reports.Close()
 ```
 
-`OpenMemory` remains as a compatibility alias for `CreateConn`.
-
 `scripts/smoke_go_package.sh` verifies that this package can be imported from a
 separate Go module using a local `replace` to this checkout.
 

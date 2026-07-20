@@ -169,7 +169,7 @@ Rust wraps the same native handles with RAII:
 use vevdb::Conn;
 
 fn main() -> Result<(), String> {
-    let conn = Conn::open_memory()?;                                // 1
+    let conn = Conn::create()?;                                     // 1
     conn.transact(r#"[{:db/id 1 :user/name "Ada"}]"#);             // 2
 
     let db = conn.db()?;                                            // 3

@@ -364,7 +364,7 @@ The Rust wrapper is a local crate over the C ABI and follows the intended RAII
 shape:
 
 ```rust
-let conn = Conn::open_memory()?;
+let conn = Conn::create()?;
 
 conn.transact(r#"[{:db/id 1 :user/name "Ada"}]"#);
 

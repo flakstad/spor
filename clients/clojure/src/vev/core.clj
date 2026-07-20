@@ -322,8 +322,6 @@
          (.close engine)
          (throw error))))))
 
-(def open create-conn)
-
 (defn connect
   "Open a durable Vev connection.
 
@@ -344,16 +342,6 @@
        (catch Throwable error
          (.close engine)
          (throw error))))))
-
-(defn open-sqlite
-  "Open a durable SQLite-backed Vev connection.
-
-  Prefer `connect` for application code; this backend-specific alias is for
-  storage tests and migration/debugging."
-  ([sqlite-path]
-   (connect sqlite-path))
-  ([lib-path sqlite-path]
-   (connect lib-path sqlite-path)))
 
 (defn db
   "Return an immutable DB snapshot from a connection."

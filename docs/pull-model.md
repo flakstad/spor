@@ -198,19 +198,21 @@ Pull should:
 The engine does not need to clone every DataScript implementation trick.
 It does need to preserve the user-facing meaning.
 
-## Entity wrappers
+## Entity API relationship
 
-Entity-style wrappers are optional and secondary.
+Pull and entities are complementary parts of the Datomic Peer model.
 
-Priority order should be:
+- `entity` provides a lazy, immutable, associative view for incremental and
+  interactive navigation.
+- `pull` and `pull-many` explicitly select and shape a hierarchy.
+- both remain tied to one immutable DB value, including navigation through
+  refs
+- `touch` realizes all direct attributes and recursively realizes component
+  entities
 
-1. direct transact semantics
-2. direct query semantics
-3. direct pull semantics
-4. only then, optional entity-style convenience wrappers
-
-That keeps Vev centered on explicit data access instead of lazy wrapper
-magic.
+The entity API is therefore a first-class public API, not a secondary wrapper.
+The Clojure representation should behave like ordinary keyword/map access while
+retaining laziness and the entity's DB basis.
 
 ## Compatibility rule
 

@@ -642,10 +642,9 @@ javac --release 25 ...
 java --enable-native-access=ALL-UNNAMED ...
 ```
 
-The Java wrapper exposes `Vev.load(path)` and `createConn()` as the public-ish
-example shape. `openMemory()` remains as a low-level compatibility alias for
-the underlying ABI operation. Durable connections use `connect(path)` and query
-through immutable DB snapshots:
+The Java wrapper exposes `Vev.load(path)` and `createConn()` for in-memory
+work. Durable connections use `connect(path)` and query through immutable DB
+snapshots:
 
 ```java
 try (Vev.DurableConnection durable = vev.connect("app.vev")) {

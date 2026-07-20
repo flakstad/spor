@@ -278,10 +278,6 @@ class PreparedQuery {
   }
 }
 
-function openMemory() {
-  return new Conn();
-}
-
 function createConn() {
   return new Conn();
 }
@@ -304,6 +300,5 @@ module.exports = {
   PreparedQuery,
   connect,
   createConn,
-  openMemory,
   q,
 };

@@ -222,9 +222,6 @@ class Library:
     def connect(self, uri: str | pathlib.Path) -> "DurableConnection":
         return DurableConnection(self, uri)
 
-    def open_sqlite(self, path: str | pathlib.Path) -> "SQLiteConnection":
-        return SQLiteConnection(self, path)
-
     def _configure(self) -> None:
         lib = self.lib
 
@@ -1186,16 +1183,8 @@ def create_conn() -> "Connection":
     return Connection(default_library())
 
 
-def open_memory() -> "Connection":
-    return create_conn()
-
-
 def connect(uri: str | pathlib.Path) -> "DurableConnection":
     return DurableConnection(default_library(), uri)
-
-
-def open_sqlite(path: str | pathlib.Path) -> "SQLiteConnection":
-    return SQLiteConnection(default_library(), path)
 
 
 def q(
