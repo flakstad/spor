@@ -8986,7 +8986,17 @@
              {:db/id 15 :db/ident :fail-tx}
              {:db/id 13 :db/ident :create-vera}
              {:db/id 14 :db/ident :create-map}
-             {:db/id 11 :db/ident :Petr}])
+             {:db/id 11 :db/ident :Petr}
+             {:db/id 1 :name "Petr" :age 31}
+             {:db/id 2 :name "Ada" :age 40}
+             {:db/id 3 :name "Grace" :age 50}
+             {:db/id 4 :name "Lin" :age 20}
+             {:db/id 5 :name "Mina" :age 30}
+             {:db/id 6 :name "Nia" :age 60}
+             {:db/id 20 :name "Ruth" :age 10}
+             {:db/id 21 :name "Sofia" :age 11}
+             {:db/id 22 :name "Tara" :age 12}
+             {:db/id 23 :name "Uma" :age 13}])
         duplicate-registry ([]vev.Tx-Fn-String [(vev.tx-fn-string ":inc-age" birthday-by-name)
                                                 (vev.tx-fn-values ":inc-age" birthday-by-name-and-delta)])
         before-duplicate-datom-count (count conn.db.datoms)
@@ -9009,8 +9019,7 @@
         report (vev.transact-tx-data-with-string-fns
                  (addr conn)
                  (vev.tx-data
-                   [:db/add 1 :name "Petr"]
-                   [:db/add 1 :age 31]
+                   [:db/add 1 :age 99]
                    [:inc-age "Petr"]
                    [:db/add 1 :label "after-call"])
                  registry)
@@ -9020,23 +9029,22 @@
                        registry)
         text-call (vev.transact-text-with-string-fns
                     (addr conn)
-                    "[[:db/add 2 :name \"Ada\"] [:db/add 2 :age 40] [:db.fn/call :inc-age \"Ada\"] [:db/add 2 :label \"after-text-call\"]]"
+                    "[[:db/add 2 :age 99] [:db.fn/call :inc-age \"Ada\"] [:db/add 2 :label \"after-text-call\"]]"
                     registry)
         text-value-call (vev.transact-text-with-string-fns
                           (addr conn)
-                          "[[:db/add 4 :name \"Lin\"] [:db/add 4 :age 20] [:db.fn/call :inc-age-by \"Lin\" 5] [:db/add 4 :label \"after-value-call\"]]"
+                          "[[:db/add 4 :age 99] [:db.fn/call :inc-age-by \"Lin\" 5] [:db/add 4 :label \"after-value-call\"]]"
                           registry)
         prepared (vev.prepare-tx-text
-                   "[[:db/add 3 :name \"Grace\"] [:db/add 3 :age 50] [:inc-age \"Grace\"] [:db/add 3 :label \"after-prepared-call\"]]")
+                   "[[:db/add 3 :age 99] [:inc-age \"Grace\"] [:db/add 3 :label \"after-prepared-call\"]]")
         prepared-call (vev.transact-prepared-with-string-fns (addr conn) prepared registry)
         prepared-values (vev.prepare-tx-text
-                          "[[:db/add 5 :name \"Mina\"] [:db/add 5 :age 30] [:inc-age-by \"Mina\" 7] [:create-vera] [:create-map]]")
+                          "[[:db/add 5 :age 99] [:inc-age-by \"Mina\" 7] [:create-vera] [:create-map]]")
         prepared-value-call (vev.transact-prepared-with-string-fns (addr conn) prepared-values registry)
         literal-value-call (vev.transact-tx-data-with-string-fns
                              (addr conn)
                              (vev.tx-data
-                               [:db/add 6 :name "Nia"]
-                               [:db/add 6 :age 60]
+                               [:db/add 6 :age 99]
                                [:inc-age-by "Nia" 4])
                              registry)
         no-registry (vev.transact-text-with-string-fns
@@ -9085,18 +9093,18 @@
                                    [(= ?name "RollbackPrepared")]])
         pure-text-fn (vev.with-text-with-string-fns
                        report.db-after
-                       "[[:db/add 20 :name \"Ruth\"] [:db/add 20 :age 10] [:inc-age \"Ruth\"]]"
+                       "[[:db/add 20 :age 99] [:inc-age \"Ruth\"]]"
                        registry)
         pure-prepared-fn (vev.prepare-tx-text
-                           "[[:db/add 21 :name \"Sofia\"] [:db/add 21 :age 11] [:inc-age-by \"Sofia\" 3]]")
+                           "[[:db/add 21 :age 99] [:inc-age-by \"Sofia\" 3]]")
         pure-prepared-report (vev.with-prepared-with-string-fns report.db-after pure-prepared-fn registry)
         pure-db-text (vev.db-with-text-with-string-fns
                        report.db-after
-                       "[[:db/add 22 :name \"Tara\"] [:db/add 22 :age 12] [:inc-age \"Tara\"]]"
-                       registry)
+                       "[[:db/add 22 :age 99] [:inc-age \"Tara\"]]"
+                      registry)
         pure-db-prepared (vev.db-with-prepared-with-string-fns
                            report.db-after
-                           (vev.prepare-tx-text "[[:db/add 23 :name \"Uma\"] [:db/add 23 :age 13] [:inc-age-by \"Uma\" 2]]")
+                           (vev.prepare-tx-text "[[:db/add 23 :age 99] [:inc-age-by \"Uma\" 2]]")
                            registry)
         base-ruth (vev.q report.db-after
                     [:find ?age
@@ -9181,7 +9189,8 @@
     (t.is pure-text-fn.ok)
     (t.is pure-prepared-fn.ok)
     (t.is pure-prepared-report.ok)
-    (t.is (= (count base-ruth.rows) 0))
+    (t.is (= (count base-ruth.rows) 1))
+    (t.is (= base-ruth.rows[0].values[0].int-value 10))
     (t.is (= (vev.entity-get ruth ":age").int-value 11))
     (t.is (vev.entity-get ruth ":had-birthday").bool-value)
     (t.is (= (vev.entity-get sofia ":age").int-value 14))

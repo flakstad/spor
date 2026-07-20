@@ -264,9 +264,10 @@ subscription mechanism inside the database core.
 
 Vev supports DataScript/Datomic-shaped transaction functions through registered
 idents. A transaction can call a registered function with `:db.fn/call` or an
-ident shorthand form. The function receives the intermediate DB value at that
-point in the transaction and returns tx-data, which is parsed/resolved as part
-of the same transaction.
+ident shorthand form. As in Datomic, every function call receives the immutable
+DB value from the start of the transaction. It does not observe operations that
+appear earlier in the same transaction. Returned tx-data is still parsed and
+resolved into that transaction in call order.
 
 Through the C ABI, host-provided transaction functions currently return EDN
 tx-data strings and receive borrowed typed argument values plus a borrowed DB

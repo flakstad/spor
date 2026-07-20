@@ -137,10 +137,15 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
     (assert (nil? (d/entity snapshot [:user/email "missing@example.com"]))))
   (with-open [fns (d/tx-fns conn {:user/set-name
                                   (fn [db e name]
-                                    [[:db/add e :user/name name]])})]
+                                    [[:db/add e :user/name
+                                      (str (:user/name (d/entity db e))
+                                           "->"
+                                           name)]])})]
     (d/transact conn [[:db/add 100 :db/ident :user/set-name]])
-    (d/transact conn [[:user/set-name 2 "Grace"]] fns)
-    (assert (= #{["Grace"]}
+    (d/transact conn [[:db/add 2 :user/name "Intermediate"]
+                      [:user/set-name 2 "Final"]]
+                fns)
+    (assert (= #{["Grace->Final"]}
                (d/q '[:find ?name :where [2 :user/name ?name]]
                     (d/db conn)))))
   (with-open [snapshot (d/db conn)

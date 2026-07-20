@@ -3230,7 +3230,7 @@
                 [fn-index fn-ok] (tx-fn-source-string-index registry data.ident)]
             (when (not fn-ok)
               (return (failed-source-registered-tx before ops tx-meta tempids segment "transaction fn not registered")))
-            (let [result (call-source-registered-tx-fn registry[fn-index] current-source data)]
+            (let [result (call-source-registered-tx-fn registry[fn-index] source data)]
               (when (not result.ok)
                 (delete result.tx-data)
                 (return (failed-source-registered-tx before ops tx-meta tempids segment result.error)))

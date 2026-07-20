@@ -18754,8 +18754,8 @@
             (when (not fn-ok)
               (delete-owned-db current-db)
               (return (failed-registered-tx before ops tx-meta tempids segment "transaction fn not registered")))
-            (let [result (call-registered-tx-fn registry[fn-index] current-db data)]
-              (delete-owned-db current-db)
+            (delete-owned-db current-db)
+            (let [result (call-registered-tx-fn registry[fn-index] before data)]
               (when (not result.ok)
                 (delete result.tx-data)
                 (return (failed-registered-tx before ops tx-meta tempids segment result.error)))

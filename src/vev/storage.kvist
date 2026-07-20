@@ -14055,11 +14055,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
               [segment-ok segment-error] (resolve-shared-source-tx-segment-source-only! state current-source (addr ops) (addr tx-meta) (addr tempids) (addr segment))]
           (when (not segment-ok)
             (return (failed-store-source-registered-tx snapshot^ ops tx-meta tempids segment segment-error)))
-          (let [call-source (tx-ops-overlay-db-read-source (addr source) (addr ops) tx)
-                [fn-index fn-ok] (tx-fn-source-string-index registry data.ident)]
+          (let [[fn-index fn-ok] (tx-fn-source-string-index registry data.ident)]
             (when (not fn-ok)
               (return (failed-store-source-registered-tx snapshot^ ops tx-meta tempids segment "transaction fn not registered")))
-            (let [result (call-source-registered-tx-fn registry[fn-index] call-source data)]
+            (let [result (call-source-registered-tx-fn registry[fn-index] source data)]
               (when (not result.ok)
                 (delete result.tx-data)
                 (return (failed-store-source-registered-tx snapshot^ ops tx-meta tempids segment result.error)))

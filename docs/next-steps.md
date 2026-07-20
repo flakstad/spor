@@ -92,7 +92,7 @@ Work through this batch in order:
    Remove the invented `entity-get`, `entity-values`, `entity-ref`,
    `entity-refs`, `entity-id`, and `entity-found?` functions, plus the
    one-argument `entity` overload.
-- [ ] Port Datomic's intra-transaction regression cases and make an explicit,
+- [x] Port Datomic's intra-transaction regression cases and make an explicit,
    tested decision about transaction functions observing the
    start-of-transaction DB rather than an intermediate DB.
 - [ ] Expose existing engine functionality under Datomic's `entid`, `ident`,
