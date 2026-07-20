@@ -116,18 +116,6 @@
           (throw (ex-info "unexpected entity view output"
                           {:entity (into {} ada)}))))
 
-      (with-open [fns (vev/tx-fns conn {:user/set-name
-                                        (fn [db e name]
-                                          [[:db/add e :user/nickname name]])})]
-        (vev/transact conn [[:db/add 101 :db/ident :user/set-name]])
-        (let [tx-fn-report (vev/transact conn [[:user/set-name 6 "Edsger"]] fns)]
-          (when-not (:ok tx-fn-report)
-            (throw (ex-info "transaction function failed" {:report tx-fn-report})))
-          (when-not (= #{["Edsger"]}
-                       (vev/q '[:find ?name :where [6 :user/nickname ?name]]
-                              (vev/db conn)))
-            (throw (ex-info "transaction function did not apply tx-data" {})))))
-
       (with-open [email-query (vev/prepare conn
                                            '[:find ?e ?email
                                              :in $ ?needle

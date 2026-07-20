@@ -99,10 +99,12 @@ Work through this batch in order:
    `datoms`, `seek-datoms`, `rseek-datoms`, and `index-range` names.
 - [x] Implement Datomic-shaped `sync`: immediate/current snapshots where possible
    and basis-`t` coordination for durable connections shared by processes.
-- [ ] Keep executable stored-function policy explicit. Do not persist arbitrary
+- [x] Keep executable stored-function policy explicit. Do not persist arbitrary
    host-language code or present host callback registration as Datomic stored
-   functions. Review the non-Datomic `tx-fns` surface before calling this area
-   complete.
+   functions. The non-Datomic `tx-fns` registry and extra transaction arities
+   have been removed from `vev.core`; the lower-level C/Java host callback
+   mechanism is documented as an embedding extension, not stored-function
+   compatibility.
 - [ ] Add focused multi-process and interrupted-commit coverage for serialized
    writers, monotonic transaction coordinates, immutable retained snapshots,
    and `sync` visibility.

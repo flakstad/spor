@@ -108,18 +108,8 @@ Clojure data and follows the same connection -> DB value -> query shape:
 (d/pull db [:artist/name] 1)
 ```
 
-Registered transaction functions use the same Datomic-shaped tx-data calls.
-Install the ident in the DB, then provide executable behavior from the host
-process:
-
-```clojure
-(with-open [fns (d/tx-fns conn
-                  {:artist/rename
-                   (fn [db e name]
-                     [[:db/add e :artist/name name]])})]
-  (d/transact conn [[:db/add 100 :db/ident :artist/rename]])
-  (d/transact conn [[:artist/rename 1 "John Winston Lennon"]] fns))
-```
+VevDB does not yet expose Datomic stored functions through `vev.core`. It does
+not persist or evaluate arbitrary host-language code.
 
 Successful transaction reports can be observed with listeners:
 

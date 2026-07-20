@@ -260,14 +260,13 @@ In the embedded single-process case, this is usually enough:
 That keeps reaction logic in application code rather than introducing a
 subscription mechanism inside the database core.
 
-## Transaction functions
+## Transaction functions and stored functions
 
-Vev supports DataScript/Datomic-shaped transaction functions through registered
-idents. A transaction can call a registered function with `:db.fn/call` or an
-ident shorthand form. As in Datomic, every function call receives the immutable
-DB value from the start of the transaction. It does not observe operations that
-appear earlier in the same transaction. Returned tx-data is still parsed and
-resolved into that transaction in call order.
+VevDB does not yet implement Datomic stored functions. It does not persist or
+evaluate arbitrary host-language code, and the Datomic-shaped Clojure namespace
+does not expose a separate callback registry API. This avoids presenting a
+process-local callback mechanism as if it had Datomic's database-installed
+semantics.
 
 Through the C ABI, host-provided transaction functions currently return EDN
 tx-data strings and receive borrowed typed argument values plus a borrowed DB
@@ -276,11 +275,11 @@ released. This keeps the raw ABI simple while preserving normal transaction
 rollback semantics: if the callback fails or its returned tx-data is invalid,
 earlier segment operations are rolled back and listeners are not notified.
 
-The Java wrapper exposes this as `TxFunctionRegistry`, and the Clojure wrapper
-exposes `tx-fns`. Clojure callbacks receive `(db & args)` and return ordinary
-tx-data. The DB still needs the function ident installed with `:db/ident`,
-matching Datomic's model that transaction functions are named by DB idents
-while executable host code is supplied by the running process.
+The Java wrapper exposes that low-level host extension as
+`TxFunctionRegistry`. It remains useful for embedding and ABI validation, but
+it is explicitly not Datomic stored-function compatibility. If stored
+functions are added, they need a portable, deterministic execution and
+deployment model rather than process-local callback registration.
 
 ## Listener and derivation extension point
 

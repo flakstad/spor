@@ -35,11 +35,11 @@ Current Vev supports the main Datomic/DataScript transaction shapes:
 - list forms
 - map forms
 - built-in transaction functions such as `:db/cas`
-- registered transaction functions called through `:db.fn/call` or ident shorthand
+- lower-level host callbacks called through `:db.fn/call` or ident shorthand
 
-The remaining work is not a different transaction syntax; it is exact API
-polish around diagnostics, host registration ergonomics, and any unported edge
-cases from the upstream compatibility suites.
+The host callback mechanism is available through the C ABI and Java embedding
+API, but is not Datomic stored-function compatibility and is intentionally not
+part of `vev.core`. Stored functions remain unimplemented.
 
 ### Transaction list forms
 

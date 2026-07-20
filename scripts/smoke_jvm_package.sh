@@ -171,19 +171,7 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
       (assert (= ["ada@example.com"] (mapv :v email-range)))
       (assert (= 2 (:e (first (d/seek-datoms snapshot :eavt 2)))))
       (assert (= 2 (:e (first (d/rseek-datoms snapshot :eavt 2)))))))
-  (with-open [fns (d/tx-fns conn {:user/set-name
-                                  (fn [db e name]
-                                    [[:db/add e :user/name
-                                      (str (:user/name (d/entity db e))
-                                           "->"
-                                           name)]])})]
-    (d/transact conn [[:db/add 100 :db/ident :user/set-name]])
-    (d/transact conn [[:db/add 2 :user/name "Intermediate"]
-                      [:user/set-name 2 "Final"]]
-                fns)
-    (assert (= #{["Grace->Final"]}
-               (d/q '[:find ?name :where [2 :user/name ?name]]
-                    (d/db conn)))))
+  (d/transact conn [[:db/add 2 :user/name "Grace Hopper"]])
   (with-open [snapshot (d/db conn)
               earlier (d/as-of snapshot (dec (d/basis-t snapshot)))
               audit (d/history snapshot)]

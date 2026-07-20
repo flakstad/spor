@@ -325,23 +325,10 @@ process, `sync` returns a future in the Datomic shape:
 The two-argument form waits for a DB whose basis is at least the supplied `t`.
 The no-argument form captures all transactions complete when it is called.
 
-Transaction functions follow Datomic's installed-ident model: the DB contains
-the function ident, while the host registry supplies the executable callback for
-this process.
-
-```clojure
-(with-open [fns (d/tx-fns conn
-                  {:user/set-name
-                   (fn [db e name]
-                     [[:db/add e :user/name name]])})]
-  (d/transact conn [[:db/add 100 :db/ident :user/set-name]])
-  (d/transact conn [[:user/set-name 1 "Ada"]] fns))
-```
-
-The same shape works with `d/connect` durable handles. The callback receives
-`(db & args)` and returns ordinary tx-data. The DB value is valid for the
-callback call; keep durable application state outside the callback if it needs
-to outlive the transaction.
+VevDB does not currently expose Datomic stored functions through the Clojure
+API. In particular, it does not persist or evaluate arbitrary host-language
+code, and `vev.core` does not add a callback-registration API that Datomic
+itself does not have.
 
 Immutable DB values support Datomic/DataScript-style `with` operations:
 

@@ -154,9 +154,11 @@ Transaction syntax stays close to Datomic/DataScript:
 [:db.fn/call ident arg...]
 ```
 
-Map tx-data, lookup refs, tempids, reverse attrs, nested maps, current-tx
-metadata aliases, and registered transaction functions are part of the current
-in-memory engine and EDN text API.
+Map tx-data, lookup refs, tempids, reverse attrs, nested maps, and current-tx
+metadata aliases are part of the current in-memory engine and EDN text API.
+Lower-level C/Java embedding APIs also support process-local transaction
+callbacks; these are not Datomic stored functions and are not exposed by
+`vev.core`.
 
 ## Transaction metadata
 

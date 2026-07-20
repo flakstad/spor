@@ -255,10 +255,10 @@ The implementation lives in `src/vev_abi` with the public header in
 - free returned strings and handles
 
 Java exposes the raw transaction-function callback path as
-`TxFunctionRegistry`; Clojure wraps it as `tx-fns`, where callbacks return
-ordinary Clojure tx-data. See `docs/c-abi.md`, `clients/c/smoke.c`, and the
-Python/Rust/Java/Clojure smoke examples, plus the Go and Node/TypeScript smoke
-examples.
+`TxFunctionRegistry`. This is a low-level host extension, not Datomic stored
+functions, and is intentionally absent from the Datomic-shaped `vev.core`
+namespace. See `docs/c-abi.md`, `clients/c/smoke.c`, and the Python/Rust/Java
+smoke examples, plus the Go and Node/TypeScript smoke examples.
 
 ## Clojure/JVM
 

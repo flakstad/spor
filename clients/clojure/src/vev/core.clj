@@ -7,7 +7,7 @@
             [clojure.set :as set])
   (:import [java.nio.file Path]
            [java.util.function Function]
-           [com.vevdb Vev Vev$ColumnResult Vev$DB Vev$Datom Vev$Entity Vev$EntityView Vev$Keyword Vev$Log Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxFunction Vev$TxReportListener]))
+           [com.vevdb Vev Vev$ColumnResult Vev$DB Vev$Datom Vev$Entity Vev$EntityView Vev$Keyword Vev$Log Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxReportListener]))
 
 (defn- path [value]
   (cond
@@ -288,11 +288,6 @@
     (.close ^java.lang.AutoCloseable native)))
 
 (defrecord TxBuilder [^Vev engine native]
-  java.lang.AutoCloseable
-  (close [_]
-    (.close ^java.lang.AutoCloseable native)))
-
-(defrecord TxFnRegistry [^Vev engine native]
   java.lang.AutoCloseable
   (close [_]
     (.close ^java.lang.AutoCloseable native)))
@@ -660,23 +655,11 @@
   "Transact Clojure data or EDN text against a connection.
 
   Returns a Clojure transaction report map."
-  ([conn tx]
-   (with-open [report (if (instance? TxBuilder tx)
-                        (.transactReport (:native conn) (:native tx))
-                        (.transactReport (:native conn) (edn-text tx)))]
-     (clj-value (.value report))))
-  ([conn tx tx-fns]
-   (when (instance? TxBuilder tx)
-     (throw (ex-info "transaction function registries apply to EDN tx data, not TxBuilder values"
-                     {:tx tx})))
-   (when-not (or (instance? Conn conn)
-                 (instance? DurableConn conn))
-     (throw (ex-info "transaction function registries require a Vev connection"
-                     {:conn conn})))
-   (with-open [report (.transactReport (:native conn)
-                                       (edn-text tx)
-                                       (:native tx-fns))]
-     (clj-value (.value report)))))
+  [conn tx]
+  (with-open [report (if (instance? TxBuilder tx)
+                       (.transactReport (:native conn) (:native tx))
+                       (.transactReport (:native conn) (edn-text tx)))]
+    (clj-value (.value report))))
 
 (def transact! transact)
 
@@ -806,26 +789,18 @@
 
 (defn with
   "Apply tx data to an immutable DB and return a transaction report map."
-  ([^DB db tx]
-   (with-open [report (.withReport (:native db) (edn-text tx))]
-     (clj-value (.value report))))
-  ([^DB db tx tx-fns]
-   (with-open [report (.withReport (:native db) (edn-text tx) (:native tx-fns))]
-     (clj-value (.value report)))))
+  [^DB db tx]
+  (with-open [report (.withReport (:native db) (edn-text tx))]
+    (clj-value (.value report))))
 
 (defn with-report
   "Apply tx data to an immutable DB and return a transaction report map with
   owned `:db-before` and `:db-after` DB values."
-  ([^DB db tx]
-   (with-open [report (.withReport (:native db) (edn-text tx))]
-     (assoc (clj-value (.value report))
-            :db-before (->DB (:engine db) (.dbBefore report))
-            :db-after (->DB (:engine db) (.dbAfter report)))))
-  ([^DB db tx tx-fns]
-   (with-open [report (.withReport (:native db) (edn-text tx) (:native tx-fns))]
-     (assoc (clj-value (.value report))
-            :db-before (->DB (:engine db) (.dbBefore report))
-            :db-after (->DB (:engine db) (.dbAfter report))))))
+  [^DB db tx]
+  (with-open [report (.withReport (:native db) (edn-text tx))]
+    (assoc (clj-value (.value report))
+           :db-before (->DB (:engine db) (.dbBefore report))
+           :db-after (->DB (:engine db) (.dbAfter report)))))
 
 (defn db-with
   "Apply tx data to an immutable DB and return the resulting immutable DB value."
@@ -941,37 +916,6 @@
   ([source capacity]
    (let [engine (:engine source)]
      (->TxBuilder engine (.txBuilder engine (int capacity))))))
-
-(defn register-tx-fn
-  "Register a Datomic-shaped transaction function in a registry.
-
-  The callback receives `(db & args)` and returns ordinary tx-data."
-  [^TxFnRegistry registry ident f]
-  (let [engine (:engine registry)
-        native-fn (reify Vev$TxFunction
-                    (apply [_ native-db args]
-                      (edn-text
-                       (apply f
-                              (->DB engine native-db)
-                              (mapv clj-value args)))))]
-    (.register (:native registry) (edn-text ident) native-fn)
-    registry))
-
-(defn tx-fns
-  "Create a transaction function registry from `{ident fn}`.
-
-  Registered functions can be called from tx-data with Datomic-style ident
-  shorthand or `:db.fn/call` and passed to `transact` / `with`."
-  [source registry]
-  (let [engine (source-engine source)
-        out (->TxFnRegistry engine (.txFunctionRegistry engine))]
-    (try
-      (doseq [[ident f] registry]
-        (register-tx-fn out ident f))
-      out
-      (catch Throwable error
-        (.close out)
-        (throw error)))))
 
 (defn- attr-text [attr]
   (cond

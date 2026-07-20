@@ -109,10 +109,10 @@ Deferred engine batch order:
    Maven repository under `build/m2`. The local proof now verifies both
    one-dependency JVM paths: `com.vevdb:vev-java` pulls the platform native
    artifact, and `com.vevdb/vev-clj` pulls Java.
-   Java now exposes C ABI transaction-function registries through
-   `TxFunctionRegistry`; Clojure exposes the Datomic-shaped `tx-fns` wrapper
-   where callbacks receive `(db & args)` and return ordinary tx-data. Java and
-   Clojure also expose in-memory transaction report listeners through
+   Java exposes the C ABI's low-level host transaction-function registry through
+   `TxFunctionRegistry`. This is an embedding extension, not Datomic stored
+   functions; the non-Datomic Clojure registry surface was removed from
+   `vev.core`. Java and Clojure also expose in-memory transaction report listeners through
    `Connection.listen` and `d/listen`/`d/unlisten`.
    Python and Node now also have tested temporary package layouts with bundled
    platform-native artifacts, and Odin has a dynamic C ABI smoke wrapper.
