@@ -3,6 +3,7 @@
 
 #include "vev.h"
 #include <node_api.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,7 +86,7 @@ T *external_arg(napi_env env, napi_callback_info info, size_t index) {
   return static_cast<T *>(data);
 }
 
-bool uint64_arg(napi_env env, napi_value value, unsigned long long *out) {
+bool uint64_arg(napi_env env, napi_value value, uint64_t *out) {
   napi_valuetype type;
   if (!ok(env, napi_typeof(env, value, &type))) {
     return false;
@@ -105,11 +106,11 @@ bool uint64_arg(napi_env env, napi_value value, unsigned long long *out) {
   if (!ok(env, napi_get_value_double(env, value, &number)) || number < 0) {
     return false;
   }
-  *out = static_cast<unsigned long long>(number);
+  *out = static_cast<uint64_t>(number);
   return true;
 }
 
-bool int64_arg(napi_env env, napi_value value, long long *out) {
+bool int64_arg(napi_env env, napi_value value, int64_t *out) {
   napi_valuetype type;
   if (!ok(env, napi_typeof(env, value, &type))) {
     return false;
@@ -735,7 +736,7 @@ napi_value db_as_of(napi_env env, napi_callback_info info) {
   DB *snapshot = external_arg<DB>(env, info, 0);
   size_t argc = 2;
   napi_value args[2];
-  unsigned long long tx = 0;
+  uint64_t tx = 0;
   ok(env, napi_get_cb_info(env, info, &argc, args, nullptr, nullptr));
   if (argc < 2 || !snapshot || !snapshot->raw ||
       !uint64_arg(env, args[1], &tx)) {
@@ -749,7 +750,7 @@ napi_value db_as_of_instant_millis(napi_env env, napi_callback_info info) {
   DB *snapshot = external_arg<DB>(env, info, 0);
   size_t argc = 2;
   napi_value args[2];
-  long long unix_millis = 0;
+  int64_t unix_millis = 0;
   ok(env, napi_get_cb_info(env, info, &argc, args, nullptr, nullptr));
   if (argc < 2 || !snapshot || !snapshot->raw ||
       !int64_arg(env, args[1], &unix_millis)) {
@@ -764,7 +765,7 @@ napi_value db_since(napi_env env, napi_callback_info info) {
   DB *snapshot = external_arg<DB>(env, info, 0);
   size_t argc = 2;
   napi_value args[2];
-  unsigned long long tx = 0;
+  uint64_t tx = 0;
   ok(env, napi_get_cb_info(env, info, &argc, args, nullptr, nullptr));
   if (argc < 2 || !snapshot || !snapshot->raw ||
       !uint64_arg(env, args[1], &tx)) {
@@ -778,7 +779,7 @@ napi_value db_since_instant_millis(napi_env env, napi_callback_info info) {
   DB *snapshot = external_arg<DB>(env, info, 0);
   size_t argc = 2;
   napi_value args[2];
-  long long unix_millis = 0;
+  int64_t unix_millis = 0;
   ok(env, napi_get_cb_info(env, info, &argc, args, nullptr, nullptr));
   if (argc < 2 || !snapshot || !snapshot->raw ||
       !int64_arg(env, args[1], &unix_millis)) {
