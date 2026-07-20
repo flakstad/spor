@@ -11,33 +11,37 @@ ABI_VERSION :: 1
 
 @(private)
 API :: struct {
-	abi_version:  proc "c" () -> u32 `dynlib:"vev_abi_version"`,
-	open_memory:  proc "c" () -> rawptr `dynlib:"vev_conn_open_memory"`,
-	close_conn:   proc "c" (conn: rawptr) `dynlib:"vev_conn_close"`,
+	abi_version: proc "c" () -> u32 `dynlib:"vev_abi_version"`,
+	open_memory: proc "c" () -> rawptr `dynlib:"vev_conn_open_memory"`,
+	close_conn: proc "c" (conn: rawptr) `dynlib:"vev_conn_close"`,
 	transact_edn: proc "c" (conn: rawptr, tx_text: cstring) -> cstring `dynlib:"vev_transact_edn"`,
-	query_edn:    proc "c" (conn: rawptr, query_text: cstring) -> cstring `dynlib:"vev_query_edn"`,
-	connect:      proc "c" (uri: cstring) -> rawptr `dynlib:"vev_connect"`,
+	query_value_with_inputs: proc "c" (conn: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_query_value_with_inputs"`,
+	connect: proc "c" (uri: cstring) -> rawptr `dynlib:"vev_connect"`,
 	connection_ok: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_ok"`,
 	connection_error: proc "c" (conn: rawptr) -> cstring `dynlib:"vev_connection_error"`,
 	connection_close: proc "c" (conn: rawptr) `dynlib:"vev_connection_close"`,
-	connection_db: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_db"`,
 	connection_transact_edn_report: proc "c" (conn: rawptr, tx_text: cstring) -> rawptr `dynlib:"vev_connection_transact_edn_report"`,
+	connection_query_value_with_inputs: proc "c" (conn: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_connection_query_value_with_inputs"`,
 	tx_report_edn: proc "c" (report: rawptr) -> cstring `dynlib:"vev_tx_report_edn"`,
 	tx_report_free: proc "c" (report: rawptr) `dynlib:"vev_tx_report_free"`,
-	db_release: proc "c" (db: rawptr) `dynlib:"vev_db_release"`,
-	prepare_query_edn: proc "c" (query_text: cstring) -> rawptr `dynlib:"vev_prepare_query_edn"`,
-	prepared_query_ok: proc "c" (query: rawptr) -> bool `dynlib:"vev_prepared_query_ok"`,
-	prepared_query_error: proc "c" (query: rawptr) -> cstring `dynlib:"vev_prepared_query_error"`,
-	prepared_query_free: proc "c" (query: rawptr) `dynlib:"vev_prepared_query_free"`,
-	query_db_prepared_result_with_inputs: proc "c" (db, query: rawptr, inputs_text: cstring) -> rawptr `dynlib:"vev_query_db_prepared_result_with_inputs"`,
-	result_free: proc "c" (result: rawptr) `dynlib:"vev_result_free"`,
-	result_ok: proc "c" (result: rawptr) -> bool `dynlib:"vev_result_ok"`,
-	result_error: proc "c" (result: rawptr) -> cstring `dynlib:"vev_result_error"`,
-	result_row_count: proc "c" (result: rawptr) -> int `dynlib:"vev_result_row_count"`,
-	result_value_count: proc "c" (result: rawptr, row: int) -> int `dynlib:"vev_result_value_count"`,
-	result_value_edn: proc "c" (result: rawptr, row, column: int) -> cstring `dynlib:"vev_result_value_edn"`,
-	string_free:  proc "c" (text: cstring) `dynlib:"vev_string_free"`,
-	__handle:     dynlib.Library,
+	value_handle_free: proc "c" (handle: rawptr) `dynlib:"vev_value_handle_free"`,
+	value_handle_value: proc "c" (handle: rawptr) -> rawptr `dynlib:"vev_value_handle_value"`,
+	value_handle_edn: proc "c" (handle: rawptr) -> cstring `dynlib:"vev_value_handle_edn"`,
+	value_kind: proc "c" (value: rawptr) -> int `dynlib:"vev_value_kind"`,
+	value_entity: proc "c" (value: rawptr) -> u64 `dynlib:"vev_value_entity"`,
+	value_int: proc "c" (value: rawptr) -> i64 `dynlib:"vev_value_int"`,
+	value_float: proc "c" (value: rawptr) -> f64 `dynlib:"vev_value_float"`,
+	value_bool: proc "c" (value: rawptr) -> bool `dynlib:"vev_value_bool"`,
+	value_text: proc "c" (value: rawptr) -> cstring `dynlib:"vev_value_text"`,
+	value_edn: proc "c" (value: rawptr) -> cstring `dynlib:"vev_value_edn"`,
+	value_item_count: proc "c" (value: rawptr) -> int `dynlib:"vev_value_item_count"`,
+	value_item: proc "c" (value: rawptr, index: int) -> rawptr `dynlib:"vev_value_item"`,
+	value_map_count: proc "c" (value: rawptr) -> int `dynlib:"vev_value_map_count"`,
+	value_map_key: proc "c" (value: rawptr, index: int) -> rawptr `dynlib:"vev_value_map_key"`,
+	value_map_value: proc "c" (value: rawptr, index: int) -> rawptr `dynlib:"vev_value_map_value"`,
+	value_map_get: proc "c" (value: rawptr, key: cstring) -> rawptr `dynlib:"vev_value_map_get"`,
+	string_free: proc "c" (text: cstring) `dynlib:"vev_string_free"`,
+	__handle: dynlib.Library,
 }
 
 Library :: struct {
@@ -54,9 +58,31 @@ Durable_Connection :: struct {
 	handle: rawptr,
 }
 
-Rows :: struct {
+Data :: struct {
 	library: ^Library,
 	handle: rawptr,
+}
+
+// Value is a borrowed view into Data. It remains valid until its Data is closed.
+Value :: struct {
+	library: ^Library,
+	handle: rawptr,
+}
+
+Kind :: enum int {
+	Nil,
+	Entity,
+	String,
+	Int,
+	Float,
+	Bool,
+	Keyword,
+	Symbol,
+	Vector,
+	Map,
+	UUID,
+	Set,
+	Instant,
 }
 
 library_filename :: proc() -> string {
@@ -80,27 +106,31 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.open_memory == nil ||
 	   library.api.close_conn == nil ||
 	   library.api.transact_edn == nil ||
-	   library.api.query_edn == nil ||
+	   library.api.query_value_with_inputs == nil ||
 	   library.api.connect == nil ||
 	   library.api.connection_ok == nil ||
 	   library.api.connection_error == nil ||
 	   library.api.connection_close == nil ||
-	   library.api.connection_db == nil ||
 	   library.api.connection_transact_edn_report == nil ||
+	   library.api.connection_query_value_with_inputs == nil ||
 	   library.api.tx_report_edn == nil ||
 	   library.api.tx_report_free == nil ||
-	   library.api.db_release == nil ||
-	   library.api.prepare_query_edn == nil ||
-	   library.api.prepared_query_ok == nil ||
-	   library.api.prepared_query_error == nil ||
-	   library.api.prepared_query_free == nil ||
-	   library.api.query_db_prepared_result_with_inputs == nil ||
-	   library.api.result_free == nil ||
-	   library.api.result_ok == nil ||
-	   library.api.result_error == nil ||
-	   library.api.result_row_count == nil ||
-	   library.api.result_value_count == nil ||
-	   library.api.result_value_edn == nil ||
+	   library.api.value_handle_free == nil ||
+	   library.api.value_handle_value == nil ||
+	   library.api.value_handle_edn == nil ||
+	   library.api.value_kind == nil ||
+	   library.api.value_entity == nil ||
+	   library.api.value_int == nil ||
+	   library.api.value_float == nil ||
+	   library.api.value_bool == nil ||
+	   library.api.value_text == nil ||
+	   library.api.value_edn == nil ||
+	   library.api.value_item_count == nil ||
+	   library.api.value_item == nil ||
+	   library.api.value_map_count == nil ||
+	   library.api.value_map_key == nil ||
+	   library.api.value_map_value == nil ||
+	   library.api.value_map_get == nil ||
 	   library.api.string_free == nil ||
 	   library.api.abi_version() != ABI_VERSION {
 		dynlib.unload_library(library.api.__handle)
@@ -148,26 +178,6 @@ close_memory :: proc(connection: ^Connection) {
 	connection^ = {}
 }
 
-transact_memory :: proc(
-	connection: ^Connection,
-	tx: string,
-	allocator := context.allocator,
-) -> (result: string, ok: bool) {
-	if connection == nil || connection.handle == nil {
-		return "", false
-	}
-
-	tx_text := strings.clone_to_cstring(tx, context.temp_allocator)
-	native_result := connection.library.api.transact_edn(connection.handle, tx_text)
-	if native_result == nil {
-		return "", false
-	}
-	defer connection.library.api.string_free(native_result)
-
-	result = strings.clone(string(native_result), allocator)
-	return result, true
-}
-
 connect :: proc(library: ^Library, uri: string) -> (connection: Durable_Connection, ok: bool) {
 	if library == nil || library.api.connect == nil {
 		return {}, false
@@ -203,6 +213,26 @@ close_durable :: proc(connection: ^Durable_Connection) {
 	connection^ = {}
 }
 
+transact_memory :: proc(
+	connection: ^Connection,
+	tx: string,
+	allocator := context.allocator,
+) -> (result: string, ok: bool) {
+	if connection == nil || connection.handle == nil {
+		return "", false
+	}
+
+	tx_text := strings.clone_to_cstring(tx, context.temp_allocator)
+	native_result := connection.library.api.transact_edn(connection.handle, tx_text)
+	if native_result == nil {
+		return "", false
+	}
+	defer connection.library.api.string_free(native_result)
+
+	result = strings.clone(string(native_result), allocator)
+	return result, true
+}
+
 transact_durable :: proc(
 	connection: ^Durable_Connection,
 	tx: string,
@@ -229,110 +259,212 @@ transact_durable :: proc(
 	return result, strings.contains(result, ":ok true")
 }
 
-query_rows :: proc(
+query_memory :: proc(
+	connection: ^Connection,
+	query_text: string,
+	inputs := "[]",
+) -> (result: Data, ok: bool) {
+	if connection == nil || connection.handle == nil {
+		return {}, false
+	}
+	query_cstring := strings.clone_to_cstring(query_text, context.temp_allocator)
+	inputs_cstring := strings.clone_to_cstring(inputs, context.temp_allocator)
+	handle := connection.library.api.query_value_with_inputs(
+		connection.handle,
+		query_cstring,
+		inputs_cstring,
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = connection.library, handle = handle}, true
+}
+
+query_durable :: proc(
 	connection: ^Durable_Connection,
 	query_text: string,
 	inputs := "[]",
-) -> (rows: Rows, ok: bool) {
+) -> (result: Data, ok: bool) {
 	if connection == nil || connection.handle == nil {
 		return {}, false
 	}
 	query_cstring := strings.clone_to_cstring(query_text, context.temp_allocator)
-	prepared := connection.library.api.prepare_query_edn(query_cstring)
-	if prepared == nil {
-		return {}, false
-	}
-	defer connection.library.api.prepared_query_free(prepared)
-	if !connection.library.api.prepared_query_ok(prepared) {
-		return {}, false
-	}
-	db := connection.library.api.connection_db(connection.handle)
-	if db == nil {
-		return {}, false
-	}
-	defer connection.library.api.db_release(db)
-	inputs_text := strings.clone_to_cstring(inputs, context.temp_allocator)
-	result := connection.library.api.query_db_prepared_result_with_inputs(
-		db,
-		prepared,
-		inputs_text,
+	inputs_cstring := strings.clone_to_cstring(inputs, context.temp_allocator)
+	handle := connection.library.api.connection_query_value_with_inputs(
+		connection.handle,
+		query_cstring,
+		inputs_cstring,
 	)
-	if result == nil {
+	if handle == nil {
 		return {}, false
 	}
-	rows = Rows{library = connection.library, handle = result}
-	return rows, connection.library.api.result_ok(result)
+	return Data{library = connection.library, handle = handle}, true
 }
 
-rows_error :: proc(rows: ^Rows, allocator := context.allocator) -> string {
-	if rows == nil || rows.handle == nil {
-		return strings.clone("invalid query result", allocator)
-	}
-	native_error := rows.library.api.result_error(rows.handle)
-	if native_error == nil {
-		return strings.clone("", allocator)
-	}
-	defer rows.library.api.string_free(native_error)
-	return strings.clone(string(native_error), allocator)
-}
-
-row_count :: proc(rows: ^Rows) -> int {
-	if rows == nil || rows.handle == nil {
-		return 0
-	}
-	return rows.library.api.result_row_count(rows.handle)
-}
-
-value_count :: proc(rows: ^Rows, row: int) -> int {
-	if rows == nil || rows.handle == nil {
-		return 0
-	}
-	return rows.library.api.result_value_count(rows.handle, row)
-}
-
-value_edn :: proc(
-	rows: ^Rows,
-	row, column: int,
-	allocator := context.allocator,
-) -> (value: string, ok: bool) {
-	if rows == nil || rows.handle == nil {
-		return "", false
-	}
-	native_value := rows.library.api.result_value_edn(rows.handle, row, column)
-	if native_value == nil {
-		return "", false
-	}
-	defer rows.library.api.string_free(native_value)
-	return strings.clone(string(native_value), allocator), true
-}
-
-close_rows :: proc(rows: ^Rows) {
-	if rows == nil || rows.handle == nil {
+close_data :: proc(data: ^Data) {
+	if data == nil || data.handle == nil {
 		return
 	}
-	rows.library.api.result_free(rows.handle)
-	rows^ = {}
+	data.library.api.value_handle_free(data.handle)
+	data^ = {}
 }
 
-close :: proc{close_memory, close_durable, close_rows}
-transact :: proc{transact_memory, transact_durable}
+value :: proc(data: ^Data) -> (result: Value, ok: bool) {
+	if data == nil || data.handle == nil {
+		return {}, false
+	}
+	handle := data.library.api.value_handle_value(data.handle)
+	if handle == nil {
+		return {}, false
+	}
+	return Value{library = data.library, handle = handle}, true
+}
 
-query :: proc(
-	connection: ^Connection,
-	query_text: string,
-	allocator := context.allocator,
-) -> (result: string, ok: bool) {
-	if connection == nil || connection.handle == nil {
+kind :: proc(value: Value) -> Kind {
+	if value.handle == nil {
+		return .Nil
+	}
+	return Kind(value.library.api.value_kind(value.handle))
+}
+
+edn_data :: proc(data: ^Data, allocator := context.allocator) -> (result: string, ok: bool) {
+	if data == nil || data.handle == nil {
 		return "", false
 	}
-
-	query_cstring := strings.clone_to_cstring(query_text, context.temp_allocator)
-	native_result := connection.library.api.query_edn(connection.handle, query_cstring)
+	native_result := data.library.api.value_handle_edn(data.handle)
 	if native_result == nil {
 		return "", false
 	}
-	defer connection.library.api.string_free(native_result)
-
-	result = strings.clone(string(native_result), allocator)
-	return result, true
+	defer data.library.api.string_free(native_result)
+	return strings.clone(string(native_result), allocator), true
 }
+
+edn_value :: proc(value: Value, allocator := context.allocator) -> (result: string, ok: bool) {
+	if value.handle == nil {
+		return "", false
+	}
+	native_result := value.library.api.value_edn(value.handle)
+	if native_result == nil {
+		return "", false
+	}
+	defer value.library.api.string_free(native_result)
+	return strings.clone(string(native_result), allocator), true
+}
+
+item_count :: proc(value: Value) -> int {
+	if value.handle == nil {
+		return 0
+	}
+	return value.library.api.value_item_count(value.handle)
+}
+
+item :: proc(value: Value, index: int) -> (result: Value, ok: bool) {
+	if value.handle == nil || index < 0 || index >= item_count(value) {
+		return {}, false
+	}
+	handle := value.library.api.value_item(value.handle, index)
+	if handle == nil {
+		return {}, false
+	}
+	return Value{library = value.library, handle = handle}, true
+}
+
+map_count :: proc(value: Value) -> int {
+	if value.handle == nil {
+		return 0
+	}
+	return value.library.api.value_map_count(value.handle)
+}
+
+map_key :: proc(value: Value, index: int) -> (result: Value, ok: bool) {
+	if value.handle == nil || index < 0 || index >= map_count(value) {
+		return {}, false
+	}
+	handle := value.library.api.value_map_key(value.handle, index)
+	if handle == nil {
+		return {}, false
+	}
+	return Value{library = value.library, handle = handle}, true
+}
+
+map_value :: proc(value: Value, index: int) -> (result: Value, ok: bool) {
+	if value.handle == nil || index < 0 || index >= map_count(value) {
+		return {}, false
+	}
+	handle := value.library.api.value_map_value(value.handle, index)
+	if handle == nil {
+		return {}, false
+	}
+	return Value{library = value.library, handle = handle}, true
+}
+
+get :: proc(value: Value, key: string) -> (result: Value, ok: bool) {
+	if value.handle == nil || kind(value) != .Map {
+		return {}, false
+	}
+	key_cstring := strings.clone_to_cstring(key, context.temp_allocator)
+	handle := value.library.api.value_map_get(value.handle, key_cstring)
+	if handle == nil {
+		return {}, false
+	}
+	return Value{library = value.library, handle = handle}, true
+}
+
+as_entity :: proc(value: Value) -> (result: u64, ok: bool) {
+	if kind(value) != .Entity {
+		return 0, false
+	}
+	return value.library.api.value_entity(value.handle), true
+}
+
+as_int :: proc(value: Value) -> (result: i64, ok: bool) {
+	if kind(value) != .Int {
+		return 0, false
+	}
+	return value.library.api.value_int(value.handle), true
+}
+
+as_instant :: proc(value: Value) -> (unix_millis: i64, ok: bool) {
+	if kind(value) != .Instant {
+		return 0, false
+	}
+	return value.library.api.value_int(value.handle), true
+}
+
+as_float :: proc(value: Value) -> (result: f64, ok: bool) {
+	if kind(value) != .Float {
+		return 0, false
+	}
+	return value.library.api.value_float(value.handle), true
+}
+
+as_bool :: proc(value: Value) -> (result: bool, ok: bool) {
+	if kind(value) != .Bool {
+		return false, false
+	}
+	return value.library.api.value_bool(value.handle), true
+}
+
+as_string :: proc(
+	value: Value,
+	allocator := context.allocator,
+) -> (result: string, ok: bool) {
+	value_kind := kind(value)
+	if value_kind != .String &&
+	   value_kind != .Keyword &&
+	   value_kind != .Symbol &&
+	   value_kind != .UUID {
+		return "", false
+	}
+	native_result := value.library.api.value_text(value.handle)
+	if native_result == nil {
+		return "", false
+	}
+	defer value.library.api.string_free(native_result)
+	return strings.clone(string(native_result), allocator), true
+}
+
+close :: proc{close_memory, close_durable, close_data}
+transact :: proc{transact_memory, transact_durable}
+query :: proc{query_memory, query_durable}
+edn :: proc{edn_data, edn_value}

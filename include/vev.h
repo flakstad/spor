@@ -125,6 +125,13 @@ const char *vev_connection_query_edn_with_inputs(
     vev_connection_t conn,
     const char *query_text,
     const char *inputs_text);
+vev_value_handle_t vev_connection_query_value(
+    vev_connection_t conn,
+    const char *query_text);
+vev_value_handle_t vev_connection_query_value_with_inputs(
+    vev_connection_t conn,
+    const char *query_text,
+    const char *inputs_text);
 vev_tx_report_t vev_connection_transact_edn_report(
     vev_connection_t conn,
     const char *tx_text);
@@ -257,6 +264,13 @@ bool vev_tx_fn_registry_register_edn(
 vev_value_t vev_tx_fn_arg(vev_tx_fn_args_t args, int index);
 const char *vev_query_edn(vev_conn_t conn, const char *query_text);
 const char *vev_query_edn_with_inputs(
+    vev_conn_t conn,
+    const char *query_text,
+    const char *inputs_text);
+vev_value_handle_t vev_query_value(
+    vev_conn_t conn,
+    const char *query_text);
+vev_value_handle_t vev_query_value_with_inputs(
     vev_conn_t conn,
     const char *query_text,
     const char *inputs_text);

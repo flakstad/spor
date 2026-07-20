@@ -43,12 +43,12 @@ tx, ok := vev.transact(&connection, `[{:db/id 1 :user/name "Ada"}]`)
 assert(ok)
 defer delete(tx)
 
-rows, ok := vev.query(
+result, ok := vev.query(
     &connection,
     `[:find ?name :where [?e :user/name ?name]]`,
 )
 assert(ok)
-defer delete(rows)
+defer vev.close(&result)
 ```
 
 For a shared dependency directory, expose a collection at build time:
@@ -59,7 +59,8 @@ odin build . -collection:deps=vendor
 
 and import it as `import vev "deps:vev"`.
 
-Durable stores are first-class and expose typed result traversal:
+The same API works for durable stores and returns the same Datomic-shaped
+query value:
 
 ```odin
 connection, ok := vev.connect(&library, "app.vev")
@@ -70,21 +71,23 @@ tx, ok := vev.transact(&connection, `[{:db/id 1 :user/name "Ada"}]`)
 assert(ok)
 defer delete(tx)
 
-rows, ok := vev.query_rows(
+result, ok := vev.query(
 	&connection,
-	`[:find ?name :where [?e :user/name ?name]]`,
+	`[:find ?name . :where [?e :user/name ?name]]`,
 )
 assert(ok)
-defer vev.close(&rows)
+defer vev.close(&result)
 
-name, ok := vev.value_edn(&rows, 0, 0)
+value, ok := vev.value(&result)
+assert(ok)
+name, ok := vev.as_string(value)
 assert(ok)
 defer delete(name)
 ```
 
-Each `query_rows` call takes a fresh immutable DB snapshot. An application,
+Each durable `query` call takes a fresh immutable DB snapshot. An application,
 REPL, or VevDB CLI can therefore share the same durable store, while retained
-result handles continue to represent the query basis they captured.
+query values continue to represent the query basis they captured.
 
 The complete consumer example is in [`example`](example). Run it from the
 repository root after packaging the vendor bundle:

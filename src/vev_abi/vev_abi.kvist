@@ -4098,6 +4098,49 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (vev_connection_query_edn_with_inputs conn query-text (cstring "[]")))
 
 @export
+(defn vev_connection_query_value_with_inputs :abi "c" [conn: Vev-Connection, query-text: cstring, inputs-text: cstring] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr conn) nil)
+            (= query-text nil)
+            (= inputs-text nil)
+            (not (abi-sqlite-conn-ok (rawptr conn))))
+    (return (Vev-Value-Handle nil)))
+  (let [query (text-from-c query-text)
+        inputs (text-from-c inputs-text)
+        [snapshot snapshot-ok snapshot-error] (vev.sqlite-store-db (sqlite-conn-ptr (connection-as-sqlite conn)))]
+    (defer (delete query))
+    (defer (delete inputs))
+    (when (not snapshot-ok)
+      (if (= snapshot-error "sqlite DB has no Vev index roots")
+        (set! snapshot (vev.empty-shared-store-db-for-sqlite-bootstrap))
+        (return (Vev-Value-Handle nil))))
+    (defer (vev.close-store-db snapshot))
+    (let [prepared (vev.prepare-query-text query)]
+      (defer (vev.delete-prepared-query-shallow prepared))
+      (when (not prepared.ok)
+        (return (Vev-Value-Handle nil)))
+      (let [[query-inputs inputs-ok _] (vev.parse-query-inputs-text-for-query prepared.query inputs)]
+        (defer (vev.delete-owned-query-inputs query-inputs))
+        (when (not inputs-ok)
+          (return (Vev-Value-Handle nil)))
+        (let [result (vev.q-result-store-db-prepared-with-inputs (addr snapshot) prepared (slice query-inputs 0))]
+          (defer (vev.delete-query-result result))
+          (when (not result.result.ok)
+            (return (Vev-Value-Handle nil)))
+          (let [[source source-ok _] (vev.store-db-read-source (addr snapshot))]
+            (when (not source-ok)
+              (return (Vev-Value-Handle nil)))
+            (let [[value value-ok _] (vev.query-result-shaped-value source prepared.source-owner result.result)]
+              (if value-ok
+                (value-handle-from-owned-value value)
+                (Vev-Value-Handle nil)))))))))
+
+@export
+(defn vev_connection_query_value :abi "c" [conn: Vev-Connection, query-text: cstring] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (vev_connection_query_value_with_inputs conn query-text (cstring "[]")))
+
+@export
 (defn vev_connection_transact_edn_report :abi "c" [conn: Vev-Connection, tx-text: cstring] -> Vev-Tx-Report
   (odin "context = runtime.default_context()")
   (vev_sqlite_conn_transact_edn_report (connection-as-sqlite conn) tx-text))
@@ -4904,6 +4947,37 @@ abi_free_stmt :: proc(stmt: rawptr) {
     (delete query)
     (delete inputs)
     out))
+
+@export
+(defn vev_query_value_with_inputs :abi "c" [conn: Vev-Conn, query-text: cstring, inputs-text: cstring] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr conn) nil) (= query-text nil) (= inputs-text nil))
+    (return (Vev-Value-Handle nil)))
+  (let [query (text-from-c query-text)
+        inputs (text-from-c inputs-text)
+        ptr (conn-ptr conn)]
+    (defer (delete query))
+    (defer (delete inputs))
+    (let [prepared (vev.prepare-query-text query)]
+      (defer (vev.delete-prepared-query-shallow prepared))
+      (when (not prepared.ok)
+        (return (Vev-Value-Handle nil)))
+      (let [[query-inputs inputs-ok _] (vev.parse-query-inputs-text-for-query prepared.query inputs)]
+        (defer (vev.delete-owned-query-inputs query-inputs))
+        (when (not inputs-ok)
+          (return (Vev-Value-Handle nil)))
+        (let [source (vev.resident-db-read-source (addr ptr^.db))
+              result (vev.q-prepared-db-read-source-with-inputs source prepared (slice query-inputs 0))]
+          (defer (vev.delete-result-set-shallow result))
+          (let [[value value-ok _] (vev.query-result-shaped-value source prepared.source-owner result)]
+            (if value-ok
+              (value-handle-from-owned-value value)
+              (Vev-Value-Handle nil))))))))
+
+@export
+(defn vev_query_value :abi "c" [conn: Vev-Conn, query-text: cstring] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (vev_query_value_with_inputs conn query-text (cstring "[]")))
 
 @export
 (defn vev_prepare_query_edn :abi "c" [query-text: cstring] -> Vev-Prepared-Query

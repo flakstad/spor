@@ -241,11 +241,17 @@ main :: proc() {
     assert(transacted)
     defer delete(tx)
 
-    rows, queried := vev.query_rows(
-        &conn, `[:find ?name :where [?e :user/name ?name]]`)
+    result, queried := vev.query(
+        &conn, `[:find ?name . :where [?e :user/name ?name]]`)
     assert(queried)
-    defer vev.close(&rows)
-    fmt.println(vev.row_count(&rows))
+    defer vev.close(&result)
+
+    value, found := vev.value(&result)
+    assert(found)
+    name, found := vev.as_string(value)
+    assert(found)
+    defer delete(name)
+    fmt.println(name)
 }
 ```
 

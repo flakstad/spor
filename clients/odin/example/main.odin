@@ -40,21 +40,25 @@ main :: proc() {
 
 	query_result, queried := vev.query(
 		&connection,
-		`[:find ?name :where [?e :user/name ?name]]`,
+		`[:find ?name . :where [?e :user/name ?name]]`,
 	)
 	if !queried {
 		fmt.eprintln("query failed")
 		os.exit(1)
 	}
-	defer delete(query_result)
+	defer vev.close(&query_result)
 
-	if !strings.contains(tx_result, ":ok true") ||
-	   !strings.contains(query_result, `"Ada"`) {
-		fmt.eprintln("unexpected VevDB result:", tx_result, query_result)
+	query_value, value_ok := vev.value(&query_result)
+	name, name_ok := vev.as_string(query_value)
+	if !value_ok || !name_ok ||
+	   !strings.contains(tx_result, ":ok true") ||
+	   name != "Ada" {
+		fmt.eprintln("unexpected VevDB result:", tx_result, name)
 		os.exit(1)
 	}
+	defer delete(name)
 
-	fmt.println(query_result)
+	fmt.println(name)
 
 	database_path := "example.vev"
 	if len(os.args) > 2 {
@@ -81,30 +85,21 @@ main :: proc() {
 	}
 	defer delete(durable_tx)
 
-	rows, durable_queried := vev.query_rows(
+	result, durable_queried := vev.query(
 		&durable,
-		`[:find ?name :where [?e :user/name ?name]]`,
+		`[:find ?name . :where [?e :user/name ?name]]`,
 	)
 	if !durable_queried {
-		error := vev.rows_error(&rows)
-		fmt.eprintln("durable query failed:", error)
-		delete(error)
-		vev.close(&rows)
+		fmt.eprintln("durable query failed")
 		os.exit(1)
 	}
-	defer vev.close(&rows)
-	if vev.row_count(&rows) < 1 || vev.value_count(&rows, 0) != 1 {
-		fmt.eprintln("unexpected durable query shape")
+	defer vev.close(&result)
+	durable_value, durable_value_ok := vev.value(&result)
+	durable_name, durable_name_ok := vev.as_string(durable_value)
+	if !durable_value_ok || !durable_name_ok || durable_name != "Grace" {
+		fmt.eprintln("unexpected durable query value:", durable_name)
 		os.exit(1)
 	}
-	name, name_ok := vev.value_edn(&rows, 0, 0)
-	if !name_ok || name != `"Grace"` {
-		fmt.eprintln("unexpected durable query value:", name)
-		if name_ok {
-			delete(name)
-		}
-		os.exit(1)
-	}
-	defer delete(name)
-	fmt.println(name)
+	defer delete(durable_name)
+	fmt.println(durable_name)
 }

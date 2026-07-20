@@ -64,19 +64,35 @@ main :: proc() {
 	assert(transacted)
 	defer delete(tx)
 
-	rows, queried := vev.query_rows(
+	result, queried := vev.query(
+		&connection,
+		`[:find ?name . :where [?e :user/name ?name]]`,
+	)
+	assert(queried)
+	defer vev.close(&result)
+
+	value, found := vev.value(&result)
+	assert(found)
+	name, name_found := vev.as_string(value)
+	assert(name_found)
+	defer delete(name)
+	assert(name == "Ada")
+	fmt.println(name)
+
+	relation, relation_queried := vev.query(
 		&connection,
 		`[:find ?name :where [?e :user/name ?name]]`,
 	)
-	assert(queried)
-	defer vev.close(&rows)
-	assert(vev.row_count(&rows) == 1)
-
-	name, found := vev.value_edn(&rows, 0, 0)
-	assert(found)
-	defer delete(name)
-	assert(name == `"Ada"`)
-	fmt.println(name)
+	assert(relation_queried)
+	defer vev.close(&relation)
+	relation_value, relation_found := vev.value(&relation)
+	assert(relation_found)
+	assert(vev.kind(relation_value) == .Set)
+	assert(vev.item_count(relation_value) == 1)
+	tuple, tuple_found := vev.item(relation_value, 0)
+	assert(tuple_found)
+	assert(vev.kind(tuple) == .Vector)
+	assert(vev.item_count(tuple) == 1)
 }
 EOF
 

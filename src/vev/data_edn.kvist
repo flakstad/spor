@@ -183,6 +183,25 @@
             true
             "")))
 
+(defn data-owned-value [source: Data] -> [value: Value, ok: bool, error: string]
+  (let [doc (edn-doc-from-data source)]
+    (defer (delete doc.nodes))
+    (let [[parsed parsed-ok parsed-error] (edn-value-from-node doc doc.root)]
+      (when (not parsed-ok)
+        (return (Value {}) false parsed-error))
+      (let [owned (value-owned parsed)]
+        (delete-value-containers-shallow parsed)
+        (return owned true "")))))
+
+(defn query-result-shaped-value [source: DB-Read-Source, query-source: Data, result: Result-Set] -> [value: Value, ok: bool, error: string]
+  (when (not result.ok)
+    (return (Value {}) false result.error))
+  (let [[shaped shaped-ok shaped-error] (query-result-data-value source query-source result)]
+    (defer (kdata.release shaped))
+    (when (not shaped-ok)
+      (return (Value {}) false shaped-error))
+    (data-owned-value shaped)))
+
 (defn query-result-data [snapshot: ^Store-DB, query-source: Data, result: Query-Result] -> [value: Data, ok: bool, error: string]
   (when (not result.result.ok)
     (let [error result.result.error]
