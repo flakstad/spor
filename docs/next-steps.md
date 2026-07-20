@@ -105,9 +105,12 @@ Work through this batch in order:
    have been removed from `vev.core`; the lower-level C/Java host callback
    mechanism is documented as an embedding extension, not stored-function
    compatibility.
-- [ ] Add focused multi-process and interrupted-commit coverage for serialized
+- [x] Add focused multi-process and interrupted-commit coverage for serialized
    writers, monotonic transaction coordinates, immutable retained snapshots,
-   and `sync` visibility.
+   and `sync` visibility. The native fixture holds old snapshots while another
+   process commits, checks concurrent-writer transaction coordinates, and
+   kills/reopens a writer mid-stream. The packaged Clojure smoke coordinates
+   `sync` across two independent JVM processes.
 
 The compatibility reference is the current Datomic Clojure API. Embedded
 architecture may change implementation and timing, but not names, argument

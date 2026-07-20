@@ -23,6 +23,10 @@ fi
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vev-jvm-package.XXXXXX")"
 cleanup() {
+  if [[ -n "${SYNC_READER_PID:-}" ]] && kill -0 "$SYNC_READER_PID" 2>/dev/null; then
+    kill "$SYNC_READER_PID" 2>/dev/null || true
+    wait "$SYNC_READER_PID" 2>/dev/null || true
+  fi
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -241,3 +245,50 @@ EOF
   cd "$TMP_DIR"
   clojure -Sdeps "$(cat deps-clj.edn)" -M:run clojure-smoke.clj
 )
+
+cat > "$TMP_DIR/clojure-sync-process.clj" <<'EOF'
+(require '[vev.core :as d])
+
+(let [[mode path ready] *command-line-args*]
+  (case mode
+    "reader"
+    (with-open [conn (d/connect path)]
+      (let [coordinated (d/sync conn 1)]
+        (spit ready "ready")
+        (let [snapshot (deref coordinated 10000 ::timeout)]
+          (assert (not= ::timeout snapshot))
+          (with-open [snapshot snapshot]
+            (assert (>= (d/basis-t snapshot) 1))
+            (assert (= #{["visible"]}
+                       (d/q '[:find ?value
+                              :where [1 :fixture/sync-value ?value]]
+                            snapshot)))))))
+
+    "writer"
+    (with-open [conn (d/connect path)]
+      (d/transact conn [[:db/add 1 :fixture/sync-value "visible"]]))
+
+    (throw (ex-info "unknown sync fixture mode" {:mode mode}))))
+EOF
+
+SYNC_DB="$TMP_DIR/cross-process-sync.vev"
+SYNC_READY="$TMP_DIR/cross-process-sync.ready"
+(
+  cd "$TMP_DIR"
+  clojure -Sdeps "$(cat deps-clj.edn)" -M:run clojure-sync-process.clj \
+    reader "$SYNC_DB" "$SYNC_READY"
+) &
+SYNC_READER_PID=$!
+while [[ ! -f "$SYNC_READY" ]]; do
+  if ! kill -0 "$SYNC_READER_PID" 2>/dev/null; then
+    wait "$SYNC_READER_PID"
+  fi
+done
+(
+  cd "$TMP_DIR"
+  clojure -Sdeps "$(cat deps-clj.edn)" -M:run clojure-sync-process.clj \
+    writer "$SYNC_DB" "$SYNC_READY"
+)
+wait "$SYNC_READER_PID"
+SYNC_READER_PID=""
+echo ":vev-clojure-cross-process-sync-ok"

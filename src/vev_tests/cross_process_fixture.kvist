@@ -11,9 +11,18 @@
   (fmt.eprintln message)
   (os.exit 1))
 
+(defn query-int [db: d.DB, query: string] -> i64
+  (let [result (d.q-text query db)]
+    (defer (d.close result))
+    (when (not (and (= (count result.rows) 1)
+                    (= (count result.rows[0].values) 1)
+                    (= result.rows[0].values[0].kind .Int)))
+      (fail! (fmt.tprintf "expected integer query result for %s" query)))
+    result.rows[0].values[0].int-value))
+
 (defn main []
   (when (< (count os.args) 3)
-    (fail! "usage: cross-process-fixture <init|write|read|write-loop|watch|write-a|write-b|verify-writers> <path> [ready-path]"))
+    (fail! "usage: cross-process-fixture <init|write|read|write-loop|watch|write-a|write-b|verify-writers|crash-loop|verify-crash> <path> [marker-path]"))
   (let [mode os.args[1]
         path os.args[2]
         conn (d.connect path)]
@@ -37,7 +46,9 @@
              [:db/add 6 :db/valueType :db.type/long]
              [:db/add 6 :db/cardinality :db.cardinality/one]
              [:db/add 7 :db/ident :fixture/worker]
-             [:db/add 7 :db/valueType :db.type/long]])
+             [:db/add 7 :db/valueType :db.type/long]
+             [:db/add 8 :db/ident :fixture/crash-value]
+             [:db/add 8 :db/valueType :db.type/long]])
           (d.transact conn
             [{:db/id 120
               :ro/id "condition-main"
@@ -70,14 +81,24 @@
             (d.transact conn [[:db/add 200 :fixture/counter value]])
             (inc! value)))
       (= mode "write-a")
-        (let [offset 1]
+        (let [offset 1
+              last-t: u64 0]
           (while (<= offset 30)
-            (d.transact conn [[:db/add (+ 1000 offset) :fixture/worker 1]])
+            (let [report (d.transact conn [[:db/add (+ 1000 offset) :fixture/worker 1]])
+                  current-t (d.tx-to-t report.tx)]
+              (when (<= current-t last-t)
+                (fail! "writer A transaction coordinates were not monotonic"))
+              (set! last-t current-t))
             (inc! offset)))
       (= mode "write-b")
-        (let [offset 1]
+        (let [offset 1
+              last-t: u64 0]
           (while (<= offset 30)
-            (d.transact conn [[:db/add (+ 2000 offset) :fixture/worker 2]])
+            (let [report (d.transact conn [[:db/add (+ 2000 offset) :fixture/worker 2]])
+                  current-t (d.tx-to-t report.tx)]
+              (when (<= current-t last-t)
+                (fail! "writer B transaction coordinates were not monotonic"))
+              (set! last-t current-t))
             (inc! offset)))
       (= mode "verify-writers")
         (let [db (d.db conn)
@@ -90,7 +111,9 @@
                           (= (count result.rows[0].values) 1)
                           (= result.rows[0].values[0].kind .Int)
                           (= result.rows[0].values[0].int-value 60)))
-            (fail! "expected 60 concurrent writer entities")))
+            (fail! "expected 60 concurrent writer entities"))
+          (when (not (= (d.basis-t db) 113))
+            (fail! (fmt.tprintf "expected contiguous basis t 113, got %d" (d.basis-t db)))))
       (= mode "watch")
         (do
           (when (< (count os.args) 4)
@@ -99,8 +122,10 @@
                 write-error (os.write_entire_file ready-path "ready")]
             (when (!= write-error nil)
               (fail! "failed to write reader ready marker")))
-          (let [last-value: i64 0
+          (let [retained (d.db conn)
+                last-value: i64 0
                 iterations 0]
+            (defer (d.close retained))
             (while (and (< last-value 50) (< iterations 100000))
               (let [db (d.db conn)
                     result (d.q-text
@@ -118,6 +143,48 @@
                   (set! last-value current)))
               (inc! iterations))
             (when (not (= last-value 50))
-              (fail! (fmt.tprintf "reader did not observe final counter value, got %d" last-value)))))
+              (fail! (fmt.tprintf "reader did not observe final counter value, got %d" last-value)))
+            (when (not (= (query-int retained
+                            "[:find ?value . :where [200 :fixture/counter ?value]]")
+                          0))
+              (fail! "retained DB snapshot changed while another process committed"))))
+      (= mode "crash-loop")
+        (do
+          (when (< (count os.args) 4)
+            (fail! "crash-loop mode requires a progress marker path"))
+          (let [progress-path os.args[3]
+                value 1]
+            (while (<= value 100000)
+              (d.transact conn [[:db/add (+ 3000 value) :fixture/crash-value value]])
+              (let [write-error (os.write_entire_file progress-path (fmt.tprintf "%d" value))]
+                (when (!= write-error nil)
+                  (fail! "failed to write crash-loop progress marker")))
+              (inc! value))))
+      (= mode "verify-crash")
+        (let [before (d.db conn)
+              committed (query-int before
+                          "[:find (count ?entity) . :where [?entity :fixture/crash-value]]")
+              basis (d.basis-t before)
+              transactions (d.tx-range (d.log conn) nil nil)]
+          (defer (d.close before))
+          (when (<= committed 0)
+            (fail! "interrupted writer left no committed prefix to verify"))
+          (when (not (= basis (+ 3 (u64 committed))))
+            (fail! (fmt.tprintf "interrupted writer left a non-contiguous basis: %d commits at basis %d" committed basis)))
+          (when (not (= (u64 (count transactions)) basis))
+            (fail! "transaction log and basis diverged after interrupted commit"))
+          (let [report (d.transact conn [[:db/add 999999 :fixture/crash-value 999999]])]
+            (when (not (= (d.tx-to-t report.tx) (+ basis 1)))
+              (fail! "first post-recovery transaction did not receive the next t")))
+          (when (not (= (query-int before
+                          "[:find (count ?entity) . :where [?entity :fixture/crash-value]]")
+                        committed))
+            (fail! "retained pre-recovery snapshot changed after the next commit"))
+          (let [fresh (d.db conn)]
+            (defer (d.close fresh))
+            (when (not (= (query-int fresh
+                            "[:find (count ?entity) . :where [?entity :fixture/crash-value]]")
+                          (+ committed 1)))
+              (fail! "fresh DB did not observe the post-recovery commit"))))
       :else
         (fail! "unknown fixture mode"))))
