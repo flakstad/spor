@@ -246,10 +246,15 @@ Status labels:
 - `kvist-done` Inferred lifetime boundaries without a managed-type protocol.
   Kvist infers allocating results, borrowed views, and consuming parameters
   from ordinary bodies. Vev does not annotate types or install behavior through
-  `Type-destroy`/`Type-clone` naming. `Prepared-Pull-Pattern` intentionally
-  retains its explicit `owns-source` bit and cleanup procedure because it is an
-  opaque native aggregate assembled outside a typed Data-decoding boundary.
-  Its internal owning scopes use ordinary `defer` cleanup. Likewise,
+  `Type-destroy`/`Type-clone` naming. Prepared query, rule, clause, binding, and
+  pull-pattern values now rely on the ordinary managed lifetime of their
+  embedded `Data` source fields. Their explicit cleanup procedures own only
+  native query-engine containers and parser-owned `Value` payloads. A separate
+  transfer cleanup is used when parsed rules move into a prepared query, so
+  shared rule plans are not deep-freed. Kvist recognizes managed structs
+  returned through ordinary `let`/`if` control flow as owned results and moves
+  them into caller bindings instead of introducing an unbalanced clone.
+  Likewise,
   `query-relation-builder-add-binding!` deletes a rejected binding explicitly;
   the compiler infers that consuming path for callers without changing the
   `Binding` type. Continue removing redundant cleanup only where inference is

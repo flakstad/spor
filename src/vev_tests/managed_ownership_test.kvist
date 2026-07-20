@@ -18,3 +18,11 @@
     (defer (vev.delete-prepared-pull-pattern-shallow prepared))
     (t.is (not prepared.ok))
     (t.is (= (count prepared.pattern) 0))))
+
+(t.deftest prepared-rule-literals-have-deterministic-explicit-lifetime
+  (let [prepared
+          (vev.parse-rules-text
+            "[[(label ?e ?value) [?e :name ?name] [(str ?name \"!\") ?value] [(get-else $ ?e :kind :kind/default) ?kind]]]")]
+    (defer (vev.delete-prepared-rules-shallow prepared))
+    (t.is prepared.ok prepared.error)
+    (t.is (= (count prepared.rules) 1))))

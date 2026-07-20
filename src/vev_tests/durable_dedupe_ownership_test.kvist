@@ -6,11 +6,17 @@
 (import d "../vev_app")
 
 (def durable-dedupe-path "/tmp/vev-durable-dedupe-ownership.sqlite")
+(def durable-get-else-path "/tmp/vev-durable-get-else-ownership.sqlite")
 
 (defn remove-durable-dedupe-db []
   (os.remove durable-dedupe-path)
   (os.remove "/tmp/vev-durable-dedupe-ownership.sqlite-wal")
   (os.remove "/tmp/vev-durable-dedupe-ownership.sqlite-shm"))
+
+(defn remove-durable-get-else-db []
+  (os.remove durable-get-else-path)
+  (os.remove "/tmp/vev-durable-get-else-ownership.sqlite-wal")
+  (os.remove "/tmp/vev-durable-get-else-ownership.sqlite-shm"))
 
 (test.deftest durable-typed-dedupe-cursor-owns-retained-keys
   (remove-durable-dedupe-db)
@@ -33,3 +39,23 @@
     (d.close db)
     (d.close conn))
   (remove-durable-dedupe-db))
+
+(test.deftest durable-typed-get-else-text-default-is-released
+  (remove-durable-get-else-db)
+  (let [conn (d.connect durable-get-else-path)]
+    (d.transact conn
+      '[[:db/add 10 :db/ident :fixture/id]
+        [:db/add 10 :db/valueType :db.type/string]
+        [:db/add 10 :db/unique :db.unique/identity]])
+    (d.transact conn
+      '[{:db/id "fixture" :fixture/id "fixture-main"}])
+    (let [db (d.db conn)
+          values (d.q '[:find ?cardinality
+                        :where [?entity :fixture/id "fixture-main"]
+                               [(get-else $ ?entity :fixture/cardinality :cardinality/many) ?cardinality]]
+                      db)]
+      (test.is (= (kdata.count values) 1))
+      (kdata.release values)
+      (d.close db))
+    (d.close conn))
+  (remove-durable-get-else-db))

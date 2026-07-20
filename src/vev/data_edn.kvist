@@ -381,12 +381,12 @@
       (Prepared-Query {ok: true
                        error: ""
                        query: (query-with-rule-call-plans query-value)
-                       source-owner: (data.retain value)
+                       source-owner: value
                        owns-source: true})
       (Prepared-Query {ok: false
                        error: error
                        query: query-value
-                       source-owner: (data.retain value)
+                       source-owner: value
                        owns-source: true}))))
 
 (defn prepare-query-data [value: Data] -> Prepared-Query
@@ -401,13 +401,13 @@
       (return (Prepared-Rules {ok: false
                                error: error
                                rules: rules
-                               source-owner: (data.retain value)
+                               source-owner: value
                                owns-source: true})))
     (let [[valid valid-error] (validate-parsed-rules (slice rules 0))]
       (Prepared-Rules {ok: valid
                        error: (if valid "" valid-error)
                        rules: rules
-                       source-owner: (data.retain value)
+                       source-owner: value
                        owns-source: true}))))
 
 (defn parse-pull-pattern-data [value: Data] -> [pattern: [dynamic]Pull-Spec, ok: bool, error: string]
@@ -422,7 +422,7 @@
     (Prepared-Pull-Pattern {ok: ok
                             error: error
                             pattern: pattern
-                            source-owner: (data.retain value)
+                            source-owner: value
                             owns-source: true})))
 
 (defn prepare-tx-data [value: Data] -> Prepared-Tx-Data

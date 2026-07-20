@@ -592,7 +592,7 @@
         (Prepared-Binding {ok: true
                            error: ""
                            binding: binding
-                           source-owner: (data.retain value)
+                           source-owner: value
                            owns-source: true})
         (prepared-binding-error binding-error)))))
 
@@ -621,7 +621,7 @@
       (Prepared-In {ok: true
                     error: ""
                     bindings: bindings
-                    source-owner: (data.retain value)
+                    source-owner: value
                     owns-source: true}))))
 
 (defn parse-in-text [text: string] -> Prepared-In
@@ -648,7 +648,7 @@
       (Prepared-With {ok: true
                       error: ""
                       vars: vars
-                      source-owner: (data.retain value)
+                      source-owner: value
                       owns-source: true}))))
 
 (defn parse-with-text [text: string] -> Prepared-With
@@ -698,7 +698,7 @@
                           not-groups: not-groups
                           or-groups: or-groups
                           where-steps: where-steps
-                          source-owner: (data.retain value)
+                          source-owner: value
                           owns-source: true})
         (do
           (delete clauses)
@@ -2550,9 +2550,9 @@
                 (query-with-rules prepared-query.query (slice prepared-rules.rules 0)))]
         (set! prepared-query.query query-with-attached-rules)
         (when prepared-rules.owns-source
-          (set! prepared-query.rules-source-owner (data.retain prepared-rules.source-owner))
+          (set! prepared-query.rules-source-owner prepared-rules.source-owner)
           (set! prepared-query.owns-rules-source true))
-        (delete-prepared-rules-shallow prepared-rules)
+        (delete-prepared-rules-after-rules-transferred prepared-rules)
         prepared-query))))
 
 (defn q-prepared [db: DB, prepared: Prepared-Query] -> Result-Set

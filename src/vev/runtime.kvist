@@ -383,7 +383,41 @@
   (delete query.aggregates)
   (delete query.return-map-keys))
 
+(defn delete-parser-get-else-defaults [clauses: []Get-Else]
+  ;; get-else defaults are parsed through edn-value-from-node and own their
+  ;; complete textual and compound payloads. Ordinary query terms continue to
+  ;; borrow atomic text from the retained EDN source.
+  (for [clause-value clauses]
+    (delete-owned-value clause-value.default-value)))
+
+(defn delete-parser-not-group-get-else-defaults [group: Not-Group]
+  (delete-parser-get-else-defaults (slice group.get-elses 0))
+  (for [nested group.not-groups]
+    (delete-parser-not-group-get-else-defaults nested)))
+
+(defn delete-parser-or-group-get-else-defaults [group: Or-Group]
+  (for [branch group.branches]
+    (delete-parser-not-group-get-else-defaults branch)))
+
+(defn delete-parser-rule-get-else-defaults [rule: Rule]
+  (delete-parser-get-else-defaults (slice rule.get-elses 0))
+  (for [group rule.not-groups]
+    (delete-parser-not-group-get-else-defaults group))
+  (for [group rule.or-groups]
+    (delete-parser-or-group-get-else-defaults group)))
+
 (defn delete-not-group-containers [group: Not-Group]
+  (for [predicate group.predicates]
+    (delete predicate.terms))
+  (for [function group.function-clauses]
+    (delete function.terms)
+    (delete function.out-vars)
+    (delete-input-binding-shallow function.out-binding))
+  (for [ground group.grounds]
+    (delete ground.tuple-vars)
+    (delete-input-binding-shallow ground.binding))
+  (for [call group.rule-calls]
+    (delete call.args))
   (for [nested group.not-groups]
     (delete-not-group-containers nested))
   (delete group.clauses)
@@ -403,6 +437,34 @@
   (delete group.branches)
   (delete group.join-vars))
 
+(defn delete-rule-containers [rule: Rule]
+  (for [predicate rule.predicates]
+    (delete predicate.terms))
+  (for [function rule.function-clauses]
+    (delete function.terms)
+    (delete function.out-vars)
+    (delete-input-binding-shallow function.out-binding))
+  (for [ground rule.grounds]
+    (delete ground.tuple-vars)
+    (delete-input-binding-shallow ground.binding))
+  (for [call rule.rule-calls]
+    (delete call.args))
+  (for [group rule.not-groups]
+    (delete-not-group-containers group))
+  (for [group rule.or-groups]
+    (delete-or-group-containers group))
+  (delete rule.params)
+  (delete rule.clauses)
+  (delete rule.predicates)
+  (delete rule.function-clauses)
+  (delete rule.get-elses)
+  (delete-get-somes rule.get-somes)
+  (delete rule.grounds)
+  (delete rule.rule-calls)
+  (delete rule.not-groups)
+  (delete rule.or-groups)
+  (delete rule.body-steps))
+
 (defn delete-prepared-query-shallow [prepared: Prepared-Query]
   (for [predicate prepared.query.predicates]
     (delete predicate.terms))
@@ -410,17 +472,22 @@
     (delete function.terms)
     (delete function.out-vars)
     (delete-input-binding-shallow function.out-binding))
+  (for [rule prepared.query.rules]
+    (delete-parser-rule-get-else-defaults rule)
+    (delete-rule-containers rule))
+  (delete-parser-get-else-defaults (slice prepared.query.get-elses 0))
   (for [group prepared.query.not-groups]
+    (delete-parser-not-group-get-else-defaults group)
     (delete-not-group-containers group))
   (for [group prepared.query.or-groups]
+    (delete-parser-or-group-get-else-defaults group)
     (delete-or-group-containers group))
   (for [aggregate prepared.query.aggregates]
     (delete aggregate.args))
   (delete-query-shallow prepared.query)
-  (when prepared.owns-source
-    (data.release prepared.source-owner))
-  (when prepared.owns-rules-source
-    (data.release prepared.rules-source-owner)))
+  ;; Embedded Data fields are managed by Kvist. This explicit cleanup owns
+  ;; only the query engine's native containers and parser-owned Value payloads.
+  )
 
 (defn delete-input-binding-shallow [binding: Input-Binding]
   (for [item binding.items]
@@ -429,22 +496,22 @@
 
 (defn delete-prepared-binding-shallow [prepared: Prepared-Binding]
   (delete-input-binding-shallow prepared.binding)
-  (when prepared.owns-source
-    (data.release prepared.source-owner)))
+  )
 
 (defn delete-prepared-in-shallow [prepared: Prepared-In]
   (for [binding prepared.bindings]
     (delete-input-binding-shallow binding))
-  (delete prepared.bindings)
-  (when prepared.owns-source
-    (data.release prepared.source-owner)))
+  (delete prepared.bindings))
 
 (defn delete-prepared-with-shallow [prepared: Prepared-With]
-  (delete prepared.vars)
-  (when prepared.owns-source
-    (data.release prepared.source-owner)))
+  (delete prepared.vars))
 
 (defn delete-prepared-clause-shallow [prepared: Prepared-Clause]
+  (delete-parser-get-else-defaults (slice prepared.get-elses 0))
+  (for [group prepared.not-groups]
+    (delete-parser-not-group-get-else-defaults group))
+  (for [group prepared.or-groups]
+    (delete-parser-or-group-get-else-defaults group))
   (delete prepared.clauses)
   (delete prepared.predicates)
   (delete prepared.function-clauses)
@@ -454,14 +521,18 @@
   (delete prepared.grounds)
   (delete prepared.not-groups)
   (delete prepared.or-groups)
-  (delete prepared.where-steps)
-  (when prepared.owns-source
-    (data.release prepared.source-owner)))
+  (delete prepared.where-steps))
 
 (defn delete-prepared-rules-shallow [prepared: Prepared-Rules]
-  (delete prepared.rules)
-  (when prepared.owns-source
-    (data.release prepared.source-owner)))
+  (for [rule prepared.rules]
+    (delete-parser-rule-get-else-defaults rule)
+    (delete-rule-containers rule))
+  (delete prepared.rules))
+
+(defn delete-prepared-rules-after-rules-transferred [prepared: Prepared-Rules]
+  ;; query-with-rules copies the outer rule array while transferring ownership
+  ;; of the rules' nested parser values to the receiving prepared query.
+  (delete prepared.rules))
 
 (defn delete-pull-spec-containers-shallow [specs: []Pull-Spec]
   (for [spec specs]
@@ -470,9 +541,7 @@
 
 (defn delete-prepared-pull-pattern-shallow [prepared: Prepared-Pull-Pattern]
   (delete-pull-spec-containers-shallow (slice prepared.pattern 0))
-  (delete prepared.pattern)
-  (when prepared.owns-source
-    (data.release prepared.source-owner)))
+  (delete prepared.pattern))
 
 (defn delete-prepared-tx-data-shallow [prepared: Prepared-Tx-Data]
   (delete-owned-tx-data prepared.tx-data))
