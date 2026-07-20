@@ -64,7 +64,7 @@ The POMs must carry name, description, project URL, license, developer, and SCM
 metadata. `vev-clj` must declare an ordinary compile dependency on the exact
 same version of `com.vevdb:vev-java`.
 
-## First publication
+## Publishing a version
 
 1. Merge and tag the coordinated version in `vev`, `vev-java`, and `vev-clj`.
    Use a new version: Maven Central artifacts are immutable.
@@ -123,8 +123,10 @@ same version of `com.vevdb:vev-java`.
 9. Wait for the state `PUBLISHED`, then resolve both coordinates anonymously
    from `https://repo1.maven.org/maven2/` into another empty cache.
 
-The recommended first publication under `com.vevdb` is `0.2.0-rc.2`, followed
-by `0.2.0` after consumer validation.
+`0.2.0-rc.2` was the first publication under `com.vevdb`. Maven Central
+artifacts are immutable, so every subsequent deployment must use a new
+coordinated version. Promote a release candidate to `0.2.0` only after its
+public artifacts pass consumer validation.
 
 ## Official references
 

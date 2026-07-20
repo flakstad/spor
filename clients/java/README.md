@@ -127,9 +127,10 @@ try (Vev.TxFunctionRegistry fns = vev.txFunctionRegistry()) {
 }
 ```
 
-The Java callback returns EDN tx-data text. Higher-level clients such as
-Clojure can wrap this and let callbacks return ordinary host data. The same
-registry shape works for durable `vev.connect("app.vev")` handles.
+The Java callback returns EDN tx-data text. This is a low-level embedding
+extension, not Datomic stored-function compatibility. It is intentionally not
+wrapped by the Datomic-shaped Clojure API. The same registry shape works for
+durable `vev.connect("app.vev")` handles.
 
 Typed transaction builders are also accepted by durable connections, so bulk
 host writes do not have to round-trip through EDN text:

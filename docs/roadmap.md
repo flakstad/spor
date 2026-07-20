@@ -65,7 +65,7 @@ Non-goal:
 Status: mostly satisfied as the current compatibility gate. The broad in-memory surface is present:
 query, pull, tx-data, schema, lookup refs, tuples, indexes, parser text paths,
 prepared APIs, and host-facing EDN/C ABI query paths. The local compatibility
-suite currently passes 372 tests. Remaining work is concentrated in exact
+suite currently passes 379 tests. Remaining work is concentrated in exact
 parser diagnostics/object rendering, query/rule planner maturity,
 targeted MusicBrainz/Datomic regressions, higher-level host wrapper
 ergonomics, and durable storage architecture.
@@ -453,21 +453,18 @@ open/transact/close/reopen/query through the raw C ABI and the Python, Rust,
 Java, and Clojure example wrappers. The ABI-vs-native benchmark covers small
 lookups, DB snapshots, transaction reports, many-row results, direct row
 visitors, nested pull-many values, and host-provided transaction function
-callbacks. The Java and Clojure wrappers now expose that transaction-function
-registry path, while still requiring the function ident to be installed in the
-DB like Datomic. Further interop work should be driven by specific adapter needs,
-especially packaging and richer host-specific APIs over the stable raw C
-surface.
+callbacks. Java exposes that callback registry as a low-level embedding
+extension. The Datomic-shaped Clojure API intentionally does not expose it as
+stored-function compatibility. Further interop work should be driven by
+specific adapter needs over the stable raw C surface.
 
-Next packaging work should use the canonical repository identity
-`https://github.com/vevdb/vev`. The JVM path should split the current examples
-into publishable clients: `com.vevdb:vev-java` for the Java FFM wrapper,
-`com.vevdb/vev-clj` for the Clojure API, and later platform native
-artifacts such as `com.vevdb:vev-native-darwin-aarch64`. Local explicit
-library paths and `VEV_LIB`-style overrides remain supported, but the current
-JVM proof path already works through a local Maven repo with bundled native
-resources on the classpath. Java and Clojure each have a one-dependency local
-proof path; publication work should preserve that shape.
+The canonical repository is `https://github.com/vevdb/vev`. The Java FFM
+wrapper is published as `com.vevdb:vev-java`, and the Clojure API as
+`com.vevdb/vev-clj`. The Java artifact contains the verified platform-native
+resources, so each language has a one-dependency public Maven path. Explicit
+library paths and `VEV_LIB` remain local-development overrides. Future
+packaging work is coordinated release maintenance and optional publication of
+the other host adapters, not another JVM package split.
 
 ## Phase 9: Optional packaging expansion
 

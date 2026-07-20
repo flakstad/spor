@@ -290,7 +290,9 @@ aggregates, rules, and immutable `db-with` operations.
 - Datomic-flavored Datalog with predicates, functions, aggregates, rules,
   negation, disjunction, relation inputs, and pull expressions.
 - Datomic-shaped transaction data, schema constraints, tempids, lookup refs,
-  upserts, tuple attributes, transaction functions, and transaction reports.
+  upserts, tuple attributes, built-in transaction functions, and transaction
+  reports. Lower-level host callback functions are embedding extensions, not
+  Datomic stored functions.
 - Prepared query, pull, and transaction APIs for native hosts.
 - A C header and language wrappers over the native ABI.
 - A CLI for querying, transacting, pulling, and inspecting durable stores.

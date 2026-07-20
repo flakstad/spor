@@ -54,7 +54,7 @@ Status key:
 
 ## Next Porting Order
 
-The local compatibility suite currently passes 372 tests. The remaining
+The local compatibility suite currently passes 379 tests. The remaining
 DataScript work should focus on the areas where Vev still differs in engine
 semantics or required native interop, not on already-covered syntax families.
 

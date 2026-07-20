@@ -90,7 +90,7 @@ This layer owns:
 - C ABI for non-Kvist consumers
 - native library packaging
 - CLI binary for tooling and inspection
-- later JVM/Clojure wrapper
+- Java and Datomic-shaped Clojure wrappers
 - possible later server wrapper or daemon mode
 - possible later transactor/peer packaging model
 

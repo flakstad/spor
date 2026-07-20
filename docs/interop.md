@@ -38,8 +38,7 @@ The canonical repository is:
 https://github.com/vevdb/vev
 ```
 
-That should drive public package coordinates once VevDB moves beyond local smoke
-clients:
+It drives the published and planned package identities:
 
 - Clojure deps coordinate: `com.vevdb/vev-clj`
 - Java/Maven coordinate: `com.vevdb:vev-java`
