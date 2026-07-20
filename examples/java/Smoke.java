@@ -281,6 +281,31 @@ public final class Smoke {
 
                 try (Vev.PreparedQuery allEmails = vev.prepare("[:find ?e ?email :where [?e :user/email ?email]]");
                      Vev.DB snapshot = conn.db()) {
+                    long snapshotBasis = snapshot.basisT();
+                    if (snapshotBasis == 0
+                        || snapshot.nextT() != snapshotBasis + 1
+                        || snapshot.asOfT() != null
+                        || snapshot.sinceT() != null
+                        || snapshot.isHistory()) {
+                        throw new IllegalStateException("unexpected current DB metadata");
+                    }
+                    try (Vev.DB earlier = snapshot.asOf(1);
+                         Vev.DB recent = snapshot.since(1);
+                         Vev.DB audit = snapshot.history()) {
+                        if (earlier.basisT() != snapshotBasis
+                            || !Long.valueOf(1).equals(earlier.asOfT())
+                            || !Long.valueOf(1).equals(recent.sinceT())
+                            || !audit.isHistory()) {
+                            throw new IllegalStateException("unexpected filtered DB metadata");
+                        }
+                    }
+                    try (Vev.Log log = conn.log()) {
+                        Object range = log.txRange(null, null);
+                        if (!(range instanceof List<?> transactions)
+                            || transactions.size() != snapshotBasis) {
+                            throw new IllegalStateException("unexpected resident transaction range");
+                        }
+                    }
                     conn.transact("[{:db/id 3 :user/name \"Alan\" :user/email \"alan@example.com\"}]");
                     try (Vev.ResultSet current = conn.query(allEmails, "[]");
                          Vev.ResultSet old = snapshot.query(allEmails, "[]")) {

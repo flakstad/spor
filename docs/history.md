@@ -49,6 +49,17 @@ The Clojure names and argument order are identical:
 ;; Assertions and retractions
 (datomic/history datomic-db)
 (vev/history     vev-db)
+
+;; Immutable database metadata
+(datomic/basis-t datomic-db)
+(vev/basis-t     vev-db)
+
+(datomic/as-of-t (datomic/as-of datomic-db datomic-t))
+(vev/as-of-t     (vev/as-of vev-db vev-t))
+
+;; Transaction log range: start inclusive, end exclusive
+(datomic/tx-range (datomic/log datomic-conn) start end)
+(vev/tx-range     (vev/log vev-conn)         start end)
 ```
 
 The executable example
@@ -63,8 +74,78 @@ scripts/compare_history_time_filters.sh
 It checks transaction and native-date boundaries, an instant exactly at a
 transaction, an instant between transactions, points before and after the
 available history, history rows, and composed `history(as-of(db, instant))`
-views. The comparison is pinned to Datomic Peer `1.0.7277` by default; set
-`DATOMIC_VERSION` to exercise another Peer release.
+views. It also checks `basis-t`, `next-t`, `as-of-t`, `since-t`, and
+`tx-range`, including transaction and native-date bounds. The comparison is
+pinned to Datomic Peer `1.0.7277` by default; set `DATOMIC_VERSION` to exercise
+another Peer release.
+
+## Immutable database metadata
+
+Metadata belongs to a DB value, not to the mutable connection:
+
+```clojure
+(d/basis-t db)                 ; latest t reachable from db
+(d/next-t db)                  ; the following t
+(d/as-of-t db)                 ; nil on an ordinary DB
+(d/as-of-t (d/as-of db t1))    ; t1
+(d/since-t (d/since db t1))    ; t1
+```
+
+As in Datomic, a filtered DB retains its source database basis. If the current
+database is at `t2`, `(d/basis-t (d/as-of db t1))` is `t2`, while
+`(d/as-of-t (d/as-of db t1))` is `t1`. Filter bounds are normalized when the
+caller supplies a transaction entity id.
+
+Transaction coordinates and entity ids are database-local. A Datomic database
+and a separately created Vev database therefore need not assign the same
+numeric `t` or transaction id to equivalent transactions. The parity example
+compares the same metadata relationships and uses each database's returned
+coordinates.
+
+Kvist exposes `d.basis-t`, `d.next-t`, `d.as-of-t`, `d.since-t`, and
+`d.history?`. Java exposes `basisT()`, `nextT()`, nullable `asOfT()` and
+`sinceT()`, and `isHistory()`.
+
+## Transaction ranges
+
+`tx-range` follows the Datomic log contract:
+
+- the start bound is inclusive;
+- the end bound is exclusive;
+- either bound may be `nil`;
+- bounds may be a basis `t`, transaction entity id, `java.util.Date`, or
+  `java.time.Instant` (the latter is a Vev convenience);
+- each result is a map with `:t` and `:data`;
+- `:data` contains five-position `[e a v tx added]` datoms.
+
+```clojure
+(def log-value (d/log conn))
+
+(d/tx-range log-value nil nil)  ; the complete available log
+(d/tx-range log-value t1 t3)    ; t1 included, t3 excluded
+(d/tx-range log-value
+            #inst "2026-07-20T10:15:00.000Z"
+            #inst "2026-07-21T10:15:00.000Z")
+;; => [{:t 42
+;;      :data [[17592186045418 :item/count 100 13194139534354 true]
+;;             ...]}
+;;     ...]
+```
+
+Date bounds select transactions by their `:db/txInstant`: start includes the
+first transaction at or after the date, and end excludes the first transaction
+at or after the date. This differs intentionally from `as-of` instant
+resolution, which selects the greatest transaction at or before the instant.
+
+The Kvist spelling is the same, with `Data` bounds:
+
+```clojure
+(d.tx-range (d.log conn) (data.from-nil) end-instant)
+```
+
+The raw C entry point is `vev_db_tx_range_value`; Java's
+`Connection.log().txRange(...)` and the Clojure wrapper use that same engine
+operation for both resident and durable database values.
 
 ## Instant resolution
 
@@ -127,6 +208,7 @@ database and pass it as an input when necessary.
 | JavaScript | `db.asOf(number\|bigint)`, `db.since(...)` | `Date` |
 | Go | `db.AsOf(uint64)`, `db.Since(uint64)` | `AsOfTime(time.Time)`, `SinceTime(time.Time)` |
 | Rust | `as_of(u64)`, `since(u64)` | `as_of_time(SystemTime)`, `since_time(SystemTime)` |
+| Odin | `vev.as_of(&db, t)`, `vev.since(&db, t)` | The same overloads with `time.Time` |
 | C | `vev_db_as_of`, `vev_db_since` | `vev_db_*_instant_millis` |
 
 All returned DB handles are independently owned and should be closed or

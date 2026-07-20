@@ -46,6 +46,41 @@
 (defn vq-values [query db]
   (set (vev/q query db)))
 
+(defn tx-range-summary [transactions attr-ident]
+  (->> transactions
+       (map (fn [{:keys [data]}]
+              (->> data
+                   (keep (fn [datom]
+                           (let [a (or (get datom :a) (nth datom 1))
+                                 v (if (some? (get datom :v))
+                                     (get datom :v)
+                                     (nth datom 2))
+                                 added (if (some? (get datom :added))
+                                         (get datom :added)
+                                         (nth datom 4))]
+                             (when (= (attr-ident a) :item/count)
+                               [v added]))))
+                   set)))
+       (filterv seq)))
+
+(defn metadata-summary [api db t1 t2]
+  (let [as-of-db ((:as-of api) db t1)
+        since-db ((:since api) db t1)]
+    (try
+      {:basis-is-current (= t2 ((:basis-t api) db))
+       :next-is-successor (= (inc t2) ((:next-t api) db))
+       :current-as-of ((:as-of-t api) db)
+       :current-since ((:since-t api) db)
+       :as-of-view {:basis-is-current (= t2 ((:basis-t api) as-of-db))
+                    :as-of-t ((:as-of-t api) as-of-db)}
+       :since-view {:basis-is-current (= t2 ((:basis-t api) since-db))
+                    :since-t ((:since-t api) since-db)}}
+      (finally
+        (when (instance? java.lang.AutoCloseable as-of-db)
+          (.close ^java.lang.AutoCloseable as-of-db))
+        (when (instance? java.lang.AutoCloseable since-db)
+          (.close ^java.lang.AutoCloseable since-db))))))
+
 (defn -main [& _]
   (let [datomic-uri (str "datomic:mem://vev-history-parity-" (UUID/randomUUID))
         vev-path (str (Files/createTempFile "vev-history-parity-" ".sqlite"
@@ -65,13 +100,16 @@
               datomic-tx1 @(datomic/transact datomic-conn (data-tx t1 100))
               _ (vev/transact vev-conn (data-tx t1 100))
               datomic-coordinate (datomic/basis-t (:db-after datomic-tx1))
-              vev-coordinate (:basis-t (vev/connection-info vev-conn))]
+              vev-coordinate (with-open [snapshot (vev/db vev-conn)]
+                               (vev/basis-t snapshot))]
           (Thread/sleep 20)
           (let [t2 (Date. (System/currentTimeMillis))]
-            @(datomic/transact datomic-conn (data-tx t2 250))
+            (let [datomic-tx2 @(datomic/transact datomic-conn (data-tx t2 250))]
             (vev/transact vev-conn (data-tx t2 250))
             (let [datomic-db (datomic/db datomic-conn)
                   vev-db (vev/db vev-conn)
+                  datomic-current-t (datomic/basis-t (:db-after datomic-tx2))
+                  vev-current-t (vev/basis-t vev-db)
                   between (Date. (quot (+ (.getTime t1) (.getTime t2)) 2))
                   before (Date. (dec (.getTime t1)))
                   after (Date. (inc (.getTime t2)))
@@ -119,6 +157,81 @@
                                     (datomic/history (datomic/as-of datomic-db t1)))
                           (vq-values history-query
                                      (vev/history (vev/as-of vev-db t1))))]]
+              (let [datomic-metadata
+                    (metadata-summary
+                      {:basis-t datomic/basis-t
+                       :next-t datomic/next-t
+                       :as-of-t datomic/as-of-t
+                       :since-t datomic/since-t
+                       :as-of datomic/as-of
+                       :since datomic/since}
+                      datomic-db datomic-coordinate datomic-current-t)
+                    vev-metadata
+                    (metadata-summary
+                      {:basis-t vev/basis-t
+                       :next-t vev/next-t
+                       :as-of-t vev/as-of-t
+                       :since-t vev/since-t
+                       :as-of vev/as-of
+                       :since vev/since}
+                      vev-db vev-coordinate vev-current-t)
+                    expected-metadata
+                    {:basis-is-current true
+                     :next-is-successor true
+                     :current-as-of nil
+                     :current-since nil
+                     :as-of-view {:basis-is-current true
+                                  :as-of-t datomic-coordinate}
+                     :since-view {:basis-is-current true
+                                  :since-t datomic-coordinate}}
+                    normalized-vev-metadata
+                    (-> vev-metadata
+                        (assoc-in [:as-of-view :as-of-t] datomic-coordinate)
+                        (assoc-in [:since-view :since-t] datomic-coordinate))]
+                (when-not (= expected-metadata
+                             datomic-metadata
+                             normalized-vev-metadata)
+                  (throw (ex-info "Datomic/Vev DB metadata mismatch"
+                                  {:expected expected-metadata
+                                   :datomic datomic-metadata
+                                   :vev vev-metadata})))
+                (let [datomic-log (datomic/log datomic-conn)
+                      vev-log (vev/log vev-conn)
+                      expected-range [#{[100 true]}
+                                      #{[100 false] [250 true]}]
+                      range-results
+                      {:all
+                       [(tx-range-summary
+                          (datomic/tx-range datomic-log datomic-coordinate nil)
+                          #(datomic/ident datomic-db %))
+                        (tx-range-summary
+                          (vev/tx-range vev-log vev-coordinate nil)
+                          identity)]
+                       :from-between
+                       [(tx-range-summary
+                          (datomic/tx-range datomic-log between nil)
+                          #(datomic/ident datomic-db %))
+                        (tx-range-summary
+                          (vev/tx-range vev-log between nil)
+                          identity)]
+                       :until-exact
+                       [(tx-range-summary
+                          (datomic/tx-range datomic-log nil t2)
+                          #(datomic/ident datomic-db %))
+                        (tx-range-summary
+                          (vev/tx-range vev-log nil t2)
+                          identity)]}]
+                  (when-not (and (= expected-range
+                                    (first (:all range-results))
+                                    (second (:all range-results)))
+                                 (= [(second expected-range)]
+                                    (first (:from-between range-results))
+                                    (second (:from-between range-results)))
+                                 (= [(first expected-range)]
+                                    (first (:until-exact range-results))
+                                    (second (:until-exact range-results))))
+                    (throw (ex-info "Datomic/Vev tx-range mismatch"
+                                    {:ranges range-results})))))
               ;; java.time.Instant is a Vev convenience in addition to
               ;; Datomic's documented java.util.Date time point.
               (when-not (= #{[100]}
@@ -128,7 +241,9 @@
               (doseq [{:keys [scenario datomic vev]} rows]
                 (println (format "%-30s Datomic=%-24s Vev=%s"
                                  (name scenario) (pr-str datomic) (pr-str vev))))
-              (println "history time-filter parity: ok"))))
+              (println "DB metadata parity:             ok")
+              (println "tx-range parity:                ok")
+              (println "history time-filter parity: ok")))))
         (finally
           (.close vev-conn)
           (datomic/release datomic-conn)

@@ -228,13 +228,7 @@
     (free (rawptr conn))))
 
 (defn log [conn: Conn] -> Log
-  (let [state (conn-state conn)]
-    (sync.mutex-lock state^.lock)
-    (defer (sync.mutex-unlock state^.lock))
-    (let [store (addr state^.store)]
-    (when (not (= store^.kind .SQLite))
-      (panic "transaction log requires a durable connection"))
-    (Log (rawptr conn)))))
+  (Log (rawptr conn)))
 
 (defn log-tx-ids [conn: Conn] -> [tx-ids: [dynamic]u64, ok: bool, error: string]
   (let [state (conn-state conn)]
@@ -807,7 +801,7 @@
        (vev.db-with-store-db-data (db-ptr ~db) ~tx-form))
      (db-lock ~db)))
 
-(defn as-of-t [db: DB, tx: u64] -> DB
+(defn as-of-coordinate [db: DB, tx: u64] -> DB
   (db-handle
     (with-db-lock vev.Store-DB db
       (vev.as-of-store-db (db-ptr db) tx))
@@ -829,9 +823,9 @@
         (vev.as-of-store-db-instant-or-panic (db-ptr db) unix-millis))
       (db-lock db))))
 
-(def as-of (overload as-of-t as-of-data))
+(def as-of (overload as-of-coordinate as-of-data))
 
-(defn since-t [db: DB, tx: u64] -> DB
+(defn since-coordinate [db: DB, tx: u64] -> DB
   (db-handle
     (with-db-lock vev.Store-DB db
       (vev.since-store-db (db-ptr db) tx))
@@ -844,12 +838,71 @@
         (vev.since-store-db-instant-or-panic (db-ptr db) unix-millis))
       (db-lock db))))
 
-(def since (overload since-t since-data))
+(def since (overload since-coordinate since-data))
 
 (defn history [db: DB] -> DB
   (db-handle
     (with-db-lock vev.Store-DB db
       (vev.history-store-db (db-ptr db)))
     (db-lock db)))
+
+(defn basis-t [db: DB] -> u64
+  (with-db-lock u64 db
+    (let [[value ok error] (vev.store-db-basis-t (db-ptr db))]
+      (when (not ok)
+        (panic error))
+      value)))
+
+(defn next-t [db: DB] -> u64
+  (with-db-lock u64 db
+    (let [[value ok error] (vev.store-db-next-t (db-ptr db))]
+      (when (not ok)
+        (panic error))
+      value)))
+
+(defn as-of-t [db: DB] -> Data
+  (with-db-lock Data db
+    (let [[value present] (vev.store-db-as-of-t (db-ptr db))]
+      (if present
+        (kdata.from-int (i64 value))
+        (kdata.from-nil)))))
+
+(defn since-t [db: DB] -> Data
+  (with-db-lock Data db
+    (let [[value present] (vev.store-db-since-t (db-ptr db))]
+      (if present
+        (kdata.from-int (i64 value))
+        (kdata.from-nil)))))
+
+(defn history? [db: DB] -> bool
+  (with-db-lock bool db
+    (vev.store-db-history? (db-ptr db))))
+
+(defn tx-range [log-value: Log, start: Data, end: Data] -> Data
+  (let [[start-value start-ok start-error] (vev.data-owned-value start)]
+    (when (not start-ok)
+      (panic start-error))
+    (defer (vev.delete-owned-value start-value))
+    (let [[end-value end-ok end-error] (vev.data-owned-value end)]
+      (when (not end-ok)
+        (panic end-error))
+      (defer (vev.delete-owned-value end-value))
+      (let [conn (log-conn log-value)
+            state (conn-state conn)]
+        (sync.mutex-lock state^.lock)
+        (defer (sync.mutex-unlock state^.lock))
+        (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (addr state^.store))]
+          (when (not snapshot-ok)
+            (vev.close-store-db! (addr snapshot))
+            (panic snapshot-error))
+          (defer (vev.close-store-db! (addr snapshot)))
+          (let [[value ok error] (vev.store-db-tx-range-value
+                                   (addr snapshot) start-value end-value)]
+            (when (not ok)
+              (vev.delete-owned-value value)
+              (panic error))
+            (let [out (vev.value-data value)]
+              (vev.delete-owned-value value)
+              out)))))))
 
 (def close (overload close-conn close-db close-result close-value))

@@ -14756,6 +14756,54 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (+ tx-partition-base (- coordinate 1))
     coordinate))
 
+(defn store-db-tx-t [tx: u64] -> u64
+  (if (>= tx tx-partition-base)
+    (+ (- tx tx-partition-base) 1)
+    tx))
+
+(defn store-db-unfiltered [snapshot: ^Store-DB] -> ^Store-DB
+  (if (= snapshot^.kind .Filtered)
+    (store-db-unfiltered snapshot^.filtered-base)
+    snapshot))
+
+(defn store-db-basis-t [snapshot: ^Store-DB] -> [basis-t: u64, ok: bool, error: string]
+  ;; A filtered database retains the basis of the database from which it was
+  ;; derived. as-of-t and since-t describe the filter bounds separately.
+  (let [base (store-db-unfiltered snapshot)
+        [source source-ok source-error] (store-db-read-source base)]
+    (when (not source-ok)
+      (return 0 false source-error))
+    (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source ":db/txInstant")]
+      (when (not datoms-ok)
+        (return 0 false datoms-error))
+      (defer (delete-owned-datoms datoms))
+      (let [basis-tx (u64 0)]
+        (for [datom datoms]
+          (when (and datom.added
+                     (= datom.e datom.tx)
+                     (> datom.tx basis-tx))
+            (set! basis-tx datom.tx)))
+        (return (store-db-tx-t basis-tx) true "")))))
+
+(defn store-db-next-t [snapshot: ^Store-DB] -> [next-t: u64, ok: bool, error: string]
+  (let [[basis-t basis-ok basis-error] (store-db-basis-t snapshot)]
+    (if basis-ok
+      (return (+ basis-t 1) true "")
+      (return 0 false basis-error))))
+
+(defn store-db-as-of-t [snapshot: ^Store-DB] -> [as-of-t: u64, has-as-of: bool]
+  (if (and (= snapshot^.kind .Filtered) snapshot^.filter-has-as-of)
+    (return (store-db-tx-t snapshot^.filter-as-of-tx) true)
+    (return 0 false)))
+
+(defn store-db-since-t [snapshot: ^Store-DB] -> [since-t: u64, has-since: bool]
+  (if (and (= snapshot^.kind .Filtered) snapshot^.filter-has-since)
+    (return (store-db-tx-t snapshot^.filter-since-tx) true)
+    (return 0 false)))
+
+(defn store-db-history? [snapshot: ^Store-DB] -> bool
+  (and (= snapshot^.kind .Filtered) snapshot^.filter-history))
+
 (defn as-of-store-db [snapshot: ^Store-DB, tx: u64] -> Store-DB
   (filtered-store-db snapshot true (store-db-time-point-tx tx) false 0 false))
 
@@ -14811,6 +14859,72 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 
 (defn history-store-db [snapshot: ^Store-DB] -> Store-DB
   (filtered-store-db snapshot false 0 false 0 true))
+
+(defn store-db-tx-range-bound-valid? [bound: Value] -> bool
+  (or (= bound.kind .Nil)
+      (= bound.kind .Instant)
+      (and (= bound.kind .Int) (>= bound.int-value 0))
+      (= bound.kind .Entity)))
+
+(defn store-db-tx-range-bound-allows? [bound: Value, start?: bool, tx: u64, unix-millis: i64] -> bool
+  (case bound.kind
+    .Nil true
+    .Instant (if start?
+               (>= unix-millis bound.int-value)
+               (< unix-millis bound.int-value))
+    .Int
+      (let [bound-tx (store-db-time-point-tx (u64 bound.int-value))]
+        (if start? (>= tx bound-tx) (< tx bound-tx)))
+    .Entity
+      (let [bound-tx (store-db-time-point-tx bound.entity)]
+        (if start? (>= tx bound-tx) (< tx bound-tx)))
+    false))
+
+(defn store-db-log-datom-value [datom: Datom] -> Value
+  (value-vector
+    ([]Value [(value-entity datom.e)
+              (value-keyword (string-owned datom.a))
+              (value-owned datom.v)
+              (value-entity datom.tx)
+              (value-bool datom.added)])))
+
+(defn store-db-tx-range-value [snapshot: ^Store-DB, start: Value, end: Value] -> [value: Value, ok: bool, error: string]
+  (when (or (not (store-db-tx-range-bound-valid? start))
+            (not (store-db-tx-range-bound-valid? end)))
+    (return (value-vector-owned (make [dynamic]Value))
+            false
+            "transaction range bounds must be nil, a non-negative t or transaction id, or an instant"))
+  (let [base (store-db-unfiltered snapshot)
+        [source source-ok source-error] (store-db-read-source base)]
+    (when (not source-ok)
+      (return (value-vector-owned (make [dynamic]Value)) false source-error))
+    (let [[instants instants-ok instants-error] (db-read-source-datoms-by-attr source ":db/txInstant")]
+      (when (not instants-ok)
+        (return (value-vector-owned (make [dynamic]Value)) false instants-error))
+      (defer (delete-owned-datoms instants))
+      (let [[materialized materialized-ok materialized-error] (store-db-materialize-db base)]
+        (when (not materialized-ok)
+          (delete-owned-db materialized)
+          (return (value-vector-owned (make [dynamic]Value)) false materialized-error))
+        (defer (delete-owned-db materialized))
+        (let [transactions (make [dynamic]Value)]
+          (for [instant-datom instants]
+            (when (and instant-datom.added
+                       (= instant-datom.e instant-datom.tx)
+                       (= instant-datom.v.kind .Instant)
+                       (store-db-tx-range-bound-allows? start true instant-datom.tx instant-datom.v.int-value)
+                       (store-db-tx-range-bound-allows? end false instant-datom.tx instant-datom.v.int-value))
+              (let [tx-datoms (make [dynamic]Value)]
+                (for [datom materialized.datoms]
+                  (when (= datom.tx instant-datom.tx)
+                    (arr.push! tx-datoms (store-db-log-datom-value datom))))
+                (arr.push! transactions
+                  (value-map
+                    ([]Value [(value-keyword (string-owned ":t"))
+                              (value-int (i64 (store-db-tx-t instant-datom.tx)))
+                              (value-keyword (string-owned ":data"))
+                              (value-vector-owned tx-datoms)]))))))
+          (return (value-vector-owned transactions) true ""))))))
 
 (defn with-store-db-text [snapshot: ^Store-DB, text: string] -> Tx-Report
   (when (source-backed-store-db? snapshot)

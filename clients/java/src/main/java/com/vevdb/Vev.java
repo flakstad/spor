@@ -110,11 +110,19 @@ public final class Vev implements AutoCloseable {
     private final MethodHandle sqliteConnPreparedColumnBatchWithInputs;
     private final MethodHandle dbRetain;
     private final MethodHandle dbRelease;
+    private final MethodHandle dbBasisT;
+    private final MethodHandle dbNextT;
+    private final MethodHandle dbHasAsOfT;
+    private final MethodHandle dbAsOfT;
+    private final MethodHandle dbHasSinceT;
+    private final MethodHandle dbSinceT;
+    private final MethodHandle dbIsHistory;
     private final MethodHandle dbAsOf;
     private final MethodHandle dbAsOfInstantMillis;
     private final MethodHandle dbSince;
     private final MethodHandle dbSinceInstantMillis;
     private final MethodHandle dbHistory;
+    private final MethodHandle dbTxRangeValue;
     private final MethodHandle withEdn;
     private final MethodHandle withEdnReport;
     private final MethodHandle dbWithEdn;
@@ -320,6 +328,32 @@ public final class Vev implements AutoCloseable {
         return new Vev(libraryPath);
     }
 
+    private record TxRangeBound(int kind, long value) {}
+
+    private static TxRangeBound txRangeBound(Object value) {
+        if (value == null) {
+            return new TxRangeBound(0, 0);
+        }
+        if (value instanceof Date date) {
+            return new TxRangeBound(2, date.getTime());
+        }
+        if (value instanceof Instant instant) {
+            return new TxRangeBound(2, instant.toEpochMilli());
+        }
+        if (value instanceof Byte
+            || value instanceof Short
+            || value instanceof Integer
+            || value instanceof Long) {
+            long coordinate = ((Number) value).longValue();
+            if (coordinate < 0) {
+                throw new IllegalArgumentException("transaction range coordinates must be non-negative");
+            }
+            return new TxRangeBound(1, coordinate);
+        }
+        throw new IllegalArgumentException(
+            "transaction range bounds must be null, an integer t or transaction id, java.util.Date, or java.time.Instant");
+    }
+
     private static String platformLibraryName() {
         return System.mapLibraryName("vev");
     }
@@ -434,11 +468,19 @@ public final class Vev implements AutoCloseable {
         this.sqliteConnPreparedColumnBatchWithInputs = downcall("vev_sqlite_conn_prepared_column_batch_with_inputs", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbRetain = downcall("vev_db_retain", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbRelease = downcall("vev_db_release", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+        this.dbBasisT = downcall("vev_db_basis_t", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+        this.dbNextT = downcall("vev_db_next_t", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+        this.dbHasAsOfT = downcall("vev_db_has_as_of_t", FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS));
+        this.dbAsOfT = downcall("vev_db_as_of_t", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+        this.dbHasSinceT = downcall("vev_db_has_since_t", FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS));
+        this.dbSinceT = downcall("vev_db_since_t", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+        this.dbIsHistory = downcall("vev_db_is_history", FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS));
         this.dbAsOf = downcall("vev_db_as_of", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
         this.dbAsOfInstantMillis = downcall("vev_db_as_of_instant_millis", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
         this.dbSince = downcall("vev_db_since", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
         this.dbSinceInstantMillis = downcall("vev_db_since_instant_millis", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
         this.dbHistory = downcall("vev_db_history", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        this.dbTxRangeValue = downcall("vev_db_tx_range_value", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG));
         this.withEdn = downcall("vev_with_edn", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.withEdnReport = downcall("vev_with_edn_report", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbWithEdn = downcall("vev_db_with_edn", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
@@ -1675,6 +1717,10 @@ public final class Vev implements AutoCloseable {
             return new DB(db);
         }
 
+        public Log log() throws Throwable {
+            return new Log(db());
+        }
+
         private void requireOpen() {
             if (isNull(raw)) throw new IllegalStateException("connection is closed");
         }
@@ -1843,6 +1889,10 @@ public final class Vev implements AutoCloseable {
             return new DB(db);
         }
 
+        public Log log() throws Throwable {
+            return new Log(db());
+        }
+
         public String backend() throws Throwable {
             requireOpen();
             return ownedString((MemorySegment) connectionBackend.invoke(raw));
@@ -1966,6 +2016,10 @@ public final class Vev implements AutoCloseable {
             return new DB(db);
         }
 
+        public Log log() throws Throwable {
+            return new Log(db());
+        }
+
         private void requireOpen() {
             if (isNull(raw)) throw new IllegalStateException("SQLite-backed connection is closed");
         }
@@ -1995,15 +2049,33 @@ public final class Vev implements AutoCloseable {
             return new DB(retained);
         }
 
-        public Object q(String query, String inputs) throws Throwable {
+        public long basisT() throws Throwable {
             requireOpen();
-            try (Arena local = Arena.ofConfined();
-                 ValueHandle value = new ValueHandle((MemorySegment) dbQueryValueWithInputs.invoke(
-                     handle.raw,
-                     local.allocateFrom(query),
-                     local.allocateFrom(inputs)))) {
-                return value.value();
-            }
+            return (long) dbBasisT.invoke(handle.raw);
+        }
+
+        public long nextT() throws Throwable {
+            requireOpen();
+            return (long) dbNextT.invoke(handle.raw);
+        }
+
+        public Long asOfT() throws Throwable {
+            requireOpen();
+            return (boolean) dbHasAsOfT.invoke(handle.raw)
+                ? (long) dbAsOfT.invoke(handle.raw)
+                : null;
+        }
+
+        public Long sinceT() throws Throwable {
+            requireOpen();
+            return (boolean) dbHasSinceT.invoke(handle.raw)
+                ? (long) dbSinceT.invoke(handle.raw)
+                : null;
+        }
+
+        public boolean isHistory() throws Throwable {
+            requireOpen();
+            return (boolean) dbIsHistory.invoke(handle.raw);
         }
 
         public DB asOf(long tx) throws Throwable {
@@ -2051,6 +2123,35 @@ public final class Vev implements AutoCloseable {
             MemorySegment filtered = (MemorySegment) dbHistory.invoke(handle.raw);
             if (isNull(filtered)) throw new IllegalStateException("failed to create history DB");
             return new DB(filtered);
+        }
+
+        private Object txRange(Object start, Object end) throws Throwable {
+            requireOpen();
+            TxRangeBound startBound = txRangeBound(start);
+            TxRangeBound endBound = txRangeBound(end);
+            MemorySegment raw = (MemorySegment) dbTxRangeValue.invoke(
+                handle.raw,
+                startBound.kind,
+                startBound.value,
+                endBound.kind,
+                endBound.value);
+            if (isNull(raw)) {
+                throw new IllegalStateException("failed to read transaction range");
+            }
+            try (ValueHandle value = new ValueHandle(raw)) {
+                return value.value();
+            }
+        }
+
+        public Object q(String query, String inputs) throws Throwable {
+            requireOpen();
+            try (Arena local = Arena.ofConfined();
+                 ValueHandle value = new ValueHandle((MemorySegment) dbQueryValueWithInputs.invoke(
+                     handle.raw,
+                     local.allocateFrom(query),
+                     local.allocateFrom(inputs)))) {
+                return value.value();
+            }
         }
 
         public EntityView entity(long entity) throws Throwable {
@@ -2797,6 +2898,23 @@ public final class Vev implements AutoCloseable {
         @Override
         public void close() {
             cleanable.clean();
+        }
+    }
+
+    public final class Log implements AutoCloseable {
+        private final DB db;
+
+        private Log(DB db) {
+            this.db = db;
+        }
+
+        public Object txRange(Object start, Object end) throws Throwable {
+            return db.txRange(start, end);
+        }
+
+        @Override
+        public void close() {
+            db.close();
         }
     }
 

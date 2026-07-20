@@ -475,6 +475,15 @@ vev_db_t recent = vev_db_since(db, tx);   /* exclusive */
 vev_db_t at_time = vev_db_as_of_instant_millis(db, unix_millis);
 vev_db_t after_time = vev_db_since_instant_millis(db, unix_millis);
 vev_db_t all = vev_db_history(db);
+
+unsigned long long basis = vev_db_basis_t(db);
+unsigned long long next = vev_db_next_t(db);
+bool has_bound = vev_db_has_as_of_t(earlier);
+unsigned long long bound = vev_db_as_of_t(earlier);
+
+/* Bound kinds: 0 open, 1 t or transaction id, 2 Unix milliseconds. */
+vev_value_handle_t transactions =
+    vev_db_tx_range_value(db, 1, start_t, 0, 0);
 ```
 
 Each returned handle is independently owned and released with
@@ -482,7 +491,9 @@ Each returned handle is independently owned and released with
 queries, including the optional transaction and added fields in five-position
 data clauses. The added field is a boolean. Instant functions accept signed
 Unix epoch milliseconds and resolve to the greatest transaction at or before
-that instant.
+that instant. `vev_db_tx_range_value` returns maps with `:t` and `:data`;
+range starts are inclusive and ends are exclusive. Release the returned value
+handle with `vev_value_handle_free`.
 
 ## Python Adapter
 

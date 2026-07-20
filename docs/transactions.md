@@ -109,6 +109,18 @@ Public spellings follow each host language:
 - Rust: `db.as_of`, `db.since`, `db.history`
 - Go: `db.AsOf`, `db.Since`, `db.History`
 
+Clojure and Kvist also expose Datomic-shaped immutable DB metadata:
+`basis-t`, `next-t`, `as-of-t`, and `since-t`. A filtered DB keeps the latest
+basis reachable from its source while reporting its normalized filter bound
+separately.
+
+The transaction log range API is `(d/tx-range (d/log conn) start end)` in
+Clojure and `d.tx-range` in Kvist. Its start is inclusive, its end is
+exclusive, and bounds may be open, transaction coordinates, or native
+instants. Each result has `{:t t :data datoms}` shape. See
+[Historical database values](history.md#transaction-ranges) for exact boundary
+semantics and the executable Datomic Peer comparison.
+
 Conceptually, each datom is associated with:
 
 - entity `e`

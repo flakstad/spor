@@ -84,6 +84,18 @@ works with Datomic Peer and Vev:
 (d/as-of current #inst "2026-07-20T10:15:00.000Z")
 (d/since current #inst "2026-07-20T10:15:00.000Z") ; exclusive
 (d/history current)
+
+;; Metadata on immutable DB values
+(d/basis-t current)
+(d/next-t current)
+(d/as-of-t (d/as-of current tx))
+(d/since-t (d/since current tx))
+(d/history? (d/history current))
+
+;; Datomic log shape: start inclusive, end exclusive
+(d/tx-range (d/log conn) nil nil)
+(d/tx-range (d/log conn) tx-start tx-end)
+(d/tx-range (d/log conn) #inst "2026-07-20" #inst "2026-07-21")
 ```
 
 `java.time.Instant` is also accepted by Vev. See

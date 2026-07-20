@@ -5,7 +5,7 @@
   (:require [clojure.edn :as edn]
             [clojure.set :as set])
   (:import [java.nio.file Path]
-           [com.vevdb Vev Vev$ColumnResult Vev$DB Vev$Entity Vev$EntityView Vev$Keyword Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxFunction Vev$TxReportListener]))
+           [com.vevdb Vev Vev$ColumnResult Vev$DB Vev$Entity Vev$EntityView Vev$Keyword Vev$Log Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxFunction Vev$TxReportListener]))
 
 (defn- path [value]
   (cond
@@ -144,7 +144,10 @@
   (close [_]
     (.close ^java.lang.AutoCloseable native)))
 
-(defrecord Log [conn])
+(defrecord Log [^Vev engine ^Vev$Log native conn]
+  java.lang.AutoCloseable
+  (close [_]
+    (.close native)))
 
 (defrecord SQLiteConn [^Vev engine native]
   java.lang.AutoCloseable
@@ -288,11 +291,20 @@
     (throw (ex-info "expected Vev durable connection" {:source conn}))))
 
 (defn log
-  "Return a Datomic-style transaction log value for a durable connection."
+  "Return a Datomic-style transaction log value for a connection."
   [conn]
-  (when-not (instance? DurableConn conn)
-    (throw (ex-info "expected Vev durable connection" {:source conn})))
-  (->Log conn))
+  (cond
+    (instance? Conn conn)
+    (->Log (:engine conn) (.log (:native conn)) conn)
+
+    (instance? DurableConn conn)
+    (->Log (:engine conn) (.log (:native conn)) conn)
+
+    (instance? SQLiteConn conn)
+    (->Log (:engine conn) (.log (:native conn)) conn)
+
+    :else
+    (throw (ex-info "expected Vev connection" {:source conn}))))
 
 (defn compact-indexes!
   "Compact durable index roots as an explicit maintenance operation."
@@ -614,6 +626,38 @@
   "Return a history DB containing assertions and retractions across time."
   [^DB db]
   (->DB (:engine db) (.history (:native db))))
+
+(defn basis-t
+  "Return the latest transaction t reachable from this immutable DB value."
+  [^DB db]
+  (.basisT (:native db)))
+
+(defn next-t
+  "Return the t that would follow this DB value's basis."
+  [^DB db]
+  (.nextT (:native db)))
+
+(defn as-of-t
+  "Return the normalized as-of t for a filtered DB, or nil."
+  [^DB db]
+  (.asOfT (:native db)))
+
+(defn since-t
+  "Return the normalized since t for a filtered DB, or nil."
+  [^DB db]
+  (.sinceT (:native db)))
+
+(defn history?
+  "Return true when db is a history database value."
+  [^DB db]
+  (.isHistory (:native db)))
+
+(defn tx-range
+  "Return transaction maps from log between start (inclusive) and end
+  (exclusive). Bounds may be nil, t values, transaction ids, java.util.Date,
+  or java.time.Instant."
+  [^Log log-value start end]
+  (clj-value (.txRange (:native log-value) start end)))
 
 (defn tx-builder
   "Create a native transaction builder for direct typed bulk tx construction."

@@ -352,6 +352,32 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
         if (history_db != NULL) vev_db_release(history_db);
         goto cleanup;
     }
+    if (vev_db_basis_t(db) != 0 || vev_db_next_t(db) != 1 ||
+        vev_db_has_as_of_t(db) || vev_db_has_since_t(db) ||
+        vev_db_is_history(db) ||
+        !vev_db_has_as_of_t(as_of_db) || vev_db_as_of_t(as_of_db) != 0 ||
+        !vev_db_has_since_t(since_db) || vev_db_since_t(since_db) != 0 ||
+        !vev_db_is_history(history_db)) {
+        fprintf(stderr, "unexpected immutable DB metadata\n");
+        vev_db_release(as_of_db);
+        vev_db_release(since_db);
+        vev_db_release(as_of_instant_db);
+        vev_db_release(since_instant_db);
+        vev_db_release(history_db);
+        goto cleanup;
+    }
+    vev_value_handle_t empty_range =
+        vev_db_tx_range_value(db, 0, 0, 0, 0);
+    if (empty_range == NULL) {
+        fprintf(stderr, "failed to read empty transaction range\n");
+        vev_db_release(as_of_db);
+        vev_db_release(since_db);
+        vev_db_release(as_of_instant_db);
+        vev_db_release(since_instant_db);
+        vev_db_release(history_db);
+        goto cleanup;
+    }
+    vev_value_handle_free(empty_range);
     vev_db_release(as_of_db);
     vev_db_release(since_db);
     vev_db_release(as_of_instant_db);

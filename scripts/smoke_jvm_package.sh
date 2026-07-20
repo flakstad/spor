@@ -49,12 +49,24 @@ cat > "$TMP_DIR/java-smoke.clj" <<'EOF'
     (assert (= 1 @seen)))
   (.transact conn "[{:db/id 1 :user/name \"Ada\"}]")
   (with-open [db (.db conn)]
-    (let [relation (.query vev (java.util.Map/of
+    (let [basis (.basisT db)
+          relation (.query vev (java.util.Map/of
                                 "query" "[:find ?name :where [?e :user/name ?name]]"
                                 "args" (java.util.List/of db)))
           scalar (.query vev (java.util.Map/of
                               "query" "[:find ?name . :where [1 :user/name ?name]]"
                               "args" (java.util.List/of db)))]
+      (assert (= 3 basis))
+      (assert (= 4 (.nextT db)))
+      (assert (nil? (.asOfT db)))
+      (assert (nil? (.sinceT db)))
+      (assert (false? (.isHistory db)))
+      (with-open [log (.log conn)]
+        (assert (= 3 (count (.txRange log nil nil)))))
+      (with-open [earlier (.asOf db (dec basis))
+                  history (.history db)]
+        (assert (= (dec basis) (.asOfT earlier)))
+        (assert (.isHistory history)))
       (assert (= #{["Ada"]} (set (map vec relation))))
       (assert (= "Ada" scalar))))
   (println :vev-java-package-ok))
@@ -92,6 +104,16 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
     (assert (= #{["Grace"]}
                (d/q '[:find ?name :where [2 :user/name ?name]]
                     (d/db conn)))))
+  (with-open [snapshot (d/db conn)
+              earlier (d/as-of snapshot (dec (d/basis-t snapshot)))
+              audit (d/history snapshot)]
+    (assert (= (inc (d/basis-t snapshot)) (d/next-t snapshot)))
+    (assert (nil? (d/as-of-t snapshot)))
+    (assert (nil? (d/since-t snapshot)))
+    (assert (= (dec (d/basis-t snapshot)) (d/as-of-t earlier)))
+    (assert (d/history? audit))
+    (assert (= (d/basis-t snapshot)
+               (count (d/tx-range (d/log conn) nil nil)))))
   (println :vev-jvm-package-ok))
 EOF
 

@@ -76,6 +76,31 @@ try (Vev.DB db = conn.db();
 Parser tooling can inspect a single where clause with
 `vev.parseClauseEdn("[?e :user/name ?name]")`.
 
+Immutable DB metadata and transaction ranges follow the Datomic model:
+
+```java
+try (Vev.DB db = conn.db();
+     Vev.Log log = conn.log();
+     Vev.DB earlier = db.asOf(1);
+     Vev.DB audit = db.history()) {
+    System.out.println(db.basisT());
+    System.out.println(db.nextT());
+    System.out.println(earlier.asOfT()); // nullable Long
+    System.out.println(audit.isHistory());
+
+    // Start inclusive, end exclusive. null means an open bound.
+    System.out.println(log.txRange(null, null));
+    System.out.println(log.txRange(1L, 3L));
+    System.out.println(log.txRange(
+        Date.from(startInstant),
+        Date.from(endInstant)));
+}
+```
+
+`txRange` accepts `Long`-compatible integer values, `java.util.Date`,
+`java.time.Instant`, or `null`. It returns ordinary Java lists and maps with
+the Datomic-shaped `{:t ..., :data ...}` structure.
+
 Transaction functions use a host registry plus a Datomic-style installed ident
 in the DB:
 

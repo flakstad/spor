@@ -15822,6 +15822,9 @@
       (when direct-used
         (return direct-result))))
   (when (and (= source.kind .Resident)
+             (not source.filter-has-as-of)
+             (not source.filter-has-since)
+             (not source.filter-history)
              (= (count sources) 0)
              (not (db-read-source-query-has-source-inputs? query-value))
              (not (query-has-source-function? query-value)))

@@ -98,6 +98,8 @@
           since-db (d.since db (u64 4611686018427387904)) :defer-with d.close
           since-t-db (d.since db (u64 1)) :defer-with d.close
           history-db (d.history db) :defer-with d.close
+          all-transactions (d.tx-range (d.log conn) (kdata.from-nil) (kdata.from-nil))
+          second-transaction-onward (d.tx-range (d.log conn) (kdata.from-int 2) (kdata.from-nil))
           history-rows: Data
             (d.q
               '[:find ?name ?tx ?added
@@ -113,6 +115,20 @@
         (fail! "resident since did not accept basis t"))
       (when (not (= (count history-rows) 3))
         (fail! "resident history did not expose the full fact history"))
+      (when (or (not (= (d.basis-t db) 2))
+                (not (= (d.next-t db) 3))
+                (not (kdata.nil? (d.as-of-t db)))
+                (not (kdata.nil? (d.since-t db)))
+                (d.history? db))
+        (fail! "resident current DB metadata did not match Datomic semantics"))
+      (when (or (not (= (d.basis-t as-of-t-db) 2))
+                (not (= (kdata.int (d.as-of-t as-of-t-db)) 1))
+                (not (= (kdata.int (d.since-t since-t-db)) 1))
+                (not (d.history? history-db)))
+        (fail! "resident filtered DB metadata did not match Datomic semantics"))
+      (when (or (not (= (count all-transactions) 2))
+                (not (= (count second-transaction-onward) 1)))
+        (fail! "resident tx-range did not use inclusive/exclusive t bounds"))
       (fmt.println "history-api resident: ok")))
   (let [conn (d.create-conn)
         first-time (instant-data "2020-01-01T00:00:00.000Z")
@@ -136,7 +152,17 @@
             exact (d.as-of db first-instant) :defer-with d.close
             before (d.as-of db (instant-data "2000-01-01T00:00:00.000Z")) :defer-with d.close
             after (d.as-of db (instant-data "2100-01-01T00:00:00.000Z")) :defer-with d.close
-            recent (d.since db first-instant) :defer-with d.close]
+            recent (d.since db first-instant) :defer-with d.close
+            from-second
+              (d.tx-range
+                (d.log conn)
+                (instant-data "2020-06-01T00:00:00.000Z")
+                (kdata.from-nil))
+            until-second
+              (d.tx-range
+                (d.log conn)
+                (kdata.from-nil)
+                second-time)]
         (when (not (= (query-name-count exact "Ada") 1))
           (fail! "Kvist instant as-of did not include the exact transaction"))
         (when (not (= (query-name-count before "Ada") 0))
@@ -145,4 +171,7 @@
           (fail! "Kvist instant as-of after history did not include the latest state"))
         (when (not (= (query-name-count recent "Grace") 1))
           (fail! "Kvist instant since did not use an exclusive boundary"))
+        (when (or (not (= (count from-second) 1))
+                  (not (= (count until-second) 1)))
+          (fail! "Kvist tx-range did not follow Datomic instant boundary semantics"))
         (fmt.println "history-api Kvist instants: ok")))))

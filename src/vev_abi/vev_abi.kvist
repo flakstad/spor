@@ -4318,6 +4318,60 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (Vev-DB (abi-retain-db (rawptr db))))
 
 @export
+(defn vev_db_basis_t :abi "c" [db: Vev-DB] -> u64
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return 0))
+  (let [[basis-t ok _] (vev.store-db-basis-t (store-db-ptr db))]
+    (if ok basis-t 0)))
+
+@export
+(defn vev_db_next_t :abi "c" [db: Vev-DB] -> u64
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return 0))
+  (let [[next-t ok _] (vev.store-db-next-t (store-db-ptr db))]
+    (if ok next-t 0)))
+
+@export
+(defn vev_db_has_as_of_t :abi "c" [db: Vev-DB] -> bool
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return false))
+  (let [[_ present] (vev.store-db-as-of-t (store-db-ptr db))]
+    present))
+
+@export
+(defn vev_db_as_of_t :abi "c" [db: Vev-DB] -> u64
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return 0))
+  (let [[value present] (vev.store-db-as-of-t (store-db-ptr db))]
+    (if present value 0)))
+
+@export
+(defn vev_db_has_since_t :abi "c" [db: Vev-DB] -> bool
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return false))
+  (let [[_ present] (vev.store-db-since-t (store-db-ptr db))]
+    present))
+
+@export
+(defn vev_db_since_t :abi "c" [db: Vev-DB] -> u64
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return 0))
+  (let [[value present] (vev.store-db-since-t (store-db-ptr db))]
+    (if present value 0)))
+
+@export
+(defn vev_db_is_history :abi "c" [db: Vev-DB] -> bool
+  (odin "context = runtime.default_context()")
+  (and (not (= (rawptr db) nil))
+       (vev.store-db-history? (store-db-ptr db))))
+
+@export
 (defn vev_db_as_of :abi "c" [db: Vev-DB, tx: u64] -> Vev-DB
   (odin "context = runtime.default_context()")
   (when (= (rawptr db) nil)
@@ -4357,6 +4411,32 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (when (= (rawptr db) nil)
     (return (Vev-DB nil)))
   (Vev-DB (abi-alloc-db (vev.history-store-db (store-db-ptr db)))))
+
+(defn- tx-range-bound-value [kind: int, raw-value: i64] -> [value: vev.Value, ok: bool]
+  (case kind
+    0 (return (vev.value-nil) true)
+    1
+      (if (>= raw-value 0)
+        (return (vev.value-int raw-value) true)
+        (return (vev.value-nil) false))
+    2 (return (vev.value-instant raw-value) true)
+    (return (vev.value-nil) false)))
+
+@export
+(defn vev_db_tx_range_value :abi "c" [db: Vev-DB, start-kind: int, start-value: i64, end-kind: int, end-value: i64] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return (Vev-Value-Handle nil)))
+  (let [[start start-ok] (tx-range-bound-value start-kind start-value)
+        [end end-ok] (tx-range-bound-value end-kind end-value)]
+    (when (not (and start-ok end-ok))
+      (return (Vev-Value-Handle nil)))
+    (let [[value ok _] (vev.store-db-tx-range-value (store-db-ptr db) start end)]
+      (if ok
+        (value-handle-from-owned-value value)
+        (do
+          (vev.delete-owned-value value)
+          (Vev-Value-Handle nil))))))
 
 @export
 (defn vev_with_edn :abi "c" [db: Vev-DB, tx-text: cstring] -> cstring

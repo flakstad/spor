@@ -208,11 +208,26 @@ vev_db_t vev_conn_db(vev_conn_t conn);
 vev_conn_t vev_conn_from_db(vev_db_t db);
 vev_db_t vev_db_retain(vev_db_t db);
 void vev_db_release(vev_db_t db);
+unsigned long long vev_db_basis_t(vev_db_t db);
+unsigned long long vev_db_next_t(vev_db_t db);
+bool vev_db_has_as_of_t(vev_db_t db);
+unsigned long long vev_db_as_of_t(vev_db_t db);
+bool vev_db_has_since_t(vev_db_t db);
+unsigned long long vev_db_since_t(vev_db_t db);
+bool vev_db_is_history(vev_db_t db);
 vev_db_t vev_db_as_of(vev_db_t db, unsigned long long tx);
 vev_db_t vev_db_as_of_instant_millis(vev_db_t db, long long unix_millis);
 vev_db_t vev_db_since(vev_db_t db, unsigned long long tx);
 vev_db_t vev_db_since_instant_millis(vev_db_t db, long long unix_millis);
 vev_db_t vev_db_history(vev_db_t db);
+/* tx-range bound kinds: 0 = open, 1 = t or transaction id, 2 = Unix
+   milliseconds. The start is inclusive and the end is exclusive. */
+vev_value_handle_t vev_db_tx_range_value(
+    vev_db_t db,
+    int start_kind,
+    long long start_value,
+    int end_kind,
+    long long end_value);
 const char *vev_with_edn(vev_db_t db, const char *tx_text);
 vev_tx_report_t vev_with_edn_report(vev_db_t db, const char *tx_text);
 vev_db_t vev_db_with_edn(vev_db_t db, const char *tx_text);
