@@ -114,9 +114,13 @@
       (when (not (= (count history-rows) 3))
         (fail! "resident history did not expose the full fact history"))
       (fmt.println "history-api resident: ok")))
-  (let [conn (d.create-conn)]
+  (let [conn (d.create-conn)
+        first-time (instant-data "2020-01-01T00:00:00.000Z")
+        second-time (instant-data "2021-01-01T00:00:00.000Z")]
     (defer (d.close conn))
-    (d.transact conn [[:db/add 1 :user/name "Ada"]])
+    (d.transact conn
+      [{:db/id "datomic.tx" :db/txInstant first-time}
+       [:db/add 1 :user/name "Ada"]])
     (let [first-db (d.db conn) :defer-with d.close
           first-instant: Data
             (d.q
@@ -124,8 +128,10 @@
                 :where [1 :user/name "Ada" ?tx]
                        [?tx :db/txInstant ?instant]]
               first-db)]
-      (d.transact conn [[:db/retract 1 :user/name "Ada"]
-                        [:db/add 1 :user/name "Grace"]])
+      (d.transact conn
+        [{:db/id "datomic.tx" :db/txInstant second-time}
+         [:db/retract 1 :user/name "Ada"]
+         [:db/add 1 :user/name "Grace"]])
       (let [db (d.db conn) :defer-with d.close
             exact (d.as-of db first-instant) :defer-with d.close
             before (d.as-of db (instant-data "2000-01-01T00:00:00.000Z")) :defer-with d.close
