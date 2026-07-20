@@ -212,9 +212,9 @@ builds pass.
 `scripts/package_jvm.sh` builds local proof jars under `build/jvm`:
 
 ```text
-vev-java-0.2.0-rc.2.jar
-vev-native-<platform>-0.2.0-rc.2.jar
-vev-clj-0.2.0-rc.2.jar
+vev-java-0.2.0-rc.3.jar
+vev-native-<platform>-0.2.0-rc.3.jar
+vev-clj-0.2.0-rc.3.jar
 ```
 
 It also writes a local Maven-style repository under `build/m2`. These

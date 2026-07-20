@@ -93,7 +93,7 @@ can be tested from outside the repo before publication:
 
 ```clojure
 {:mvn/local-repo "/path/to/vev/build/m2"
- :deps {com.vevdb/vev-clj {:mvn/version "0.2.0-rc.2"}}}
+ :deps {com.vevdb/vev-clj {:mvn/version "0.2.0-rc.3"}}}
 ```
 
 For Java, the matching Maven dependency is `com.vevdb:vev-java`. Both
