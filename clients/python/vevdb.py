@@ -54,6 +54,17 @@ VEV_COLUMN_SYMBOL = 9
 VEV_COLUMN_UUID = 10
 VEV_COLUMN_INSTANT = 11
 
+
+def _datetime_millis(value: datetime) -> int:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    delta = value.astimezone(timezone.utc) - datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return (
+        delta.days * 86_400_000
+        + delta.seconds * 1_000
+        + delta.microseconds // 1_000
+    )
+
 RESULT_VISIT_FN = ctypes.CFUNCTYPE(
     ctypes.c_bool,
     ctypes.c_void_p,
@@ -303,8 +314,18 @@ class Library:
         lib.vev_db_release.argtypes = [ctypes.c_void_p]
         lib.vev_db_as_of.argtypes = [ctypes.c_void_p, ctypes.c_ulonglong]
         lib.vev_db_as_of.restype = ctypes.c_void_p
+        lib.vev_db_as_of_instant_millis.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_longlong,
+        ]
+        lib.vev_db_as_of_instant_millis.restype = ctypes.c_void_p
         lib.vev_db_since.argtypes = [ctypes.c_void_p, ctypes.c_ulonglong]
         lib.vev_db_since.restype = ctypes.c_void_p
+        lib.vev_db_since_instant_millis.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_longlong,
+        ]
+        lib.vev_db_since_instant_millis.restype = ctypes.c_void_p
         lib.vev_db_history.argtypes = [ctypes.c_void_p]
         lib.vev_db_history.restype = ctypes.c_void_p
         lib.vev_with_edn.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
@@ -1628,18 +1649,32 @@ class DB:
             raise VevError("failed to create DB snapshot")
         return DB(self._library, handle)
 
-    def as_of(self, tx: int) -> "DB":
-        """Return the database as of transaction `tx`, inclusive."""
+    def as_of(self, time_point: int | datetime) -> "DB":
+        """Return the database as of a transaction or datetime, inclusive."""
         self._require_open()
-        handle = self._library.lib.vev_db_as_of(self._handle, int(tx))
+        if isinstance(time_point, datetime):
+            handle = self._library.lib.vev_db_as_of_instant_millis(
+                self._handle, _datetime_millis(time_point)
+            )
+        else:
+            handle = self._library.lib.vev_db_as_of(
+                self._handle, int(time_point)
+            )
         if not handle:
             raise VevError("failed to create as-of DB")
         return DB(self._library, handle)
 
-    def since(self, tx: int) -> "DB":
-        """Return facts asserted after transaction `tx`, exclusive."""
+    def since(self, time_point: int | datetime) -> "DB":
+        """Return facts asserted after a transaction or datetime, exclusive."""
         self._require_open()
-        handle = self._library.lib.vev_db_since(self._handle, int(tx))
+        if isinstance(time_point, datetime):
+            handle = self._library.lib.vev_db_since_instant_millis(
+                self._handle, _datetime_millis(time_point)
+            )
+        else:
+            handle = self._library.lib.vev_db_since(
+                self._handle, int(time_point)
+            )
         if not handle:
             raise VevError("failed to create since DB")
         return DB(self._library, handle)

@@ -4325,11 +4325,31 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (Vev-DB (abi-alloc-db (vev.as-of-store-db (store-db-ptr db) tx))))
 
 @export
+(defn vev_db_as_of_instant_millis :abi "c" [db: Vev-DB, unix-millis: i64] -> Vev-DB
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return (Vev-DB nil)))
+  (let [[filtered ok _] (vev.as-of-store-db-instant (store-db-ptr db) unix-millis)]
+    (when (not ok)
+      (return (Vev-DB nil)))
+    (Vev-DB (abi-alloc-db filtered))))
+
+@export
 (defn vev_db_since :abi "c" [db: Vev-DB, tx: u64] -> Vev-DB
   (odin "context = runtime.default_context()")
   (when (= (rawptr db) nil)
     (return (Vev-DB nil)))
   (Vev-DB (abi-alloc-db (vev.since-store-db (store-db-ptr db) tx))))
+
+@export
+(defn vev_db_since_instant_millis :abi "c" [db: Vev-DB, unix-millis: i64] -> Vev-DB
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return (Vev-DB nil)))
+  (let [[filtered ok _] (vev.since-store-db-instant (store-db-ptr db) unix-millis)]
+    (when (not ok)
+      (return (Vev-DB nil)))
+    (Vev-DB (abi-alloc-db filtered))))
 
 @export
 (defn vev_db_history :abi "c" [db: Vev-DB] -> Vev-DB

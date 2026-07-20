@@ -491,9 +491,9 @@ Possible shapes:
 Immutable transactions and stable snapshots may make replication and
 local-first sync natural later extensions.
 
-Transaction-id `as-of`, `since`, and `history` database views are implemented
-for resident and durable snapshots. Remaining time API work includes native
-instant/date boundaries, richer DB metadata, and broader parity tests; it is
+Transaction-id and native instant/date `as-of` and `since` database views,
+plus `history`, are implemented for resident and durable snapshots. Remaining
+time API work includes richer DB metadata and broader parity tests; it is
 separate from replication and sync.
 
 Possible goal:

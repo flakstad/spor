@@ -7551,7 +7551,7 @@
       (when (not (db-read-source-binding-match-optional-borrowed! (addr candidate-binding) clause-value.tx-term (datom-tx-value datom)))
         (db-read-source-delete-binding-owned candidate-binding)
         (return (Binding {}) false))
-      (when (not (db-read-source-binding-match-optional-borrowed! (addr candidate-binding) clause-value.op-term (datom-op-value datom)))
+      (when (not (db-read-source-binding-match-optional-borrowed! (addr candidate-binding) clause-value.op-term (value-bool datom.added)))
         (db-read-source-delete-binding-owned candidate-binding)
         (return (Binding {}) false))
       (return candidate-binding true))
@@ -7567,7 +7567,7 @@
     (when (not (db-read-source-binding-match-optional-borrowed! (addr candidate-binding) clause-value.tx-term (datom-tx-value datom)))
       (db-read-source-delete-binding-owned candidate-binding)
       (return (Binding {}) false))
-    (when (not (db-read-source-binding-match-optional-borrowed! (addr candidate-binding) clause-value.op-term (datom-op-value datom)))
+    (when (not (db-read-source-binding-match-optional-borrowed! (addr candidate-binding) clause-value.op-term (value-bool datom.added)))
       (db-read-source-delete-binding-owned candidate-binding)
       (return (Binding {}) false))
     (return candidate-binding true)))
@@ -11273,7 +11273,7 @@
          (and (= clause-value.a.kind .Value)
               (= clause-value.a.value.kind .Keyword)))
        (db-read-source-direct-optional-term-matches-typed-row! source rel row names values clause-value.tx-term (datom-tx-value datom))
-       (db-read-source-direct-optional-term-matches-typed-row! source rel row names values clause-value.op-term (datom-op-value datom))))
+       (db-read-source-direct-optional-term-matches-typed-row! source rel row names values clause-value.op-term (value-bool datom.added))))
 
 (defn db-read-source-direct-clause-var-value [rel: Query-Relation, row: int, scan: Clause-Index-Scan, clause-value: Clause, datom: Datom, name: string] -> [value: Value, ok: bool]
   (let [[existing existing-ok] (query-relation-typed-row-value rel row name)]
@@ -11288,7 +11288,7 @@
   (when (term-var-name? clause-value.tx-term name)
     (return (datom-tx-value datom) true))
   (when (term-var-name? clause-value.op-term name)
-    (return (value-owned (datom-op-value datom)) true))
+    (return (value-bool datom.added) true))
   (return (Value {}) false))
 
 (defn db-read-source-direct-clause-var-borrowed-value [rel: Query-Relation, row: int, scan: Clause-Index-Scan, clause-value: Clause, datom: Datom, name: string] -> [value: Value, ok: bool]
@@ -11304,7 +11304,7 @@
   (when (term-var-name? clause-value.tx-term name)
     (return (datom-tx-value datom) true))
   (when (term-var-name? clause-value.op-term name)
-    (return (datom-op-value datom) true))
+    (return (value-bool datom.added) true))
   (return (Value {}) false))
 
 (defn query-relation-builder-can-add-db-source-clause-row? [builder: Query-Relation-Builder, attrs: []string, rel: Query-Relation, row: int, scan: Clause-Index-Scan, clause-value: Clause, datom: Datom] -> bool
@@ -18780,7 +18780,7 @@
 
 (defn datom-tx-op-terms-match? [datom: Datom, clause: Clause, binding: ^Binding] -> bool
   (and (match-optional-datom-term? clause.tx-term (datom-tx-value datom) binding)
-       (match-optional-datom-term? clause.op-term (datom-op-value datom) binding)))
+       (match-optional-datom-term? clause.op-term (value-bool datom.added) binding)))
 
 (defn datom-clause-matches? [db: DB, datom: Datom, clause: Clause, binding: ^Binding] -> bool
   (when (and (= clause.a.kind .Value)
@@ -27224,7 +27224,7 @@
 (defn unbound-datom-clause-matches? [db: DB, datom: Datom, clause-value: Clause] -> bool
   (let [[e-value a-value v-value] (unbound-datom-clause-values datom clause-value)
         tx-value (datom-tx-value datom)
-        op-value (datom-op-value datom)]
+        op-value (value-bool datom.added)]
     (when (and (= clause-value.a.kind .Value)
                (= clause-value.a.value.kind .Keyword)
                (reverse-attr? clause-value.a.value.text))
@@ -27263,7 +27263,7 @@
     (when (term-var-name? clause-value.tx-term name)
       (return (datom-tx-value datom) true))
     (when (term-var-name? clause-value.op-term name)
-      (return (datom-op-value datom) true))
+      (return (value-bool datom.added) true))
     (return (Value {}) false)))
 
 (defn typed-same-var-term-agrees? [db: DB, name: string, term: Term, actual: Value, base: Value] -> bool
@@ -27298,7 +27298,7 @@
 
 (defn typed-datom-clause-matches? [db: DB, rel: Query-Relation, row: int, datom: Datom, clause-value: Clause] -> bool
   (let [tx-value (datom-tx-value datom)
-        op-value (datom-op-value datom)]
+        op-value (value-bool datom.added)]
     (when (and (= clause-value.a.kind .Value)
                (= clause-value.a.value.kind .Keyword)
                (reverse-attr? clause-value.a.value.text))
@@ -27344,7 +27344,7 @@
     (when (term-var-name? clause-value.tx-term name)
       (return (datom-tx-value datom) true))
     (when (term-var-name? clause-value.op-term name)
-      (return (datom-op-value datom) true))
+      (return (value-bool datom.added) true))
     (return (Value {}) false))
   (when (term-var-name? clause-value.e name)
     (return (value-entity datom.e) true))
@@ -27355,7 +27355,7 @@
   (when (term-var-name? clause-value.tx-term name)
     (return (datom-tx-value datom) true))
   (when (term-var-name? clause-value.op-term name)
-    (return (datom-op-value datom) true))
+    (return (value-bool datom.added) true))
   (return (Value {}) false))
 
 (defn append-typed-bound-clause-row! [builder: ^Query-Relation-Builder, attrs: []string, rel: Query-Relation, row: int, clause-value: Clause, datom: Datom] -> bool
@@ -27423,7 +27423,7 @@
                   (when (and (or all-current (datom-current-at? db datom-index))
                              (typed-bound-clause-term-matches? db rel row attr true clause-value.v datom.v)
                              (typed-bound-optional-term-matches? rel row clause-value.tx-term (datom-tx-value datom))
-                             (typed-bound-optional-term-matches? rel row clause-value.op-term (datom-op-value datom))
+                             (typed-bound-optional-term-matches? rel row clause-value.op-term (value-bool datom.added))
                              (resident-clause-pushdown-matches? op rel row datom clause-value))
                     (when (not (append-typed-bound-clause-row! (addr builder) (slice attrs 0) rel row clause-value datom))
                       (delete attrs)

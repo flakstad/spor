@@ -526,19 +526,19 @@
         literal (vev.q report.db-after
                   [:find ?tx ?name
                    :where
-                   [1 :user/name ?name ?tx :db/add]])
-        prepared (vev.prepare-query-text "[:find ?tx ?name :where [1 :user/name ?name ?tx :db/add]]")
+                   [1 :user/name ?name ?tx true]])
+        prepared (vev.prepare-query-text "[:find ?tx ?name :where [1 :user/name ?name ?tx true]]")
         prepared-result (vev.q-prepared report.db-after prepared)
         text (vev.q-text
                report.db-after
-               "[:find ?tx ?name :where [1 :user/name ?name ?tx :db/add]]")
+               "[:find ?tx ?name :where [1 :user/name ?name ?tx true]]")
         tx-only (vev.q report.db-after
                   [:find ?tx ?age
                    :where
                    [1 :user/age ?age ?tx]])
         retract-op (vev.q-text
                      report.db-after
-                     "[:find ?name :where [1 :user/name ?name _ :db/retract]]")]
+                     "[:find ?name :where [1 :user/name ?name _ false]]")]
     (t.is (= (count literal.rows) 1))
     (t.is (= literal.rows[0].values[0].entity report.tx))
     (t.is (= literal.rows[0].values[1].text "Ada"))
@@ -2482,8 +2482,8 @@
   (let [conn (vev.create-conn)
         result-value (vev.q-text-value-with-input-text
                        conn.db
-                       "[:find ?e ?a ?v ?t :in $rows :where [$rows ?e ?a ?v ?t :db/retract]]"
-                       "[[[1 :name \"Ivan\" 945 :db/add] [1 :age 39 999 :db/retract]]]")
+                       "[:find ?e ?a ?v ?t :in $rows :where [$rows ?e ?a ?v ?t false]]"
+                       "[[[1 :name \"Ivan\" 945 true] [1 :age 39 999 false]]]")
         [rows rows-ok] (map-value result-value ":rows")
         [values values-ok] (map-value rows.items[0] ":values")]
     (t.is rows-ok)
@@ -2509,12 +2509,12 @@
                         3)]))
         collection (vev.q-text-with-inputs
                      conn.db
-                     "[:find ?e ?a ?v ?t :in $rows :where [$rows ?e ?a ?v ?t :db/retract]]"
+                     "[:find ?e ?a ?v ?t :in $rows :where [$rows ?e ?a ?v ?t false]]"
                      ([]vev.Query-Input
                        [(vev.query-input-collection
                           ([]vev.Value
-                            [(vev.value-vector5 (vev.value-int 1) (vev.value-keyword ":name") (vev.value-string "Ivan") (vev.value-int 945) (vev.value-keyword ":db/add"))
-                             (vev.value-vector5 (vev.value-int 1) (vev.value-keyword ":age") (vev.value-int 39) (vev.value-int 999) (vev.value-keyword ":db/retract"))]))]))
+                            [(vev.value-vector5 (vev.value-int 1) (vev.value-keyword ":name") (vev.value-string "Ivan") (vev.value-int 945) (vev.value-bool true))
+                             (vev.value-vector5 (vev.value-int 1) (vev.value-keyword ":age") (vev.value-int 39) (vev.value-int 999) (vev.value-bool false))]))]))
         map-value (vev.value-map
                     ([]vev.Value [(vev.value-keyword ":a") (vev.value-int 1)
                                   (vev.value-keyword ":b") (vev.value-int 2)]))
@@ -2561,7 +2561,7 @@
                  "[:find ?n ?a :where [?e :aka \"dragon_killer_94\"] [?e :name ?n] [?e :age ?a]]")
         long (vev.q-text-relation-db
                long-rows
-               "[:find ?e ?a ?v ?t :where [?e ?a ?v ?t :db/retract]]")]
+               "[:find ?e ?a ?v ?t :where [?e ?a ?v ?t false]]")]
     (t.is (= (count result.rows) 1))
     (t.is (= result.rows[0].values[0].text "Ivan"))
     (t.is (= result.rows[0].values[1].int-value 19))
@@ -4373,10 +4373,10 @@
         long-rows (vev.q conn.db
                     [:find ?e ?a ?v ?t
                      :in $rows
-                     :where
-                     [$rows ?e ?a ?v ?t :db/retract]]
-                    [[1 :name "Ivan" 945 :db/add]
-                     [1 :age 39 999 :db/retract]])]
+                    :where
+                     [$rows ?e ?a ?v ?t false]]
+                    [[1 :name "Ivan" 945 true]
+                     [1 :age 39 999 false]])]
     (t.is (= (count result.rows) 1))
     (t.is (= result.rows[0].values[0].text "Ivan"))
     (t.is (= result.rows[0].values[1].int-value 19))

@@ -28,8 +28,8 @@ export class DB {
   rows(query: PreparedQuery, inputs?: string): unknown[][];
   q(query: string, inputs?: string): unknown[][];
   withReport(tx: string): { edn: string; dbBefore: DB; dbAfter: DB };
-  asOf(tx: number | bigint): DB;
-  since(tx: number | bigint): DB;
+  asOf(timePoint: number | bigint | Date): DB;
+  since(timePoint: number | bigint | Date): DB;
   history(): DB;
   pull(pattern: string, entity: number): unknown;
   pullLookupRefString(pattern: string, attr: string, value: string): unknown;

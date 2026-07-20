@@ -1788,7 +1788,7 @@
         report2 (vev.transact-store-text (addr store) "[[:db/add 1 :item/age 37]]")
         [snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))
         next-snapshot (vev.db-with-store-db-text (addr snapshot) "[[:db/add 1 :item/color \"red\"] [:db/add 3 :item/name \"c\"]]")
-        tx-result (vev.q-result-store-db-text (addr next-snapshot) "[:find ?tx :where [3 :item/name \"c\" ?tx :db/add]]")
+        tx-result (vev.q-result-store-db-text (addr next-snapshot) "[:find ?tx :where [3 :item/name \"c\" ?tx true]]")
         color-result (vev.q-result-store-db-text (addr next-snapshot) "[:find ?color :where [1 :item/color ?color]]")]
     (t.is report1.ok)
     (t.is report2.ok)

@@ -349,8 +349,24 @@ func (db *DB) AsOf(tx uint64) (*DB, error) {
 	return &DB{raw: raw}, nil
 }
 
+func (db *DB) AsOfTime(timePoint time.Time) (*DB, error) {
+	raw := C.vev_db_as_of_instant_millis(db.raw, C.longlong(timePoint.UnixMilli()))
+	if raw == nil {
+		return nil, fmt.Errorf("failed to create as-of DB")
+	}
+	return &DB{raw: raw}, nil
+}
+
 func (db *DB) Since(tx uint64) (*DB, error) {
 	raw := C.vev_db_since(db.raw, C.ulonglong(tx))
+	if raw == nil {
+		return nil, fmt.Errorf("failed to create since DB")
+	}
+	return &DB{raw: raw}, nil
+}
+
+func (db *DB) SinceTime(timePoint time.Time) (*DB, error) {
+	raw := C.vev_db_since_instant_millis(db.raw, C.longlong(timePoint.UnixMilli()))
 	if raw == nil {
 		return nil, fmt.Errorf("failed to create since DB")
 	}

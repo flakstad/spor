@@ -109,6 +109,19 @@ bool uint64_arg(napi_env env, napi_value value, unsigned long long *out) {
   return true;
 }
 
+bool int64_arg(napi_env env, napi_value value, long long *out) {
+  napi_valuetype type;
+  if (!ok(env, napi_typeof(env, value, &type))) {
+    return false;
+  }
+  if (type != napi_number ||
+      !ok(env, napi_get_value_int64(env, value, out))) {
+    throw_error(env, "instant must be Unix milliseconds");
+    return false;
+  }
+  return true;
+}
+
 napi_value owned_string(napi_env env, const char *text) {
   napi_value out;
   const char *safe = text ? text : "";
@@ -732,6 +745,21 @@ napi_value db_as_of(napi_env env, napi_callback_info info) {
   return wrap_db(env, vev_db_as_of(snapshot->raw, tx));
 }
 
+napi_value db_as_of_instant_millis(napi_env env, napi_callback_info info) {
+  DB *snapshot = external_arg<DB>(env, info, 0);
+  size_t argc = 2;
+  napi_value args[2];
+  long long unix_millis = 0;
+  ok(env, napi_get_cb_info(env, info, &argc, args, nullptr, nullptr));
+  if (argc < 2 || !snapshot || !snapshot->raw ||
+      !int64_arg(env, args[1], &unix_millis)) {
+    throw_error(env, "invalid as-of instant arguments");
+    return nullptr;
+  }
+  return wrap_db(env,
+                 vev_db_as_of_instant_millis(snapshot->raw, unix_millis));
+}
+
 napi_value db_since(napi_env env, napi_callback_info info) {
   DB *snapshot = external_arg<DB>(env, info, 0);
   size_t argc = 2;
@@ -744,6 +772,21 @@ napi_value db_since(napi_env env, napi_callback_info info) {
     return nullptr;
   }
   return wrap_db(env, vev_db_since(snapshot->raw, tx));
+}
+
+napi_value db_since_instant_millis(napi_env env, napi_callback_info info) {
+  DB *snapshot = external_arg<DB>(env, info, 0);
+  size_t argc = 2;
+  napi_value args[2];
+  long long unix_millis = 0;
+  ok(env, napi_get_cb_info(env, info, &argc, args, nullptr, nullptr));
+  if (argc < 2 || !snapshot || !snapshot->raw ||
+      !int64_arg(env, args[1], &unix_millis)) {
+    throw_error(env, "invalid since instant arguments");
+    return nullptr;
+  }
+  return wrap_db(env,
+                 vev_db_since_instant_millis(snapshot->raw, unix_millis));
 }
 
 napi_value db_history(napi_env env, napi_callback_info info) {
@@ -875,7 +918,9 @@ napi_value init(napi_env env, napi_value exports) {
       {"dbQ", nullptr, db_q, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"dbWithReport", nullptr, db_with_report, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"dbAsOf", nullptr, db_as_of, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"dbAsOfInstantMillis", nullptr, db_as_of_instant_millis, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"dbSince", nullptr, db_since, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"dbSinceInstantMillis", nullptr, db_since_instant_millis, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"dbHistory", nullptr, db_history, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"pull", nullptr, pull, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"pullLookupRefString", nullptr, pull_lookup_ref_string, nullptr, nullptr, nullptr, napi_default, nullptr},

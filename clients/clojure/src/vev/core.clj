@@ -571,14 +571,44 @@
     (->DB (:engine db) (.dbWith (:native db) (edn-text tx)))))
 
 (defn as-of
-  "Return a DB value containing facts in effect at transaction `tx`, inclusive."
-  [^DB db tx]
-  (->DB (:engine db) (.asOf (:native db) (long tx))))
+  "Return a DB value containing facts in effect at `time-point`, inclusive.
+  The time point may be a transaction coordinate, java.util.Date, or
+  java.time.Instant."
+  [^DB db time-point]
+  (->DB (:engine db)
+        (cond
+          (instance? java.util.Date time-point)
+          (.asOf (:native db) ^java.util.Date time-point)
+
+          (instance? java.time.Instant time-point)
+          (.asOf (:native db) ^java.time.Instant time-point)
+
+          (and (integer? time-point) (not (neg? time-point)))
+          (.asOf (:native db) (long time-point))
+
+          :else
+          (throw (ex-info "as-of time point must be a non-negative integer transaction coordinate, java.util.Date, or java.time.Instant"
+                          {:time-point time-point})))))
 
 (defn since
-  "Return a DB value containing facts asserted after transaction `tx`, exclusive."
-  [^DB db tx]
-  (->DB (:engine db) (.since (:native db) (long tx))))
+  "Return a DB value containing facts asserted after `time-point`, exclusive.
+  The time point may be a transaction coordinate, java.util.Date, or
+  java.time.Instant."
+  [^DB db time-point]
+  (->DB (:engine db)
+        (cond
+          (instance? java.util.Date time-point)
+          (.since (:native db) ^java.util.Date time-point)
+
+          (instance? java.time.Instant time-point)
+          (.since (:native db) ^java.time.Instant time-point)
+
+          (and (integer? time-point) (not (neg? time-point)))
+          (.since (:native db) (long time-point))
+
+          :else
+          (throw (ex-info "since time point must be a non-negative integer transaction coordinate, java.util.Date, or java.time.Instant"
+                          {:time-point time-point})))))
 
 (defn history
   "Return a history DB containing assertions and retractions across time."

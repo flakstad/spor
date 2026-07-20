@@ -91,7 +91,9 @@
                       [:db/add 1 :user/name "Grace"]])
     (let [db (d.db conn) :defer-with d.close
           as-of-db (d.as-of db (u64 4611686018427387904)) :defer-with d.close
+          as-of-t-db (d.as-of db (u64 1)) :defer-with d.close
           since-db (d.since db (u64 4611686018427387904)) :defer-with d.close
+          since-t-db (d.since db (u64 1)) :defer-with d.close
           history-db (d.history db) :defer-with d.close
           history-rows: Data
             (d.q
@@ -100,8 +102,12 @@
               history-db)]
       (when (not (= (query-name-count as-of-db "Ada") 1))
         (fail! "resident as-of did not restore the earlier assertion"))
+      (when (not (= (query-name-count as-of-t-db "Ada") 1))
+        (fail! "resident as-of did not accept basis t"))
       (when (not (= (query-name-count since-db "Grace") 1))
         (fail! "resident since did not expose the later assertion"))
+      (when (not (= (query-name-count since-t-db "Grace") 1))
+        (fail! "resident since did not accept basis t"))
       (when (not (= (count history-rows) 3))
         (fail! "resident history did not expose the full fact history"))
       (fmt.println "history-api resident: ok"))))

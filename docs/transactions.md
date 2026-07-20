@@ -88,16 +88,20 @@ transaction boundary. Applying `db-with` to an `as-of` or `since` value keeps
 the time filter; a history DB cannot be used as the point-in-time basis for an
 entity view or transaction.
 
-The first public time-point form is a Vev transaction id (`u64`, or the host
-language's corresponding integer). Resolving `#inst`/native date values to a
-transaction boundary remains a follow-up API. For durable databases the view
-is backed by the persisted append-only datom indexes, so it remains available
-after close and reopen rather than depending on an old in-process handle.
+Time points may be a Vev basis `t`, transaction entity id (`u64`, or the host
+language's corresponding integer), or native instant/date value. Instant
+values resolve to the greatest transaction whose `:db/txInstant` is less than
+or equal to the time point. For durable databases the view is backed by the
+persisted append-only datom indexes, so it remains available after close and
+reopen rather than depending on an old in-process handle. See
+[Historical database values](history.md) for boundary cases, composition, and
+the executable Datomic/Vev comparison.
 
 Public spellings follow each host language:
 
 - Kvist: `d.as-of`, `d.since`, `d.history`
-- C: `vev_db_as_of`, `vev_db_since`, `vev_db_history`
+- C: `vev_db_as_of`, `vev_db_since`, `vev_db_history`, plus
+  `vev_db_as_of_instant_millis` and `vev_db_since_instant_millis`
 - Clojure: `d/as-of`, `d/since`, `d/history`
 - Java and Node: `db.asOf`, `db.since`, `db.history`
 - Python: `db.as_of`, `db.since`, `db.history`

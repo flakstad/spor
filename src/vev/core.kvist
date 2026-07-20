@@ -905,8 +905,8 @@
 
 (defn value-fixture-person-datom-rows [] -> Value
   (value-vector2
-    (value-vector5 (value-int 1) (value-keyword ":name") (value-string "Ivan") (value-int 945) (value-keyword ":db/add"))
-    (value-vector5 (value-int 1) (value-keyword ":age") (value-int 39) (value-int 999) (value-keyword ":db/retract"))))
+    (value-vector5 (value-int 1) (value-keyword ":name") (value-string "Ivan") (value-int 945) (value-bool true))
+    (value-vector5 (value-int 1) (value-keyword ":age") (value-int 39) (value-int 999) (value-bool false))))
 
 (defn value-keyword-vector [attrs: []string] -> Value
   (let [items (make [dynamic]Value 0 (count attrs)) :defer]

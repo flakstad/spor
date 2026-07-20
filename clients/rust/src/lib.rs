@@ -5,6 +5,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_double, c_int, c_longlong, c_ulonglong, c_void};
 use std::ptr;
 use std::slice;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 type VevConn = *mut c_void;
 type VevConnection = *mut c_void;
@@ -49,6 +50,19 @@ pub const VEV_COLUMN_ENTITY: c_int = 1;
 pub const VEV_COLUMN_STRING: c_int = 2;
 pub const VEV_COLUMN_INT: c_int = 3;
 
+fn system_time_millis(time_point: SystemTime) -> Result<i64, String> {
+    match time_point.duration_since(UNIX_EPOCH) {
+        Ok(duration) => i64::try_from(duration.as_millis())
+            .map_err(|_| "time point is outside the signed millisecond range".to_string()),
+        Err(error) => {
+            let nanos = error.duration().as_nanos();
+            let millis = i64::try_from((nanos + 999_999) / 1_000_000)
+                .map_err(|_| "time point is outside the signed millisecond range".to_string())?;
+            Ok(-millis)
+        }
+    }
+}
+
 #[link(name = "vev")]
 unsafe extern "C" {
     fn vev_version() -> *const c_char;
@@ -89,7 +103,9 @@ unsafe extern "C" {
     ) -> VevTxReportArray;
     fn vev_db_release(db: VevDb);
     fn vev_db_as_of(db: VevDb, tx: c_ulonglong) -> VevDb;
+    fn vev_db_as_of_instant_millis(db: VevDb, unix_millis: c_longlong) -> VevDb;
     fn vev_db_since(db: VevDb, tx: c_ulonglong) -> VevDb;
+    fn vev_db_since_instant_millis(db: VevDb, unix_millis: c_longlong) -> VevDb;
     fn vev_db_history(db: VevDb) -> VevDb;
     fn vev_u64_array_free(array: VevU64Array);
     fn vev_u64_array_count(array: VevU64Array) -> c_int;
@@ -922,6 +938,19 @@ impl Db {
         }
     }
 
+    pub fn as_of_instant_millis(&self, unix_millis: i64) -> Result<Db, String> {
+        let raw = unsafe { vev_db_as_of_instant_millis(self.raw, unix_millis as c_longlong) };
+        if raw.is_null() {
+            Err("failed to create as-of DB".to_string())
+        } else {
+            Ok(Db { raw })
+        }
+    }
+
+    pub fn as_of_time(&self, time_point: SystemTime) -> Result<Db, String> {
+        self.as_of_instant_millis(system_time_millis(time_point)?)
+    }
+
     pub fn since(&self, tx: u64) -> Result<Db, String> {
         let raw = unsafe { vev_db_since(self.raw, tx as c_ulonglong) };
         if raw.is_null() {
@@ -929,6 +958,19 @@ impl Db {
         } else {
             Ok(Db { raw })
         }
+    }
+
+    pub fn since_instant_millis(&self, unix_millis: i64) -> Result<Db, String> {
+        let raw = unsafe { vev_db_since_instant_millis(self.raw, unix_millis as c_longlong) };
+        if raw.is_null() {
+            Err("failed to create since DB".to_string())
+        } else {
+            Ok(Db { raw })
+        }
+    }
+
+    pub fn since_time(&self, time_point: SystemTime) -> Result<Db, String> {
+        self.since_instant_millis(system_time_millis(time_point)?)
     }
 
     pub fn history(&self) -> Result<Db, String> {

@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
@@ -110,7 +111,9 @@ public final class Vev implements AutoCloseable {
     private final MethodHandle dbRetain;
     private final MethodHandle dbRelease;
     private final MethodHandle dbAsOf;
+    private final MethodHandle dbAsOfInstantMillis;
     private final MethodHandle dbSince;
+    private final MethodHandle dbSinceInstantMillis;
     private final MethodHandle dbHistory;
     private final MethodHandle withEdn;
     private final MethodHandle withEdnReport;
@@ -432,7 +435,9 @@ public final class Vev implements AutoCloseable {
         this.dbRetain = downcall("vev_db_retain", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbRelease = downcall("vev_db_release", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
         this.dbAsOf = downcall("vev_db_as_of", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+        this.dbAsOfInstantMillis = downcall("vev_db_as_of_instant_millis", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
         this.dbSince = downcall("vev_db_since", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+        this.dbSinceInstantMillis = downcall("vev_db_since_instant_millis", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
         this.dbHistory = downcall("vev_db_history", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.withEdn = downcall("vev_with_edn", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.withEdnReport = downcall("vev_with_edn_report", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
@@ -2008,9 +2013,35 @@ public final class Vev implements AutoCloseable {
             return new DB(filtered);
         }
 
+        public DB asOf(Date timePoint) throws Throwable {
+            if (timePoint == null) throw new NullPointerException("timePoint");
+            return asOf(timePoint.toInstant());
+        }
+
+        public DB asOf(Instant timePoint) throws Throwable {
+            if (timePoint == null) throw new NullPointerException("timePoint");
+            requireOpen();
+            MemorySegment filtered = (MemorySegment) dbAsOfInstantMillis.invoke(handle.raw, timePoint.toEpochMilli());
+            if (isNull(filtered)) throw new IllegalStateException("failed to create as-of DB");
+            return new DB(filtered);
+        }
+
         public DB since(long tx) throws Throwable {
             requireOpen();
             MemorySegment filtered = (MemorySegment) dbSince.invoke(handle.raw, tx);
+            if (isNull(filtered)) throw new IllegalStateException("failed to create since DB");
+            return new DB(filtered);
+        }
+
+        public DB since(Date timePoint) throws Throwable {
+            if (timePoint == null) throw new NullPointerException("timePoint");
+            return since(timePoint.toInstant());
+        }
+
+        public DB since(Instant timePoint) throws Throwable {
+            if (timePoint == null) throw new NullPointerException("timePoint");
+            requireOpen();
+            MemorySegment filtered = (MemorySegment) dbSinceInstantMillis.invoke(handle.raw, timePoint.toEpochMilli());
             if (isNull(filtered)) throw new IllegalStateException("failed to create since DB");
             return new DB(filtered);
         }

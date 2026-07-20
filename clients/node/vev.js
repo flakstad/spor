@@ -196,14 +196,24 @@ class DB {
     };
   }
 
-  asOf(tx) {
+  asOf(timePoint) {
     this._requireOpen();
-    return new DB(native.dbAsOf(this._handle, tx));
+    if (timePoint instanceof Date) {
+      const millis = timePoint.getTime();
+      if (!Number.isFinite(millis)) throw new TypeError("invalid Date time point");
+      return new DB(native.dbAsOfInstantMillis(this._handle, millis));
+    }
+    return new DB(native.dbAsOf(this._handle, timePoint));
   }
 
-  since(tx) {
+  since(timePoint) {
     this._requireOpen();
-    return new DB(native.dbSince(this._handle, tx));
+    if (timePoint instanceof Date) {
+      const millis = timePoint.getTime();
+      if (!Number.isFinite(millis)) throw new TypeError("invalid Date time point");
+      return new DB(native.dbSinceInstantMillis(this._handle, millis));
+    }
+    return new DB(native.dbSince(this._handle, timePoint));
   }
 
   history() {

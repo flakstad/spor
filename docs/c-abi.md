@@ -472,13 +472,17 @@ Immutable DB handles support Datomic-shaped time views:
 ```c
 vev_db_t earlier = vev_db_as_of(db, tx);  /* inclusive */
 vev_db_t recent = vev_db_since(db, tx);   /* exclusive */
+vev_db_t at_time = vev_db_as_of_instant_millis(db, unix_millis);
+vev_db_t after_time = vev_db_since_instant_millis(db, unix_millis);
 vev_db_t all = vev_db_history(db);
 ```
 
 Each returned handle is independently owned and released with
 `vev_db_release`. History handles expose assertion and retraction datoms to
 queries, including the optional transaction and added fields in five-position
-data clauses.
+data clauses. The added field is a boolean. Instant functions accept signed
+Unix epoch milliseconds and resolve to the greatest transaction at or before
+that instant.
 
 ## Python Adapter
 

@@ -345,6 +345,7 @@ library and SQLite deployment details.
 - [Getting started](docs/getting-started.md)
 - [Database model](docs/data-model.md)
 - [Transactions](docs/transactions.md)
+- [Historical database values](docs/history.md)
 - [Query model](docs/query-model.md)
 - [Pull](docs/pull-model.md)
 - [Indexes](docs/indexes.md)
