@@ -50,7 +50,9 @@ of the ordinary public API unless explicitly approved.
 - Add parity tests before adding or changing a Datomic-shaped public API.
 - Finish the client-surface audit described in
   [Client API Contract](client-api.md): one small ordinary API per host, with
-  lower-level facilities moved behind internal/advanced namespaces or types.
+  approved prepared queries accepting normal inputs and returning normal
+  Datomic-shaped results, and lower-level facilities moved behind
+  internal/advanced namespaces or types.
 - Do not expose process-local callback registration as Datomic stored
   functions.
 - Do not persist or evaluate arbitrary host-language code. Stored functions

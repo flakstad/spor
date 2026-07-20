@@ -69,8 +69,12 @@ Host-language spelling aside, the ordinary client should converge on:
 | Log | `log`, `tx-range` |
 | Reports | `tx-report-queue`, `remove-tx-report-queue` |
 
-`listen`/`unlisten` are approved convenience operations. Bulk ingest and
-prepared execution may remain as advanced facilities, but should not crowd the
+`listen`/`unlisten` are approved convenience operations. Prepared queries are
+an approved advanced facility: callers may explicitly compile a query once and
+pass that value to the normal `q` operation for repeated execution. Prepared
+execution must preserve exactly the same inputs and Datomic `:find` result
+shape as ad hoc `q`; it must not force callers into row handles, statements, or
+column batches. Bulk ingest may also remain advanced, but should not crowd the
 core namespace or type.
 
 ## Current cleanup work
@@ -80,14 +84,14 @@ be deleted:
 
 | Client | Core gaps | Surface cleanup |
 | --- | --- | --- |
-| Clojure | transaction report queue; later `attribute`, `db-stats`, `index-pull`, filters, `qseq` | move row/column/result, profiling, parser, builder, raw-text, and storage diagnostics out of `vev.core`; retain approved helpers |
-| Java | Datomic-shaped report queue and a tighter entity/map experience | separate the small ordinary API from FFM loading, prepared statements, result sets, columns, builders, parser and profiling machinery |
-| Kvist | high-level entity, identity/index access, pull-many, sync, report stream | keep generated/runtime and typed performance helpers outside the small `vev_app` facade |
-| Python | identity/index access, sync/log/report stream | hide `Library`, handles, prepared statements, result/column types, parser and builders from the ordinary import surface |
-| Node | entity, identity/index access, pull-many, immutable writes, sync/log/report stream | keep native-addon handles, prepared rows, and text/raw result paths internal |
-| Go | identity/index access, sync/log/report stream | split safe core API from prepared statements, row/column batches, parser and builders |
-| Rust | identity/index access, sync/log/report stream | complete the planned `vevdb` safe crate / `vevdb-sys` raw split; keep row/column and statement types out of the core prelude |
-| Odin | entity, pull/pull-many, indexes, immutable writes, sync/report stream | expose only overload sets and high-level values from the normal package; make overload implementation and raw ABI details private where Odin permits |
+| Clojure | transaction report queue; later `attribute`, `db-stats`, `index-pull`, filters, `qseq` | retain `prepare` as advanced input to `q`; move row/column/result, profiling, parser, builder, raw-text, and storage diagnostics out of `vev.core`; retain approved helpers |
+| Java | Datomic-shaped report queue and a tighter entity/map experience | retain prepared queries as advanced inputs to shaped query execution; separate the small ordinary API from FFM loading, statements, result sets, columns, builders, parser and profiling machinery |
+| Kvist | high-level entity, identity/index access, pull-many, sync, report stream | retain prepared queries with shaped results; keep generated/runtime and typed performance helpers outside the small `vev_app` facade |
+| Python | identity/index access, sync/log/report stream | retain prepared queries with shaped results; hide `Library`, handles, statements, result/column types, parser and builders from the ordinary import surface |
+| Node | entity, identity/index access, pull-many, immutable writes, sync/log/report stream | retain prepared queries with shaped results; keep native-addon handles, prepared-row execution, and text/raw result paths internal |
+| Go | identity/index access, sync/log/report stream | retain prepared queries with shaped results; split the safe core/advanced API from statements, row/column batches, parser and builders |
+| Rust | identity/index access, sync/log/report stream | retain prepared queries with shaped results; complete the planned `vevdb` safe crate / `vevdb-sys` raw split and keep row/column and statement types out of the core prelude |
+| Odin | entity, pull/pull-many, indexes, immutable writes, sync/report stream | add prepared queries as inputs to shaped `query`; expose only overload sets and high-level values from the normal package, making overload implementation and raw ABI details private where Odin permits |
 | C | none as a portability boundary | retain the broad ABI, but distinguish stable core functions from advanced/raw functions in documentation |
 
 ## Primary query
