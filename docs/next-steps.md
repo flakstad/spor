@@ -95,7 +95,7 @@ Work through this batch in order:
 - [x] Port Datomic's intra-transaction regression cases and make an explicit,
    tested decision about transaction functions observing the
    start-of-transaction DB rather than an intermediate DB.
-- [ ] Expose existing engine functionality under Datomic's `entid`, `ident`,
+- [x] Expose existing engine functionality under Datomic's `entid`, `ident`,
    `datoms`, `seek-datoms`, `rseek-datoms`, and `index-range` names.
 - [ ] Implement Datomic-shaped `sync`: immediate/current snapshots where possible
    and basis-`t` coordination for durable connections shared by processes.

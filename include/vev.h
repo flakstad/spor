@@ -234,6 +234,11 @@ vev_db_t vev_db_with_edn(vev_db_t db, const char *tx_text);
 vev_entity_t vev_db_entity(vev_db_t db, unsigned long long entity);
 vev_entity_t vev_db_entity_lookup_ref_string(vev_db_t db, const char *attr, const char *value);
 vev_entity_t vev_db_entity_ident(vev_db_t db, const char *ident);
+/* mode: 0 = exact datoms, 1 = forward seek, 2 = reverse seek. */
+vev_value_handle_t vev_db_datoms_value(
+    vev_db_t db, int mode, const char *index, const char *components_edn);
+vev_value_handle_t vev_db_index_range_value(
+    vev_db_t db, const char *attr, const char *start_edn, const char *end_edn);
 void vev_entity_free(vev_entity_t entity);
 bool vev_entity_found(vev_entity_t entity);
 unsigned long long vev_entity_id(vev_entity_t entity);

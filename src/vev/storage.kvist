@@ -15130,6 +15130,98 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (return (Store-Entity {}) false ident-error)))
       (store-db-entity snapshot entity-id))))
 
+(defn store-public-index-order [order: string] -> [value: Public-Index-Order, ok: bool]
+  (cond
+    (= order ":eavt") (return .EAVT true)
+    (= order ":aevt") (return .AEVT true)
+    (= order ":avet") (return .AVET true)
+    (= order ":vaet") (return .VAET true))
+  (return .EAVT false))
+
+(defn store-db-resolve-index-args [source: DB-Read-Source, args: []Index-Arg] -> [values: [dynamic]Value, ok: bool, error: string]
+  (let [out (make [dynamic]Value 0 (count args))]
+    (for [arg args]
+      (if arg.has-lookup-ref
+        (let [[entity entity-ok entity-error] (db-read-source-resolve-lookup-ref source arg.lookup-attr arg.lookup-value)]
+          (when (not entity-ok)
+            (delete out)
+            (return (make [dynamic]Value) false entity-error))
+          (arr.push! out (value-entity entity)))
+        (arr.push! out arg.value)))
+    (return out true "")))
+
+(defn store-db-index-datoms [snapshot: ^Store-DB, mode: int, order-text: string, args: []Index-Arg] -> [datoms: [dynamic]Datom, ok: bool, error: string]
+  (let [[order order-ok] (store-public-index-order order-text)]
+    (when (not order-ok)
+      (return (make [dynamic]Datom) false "index must be :eavt, :aevt, :avet, or :vaet"))
+    (let [[source source-ok source-error] (store-db-read-source snapshot)]
+      (when (not source-ok)
+        (return (make [dynamic]Datom) false source-error))
+      (let [[values values-ok values-error] (store-db-resolve-index-args source args)]
+        (when (not values-ok)
+          (return (make [dynamic]Datom) false values-error))
+        (defer (delete values))
+        (let [all (make [dynamic]Datom)
+              [scan-ok scan-error] (db-read-source-append-index-datoms! (addr all) source order ([]Value []))]
+          (when (not scan-ok)
+            (delete-owned-datoms all)
+            (return (make [dynamic]Datom) false scan-error))
+          (defer (delete-owned-datoms all))
+          (let [indexes (sorted-datom-order-indexes (slice all 0) order)
+                out (make [dynamic]Datom)]
+            (defer (delete indexes))
+            (if (= mode 2)
+              (let [position (- (count indexes) 1)]
+                (while (>= position 0)
+                  (let [datom all[indexes[position]]
+                        compare (datom-index-compare-values datom order-text (slice values 0))]
+                    (when (<= compare 0)
+                      (arr.push! out (datom-owned datom))))
+                  (set! position (- position 1))))
+              (for [index indexes]
+                (let [datom all[index]
+                      compare (datom-index-compare-values datom order-text (slice values 0))
+                      include (if (= mode 1)
+                                (>= compare 0)
+                                (= compare 0))]
+                  (when include
+                    (arr.push! out (datom-owned datom))))))
+            (return out true "")))))))
+
+(defn store-db-index-range-datoms [snapshot: ^Store-DB, attr: string, start: Index-Arg, has-start: bool, end: Index-Arg, has-end: bool] -> [datoms: [dynamic]Datom, ok: bool, error: string]
+  (let [[source source-ok source-error] (store-db-read-source snapshot)]
+    (when (not source-ok)
+      (return (make [dynamic]Datom) false source-error))
+    (let [args (make [dynamic]Index-Arg)]
+      (defer (delete args))
+      (when has-start
+        (arr.push! args start))
+      (when has-end
+        (arr.push! args end))
+      (let [[values values-ok values-error] (store-db-resolve-index-args source (slice args 0))]
+        (when (not values-ok)
+          (return (make [dynamic]Datom) false values-error))
+        (defer (delete values))
+        (let [all (make [dynamic]Datom)
+              [scan-ok scan-error] (db-read-source-append-index-datoms! (addr all) source .AVET ([]Value [(value-keyword attr)]))]
+          (when (not scan-ok)
+            (delete-owned-datoms all)
+            (return (make [dynamic]Datom) false scan-error))
+          (defer (delete-owned-datoms all))
+          (let [indexes (sorted-datom-order-indexes (slice all 0) .AVET)
+                out (make [dynamic]Datom)]
+            (defer (delete indexes))
+            (for [index indexes]
+              (let [datom all[index]
+                    after-start (or (not has-start)
+                                    (>= (index-position-compare datom.v values[0]) 0))
+                    end-index (if has-start 1 0)
+                    before-end (or (not has-end)
+                                   (< (index-position-compare datom.v values[end-index]) 0))]
+                (when (and after-start before-end)
+                  (arr.push! out (datom-owned datom)))))
+            (return out true "")))))))
+
 (defn store-entity-id [entity: Store-Entity] -> u64
   entity.e)
 

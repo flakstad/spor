@@ -3499,6 +3499,23 @@ abi_free_stmt :: proc(stmt: rawptr) {
           (vev.delete-value-containers-shallow parsed)
           (return owned true ""))))))
 
+(defn- index-arg-from-value [value: vev.Value] -> vev.Index-Arg
+  (when (and (= value.kind .Vector)
+             (= (count value.items) 2)
+             (= value.items[0].kind .Keyword))
+    (return (vev.Index-Arg {has-lookup-ref: true
+                            lookup-attr: value.items[0].text
+                            lookup-value: value.items[1]})))
+  (vev.Index-Arg {value: value}))
+
+(defn- index-args-from-value [value: vev.Value] -> [args: [dynamic]vev.Index-Arg, ok: bool]
+  (when (not (= value.kind .Vector))
+    (return (make [dynamic]vev.Index-Arg) false))
+  (let [out (make [dynamic]vev.Index-Arg 0 (count value.items))]
+    (for [item value.items]
+      (arr.push! out (index-arg-from-value item)))
+    (return out true)))
+
 (defn- entity-handle-from-owned-entity [entity: vev.Store-Entity] -> Vev-Entity
   (Vev-Entity (abi-alloc-entity entity)))
 
@@ -4524,6 +4541,72 @@ abi_free_stmt :: proc(stmt: rawptr) {
     (if entity-ok
       (entity-handle-from-owned-entity entity)
       (entity-handle-null))))
+
+@export
+(defn vev_db_datoms_value :abi "c" [db: Vev-DB, mode: int, order: cstring, components-edn: cstring] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr db) nil) (= order nil) (= components-edn nil))
+    (return (Vev-Value-Handle nil)))
+  (let [order-text (text-from-c order)
+        components-text (text-from-c components-edn)
+        [components components-ok _] (value-from-edn-text components-text)]
+    (delete components-text)
+    (when (not components-ok)
+      (delete order-text)
+      (return (Vev-Value-Handle nil)))
+    (defer (vev.delete-owned-value components))
+    (let [[args args-ok] (index-args-from-value components)]
+      (when (not args-ok)
+        (delete args)
+        (delete order-text)
+        (return (Vev-Value-Handle nil)))
+      (defer (delete args))
+      (let [[datoms datoms-ok _] (vev.store-db-index-datoms (store-db-ptr db) mode order-text (slice args 0))]
+        (delete order-text)
+        (when (not datoms-ok)
+          (vev.delete-owned-datoms datoms)
+          (return (Vev-Value-Handle nil)))
+        (let [value (vev.datoms-value (slice datoms 0))]
+          (vev.delete-owned-datoms datoms)
+          (value-handle-from-owned-value value))))))
+
+@export
+(defn vev_db_index_range_value :abi "c" [db: Vev-DB, attr: cstring, start-edn: cstring, end-edn: cstring] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr db) nil) (= attr nil) (= start-edn nil) (= end-edn nil))
+    (return (Vev-Value-Handle nil)))
+  (let [attr-text (text-from-c attr)
+        start-text (text-from-c start-edn)
+        end-text (text-from-c end-edn)
+        [start start-ok _] (value-from-edn-text start-text)
+        [end end-ok _] (value-from-edn-text end-text)]
+    (delete start-text)
+    (delete end-text)
+    (when (not (and start-ok end-ok))
+      (when start-ok
+        (vev.delete-owned-value start))
+      (when end-ok
+        (vev.delete-owned-value end))
+      (delete attr-text)
+      (return (Vev-Value-Handle nil)))
+    (defer (vev.delete-owned-value start))
+    (defer (vev.delete-owned-value end))
+    (let [has-start (not (= start.kind .Nil))
+          has-end (not (= end.kind .Nil))
+          [datoms datoms-ok _] (vev.store-db-index-range-datoms
+                                 (store-db-ptr db)
+                                 attr-text
+                                 (index-arg-from-value start)
+                                 has-start
+                                 (index-arg-from-value end)
+                                 has-end)]
+      (delete attr-text)
+      (when (not datoms-ok)
+        (vev.delete-owned-datoms datoms)
+        (return (Vev-Value-Handle nil)))
+      (let [value (vev.datoms-value (slice datoms 0))]
+        (vev.delete-owned-datoms datoms)
+        (value-handle-from-owned-value value)))))
 
 @export
 (defn vev_entity_free :abi "c" [entity: Vev-Entity]

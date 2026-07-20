@@ -300,6 +300,21 @@ Lookup refs and idents are supported through the same function:
 (d/entity db :user/ada)
 ```
 
+Identity and raw index access use the Datomic names and argument order:
+
+```clojure
+(d/entid db :user/email)
+(d/ident db 90)
+
+(d/datoms db :eavt 1 :user/name)
+(d/seek-datoms db :avet :user/email "m")
+(d/rseek-datoms db :avet :user/email "m")
+(d/index-range db :user/email "a" "n")
+```
+
+Returned datoms support keyword lookup and indexed access, for example
+`(:v datom)` and `(nth datom 2)`.
+
 Transaction functions follow Datomic's installed-ident model: the DB contains
 the function ident, while the host registry supplies the executable callback for
 this process.

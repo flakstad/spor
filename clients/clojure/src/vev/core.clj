@@ -5,7 +5,7 @@
   (:require [clojure.edn :as edn]
             [clojure.set :as set])
   (:import [java.nio.file Path]
-           [com.vevdb Vev Vev$ColumnResult Vev$DB Vev$Entity Vev$EntityView Vev$Keyword Vev$Log Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxFunction Vev$TxReportListener]))
+           [com.vevdb Vev Vev$ColumnResult Vev$DB Vev$Datom Vev$Entity Vev$EntityView Vev$Keyword Vev$Log Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxFunction Vev$TxReportListener]))
 
 (defn- path [value]
   (cond
@@ -209,6 +209,67 @@
   (toString [this]
     (str (entity-realized-map this))))
 
+(defn- datom-vector [datom]
+  [(.-e datom)
+   (.-a datom)
+   (.-v datom)
+   (.-tx datom)
+   (.-added datom)])
+
+(deftype Datom [e a v tx added]
+  clojure.lang.Associative
+  (containsKey [_ key]
+    (contains? #{:e :a :v :tx :added} key))
+  (entryAt [this key]
+    (when (contains? this key)
+      (clojure.lang.MapEntry/create key (get this key))))
+  (assoc [this key value]
+    (assoc {:e e :a a :v v :tx tx :added added} key value))
+  clojure.lang.ILookup
+  (valAt [_ key]
+    (case key
+      :e e
+      :a a
+      :v v
+      :tx tx
+      :added added
+      nil))
+  (valAt [this key not-found]
+    (if (contains? this key)
+      (get this key)
+      not-found))
+  clojure.lang.Indexed
+  (nth [this index]
+    (nth (datom-vector this) index))
+  (nth [this index not-found]
+    (nth (datom-vector this) index not-found))
+  clojure.lang.IPersistentCollection
+  (cons [this value]
+    (conj (datom-vector this) value))
+  (empty [_]
+    [])
+  (equiv [this other]
+    (= (datom-vector this) other))
+  clojure.lang.Counted
+  (count [_]
+    5)
+  clojure.lang.IHashEq
+  (hasheq [this]
+    (clojure.lang.Util/hasheq (datom-vector this)))
+  clojure.lang.Seqable
+  (seq [this]
+    (seq (datom-vector this)))
+  Iterable
+  (iterator [this]
+    (.iterator ^Iterable (datom-vector this)))
+  Object
+  (equals [this other]
+    (= (datom-vector this) other))
+  (hashCode [this]
+    (hash (datom-vector this)))
+  (toString [this]
+    (str (datom-vector this))))
+
 (defn retain-db
   "Return another owned handle to the same immutable DB value."
   [^DB db]
@@ -403,12 +464,87 @@
   [^EntityView entity-view]
   (.-db entity-view))
 
+(defn entid
+  "Return the entity id associated with an ident, or an id itself if passed."
+  [^DB db ident]
+  (cond
+    (integer? ident) ident
+    (or (keyword? ident) (vector? ident))
+    (some-> (entity db ident) :db/id)
+    :else nil))
+
+(defn ident
+  "Return the keyword associated with an entity id, or a keyword itself."
+  [^DB db eid]
+  (if (keyword? eid)
+    eid
+    (:db/ident (entity db eid))))
+
+(defn- native-index-value [value]
+  (cond
+    (keyword? value) (Vev$Keyword. (str value))
+    (vector? value) (mapv native-index-value value)
+    (set? value) (set (map native-index-value value))
+    (map? value) (into {} (map (fn [[key item]]
+                                 [(native-index-value key)
+                                  (native-index-value item)])
+                               value))
+    :else value))
+
+(defn- datom-from-map [value]
+  (if (instance? Vev$Datom value)
+    (Datom. (.e ^Vev$Datom value)
+            (clj-value (.a ^Vev$Datom value))
+            (clj-value (.v ^Vev$Datom value))
+            (.tx ^Vev$Datom value)
+            (.added ^Vev$Datom value))
+    (Datom. (:e value)
+            (:a value)
+            (:v value)
+            (:tx value)
+            (:added value))))
+
+(defn- index-datoms [^DB db operation index components]
+  (let [native-db ^Vev$DB (:native db)
+        native-index (native-index-value index)
+        native-components (object-array (map native-index-value components))
+        values (case operation
+                 :datoms (.datoms native-db native-index native-components)
+                 :seek-datoms (.seekDatoms native-db native-index native-components)
+                 :rseek-datoms (.rseekDatoms native-db native-index native-components))]
+    (mapv datom-from-map values)))
+
+(defn datoms
+  "Return datoms matching leading components of an index."
+  [db index & components]
+  (index-datoms db :datoms index components))
+
+(defn seek-datoms
+  "Return datoms at or after components in an index."
+  [db index & components]
+  (index-datoms db :seek-datoms index components))
+
+(defn rseek-datoms
+  "Return datoms at or before components in reverse index order."
+  [db index & components]
+  (index-datoms db :rseek-datoms index components))
+
+(defn index-range
+  "Return AVET datoms for attr from start inclusive to end exclusive."
+  [^DB db attr start end]
+  (let [values (.indexRange ^Vev$DB
+                (:native db)
+                            (native-index-value attr)
+                            (native-index-value start)
+                            (native-index-value end))]
+    (mapv datom-from-map values)))
+
 (defn- entity-contains?
   [^EntityView entity-view attr]
   (or (= :db/id attr)
       (and (keyword? attr)
            (.contains ^Vev$EntityView
-                      (.-native entity-view)
+            (.-native entity-view)
                       (edn-text attr)))))
 
 (defn- entity-ref-value [^DB db value]
@@ -460,8 +596,8 @@
   [^EntityView entity-view]
   (doseq [[attr value] (entity-realized-map entity-view)
           :when (bit-test (.attrFlags ^Vev$EntityView
-                                     (.-native entity-view)
-                                     (edn-text attr))
+                           (.-native entity-view)
+                                      (edn-text attr))
                           2)]
     (if (set? value)
       (doseq [component value]

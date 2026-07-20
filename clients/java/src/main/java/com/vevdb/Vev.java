@@ -20,6 +20,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -129,6 +130,8 @@ public final class Vev implements AutoCloseable {
     private final MethodHandle dbEntity;
     private final MethodHandle dbEntityLookupRefString;
     private final MethodHandle dbEntityIdent;
+    private final MethodHandle dbDatomsValue;
+    private final MethodHandle dbIndexRangeValue;
     private final MethodHandle entityFree;
     private final MethodHandle entityFound;
     private final MethodHandle entityId;
@@ -488,6 +491,8 @@ public final class Vev implements AutoCloseable {
         this.dbEntity = downcall("vev_db_entity", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
         this.dbEntityLookupRefString = downcall("vev_db_entity_lookup_ref_string", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbEntityIdent = downcall("vev_db_entity_ident", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        this.dbDatomsValue = downcall("vev_db_datoms_value", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        this.dbIndexRangeValue = downcall("vev_db_index_range_value", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.entityFree = downcall("vev_entity_free", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
         this.entityFound = downcall("vev_entity_found", FunctionDescriptor.of(ValueLayout.JAVA_BOOLEAN, ValueLayout.ADDRESS));
         this.entityId = downcall("vev_entity_id", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
@@ -1148,6 +1153,12 @@ public final class Vev implements AutoCloseable {
         return out.toString();
     }
 
+    private static String valueEdn(Object value) {
+        StringBuilder out = new StringBuilder();
+        appendEdn(out, value);
+        return out.toString();
+    }
+
     private static void appendEdn(StringBuilder out, Object value) {
         if (value == null) {
             out.append("nil");
@@ -1174,6 +1185,17 @@ public final class Vev implements AutoCloseable {
             for (Object item : items) {
                 if (index > 0) out.append(" ");
                 appendEdn(out, item);
+                index++;
+            }
+            out.append("}");
+        } else if (value instanceof Map<?, ?> items) {
+            out.append("{");
+            int index = 0;
+            for (Map.Entry<?, ?> item : items.entrySet()) {
+                if (index > 0) out.append(" ");
+                appendEdn(out, item.getKey());
+                out.append(" ");
+                appendEdn(out, item.getValue());
                 index++;
             }
             out.append("}");
@@ -1279,6 +1301,7 @@ public final class Vev implements AutoCloseable {
     public record Keyword(String text) {}
     public record Symbol(String text) {}
     public record Entry(Object key, Object value) {}
+    public record Datom(long e, Keyword a, Object v, long tx, boolean added) {}
     public record ReturnKeys(String marker, List<Object> keys) {}
 
     public record ColumnResult(int rowCount, int[] kinds, Object[] columns) {
@@ -2182,6 +2205,78 @@ public final class Vev implements AutoCloseable {
                 if (isNull(raw)) throw new IllegalStateException("failed to create ident entity view");
                 return new EntityView(raw);
             }
+        }
+
+        public Iterable<Datom> datoms(Object index, Object... components) throws Throwable {
+            return indexDatoms(0, index, components);
+        }
+
+        public Iterable<Datom> seekDatoms(Object index, Object... components) throws Throwable {
+            return indexDatoms(1, index, components);
+        }
+
+        public Iterable<Datom> rseekDatoms(Object index, Object... components) throws Throwable {
+            return indexDatoms(2, index, components);
+        }
+
+        private Iterable<Datom> indexDatoms(int mode, Object index, Object[] components) throws Throwable {
+            requireOpen();
+            String indexText = index instanceof Keyword keyword ? keyword.text() : String.valueOf(index);
+            try (Arena local = Arena.ofConfined();
+                 ValueHandle value = new ValueHandle((MemorySegment) dbDatomsValue.invoke(
+                     handle.raw,
+                     mode,
+                     local.allocateFrom(indexText),
+                     local.allocateFrom(inputsEdn(Arrays.asList(components)))))) {
+                Object result = value.value();
+                if (!(result instanceof Iterable<?> iterable)) {
+                    throw new IllegalStateException("native datoms result was not iterable");
+                }
+                return datomList(iterable);
+            }
+        }
+
+        public Iterable<Datom> indexRange(Object attr, Object start, Object end) throws Throwable {
+            requireOpen();
+            String attrText = attr instanceof Keyword keyword ? keyword.text() : String.valueOf(attr);
+            try (Arena local = Arena.ofConfined();
+                 ValueHandle value = new ValueHandle((MemorySegment) dbIndexRangeValue.invoke(
+                     handle.raw,
+                     local.allocateFrom(attrText),
+                     local.allocateFrom(valueEdn(start)),
+                     local.allocateFrom(valueEdn(end))))) {
+                Object result = value.value();
+                if (!(result instanceof Iterable<?> iterable)) {
+                    throw new IllegalStateException("native index-range result was not iterable");
+                }
+                return datomList(iterable);
+            }
+        }
+
+        private List<Datom> datomList(Iterable<?> values) {
+            List<Datom> out = new ArrayList<>();
+            for (Object value : values) {
+                if (!(value instanceof MapValue map)) {
+                    throw new IllegalStateException("native datom was not a map value");
+                }
+                long e = 0;
+                Keyword a = null;
+                Object v = null;
+                long tx = 0;
+                boolean added = false;
+                for (Entry entry : map.entries()) {
+                    if (!(entry.key() instanceof Keyword key)) continue;
+                    switch (key.text()) {
+                        case ":e" -> e = ((Entity) entry.value()).id();
+                        case ":a" -> a = (Keyword) entry.value();
+                        case ":v" -> v = entry.value();
+                        case ":tx" -> tx = ((Entity) entry.value()).id();
+                        case ":added" -> added = (boolean) entry.value();
+                    }
+                }
+                out.add(new Datom(e, a, v, tx, added));
+            }
+            return out;
         }
 
         public ResultSet query(PreparedQuery query, String inputs) throws Throwable {
