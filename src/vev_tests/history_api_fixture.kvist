@@ -20,12 +20,16 @@
   (os.exit 1))
 
 (defn first-tx-id [conn: d.Conn] -> u64
-  (let [ids: Data
+  (let [db (d.db conn) :defer-with d.close
+        ids: Data
           (d.q
             '[:find [?tx ...]
-              :in ?log
-              :where [(tx-ids ?log 0 9223372036854775807) [?tx ...]]]
-            (d.log conn))]
+              :in $ ?log ?start ?end
+              :where [(tx-ids ?log ?start ?end) [?tx ...]]]
+            db
+            (d.log conn)
+            (kdata.from-int 0)
+            (kdata.from-int 9223372036854775807))]
     (for [id ids]
       (when (kdata.int? id)
         (return (u64 (kdata.int id)))))
@@ -72,6 +76,19 @@
                 '[:find ?name ?tx ?added
                   :where [1 :user/name ?name ?tx ?added]]
                 history-as-of-db)]
+        (when (or (not (= (d.t-to-tx 1) tx1))
+                  (not (= (d.tx-to-t tx1) 1)))
+          (fail! "t/tx coordinate conversion did not round-trip"))
+        (let [tx-rows: Data
+                (d.q
+                  '[:find ?attribute ?value ?added
+                    :in $ ?log ?tx
+                    :where [(tx-data ?log ?tx) [[_ ?attribute ?value _ ?added]]]]
+                  db
+                  (d.log conn)
+                  tx1)]
+          (when (= (count tx-rows) 0)
+            (fail! "canonical tx-data relation binding did not return the transaction")))
         (when (not (= (query-name-count as-of-db "Ada") 1))
           (fail! "as-of did not restore the earlier assertion"))
         (when (not (= (query-name-count as-of-db "Grace") 0))

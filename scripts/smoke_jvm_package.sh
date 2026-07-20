@@ -113,7 +113,29 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
     (assert (= (dec (d/basis-t snapshot)) (d/as-of-t earlier)))
     (assert (d/history? audit))
     (assert (= (d/basis-t snapshot)
-               (count (d/tx-range (d/log conn) nil nil)))))
+               (count (d/tx-range (d/log conn) nil nil))))
+    (let [txs (d/q
+                '[:find [?tx ...]
+                  :in $ ?log ?start ?end
+                  :where [(tx-ids ?log ?start ?end) [?tx ...]]]
+                snapshot
+                (d/log conn)
+                nil
+                nil)
+          tx (first txs)
+          datoms (d/q
+                   '[:find ?e ?a ?v ?added
+                     :in $ ?log ?tx
+                     :where [(tx-data ?log ?tx) [[?e ?a ?v _ ?added]]]]
+                   snapshot
+                   (d/log conn)
+                   tx)]
+      (assert (= (d/basis-t snapshot) (count txs)))
+      (assert (seq datoms))
+      (assert (= 0 (d/tx->t (d/t->tx 0))))
+      (assert (= tx (d/t->tx (d/tx->t tx))))
+      (assert (= (d/basis-t snapshot)
+                 (d/tx->t (d/t->tx (d/basis-t snapshot)))))))
   (println :vev-jvm-package-ok))
 EOF
 

@@ -9,6 +9,7 @@ import "core:strings"
 import "core:time"
 
 ABI_VERSION :: 1
+TX_PARTITION_BASE :: u64(4_611_686_018_427_387_904)
 
 @(private)
 API :: struct {
@@ -299,6 +300,20 @@ next_t :: proc(database: ^DB) -> (t: u64, ok: bool) {
 		return 0, false
 	}
 	return database.library.api.db_next_t(database.handle), true
+}
+
+t_to_tx :: proc(t: u64) -> u64 {
+	if t == 0 {
+		return 0
+	}
+	return TX_PARTITION_BASE + t - 1
+}
+
+tx_to_t :: proc(tx: u64) -> u64 {
+	if tx >= TX_PARTITION_BASE {
+		return tx - TX_PARTITION_BASE + 1
+	}
+	return tx
 }
 
 as_of_t :: proc(database: ^DB) -> (t: u64, present: bool) {

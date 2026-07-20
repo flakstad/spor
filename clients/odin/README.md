@@ -120,6 +120,14 @@ result, ok := vev.query(
 `basis_t`, `next_t`, `as_of_t`, `since_t`, and `is_history` expose the same
 database metadata as Datomic.
 
+Convert between the two transaction coordinate forms with `t_to_tx` and
+`tx_to_t`:
+
+```odin
+tx := vev.t_to_tx(transaction_t)
+assert(vev.tx_to_t(tx) == transaction_t)
+```
+
 The transaction log uses the same inclusive-start, exclusive-end contract:
 
 ```odin

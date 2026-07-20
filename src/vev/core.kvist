@@ -434,6 +434,16 @@
   items: [dynamic]Input-Binding
 })
 
+(defn function-output-binding [binding: Input-Binding] -> Input-Binding
+  ;; Datomic function clauses spell relation binding as [[?x ?y]], without
+  ;; the collection ellipsis used by ordinary :in bindings.
+  (let [out binding]
+    (when (and (= out.kind .Tuple)
+               (= (count out.items) 1)
+               (= out.items[0].kind .Tuple))
+      (set! out.kind .Collection))
+    out))
+
 (defstruct Tuple-Input {
   vars: []string
   binding: Input-Binding

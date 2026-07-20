@@ -96,6 +96,28 @@ works with Datomic Peer and Vev:
 (d/tx-range (d/log conn) nil nil)
 (d/tx-range (d/log conn) tx-start tx-end)
 (d/tx-range (d/log conn) #inst "2026-07-20" #inst "2026-07-21")
+
+;; Transaction coordinate conversion
+(d/t->tx (d/basis-t current))
+(d/tx->t tx)
+
+;; The log is an ordinary query input
+(d/q
+  '[:find [?tx ...]
+    :in $ ?log ?start ?end
+    :where [(tx-ids ?log ?start ?end) [?tx ...]]]
+  current
+  (d/log conn)
+  nil
+  nil)
+
+(d/q
+  '[:find ?e ?a ?v ?added
+    :in $ ?log ?tx
+    :where [(tx-data ?log ?tx) [[?e ?a ?v _ ?added]]]]
+  current
+  (d/log conn)
+  tx)
 ```
 
 `java.time.Instant` is also accepted by Vev. See

@@ -1335,7 +1335,7 @@
             (Function-Clause {op: (edn-node-text doc op-node)
                               terms: (slice terms 0)
                               out-vars: (slice out-vars 0)
-                              out-binding: binding
+                              out-binding: (function-output-binding binding)
                               is-tuple: true})))
         (if (edn-var? doc output)
           (arr.push! out^

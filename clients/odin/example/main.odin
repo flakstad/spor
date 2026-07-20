@@ -115,6 +115,12 @@ main :: proc() {
 		fmt.eprintln("unexpected historical DB metadata")
 		os.exit(1)
 	}
+	earlier_tx := vev.t_to_tx(earlier_t)
+	if earlier_tx != u64(tx) ||
+	   vev.tx_to_t(earlier_tx) != earlier_t {
+		fmt.eprintln("transaction coordinates did not round-trip")
+		os.exit(1)
+	}
 
 	earlier_result, earlier_ok := vev.query(
 		&earlier_db,

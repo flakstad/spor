@@ -380,6 +380,9 @@
 (defn- q-input-i64 [value: i64] -> vev.Query-Input
   (vev.query-input-scalar (vev.value-int value)))
 
+(defn- q-input-u64 [value: u64] -> vev.Query-Input
+  (vev.query-input-scalar (vev.value-entity value)))
+
 (defn- q-input-f64 [value: f64] -> vev.Query-Input
   (vev.query-input-scalar (vev.value-float value)))
 
@@ -395,8 +398,28 @@
 (defn- q-input-keyword [value: keyword] -> vev.Query-Input
   (vev.query-input-scalar (vev.value-keyword (vev.keyword-text value))))
 
+(defstruct Log-Query-Input {
+  input: vev.Query-Input
+})
+
+(defn- log-query-input [value: Log] -> vev.Query-Input
+  (let [start (kdata.from-nil) :defer-with kdata.release
+        end (kdata.from-nil) :defer-with kdata.release
+        transactions (tx-range value start end)
+        [log-value ok error] (vev.data-owned-value transactions)]
+    (kdata.release transactions)
+    (when (not ok)
+      (panic error))
+    (vev.Query-Input
+      {kind: .Scalar
+       owns-values: true
+       value: log-value})))
+
+(defn- q-input-log [value: Log] -> vev.Query-Input
+  (log-query-input value))
+
 (def- q-input
-  (overload q-input-data q-input-string q-input-int q-input-i64 q-input-f64 q-input-bool q-input-value q-input-keyword))
+  (overload q-input-data q-input-string q-input-int q-input-i64 q-input-u64 q-input-f64 q-input-bool q-input-value q-input-keyword q-input-log))
 
 (defn- q-data-input-data [value: Data] -> Data
   (kdata.retain value))
@@ -410,6 +433,9 @@
 (defn- q-data-input-i64 [value: i64] -> Data
   (kdata.from-int value))
 
+(defn- q-data-input-u64 [value: u64] -> Data
+  (kdata.from-int (i64 value)))
+
 (defn- q-data-input-f64 [value: f64] -> Data
   (kdata.from-float value))
 
@@ -422,15 +448,20 @@
 (defn- q-data-input-keyword [value: keyword] -> Data
   (kdata.from-keyword (vev.keyword-text value)))
 
+(defn- q-data-input-log [value: Log] -> Log-Query-Input
+  (Log-Query-Input {input: (log-query-input value)}))
+
 (def- q-data-input
   (overload q-data-input-data
             q-data-input-string
             q-data-input-int
             q-data-input-i64
+            q-data-input-u64
             q-data-input-f64
             q-data-input-bool
             q-data-input-value
-            q-data-input-keyword))
+            q-data-input-keyword
+            q-data-input-log))
 
 (defmacro- q-literal-int? [form]
   (and (number? form)
@@ -611,6 +642,14 @@
           (data-result-value source query (q-result-first-data query source first rest)))]
     out))
 
+(defn- q-data-with-first-db-log [query: Data, source: DB, first: Log-Query-Input, rest: []vev.Query-Input] -> Data
+  (let [out: Data
+        (with-db-lock Data source
+          (data-result-value
+            source query
+            (q-result-with-first-input query source first.input rest)))]
+    out))
+
 (defn- q-data-with-first-log [query: Data, source: Log, first: Data, rest: []vev.Query-Input] -> Data
   (defer (kdata.release first))
   (when (> (count rest) 0)
@@ -618,7 +657,7 @@
   (log-query-data query source first true))
 
 (def- q-data-with-first
-  (overload q-data-with-first-db q-data-with-first-log))
+  (overload q-data-with-first-db q-data-with-first-db-log q-data-with-first-log))
 
 (defmacro q [query db & inputs]
   (let [query-form (if (vector? query) `(quote ~query) query)]
@@ -877,6 +916,12 @@
 (defn history? [db: DB] -> bool
   (with-db-lock bool db
     (vev.store-db-history? (db-ptr db))))
+
+(defn t-to-tx [t: u64] -> u64
+  (vev.store-db-time-point-tx t))
+
+(defn tx-to-t [tx: u64] -> u64
+  (vev.store-db-tx-t tx))
 
 (defn tx-range [log-value: Log, start: Data, end: Data] -> Data
   (let [[start-value start-ok start-error] (vev.data-owned-value start)]

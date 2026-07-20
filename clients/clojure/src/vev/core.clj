@@ -22,9 +22,11 @@
     (binding [*print-namespace-maps* false]
       (pr-str value))))
 
+(declare query-input-value)
+
 (defn- inputs-text [inputs]
   (binding [*print-namespace-maps* false]
-    (pr-str (vec inputs))))
+    (pr-str (mapv query-input-value inputs))))
 
 (defn- load-engine
   ([]
@@ -658,6 +660,29 @@
   or java.time.Instant."
   [^Log log-value start end]
   (clj-value (.txRange (:native log-value) start end)))
+
+(defn t->tx
+  "Return the transaction entity id associated with a Vev basis t."
+  [t]
+  (when-not (and (integer? t) (not (neg? t)))
+    (throw (ex-info "t must be a non-negative integer" {:t t})))
+  (if (zero? t)
+    0
+    (+ 4611686018427387904 (dec (long t)))))
+
+(defn tx->t
+  "Return the basis t associated with a Vev transaction entity id."
+  [tx]
+  (when-not (and (integer? tx) (not (neg? tx)))
+    (throw (ex-info "transaction id must be a non-negative integer" {:tx tx})))
+  (if (>= tx 4611686018427387904)
+    (inc (- (long tx) 4611686018427387904))
+    (long tx)))
+
+(defn- query-input-value [value]
+  (if (instance? Log value)
+    (tx-range value nil nil)
+    value))
 
 (defn tx-builder
   "Create a native transaction builder for direct typed bulk tx construction."

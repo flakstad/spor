@@ -60,6 +60,13 @@ The Clojure names and argument order are identical:
 ;; Transaction log range: start inclusive, end exclusive
 (datomic/tx-range (datomic/log datomic-conn) start end)
 (vev/tx-range     (vev/log vev-conn)         start end)
+
+;; Convert between basis t and transaction entity id
+(datomic/t->tx datomic-t)
+(vev/t->tx     vev-t)
+
+(datomic/tx->t datomic-tx)
+(vev/tx->t     vev-tx)
 ```
 
 The executable example
@@ -102,9 +109,20 @@ numeric `t` or transaction id to equivalent transactions. The parity example
 compares the same metadata relationships and uses each database's returned
 coordinates.
 
-Kvist exposes `d.basis-t`, `d.next-t`, `d.as-of-t`, `d.since-t`, and
-`d.history?`. Java exposes `basisT()`, `nextT()`, nullable `asOfT()` and
-`sinceT()`, and `isHistory()`.
+Use `t->tx` and `tx->t` when moving between Vev's two transaction coordinate
+forms:
+
+```clojure
+(def tx (d/t->tx (d/basis-t db)))
+(d/tx->t tx)
+;; => the original basis t
+```
+
+Kvist exposes `d.t-to-tx` and `d.tx-to-t`; the arrows are spelled `-to-`
+because `>` is an operator in Kvist. Odin exposes `vev.t_to_tx` and
+`vev.tx_to_t`. Java exposes transaction coordinates through its existing DB
+and log methods; Datomic's Java API does not define conversion methods, so Vev
+does not invent Java-only ones.
 
 ## Transaction ranges
 
@@ -179,6 +197,33 @@ value is a boolean, not a transaction-operation keyword:
 `history` is a query database, not a current entity database. Entity views and
 transactions against a history value are rejected. Use the ordinary database
 or an `as-of` database when entity semantics are required.
+
+## Querying the log
+
+`tx-ids` and `tx-data` are query functions. The log is an ordinary query input
+alongside the database, exactly as in Datomic:
+
+```clojure
+(def log-value (d/log conn))
+
+(def txs
+  (d/q
+    '[:find [?tx ...]
+      :in $ ?log ?start ?end
+      :where [(tx-ids ?log ?start ?end) [?tx ...]]]
+    db log-value nil nil))
+
+(d/q
+  '[:find ?e ?a ?v ?added
+    :in $ ?log ?tx
+    :where [(tx-data ?log ?tx) [[?e ?a ?v _ ?added]]]]
+  db log-value (first txs))
+```
+
+`tx-ids` returns transaction entity ids. Its start is inclusive and end is
+exclusive; either may be `nil`, and the same t, tx-id, and instant bounds as
+`tx-range` are accepted. `tx-data` accepts either a t or a transaction entity
+id and returns five-position datoms.
 
 ## Composition
 

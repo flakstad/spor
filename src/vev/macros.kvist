@@ -1477,7 +1477,8 @@
           (Function-Clause {op: (unquote (source (nth expr 0)))
                             terms: ([]Term [(splice (emit-predicate-terms (rest expr)))])
                             out-vars: ([]string [])
-                            out-binding: (unquote (emit-input-binding out))
+                            out-binding: (function-output-binding
+                                           (unquote (emit-input-binding out)))
                             is-tuple: true}))
         (quasiquote
           (Function-Clause {op: (unquote (source (nth expr 0)))

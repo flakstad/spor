@@ -16,6 +16,16 @@
   '[:find ?count ?added
     :where [_ :item/count ?count _ ?added]])
 
+(def log-tx-ids-query
+  '[:find [?tx ...]
+    :in $ ?log ?start ?end
+    :where [(tx-ids ?log ?start ?end) [?tx ...]]])
+
+(def log-tx-data-query
+  '[:find ?a ?v ?added
+    :in $ ?log ?tx
+    :where [(tx-data ?log ?tx) [[_ ?a ?v _ ?added]]]])
+
 (def schema
   [{:db/ident :item/id
     :db/valueType :db.type/string
@@ -62,6 +72,16 @@
                                [v added]))))
                    set)))
        (filterv seq)))
+
+(defn log-query-summary [q-fn db log-value start end attr-ident]
+  (let [txs (q-fn log-tx-ids-query db log-value start end)
+        rows (mapcat #(q-fn log-tx-data-query db log-value %) txs)]
+    {:tx-count (count txs)
+     :data (->> rows
+                (keep (fn [[a v added]]
+                        (when (= (attr-ident a) :item/count)
+                          [v added])))
+                set)}))
 
 (defn metadata-summary [api db t1 t2]
   (let [as-of-db ((:as-of api) db t1)
@@ -113,6 +133,8 @@
                   between (Date. (quot (+ (.getTime t1) (.getTime t2)) 2))
                   before (Date. (dec (.getTime t1)))
                   after (Date. (inc (.getTime t2)))
+                  _ (assert (= 0 (datomic/tx->t (datomic/t->tx 0))))
+                  _ (assert (= 0 (vev/tx->t (vev/t->tx 0))))
                   rows [(assert-match!
                           :as-of-transaction
                           #{[100]}
@@ -218,9 +240,22 @@
                        [(tx-range-summary
                           (datomic/tx-range datomic-log nil t2)
                           #(datomic/ident datomic-db %))
-                        (tx-range-summary
+                       (tx-range-summary
                           (vev/tx-range vev-log nil t2)
-                          identity)]}]
+                          identity)]}
+                      log-query-results
+                      [(log-query-summary datomic/q
+                                          datomic-db
+                                          datomic-log
+                                          datomic-coordinate
+                                          after
+                                          #(datomic/ident datomic-db %))
+                       (log-query-summary vev/q
+                                          vev-db
+                                          vev-log
+                                          vev-coordinate
+                                          after
+                                          identity)]]
                   (when-not (and (= expected-range
                                     (first (:all range-results))
                                     (second (:all range-results)))
@@ -231,7 +266,24 @@
                                     (first (:until-exact range-results))
                                     (second (:until-exact range-results))))
                     (throw (ex-info "Datomic/Vev tx-range mismatch"
-                                    {:ranges range-results})))))
+                                    {:ranges range-results})))
+                  (when-not (= {:tx-count 2
+                                :data #{[100 true]
+                                        [100 false]
+                                        [250 true]}}
+                               (first log-query-results)
+                               (second log-query-results))
+                    (throw (ex-info "Datomic/Vev log query mismatch"
+                                    {:results log-query-results})))
+                  (when-not (and (= datomic-coordinate
+                                    (datomic/tx->t
+                                      (datomic/t->tx datomic-coordinate)))
+                                 (= vev-coordinate
+                                    (vev/tx->t
+                                      (vev/t->tx vev-coordinate))))
+                    (throw (ex-info "Datomic/Vev t/tx conversion mismatch"
+                                    {:datomic-t datomic-coordinate
+                                     :vev-t vev-coordinate})))))
               ;; java.time.Instant is a Vev convenience in addition to
               ;; Datomic's documented java.util.Date time point.
               (when-not (= #{[100]}
@@ -243,6 +295,8 @@
                                  (name scenario) (pr-str datomic) (pr-str vev))))
               (println "DB metadata parity:             ok")
               (println "tx-range parity:                ok")
+              (println "log query parity:               ok")
+              (println "t/tx conversion parity:         ok")
               (println "history time-filter parity: ok")))))
         (finally
           (.close vev-conn)

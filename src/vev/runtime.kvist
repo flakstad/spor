@@ -4845,7 +4845,9 @@
       (= op "mod")
       (= op "min")
       (= op "max")
-      (= op "compare")))
+      (= op "compare")
+      (= op "tx-ids")
+      (= op "tx-data")))
 
 (defn source-function-op? [op: string] -> bool
   (or (= op "entid")
@@ -4992,10 +4994,132 @@
       (return (value-float float-result) true)
       (return (value-int int-result) true))))
 
+(defn log-map-field [transaction: Value, key: string] -> [value: Value, ok: bool]
+  (when (not (= transaction.kind .Map))
+    (return (Value {}) false))
+  (let [index 0]
+    (while (< (+ index 1) (count transaction.items))
+      (let [candidate transaction.items[index]]
+        (when (and (= candidate.kind .Keyword)
+                   (= candidate.text key))
+          (return transaction.items[(+ index 1)] true)))
+      (set! index (+ index 2))))
+  (return (Value {}) false))
+
+(defn log-transaction-coordinate [transaction: Value] -> [t: i64, ok: bool]
+  (let [[value value-ok] (log-map-field transaction ":t")]
+    (if (and value-ok (= value.kind .Int))
+      (return value.int-value true)
+      (return 0 false))))
+
+(defn log-transaction-data [transaction: Value] -> [data: Value, ok: bool]
+  (let [[value value-ok] (log-map-field transaction ":data")]
+    (if (and value-ok (= value.kind .Vector))
+      (return value true)
+      (return (Value {}) false))))
+
+(defn log-transaction-id [transaction: Value] -> [tx: i64, ok: bool]
+  (let [[data data-ok] (log-transaction-data transaction)]
+    (when (not data-ok)
+      (return 0 false))
+    (for [datom data.items]
+      (when (and (= datom.kind .Vector)
+                 (> (count datom.items) 3))
+        (let [tx datom.items[3]]
+          (when (= tx.kind .Int)
+            (return tx.int-value true))
+          (when (= tx.kind .Entity)
+            (return (i64 tx.entity) true)))))
+    (return 0 false)))
+
+(defn log-transaction-instant [transaction: Value] -> [unix-millis: i64, ok: bool]
+  (let [[data data-ok] (log-transaction-data transaction)]
+    (when (not data-ok)
+      (return 0 false))
+    (for [datom data.items]
+      (when (and (= datom.kind .Vector)
+                 (> (count datom.items) 2))
+        (let [attribute-value datom.items[1]
+              instant-value datom.items[2]]
+          (when (and (= attribute-value.kind .Keyword)
+                     (= attribute-value.text ":db/txInstant")
+                     (= instant-value.kind .Instant))
+            (return instant-value.int-value true)))))
+    (return 0 false)))
+
+(defn log-bound-allows-transaction? [bound: Value, start?: bool, transaction: Value] -> bool
+  (when (= bound.kind .Nil)
+    (return true))
+  (when (= bound.kind .Instant)
+    (let [[instant instant-ok] (log-transaction-instant transaction)]
+      (when (not instant-ok)
+        (return false))
+      (if start?
+        (return (>= instant bound.int-value))
+        (return (< instant bound.int-value)))))
+  (when (or (= bound.kind .Int)
+            (= bound.kind .Entity))
+    (let [coordinate (if (= bound.kind .Entity)
+                       (i64 bound.entity)
+                       bound.int-value)
+          [t t-ok] (log-transaction-coordinate transaction)
+          [tx tx-ok] (log-transaction-id transaction)]
+      (when (or (< coordinate 0) (not (and t-ok tx-ok)))
+        (return false))
+      (let [actual (if (< (u64 coordinate) tx-partition-base) t tx)]
+        (if start?
+          (return (>= actual coordinate))
+          (return (< actual coordinate))))))
+  false)
+
+(defn log-function-op-value [op: string, values: []Value] -> [value: Value, ok: bool]
+  (when (and (= op "tx-ids") (= (count values) 3))
+    (let [log-value values[0]
+          start values[1]
+          end values[2]]
+      (when (not (= log-value.kind .Vector))
+        (return (Value {}) false))
+      (let [ids (make [dynamic]Value)]
+        (for [transaction log-value.items]
+          (when (and (log-bound-allows-transaction? start true transaction)
+                     (log-bound-allows-transaction? end false transaction))
+            (let [[tx tx-ok] (log-transaction-id transaction)]
+              (when tx-ok
+                (arr.push! ids (value-int tx))))))
+        (let [out (value-vector (slice ids 0))]
+          (delete ids)
+          (return out true)))))
+  (when (and (= op "tx-data") (= (count values) 2))
+    (let [log-value values[0]
+          coordinate values[1]]
+      (when (not (and (= log-value.kind .Vector)
+                      (or (= coordinate.kind .Int)
+                          (= coordinate.kind .Entity))))
+        (return (Value {}) false))
+      (let [point (if (= coordinate.kind .Entity)
+                    (i64 coordinate.entity)
+                    coordinate.int-value)]
+        (for [transaction log-value.items]
+          (let [[t t-ok] (log-transaction-coordinate transaction)
+                [tx tx-ok] (log-transaction-id transaction)]
+            (when (and t-ok tx-ok
+                       (or (= point t) (= point tx)))
+              (return (log-transaction-data transaction)))))
+        (return (value-vector ([]Value [])) true))))
+  (return (Value {}) false))
+
 (defn typed-function-op-value [rel: Query-Relation, row: int, function: Function-Clause, registry: []Native-Query-Fn] -> [value: Value, ok: bool]
   (let [[op op-ok] (typed-function-op-name function registry)]
     (when (not op-ok)
       (return (Value {}) false))
+    (when (or (= op "tx-ids") (= op "tx-data"))
+      (let [values (make [dynamic]Value 0 (count function.terms)) :defer]
+        (for [term function.terms]
+          (let [[value value-ok] (query-relation-resolve-typed-term rel row term)]
+            (when (not value-ok)
+              (return (Value {}) false))
+            (arr.push! values value)))
+        (return (log-function-op-value op (slice values 0)))))
     (when (and (= op "count")
                (= (count function.terms) 1))
       (let [[input input-ok] (query-relation-resolve-typed-term rel row function.terms[0])]
@@ -5201,6 +5325,14 @@
   (let [[op op-ok] (query-op-name function.op binding)]
     (when (not op-ok)
       (return (Value {}) false))
+  (when (or (= op "tx-ids") (= op "tx-data"))
+    (let [values (make [dynamic]Value 0 (count function.terms)) :defer]
+      (for [term function.terms]
+        (let [[value value-ok] (resolve-term term binding)]
+          (when (not value-ok)
+            (return (Value {}) false))
+          (arr.push! values value)))
+      (return (log-function-op-value op (slice values 0)))))
   (when (and (= op "count")
              (= (count function.terms) 1))
     (let [[input input-ok] (resolve-term function.terms[0] binding)]
@@ -23977,7 +24109,9 @@
       (= op "mod")
       (= op "min")
       (= op "max")
-      (= op "compare")))
+      (= op "compare")
+      (= op "tx-ids")
+      (= op "tx-data")))
 
 (defn validate-term-vars-bound [available: []string, terms: []Term, ctx: string] -> [ok: bool, error: string]
   (for [term index terms]
