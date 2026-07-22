@@ -17,6 +17,11 @@ Datomic Peer is the reference for an embedded VevDB process:
 - `log` and `tx-range` expose transactions
 - `tx-report-queue` exposes post-commit transaction reports
 
+A rejected transaction is represented by a failed report and leaves the
+connection usable; it is not a process panic. Native connection adapters must
+also own locking inside the operation itself. They must not expand cleanup or
+unlock defers into a caller's lexical scope.
+
 The remote Datomic Client API is useful corroboration, but it deliberately does
 not provide the Peer entity interface. VevDB is embedded, so absence from the
 Client API is not a reason to omit lazy entities.

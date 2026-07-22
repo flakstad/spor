@@ -165,11 +165,11 @@
            owns-values: result.ownsValues}))
 
 (defn- tx-report-value [report: vev.Store-Tx-Report] -> Tx-Report
-  (when (not report.ok)
-    (let [error report.error]
-      (vev.delete-store-tx-report report)
-      (panic error)))
-  (let [out (Tx-Report {ok: true error: "" tx: report.tx})]
+  ;; A rejected transaction is an ordinary application-level result.  The
+  ;; public report already carries ok/error specifically so callers can keep
+  ;; the process alive, explain the failure, and choose whether to retry.
+  ;; Reserve panics for failures which cannot be represented by this API.
+  (let [out (Tx-Report {ok: report.ok error: report.error tx: report.tx})]
     (vev.delete-store-tx-report report)
     out))
 
@@ -357,12 +357,18 @@
     (sync.mutex-unlock state^.lock))
   (free (rawptr db)))
 
+(defn transact-data [conn: Conn, tx: Data] -> Tx-Report
+  ;; Own the lock scope here rather than expanding a defer into the caller.
+  ;; A caller may inspect one report and transact again in the same lexical
+  ;; scope; the first operation must already have released the connection.
+  (let [state (conn-state conn)]
+    (sync.mutex-lock state^.lock)
+    (defer (sync.mutex-unlock state^.lock))
+    (tx-report-value
+      (vev.transact-store-report-data (addr state^.store) tx))))
+
 (defmacro transact [conn tx-form]
-  `(let [state (conn-state ~conn)]
-     (sync.mutex-lock state^.lock)
-     (defer (sync.mutex-unlock state^.lock))
-     (tx-report-value
-       (vev.transact-store-report-data (addr state^.store) ~tx-form))))
+  `(transact-data ~conn ~tx-form))
 
 (defn close-result [result: Result]
   (vev.delete-query-result

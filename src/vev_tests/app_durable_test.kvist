@@ -135,6 +135,33 @@
     (d.close reopened))
   (remove-app-test-db))
 
+(test.deftest durable-app-rejected-transaction-returns-a-report
+  (remove-app-test-db)
+  (let [conn (d.connect app-test-path)
+        schema-report
+        (d.transact conn
+          '[[:db/add 10 :db/ident :entity/id]
+            [:db/add 10 :db/valueType :db.type/string]
+            [:db/add 10 :db/unique :db.unique/identity]
+            [:db/add 11 :db/ident :entity/value]
+            [:db/add 11 :db/valueType :db.type/long]])]
+    (test.is schema-report.ok schema-report.error)
+    ;; A schema mismatch is invalid user/application data, not a process-level
+    ;; invariant failure.  The facade must expose the failed report rather than
+    ;; panic before its caller can inspect it.
+    (let [invalid-report
+          (d.transact conn
+            '[{:db/id "invalid" :entity/id "invalid" :entity/value "not-a-long"}])]
+      (test.is (not invalid-report.ok))
+      (test.is (= invalid-report.error "schema value type mismatch")))
+    ;; Rejection is atomic and leaves the connection usable.
+    (let [valid-report
+          (d.transact conn
+            '[{:db/id "valid" :entity/id "valid" :entity/value 42}])]
+      (test.is valid-report.ok valid-report.error))
+    (d.close conn))
+  (remove-app-test-db))
+
 (test.deftest durable-app-connection-serializes-concurrent-reads-and-writes
   (remove-concurrent-app-test-db)
   (let [conn (d.connect concurrent-app-test-path)]
