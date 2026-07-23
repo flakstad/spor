@@ -14,6 +14,7 @@ INCLUDE_DIR="$ROOT/build/include"
 PKGCONFIG_DIR="$LIB_DIR/pkgconfig"
 IF_NEEDED="false"
 KVIST_PATH="$(command -v "$KVIST_BIN" 2>/dev/null || true)"
+ODIN_PATH="$(command -v odin 2>/dev/null || true)"
 
 if [[ "${1:-}" == "--if-needed" ]]; then
   IF_NEEDED="true"
@@ -26,9 +27,9 @@ if [[ $# -ne 0 ]]; then
 fi
 
 case "$(uname -s)" in
-  Darwin) LIB_NAME="libvev.dylib"; LINK_NAME="" ;;
-  Linux) LIB_NAME="libvev.so"; LINK_NAME="" ;;
-  MINGW*|MSYS*|CYGWIN*) LIB_NAME="vev.dll"; LINK_NAME="vev.lib" ;;
+  Darwin) LIB_NAME="libvev.dylib"; LINK_NAME=""; EXPORT_PLATFORM="darwin" ;;
+  Linux) LIB_NAME="libvev.so"; LINK_NAME=""; EXPORT_PLATFORM="linux" ;;
+  MINGW*|MSYS*|CYGWIN*) LIB_NAME="vev.dll"; LINK_NAME="vev.lib"; EXPORT_PLATFORM="windows" ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
@@ -51,10 +52,17 @@ if [[ "$IF_NEEDED" == "true" && -f "$LIB_PATH" ]]; then
   if [[ "$ROOT/scripts/build_native_library.sh" -nt "$LIB_PATH" ]]; then
     SOURCES_CURRENT="false"
   fi
+  if [[ "$ROOT/scripts/build_sqlite.sh" -nt "$LIB_PATH" ||
+        "$ROOT/scripts/generate_native_exports.py" -nt "$LIB_PATH" ]]; then
+    SOURCES_CURRENT="false"
+  fi
   if [[ ! -f "$INCLUDE_DIR/vev.h" || "$ROOT/include/vev.h" -nt "$INCLUDE_DIR/vev.h" ]]; then
     SOURCES_CURRENT="false"
   fi
   if [[ -n "$KVIST_PATH" && "$KVIST_PATH" -nt "$LIB_PATH" ]]; then
+    SOURCES_CURRENT="false"
+  fi
+  if [[ -n "$ODIN_PATH" && "$ODIN_PATH" -nt "$LIB_PATH" ]]; then
     SOURCES_CURRENT="false"
   fi
   if [[ "$SOURCES_CURRENT" == "true" ]]; then
@@ -62,6 +70,12 @@ if [[ "$IF_NEEDED" == "true" && -f "$LIB_PATH" ]]; then
     exit 0
   fi
 fi
+
+EXPORT_FILE="$GENERATED_DIR/vev.exports"
+python3 "$ROOT/scripts/generate_native_exports.py" \
+  "$ROOT/include/vev.h" \
+  "$EXPORT_PLATFORM" \
+  "$EXPORT_FILE"
 
 if [[ -n "${KVIST_REPO_DIR:-}" ]]; then
   (
@@ -80,10 +94,14 @@ ODIN_BUILD_ARGS=(
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     SQLITE_WINDOWS_DIR="$(cygpath -w "$SQLITE_LIB_DIR")"
-    ODIN_BUILD_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_WINDOWS_DIR")
+    EXPORT_WINDOWS_FILE="$(cygpath -w "$EXPORT_FILE")"
+    ODIN_BUILD_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_WINDOWS_DIR /DEF:$EXPORT_WINDOWS_FILE")
     ;;
-  *)
-    ODIN_BUILD_ARGS+=("-extra-linker-flags:-L$SQLITE_LIB_DIR")
+  Darwin)
+    ODIN_BUILD_ARGS+=("-extra-linker-flags:-L$SQLITE_LIB_DIR -Wl,-exported_symbols_list,$EXPORT_FILE -Wl,-install_name,@rpath/libvev.dylib")
+    ;;
+  Linux)
+    ODIN_BUILD_ARGS+=("-extra-linker-flags:-L$SQLITE_LIB_DIR -Wl,--version-script=$EXPORT_FILE")
     ;;
 esac
 case "$(uname -s)" in

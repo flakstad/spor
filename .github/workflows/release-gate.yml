@@ -271,6 +271,7 @@ jobs:
             cp "dist/release-$platform/release/cli/"* upload/
             cp "dist/release-$platform/release/native/"* upload/
             cp "dist/release-$platform/release/odin/"* upload/
+            cp "dist/release-$platform/release/kvist/"* upload/
           done
           cp dist/release-linux-x86_64/release/source/* upload/
           (cd upload && shasum -a 256 *) > upload/SHA256SUMS

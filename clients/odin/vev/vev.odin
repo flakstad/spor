@@ -22,6 +22,8 @@ API :: struct {
 	connect: proc "c" (uri: cstring) -> rawptr `dynlib:"vev_connect"`,
 	connection_ok: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_ok"`,
 	connection_error: proc "c" (conn: rawptr) -> cstring `dynlib:"vev_connection_error"`,
+	connection_basis_t: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_basis_t"`,
+	connection_tx_count: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_tx_count"`,
 	connection_close: proc "c" (conn: rawptr) `dynlib:"vev_connection_close"`,
 	connection_db: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_db"`,
 	connection_transact_edn_report: proc "c" (conn: rawptr, tx_text: cstring) -> rawptr `dynlib:"vev_connection_transact_edn_report"`,
@@ -41,6 +43,10 @@ API :: struct {
 	db_history: proc "c" (db: rawptr) -> rawptr `dynlib:"vev_db_history"`,
 	db_tx_range_value: proc "c" (db: rawptr, start_kind: int, start_value: i64, end_kind: int, end_value: i64) -> rawptr `dynlib:"vev_db_tx_range_value"`,
 	db_query_value_with_inputs: proc "c" (db: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_db_query_value_with_inputs"`,
+	prepare_query_edn: proc "c" (query_text: cstring) -> rawptr `dynlib:"vev_prepare_query_edn"`,
+	prepared_query_ok: proc "c" (query: rawptr) -> bool `dynlib:"vev_prepared_query_ok"`,
+	prepared_query_free: proc "c" (query: rawptr) `dynlib:"vev_prepared_query_free"`,
+	db_query_prepared_value_with_inputs: proc "c" (db, query: rawptr, inputs_text: cstring) -> rawptr `dynlib:"vev_db_query_prepared_value_with_inputs"`,
 	tx_report_edn: proc "c" (report: rawptr) -> cstring `dynlib:"vev_tx_report_edn"`,
 	tx_report_free: proc "c" (report: rawptr) `dynlib:"vev_tx_report_free"`,
 	value_handle_free: proc "c" (handle: rawptr) `dynlib:"vev_value_handle_free"`,
@@ -87,6 +93,11 @@ Log :: struct {
 }
 
 Data :: struct {
+	library: ^Library,
+	handle: rawptr,
+}
+
+Prepared_Query :: struct {
 	library: ^Library,
 	handle: rawptr,
 }
@@ -139,6 +150,8 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.connect == nil ||
 	   library.api.connection_ok == nil ||
 	   library.api.connection_error == nil ||
+	   library.api.connection_basis_t == nil ||
+	   library.api.connection_tx_count == nil ||
 	   library.api.connection_close == nil ||
 	   library.api.connection_db == nil ||
 	   library.api.connection_transact_edn_report == nil ||
@@ -158,6 +171,10 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.db_history == nil ||
 	   library.api.db_tx_range_value == nil ||
 	   library.api.db_query_value_with_inputs == nil ||
+	   library.api.prepare_query_edn == nil ||
+	   library.api.prepared_query_ok == nil ||
+	   library.api.prepared_query_free == nil ||
+	   library.api.db_query_prepared_value_with_inputs == nil ||
 	   library.api.tx_report_edn == nil ||
 	   library.api.tx_report_free == nil ||
 	   library.api.value_handle_free == nil ||
@@ -194,6 +211,47 @@ load_bundled :: proc(package_root: string) -> (library: Library, ok: bool) {
 		return {}, false
 	}
 	return load(path)
+}
+
+load_default :: proc() -> (library: Library, ok: bool) {
+	if explicit := os.get_env("VEV_LIB", context.temp_allocator); len(explicit) > 0 {
+		return load(explicit)
+	}
+
+	executable_dir, executable_error := os.get_executable_directory(context.temp_allocator)
+	if executable_error == nil {
+		candidates := [5]string{}
+		candidates[0], _ = os.join_path(
+			{executable_dir, "..", "Frameworks", library_filename()},
+			context.temp_allocator,
+		)
+		candidates[1], _ = os.join_path(
+			{executable_dir, "lib", library_filename()},
+			context.temp_allocator,
+		)
+		candidates[2], _ = os.join_path(
+			{executable_dir, library_filename()},
+			context.temp_allocator,
+		)
+		candidates[3], _ = os.join_path(
+			{executable_dir, "..", "lib", library_filename()},
+			context.temp_allocator,
+		)
+		candidates[4], _ = os.join_path(
+			{executable_dir, "deps", "vev", "lib", library_filename()},
+			context.temp_allocator,
+		)
+		for candidate in candidates {
+			if len(candidate) == 0 {
+				continue
+			}
+			if loaded, loaded_ok := load(candidate); loaded_ok {
+				return loaded, true
+			}
+		}
+	}
+
+	return {}, false
 }
 
 unload :: proc(library: ^Library) {
@@ -251,6 +309,20 @@ connection_error :: proc(
 	}
 	defer connection.library.api.string_free(native_error)
 	return strings.clone(string(native_error), allocator)
+}
+
+connection_basis_t :: proc(connection: ^Durable_Connection) -> (t: u64, ok: bool) {
+	if connection == nil || connection.handle == nil {
+		return 0, false
+	}
+	return connection.library.api.connection_basis_t(connection.handle), true
+}
+
+connection_tx_count :: proc(connection: ^Durable_Connection) -> (count: u64, ok: bool) {
+	if connection == nil || connection.handle == nil {
+		return 0, false
+	}
+	return connection.library.api.connection_tx_count(connection.handle), true
 }
 
 close_durable :: proc(connection: ^Durable_Connection) {
@@ -580,6 +652,50 @@ query_db :: proc(
 	return Data{library = database.library, handle = handle}, true
 }
 
+prepare :: proc(library: ^Library, query_text: string) -> (query: Prepared_Query, ok: bool) {
+	if library == nil || library.api.prepare_query_edn == nil {
+		return {}, false
+	}
+	query_cstring := strings.clone_to_cstring(query_text, context.temp_allocator)
+	handle := library.api.prepare_query_edn(query_cstring)
+	if handle == nil || !library.api.prepared_query_ok(handle) {
+		if handle != nil {
+			library.api.prepared_query_free(handle)
+		}
+		return {}, false
+	}
+	return Prepared_Query{library = library, handle = handle}, true
+}
+
+close_prepared_query :: proc(query: ^Prepared_Query) {
+	if query == nil || query.handle == nil {
+		return
+	}
+	query.library.api.prepared_query_free(query.handle)
+	query^ = {}
+}
+
+query_db_prepared :: proc(
+	database: ^DB,
+	query: ^Prepared_Query,
+	inputs := "[]",
+) -> (result: Data, ok: bool) {
+	if database == nil || database.handle == nil ||
+	   query == nil || query.handle == nil {
+		return {}, false
+	}
+	inputs_cstring := strings.clone_to_cstring(inputs, context.temp_allocator)
+	handle := database.library.api.db_query_prepared_value_with_inputs(
+		database.handle,
+		query.handle,
+		inputs_cstring,
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = database.library, handle = handle}, true
+}
+
 close_data :: proc(data: ^Data) {
 	if data == nil || data.handle == nil {
 		return
@@ -747,7 +863,7 @@ db :: proc{db_memory, db_durable}
 log :: proc{log_memory, log_durable}
 as_of :: proc{as_of_coordinate, as_of_time}
 since :: proc{since_coordinate, since_time}
-close :: proc{close_memory, close_durable, close_db, close_log, close_data}
+close :: proc{close_memory, close_durable, close_db, close_log, close_data, close_prepared_query}
 transact :: proc{transact_memory, transact_durable}
 query :: proc{query_memory, query_durable, query_db}
 edn :: proc{edn_data, edn_value}

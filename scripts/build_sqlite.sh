@@ -25,7 +25,9 @@ BUILD_DIR="$CACHE_DIR/build/$PLATFORM"
 LIB_PATH="$BUILD_DIR/$LIB_NAME"
 OBJECT_PATH="$BUILD_DIR/$OBJECT_NAME"
 
-if [[ -f "$LIB_PATH" ]]; then
+if [[ -f "$LIB_PATH" &&
+      ! "$ROOT/scripts/build_sqlite.sh" -nt "$LIB_PATH" &&
+      ( ! -f "$ARCHIVE_PATH" || ! "$ARCHIVE_PATH" -nt "$LIB_PATH" ) ]]; then
   printf '%s\n' "$BUILD_DIR"
   exit 0
 fi

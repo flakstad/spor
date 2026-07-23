@@ -1,0 +1,30 @@
+(package main)
+
+(import d "../../clients/kvist")
+(import data "kvist:data")
+
+(defn main []
+  (let [path "/tmp/vev-kvist-binary-smoke.vev"
+        conn (d.connect path)]
+    (defer (d.close conn))
+    (let [report
+          (d.transact
+            conn
+            [{:db/id "person-ada"
+              :person/id "ada"
+              :person/name "Ada"}])]
+      (when (not report.ok)
+        (panic report.error)))
+    (let [db (d.db conn)]
+      (defer (d.close db))
+      (let [name
+            (d.q
+              '[:find ?name .
+                :in $ ?id
+                :where [?e :person/id ?id]
+                       [?e :person/name ?name]]
+              db
+              "ada")]
+        (when (or (not (data.string? name))
+                  (not (= (data.string name) "Ada")))
+          (panic "unexpected binary Kvist query result"))))))

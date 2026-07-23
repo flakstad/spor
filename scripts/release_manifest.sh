@@ -56,6 +56,7 @@ required_artifacts=(
   "$CLI_DIR/vevdb-cli-$PLATFORM-$VERSION.$CLI_FORMAT"
   "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"
   "$ROOT/build/release/odin/vev-odin-$PLATFORM-$VERSION.zip"
+  "$ROOT/build/release/kvist/vev-kvist-$PLATFORM-$VERSION.zip"
   "$ROOT/include/vev.h"
   "$ROOT/build/jvm/vev-java-$VERSION.jar"
   "$ROOT/build/jvm/vev-native-$PLATFORM-$VERSION.jar"
@@ -121,6 +122,7 @@ artifact() {
   artifact "vevdb-cli-$PLATFORM" "cli-bundle" "$CLI_DIR/vevdb-cli-$PLATFORM-$VERSION.$CLI_FORMAT"; printf ',\n'
   artifact "vev-native-$PLATFORM-bundle" "native-bundle" "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"; printf ',\n'
   artifact "vev-odin-$PLATFORM-bundle" "odin-vendor-bundle" "$ROOT/build/release/odin/vev-odin-$PLATFORM-$VERSION.zip"; printf ',\n'
+  artifact "vev-kvist-$PLATFORM-bundle" "kvist-binary-bundle" "$ROOT/build/release/kvist/vev-kvist-$PLATFORM-$VERSION.zip"; printf ',\n'
   artifact "vev-c-header" "c-header" "$ROOT/include/vev.h"; printf ',\n'
   artifact "vev-java" "jvm-jar" "$ROOT/build/jvm/vev-java-$VERSION.jar"; printf ',\n'
   artifact "vev-native-$PLATFORM-jvm" "jvm-native-jar" "$ROOT/build/jvm/vev-native-$PLATFORM-$VERSION.jar"; printf ',\n'

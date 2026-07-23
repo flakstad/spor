@@ -6016,6 +6016,35 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (vev_db_query_value_with_inputs db query-text (cstring "[]")))
 
 @export
+(defn vev_db_query_prepared_value_with_inputs :abi "c" [db: Vev-DB, query: Vev-Prepared-Query, inputs-text: cstring] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr db) nil) (= (rawptr query) nil) (= inputs-text nil))
+    (return (Vev-Value-Handle nil)))
+  (let [input-source (text-from-c inputs-text)
+        store (store-db-ptr db)
+        prepared (prepared-query-ptr query)]
+    (defer (delete input-source))
+    (when (not prepared^.ok)
+      (return (Vev-Value-Handle nil)))
+    (let [[inputs inputs-ok _] (vev.parse-query-inputs-text-for-query prepared^.query input-source)]
+      (defer (vev.delete-owned-query-inputs inputs))
+      (when (not inputs-ok)
+        (return (Vev-Value-Handle nil)))
+      (let [result (vev.q-result-store-db-prepared-with-inputs store prepared^ (slice inputs 0))]
+        (defer (vev.delete-query-result result))
+        (when (not result.result.ok)
+          (return (Vev-Value-Handle nil)))
+        (let [[source source-ok _] (vev.store-db-read-source store)]
+          (when (not source-ok)
+            (return (Vev-Value-Handle nil)))
+          (let [[value value-ok _]
+                (vev.query-result-shaped-value
+                  source prepared^.source-owner prepared^.query result.result)]
+            (if value-ok
+              (value-handle-from-owned-value value)
+              (Vev-Value-Handle nil))))))))
+
+@export
 (defn vev_query_db_prepared_result_with_inputs :abi "c" [db: Vev-DB, query: Vev-Prepared-Query, inputs-text: cstring] -> Vev-Result
   (odin "context = runtime.default_context()")
   (when (or (= (rawptr db) nil) (= (rawptr query) nil) (= inputs-text nil))

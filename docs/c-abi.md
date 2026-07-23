@@ -20,6 +20,7 @@ The current shape is intentionally narrow:
 - callback traversal for nested value trees
 - callback traversal for typed result rows
 - direct statement query execution through typed result-row callbacks
+- prepared DB query execution into fully shaped typed value handles
 - registered transaction function callbacks that return EDN tx-data
 - transaction report listener callbacks on connection commits
 - explicit durable index compaction for maintenance scheduling
