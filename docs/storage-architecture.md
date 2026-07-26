@@ -57,6 +57,17 @@ already-opened or current root-backed handle when available, so
 parse/read-only/direct-append failures remain storage-neutral and can keep
 warmed page cache state.
 
+Maintenance policy remains explicit at the client boundary. The C ABI and
+binary-backed Kvist package expose latest visible merge-run counts, bounded
+maintenance, and full compaction. Applications can therefore keep normal
+immutable delta publication cheap while choosing where maintenance work runs.
+Full compaction and bounded maintenance invalidate the connection's cached
+write/root metadata when they republish an equivalent logical basis.
+
+Cold transaction metadata is assembled with bounded schema scans over
+`:db/ident`, `:db/valueType`, and `:db/unique`, followed by an in-memory entity
+join. It must never perform one type/uniqueness lookup per installed attribute.
+
 Legacy resident APIs still exist for compatibility and recovery:
 
 - `load-db-sqlite`

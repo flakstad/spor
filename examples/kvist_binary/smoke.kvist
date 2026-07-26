@@ -7,6 +7,14 @@
   (let [path "/tmp/vev-kvist-binary-smoke.vev"
         conn (d.connect path)]
     (defer (d.close conn))
+    (let [schema
+          (d.transact
+            conn
+            [[:db/add 100 :db/ident :person/id]
+             [:db/add 100 :db/valueType :db.type/string]
+             [:db/add 100 :db/unique :db.unique/identity]])]
+      (when (not schema.ok)
+        (panic schema.error)))
     (let [report
           (d.transact
             conn
@@ -15,8 +23,18 @@
               :person/name "Ada"}])]
       (when (not report.ok)
         (panic report.error)))
+    (when (< (d.latest-index-merge-run-count conn ":eavt") 0)
+      (panic "binary Kvist client could not inspect index run count"))
+    (when (not (d.maintain-indexes! conn 8))
+      (panic "binary Kvist client could not maintain indexes"))
+    (when (not (d.compact-indexes! conn))
+      (panic "binary Kvist client could not compact indexes"))
     (let [db (d.db conn)]
       (defer (d.close db))
+      (when (not (d.lookup-ref-string-exists? db ":person/id" "ada"))
+        (panic "binary Kvist lookup-ref did not find existing identity"))
+      (when (d.lookup-ref-string-exists? db ":person/id" "missing")
+        (panic "binary Kvist lookup-ref found missing identity"))
       (let [name
             (d.q
               '[:find ?name .

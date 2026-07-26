@@ -4200,6 +4200,16 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (vev_sqlite_conn_compact_indexes (connection-as-sqlite conn)))
 
 @export
+(defn vev_connection_maintain_indexes :abi "c" [conn: Vev-Connection, max-steps: int] -> bool
+  (odin "context = runtime.default_context()")
+  (vev_sqlite_conn_maintain_indexes (connection-as-sqlite conn) max-steps))
+
+@export
+(defn vev_connection_latest_index_merge_run_count :abi "c" [conn: Vev-Connection, index-name: cstring] -> int
+  (odin "context = runtime.default_context()")
+  (vev_sqlite_conn_latest_index_merge_run_count (connection-as-sqlite conn) index-name))
+
+@export
 (defn vev_connection_listen_tx_report :abi "c" [conn: Vev-Connection, name: cstring, callback: rawptr, user: rawptr] -> bool
   (odin "context = runtime.default_context()")
   (vev_sqlite_conn_listen_tx_report (connection-as-sqlite conn) name callback user))
@@ -4887,8 +4897,40 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (odin "context = runtime.default_context()")
   (when (or (= (rawptr conn) nil) (not (abi-sqlite-conn-ok (rawptr conn))))
     (return false))
-  (let [[_ compact-ok _] (vev.sqlite-conn-compact-indexes! (sqlite-conn-ptr conn))]
+  (let [[compacted compact-ok _] (vev.sqlite-conn-compact-indexes! (sqlite-conn-ptr conn))]
+    (when (and compact-ok compacted)
+      (vev.sqlite-conn-invalidate-write-state-cache! (sqlite-conn-ptr conn))
+      (vev.sqlite-conn-invalidate-current-root-cache! (sqlite-conn-ptr conn)))
     compact-ok))
+
+@export
+(defn vev_sqlite_conn_maintain_indexes :abi "c" [conn: Vev-SQLite-Conn, max-steps: int] -> bool
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr conn) nil)
+            (not (abi-sqlite-conn-ok (rawptr conn)))
+            (< max-steps 0))
+    (return false))
+  (let [[_ compacted maintenance-ok _]
+        (vev.sqlite-conn-maintain-indexes! (sqlite-conn-ptr conn) max-steps)]
+    (when (and maintenance-ok compacted)
+      (vev.sqlite-conn-invalidate-write-state-cache! (sqlite-conn-ptr conn))
+      (vev.sqlite-conn-invalidate-current-root-cache! (sqlite-conn-ptr conn)))
+    maintenance-ok))
+
+@export
+(defn vev_sqlite_conn_latest_index_merge_run_count :abi "c" [conn: Vev-SQLite-Conn, index-name: cstring] -> int
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr conn) nil)
+            (= index-name nil)
+            (not (abi-sqlite-conn-ok (rawptr conn))))
+    (return -1))
+  (let [sqlite (sqlite-conn-ptr conn)
+        index-text (text-from-c index-name)
+        [run-count _ count-ok _]
+        (vev.sqlite-latest-index-root-merge-run-count
+          sqlite^.handle index-text)]
+    (delete index-text)
+    (if count-ok run-count -1)))
 
 @export
 (defn vev_tx_fn_registry_create :abi "c" [] -> Vev-Tx-Fn-Registry
