@@ -89,6 +89,26 @@
     (native.unload (addr state^.library))
     (free state)))
 
+(defn compact-indexes! [conn: Conn] -> bool
+  (when (= (rawptr conn) nil)
+    (return false))
+  (let [state (conn-state conn)]
+    (native.compact-indexes (addr state^.connection))))
+
+(defn maintain-indexes! [conn: Conn, max-steps: int] -> bool
+  (when (= (rawptr conn) nil)
+    (return false))
+  (let [state (conn-state conn)]
+    (native.maintain-indexes (addr state^.connection) max-steps)))
+
+(defn latest-index-merge-run-count [conn: Conn, index-name: string] -> int
+  (when (= (rawptr conn) nil)
+    (return -1))
+  (let [state (conn-state conn)
+        [count ok] (native.latest-index-merge-run-count
+                     (addr state^.connection) index-name)]
+    (if ok count -1)))
+
 (defn db [conn: Conn] -> DB
   (let [state (conn-state conn)
         [database ok] (native.db (addr state^.connection))]
@@ -129,6 +149,12 @@
     (when (not ok)
       (panic "could not read Vev DB next t"))
     value))
+
+(defn lookup-ref-string-exists?
+  [db-value: DB, attr: string, value: string] -> bool
+  (let [state (db-state db-value)]
+    (native.lookup-ref-string-exists
+      (addr state^.database) attr value)))
 
 (defn- release-data-values! [values: [dynamic]Data]
   (for [value values]

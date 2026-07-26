@@ -28,6 +28,9 @@ API :: struct {
 	connection_db: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_db"`,
 	connection_transact_edn_report: proc "c" (conn: rawptr, tx_text: cstring) -> rawptr `dynlib:"vev_connection_transact_edn_report"`,
 	connection_query_value_with_inputs: proc "c" (conn: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_connection_query_value_with_inputs"`,
+	connection_compact_indexes: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_compact_indexes"`,
+	connection_maintain_indexes: proc "c" (conn: rawptr, max_steps: int) -> bool `dynlib:"vev_connection_maintain_indexes"`,
+	connection_latest_index_merge_run_count: proc "c" (conn: rawptr, index_name: cstring) -> int `dynlib:"vev_connection_latest_index_merge_run_count"`,
 	db_release: proc "c" (db: rawptr) `dynlib:"vev_db_release"`,
 	db_basis_t: proc "c" (db: rawptr) -> u64 `dynlib:"vev_db_basis_t"`,
 	db_next_t: proc "c" (db: rawptr) -> u64 `dynlib:"vev_db_next_t"`,
@@ -43,6 +46,9 @@ API :: struct {
 	db_history: proc "c" (db: rawptr) -> rawptr `dynlib:"vev_db_history"`,
 	db_tx_range_value: proc "c" (db: rawptr, start_kind: int, start_value: i64, end_kind: int, end_value: i64) -> rawptr `dynlib:"vev_db_tx_range_value"`,
 	db_query_value_with_inputs: proc "c" (db: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_db_query_value_with_inputs"`,
+	db_entity_lookup_ref_string: proc "c" (db: rawptr, attr, value: cstring) -> rawptr `dynlib:"vev_db_entity_lookup_ref_string"`,
+	entity_free: proc "c" (entity: rawptr) `dynlib:"vev_entity_free"`,
+	entity_found: proc "c" (entity: rawptr) -> bool `dynlib:"vev_entity_found"`,
 	prepare_query_edn: proc "c" (query_text: cstring) -> rawptr `dynlib:"vev_prepare_query_edn"`,
 	prepared_query_ok: proc "c" (query: rawptr) -> bool `dynlib:"vev_prepared_query_ok"`,
 	prepared_query_free: proc "c" (query: rawptr) `dynlib:"vev_prepared_query_free"`,
@@ -156,6 +162,9 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.connection_db == nil ||
 	   library.api.connection_transact_edn_report == nil ||
 	   library.api.connection_query_value_with_inputs == nil ||
+	   library.api.connection_compact_indexes == nil ||
+	   library.api.connection_maintain_indexes == nil ||
+	   library.api.connection_latest_index_merge_run_count == nil ||
 	   library.api.db_release == nil ||
 	   library.api.db_basis_t == nil ||
 	   library.api.db_next_t == nil ||
@@ -171,6 +180,9 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.db_history == nil ||
 	   library.api.db_tx_range_value == nil ||
 	   library.api.db_query_value_with_inputs == nil ||
+	   library.api.db_entity_lookup_ref_string == nil ||
+	   library.api.entity_free == nil ||
+	   library.api.entity_found == nil ||
 	   library.api.prepare_query_edn == nil ||
 	   library.api.prepared_query_ok == nil ||
 	   library.api.prepared_query_free == nil ||
@@ -325,6 +337,41 @@ connection_tx_count :: proc(connection: ^Durable_Connection) -> (count: u64, ok:
 	return connection.library.api.connection_tx_count(connection.handle), true
 }
 
+compact_indexes :: proc(connection: ^Durable_Connection) -> bool {
+	if connection == nil || connection.handle == nil {
+		return false
+	}
+	return connection.library.api.connection_compact_indexes(connection.handle)
+}
+
+maintain_indexes :: proc(connection: ^Durable_Connection, max_steps: int) -> bool {
+	if connection == nil || connection.handle == nil || max_steps < 0 {
+		return false
+	}
+	return connection.library.api.connection_maintain_indexes(
+		connection.handle,
+		max_steps,
+	)
+}
+
+latest_index_merge_run_count :: proc(
+	connection: ^Durable_Connection,
+	index_name: string,
+) -> (count: int, ok: bool) {
+	if connection == nil || connection.handle == nil {
+		return 0, false
+	}
+	index_name_cstring := strings.clone_to_cstring(
+		index_name,
+		context.temp_allocator,
+	)
+	count = connection.library.api.connection_latest_index_merge_run_count(
+		connection.handle,
+		index_name_cstring,
+	)
+	return count, count >= 0
+}
+
 close_durable :: proc(connection: ^Durable_Connection) {
 	if connection == nil || connection.handle == nil {
 		return
@@ -411,6 +458,24 @@ is_history :: proc(database: ^DB) -> bool {
 	return database != nil &&
 	       database.handle != nil &&
 	       database.library.api.db_is_history(database.handle)
+}
+
+lookup_ref_string_exists :: proc(database: ^DB, attr, value: string) -> bool {
+	if database == nil || database.handle == nil {
+		return false
+	}
+	attr_cstring := strings.clone_to_cstring(attr, context.temp_allocator)
+	value_cstring := strings.clone_to_cstring(value, context.temp_allocator)
+	entity := database.library.api.db_entity_lookup_ref_string(
+		database.handle,
+		attr_cstring,
+		value_cstring,
+	)
+	if entity == nil {
+		return false
+	}
+	defer database.library.api.entity_free(entity)
+	return database.library.api.entity_found(entity)
 }
 
 as_of_coordinate :: proc(database: ^DB, tx: u64) -> (filtered: DB, ok: bool) {

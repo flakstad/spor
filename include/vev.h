@@ -156,6 +156,10 @@ vev_tx_report_array_t vev_connection_transact_many_edn_reports(
     const char **tx_texts,
     int tx_count);
 bool vev_connection_compact_indexes(vev_connection_t conn);
+bool vev_connection_maintain_indexes(vev_connection_t conn, int max_steps);
+int vev_connection_latest_index_merge_run_count(
+    vev_connection_t conn,
+    const char *index_name);
 bool vev_connection_listen_tx_report(
     vev_connection_t conn,
     const char *name,
@@ -190,6 +194,10 @@ vev_tx_report_array_t vev_sqlite_conn_transact_many_edn_reports(
     const char **tx_texts,
     int tx_count);
 bool vev_sqlite_conn_compact_indexes(vev_sqlite_conn_t conn);
+bool vev_sqlite_conn_maintain_indexes(vev_sqlite_conn_t conn, int max_steps);
+int vev_sqlite_conn_latest_index_merge_run_count(
+    vev_sqlite_conn_t conn,
+    const char *index_name);
 bool vev_sqlite_conn_listen_tx_report(
     vev_sqlite_conn_t conn,
     const char *name,
