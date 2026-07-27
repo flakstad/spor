@@ -4,7 +4,7 @@
 (import data "kvist:data")
 
 (defn main []
-  (let [path "/tmp/vev-kvist-binary-smoke.vev"
+  (let [path "vev-kvist-binary-smoke.db"
         conn (d.connect path)]
     (defer (d.close conn))
     (let [schema
