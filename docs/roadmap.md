@@ -65,7 +65,7 @@ Non-goal:
 Status: mostly satisfied as the current compatibility gate. The broad in-memory surface is present:
 query, pull, tx-data, schema, lookup refs, tuples, indexes, parser text paths,
 prepared APIs, and host-facing EDN/C ABI query paths. The local compatibility
-suite currently passes 379 tests. Remaining work is concentrated in exact
+suite currently passes 383 tests. Remaining work is concentrated in exact
 parser diagnostics/object rendering, query/rule planner maturity,
 targeted MusicBrainz/Datomic regressions, higher-level host wrapper
 ergonomics, and durable storage architecture.

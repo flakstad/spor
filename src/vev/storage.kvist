@@ -13074,6 +13074,11 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (let [[schema-type has-type type-ok type-error] (db-read-source-schema-value-type source op.a)]
       (when (not type-ok)
         (return false type-error))
+      (when (and (not op.derived)
+                 (not (datomic-datom-value-valid? op.v op.a schema-type has-type)))
+        (when has-type
+          (delete schema-type))
+        (return false "unsupported datom value type"))
       (when has-type
         (let [matches (value-matches-schema-type? op.v schema-type)]
           (delete schema-type)
@@ -13111,6 +13116,11 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (let [[schema-type has-type type-ok type-error] (db-read-source-schema-value-type source op.a)]
     (when (not type-ok)
       (return false type-error))
+    (when (and (not op.derived)
+               (not (datomic-datom-value-valid? op.v op.a schema-type has-type)))
+      (when has-type
+        (delete schema-type))
+      (return false "unsupported datom value type"))
     (when has-type
       (let [matches (value-matches-schema-type? op.v schema-type)]
         (delete schema-type)
@@ -13241,6 +13251,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (when info.has-type
       (when (not (value-matches-schema-type? op.v info.schema-type))
         (return false "schema value type mismatch")))
+    (when (and (not op.derived)
+               (not (datomic-datom-value-valid? op.v op.a info.schema-type info.has-type)))
+      (return false "unsupported datom value type"))
     (let [cardinality-key ""
           prior-index -1
           has-prior false]

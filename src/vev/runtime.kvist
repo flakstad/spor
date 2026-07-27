@@ -16457,6 +16457,13 @@
 (defn schema-component? [db: DB, attr: string] -> bool
   (schema-bool? db attr ":db/isComponent"))
 
+(defn schema-component-target? [db: DB, attr: string] -> bool
+  (if (reverse-attr? attr)
+    (let [forward (forward-attr-for-reverse attr)]
+      (defer (delete forward))
+      (schema-component? db forward))
+    (schema-component? db attr)))
+
 (defn value-matches-schema-type? [value: Value, schema-type: string] -> bool
   (cond
     (= schema-type ":db.type/string") (= value.kind .String)
@@ -16468,7 +16475,29 @@
     (= schema-type ":db.type/tuple") (= value.kind .Vector)
     (= schema-type ":db.type/uuid") (= value.kind .Uuid)
     (= schema-type ":db.type/instant") (= value.kind .Instant)
+    :else false))
+
+(defn datomic-datom-value-valid? [value: Value, attr: string, schema-type: string, has-type: bool] -> bool
+  (cond
+    (= value.kind .Map) false
+    (= value.kind .Set) false
+    (= value.kind .Vector)
+      (or (= attr ":db/tupleAttrs")
+          (and has-type (= schema-type ":db.type/tuple")))
     :else true))
+
+(defn nested-map-has-unique-attr? [db: DB, map-value: Value] -> bool
+  (when (not (= map-value.kind .Map))
+    (return false))
+  (let [index 0]
+    (while (< (+ index 1) (count map-value.items))
+      (let [key map-value.items[index]]
+        (when (and (= key.kind .Keyword)
+                   (not (= key.text ":db/id"))
+                   (schema-unique? db key.text))
+          (return true)))
+      (set! index (+ index 2))))
+  false)
 
 (defn valid-tuple-attrs-value? [db: DB, value: Value] -> bool
   (when (not (= value.kind .Vector))
@@ -17492,8 +17521,20 @@
         (when skip-data
           (continue))
         (when data.has-nested-map
-          (if (schema-ref-target? current-db data.a)
-            (let [[nested-entity nested-ok nested-error] (nested-entity-ref-data data.nested-map data.nested-tempid)]
+          (when (not (schema-ref-target? current-db data.a))
+            (return (Resolved-Tx {ok: false
+                                  error: "nested map requires ref schema"
+                                  ops: resolved-ops
+                                  tx-meta: resolved-meta
+                                  tempids: resolved-tempids})))
+          (when (not (or (schema-component-target? current-db data.a)
+                         (nested-map-has-unique-attr? current-db data.nested-map)))
+            (return (Resolved-Tx {ok: false
+                                  error: "nested map requires component or unique attribute"
+                                  ops: resolved-ops
+                                  tx-meta: resolved-meta
+                                  tempids: resolved-tempids})))
+          (let [[nested-entity nested-ok nested-error] (nested-entity-ref-data data.nested-map data.nested-tempid)]
               (when (not nested-ok)
                 (return (Resolved-Tx {ok: false
                                       error: nested-error
@@ -17522,10 +17563,7 @@
                   (set! data.v (value-keyword nested-entity.ident))
                   (set! nested-assigned true))
                 (when (not nested-assigned)
-                  (set! data.v (value-entity nested-entity.e)))))
-            (do
-              (set! data.v data.nested-map)
-              (set! data.has-nested-map false))))
+                  (set! data.v (value-entity nested-entity.e))))))
         (when (or (= data.op ":db/retract")
                   (= data.op ":db/retractAttr"))
           (let [tuple-attrs (schema-tuple-attrs current-db data.a) :defer]
@@ -17679,6 +17717,9 @@
       (when (> (count tuple-attrs) 0)
         (return false "cannot modify tuple attrs directly"))))
   (let [[schema-type has-type] (mmap.get db.schema-value-types op.a)]
+    (when (and (not op.derived)
+               (not (datomic-datom-value-valid? op.v op.a schema-type has-type)))
+      (return false "unsupported datom value type"))
     (when (and has-type (not (value-matches-schema-type? op.v schema-type)))
       (return false "schema value type mismatch")))
   (return true ""))
@@ -17862,7 +17903,8 @@
           (= value ":db.type/keyword")
           (= value ":db.type/symbol")
           (= value ":db.type/tuple")
-          (= value ":db.type/uuid"))
+          (= value ":db.type/uuid")
+          (= value ":db.type/instant"))
     (= schema-attr ":db/cardinality")
       (or (= value ":db.cardinality/one")
           (= value ":db.cardinality/many"))

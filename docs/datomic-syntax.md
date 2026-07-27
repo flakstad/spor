@@ -134,9 +134,15 @@ Vector values in map forms expand to repeated facts for the same attr:
  :user/tag ["engineer" "lisp"]}
 ```
 
-Nested map values are supported with an explicit numeric, string, or ident
-`:db/id`, or an auto-generated nested tempid. The parent map id can use the same entity id,
-tempid, lookup-ref, or ident forms as other map ids:
+Nested map values are transaction shorthand for refs. The attribute must have
+`:db/valueType :db.type/ref`, and the nested map must either be reached through
+a `:db/isComponent true` attribute or contain a unique attribute. This matches
+Datomic's nested-map rules and prevents anonymous maps from becoming stored
+datom values.
+
+For component refs, nested maps may use an explicit numeric, string, or ident
+`:db/id`, or an auto-generated nested tempid. The parent map id can use the same
+entity id, tempid, lookup-ref, or ident forms as other map ids:
 
 ```clojure
 {:db/id 1
@@ -150,6 +156,10 @@ tempid, lookup-ref, or ident forms as other map ids:
 ```
 
 Generated map tempids are returned in the transaction report tempid mapping.
+
+Maps and sets are never persisted in a datom's value position. Vector
+transaction values expand cardinality-many map attributes; persisted vectors
+are reserved for `:db.type/tuple`.
 
 ### Transaction metadata
 
