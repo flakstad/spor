@@ -19,10 +19,8 @@ usage() {
   cat <<EOF
 usage: scripts/compare_musicbrainz_target_rows.sh [workload ...]
 
-Runs the current MusicBrainz persistent-performance target rows from
-docs/next-steps.md sequentially against Vev Clojure, Vev Kvist, and local
-Datomic. Workload names are the upstream-derived names accepted by
-compare_musicbrainz_workshop.sh.
+Runs selected MusicBrainz workloads sequentially against Vev Clojure and local
+Datomic. Workload names are accepted by compare_musicbrainz_workshop.sh.
 
 env:
   WARMUP_RUNS=n    default: $WARMUP_RUNS

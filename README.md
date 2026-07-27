@@ -16,347 +16,148 @@ and snapshot semantics for both in-memory and durable databases. Durable stores
 use SQLite internally, while VevDB's indexes and query engine implement the
 database model.
 
-The engine is written in [Kvist](https://github.com/kvist-lang/kvist), compiled
-to Odin, and exposed through a native C ABI. The repository includes APIs for
-Kvist, Clojure, Java, C, Python, Rust, Go, Node.js, and Odin.
+VevDB is for applications that want this model without a separate Datomic
+transactor process. It runs in-process as a lightweight native library, either
+in memory or durably with bundled SQLite. It does not require a Clojure runtime
+or a large GraalVM native image.
+
+Because VevDB follows the Datomic API and data model, Datomic and DataScript
+tutorials for transactions, queries, pull, and immutable database values should
+work out of the box.
+
+The engine is written in [Kvist](https://github.com/kvist-lang/kvist) and
+compiles through Odin to a native library. The Kvist API and C ABI are built
+in. Clojure, Java, and Odin have standalone packages. The unpublished Python,
+Rust, Go, and Node.js APIs are experimental and may change.
 
 ## Quick Start
 
-### C
+The C example shows native embedding. The Clojure example shows VevDB's
+Datomic-compatible API.
 
-VevDB is an embedded native library with a stable C ABI:
+### C
 
 ```c
 #include <stdio.h>
 #include "vev.h"
 
 int main(void) {
-    vev_conn_t conn = vev_conn_open_memory();                       // 1
+    vev_conn_t conn = vev_conn_open_memory();
 
-    vev_string_free(vev_transact_edn(                               // 2
+    vev_string_free(vev_transact_edn(
         conn, "[{:db/id 1 :user/name \"Ada\"}]"));
 
-    const char *rows = vev_query_edn(                               // 3
+    const char *rows = vev_query_edn(
         conn, "[:find ?name :where [?e :user/name ?name]]");
     puts(rows);
 
     vev_string_free(rows);
-    vev_conn_close(conn);                                           // 4
+    vev_conn_close(conn);
 }
 ```
 
-1. The process embeds an in-memory VevDB connection.
-2. Transactions cross the ABI as EDN data.
-3. Queries return EDN; typed result and prepared-query APIs are also available.
-4. The caller owns native handles and returned strings.
-
-### Kvist
-
-Kvist uses VevDB directly as a source package, with transactions and Datalog
-written as native data:
-
-```clojure
-(package main)
-
-(import data "kvist:data")
-(import fmt "core:fmt")
-(import d "../../src/vev_app")
-
-(defn main []
-  (let [conn (d.create-conn)
-        _ (d.transact conn                        ; 1
-            [{:db/id 1 :user/name "Ada"}])
-        db (d.db conn)                            ; 2
-        names (d.q                                ; 3
-                '[:find ?name
-                  :where [?e :user/name ?name]]
-                db)]
-    (for [[name] names]                           ; 4
-      (fmt.println (data.string name)))))
-```
-
-1. Transaction maps are Kvist data, not encoded text.
-2. `db` returns the connection's current immutable database value.
-3. Static Datalog stays quoted because its symbols are literal query data.
-4. Query relations are `Data`; rows can be iterated and destructured directly.
-
-This minimal program exits immediately. Long-running applications close owning
-DB values and connections with `d.close`; immutable `Data` query results are
-managed values. The complete contact book below demonstrates those lifetimes.
+The [C ABI guide](docs/c-abi.md) covers builds, ownership, typed values, and
+prepared operations.
 
 ### Clojure
 
-The Clojure API follows the familiar Datomic connection, database value, and
-query shape:
+Add the package:
+
+```clojure
+{:deps {com.vevdb/vev-clj {:mvn/version "0.2.0-rc.3"}}}
+```
+
+Use the Datomic-shaped API:
 
 ```clojure
 (require '[vev.core :as d])
 
-(def conn (d/create-conn)) ; 1
+(def conn (d/create-conn))
 
-(d/transact conn           ; 2
+(d/transact conn
   [{:db/id 1 :user/name "Ada"}
    {:db/id 2 :user/name "Grace"}])
 
-(def db (d/db conn))       ; 3
+(def db (d/db conn))
 
-(d/q '[:find ?name         ; 4
+(d/q '[:find ?name
        :where [?e :user/name ?name]]
      db)
 
-(def next-db               ; 5
+(def next-db
   (d/db-with db [{:db/id 3 :user/name "Katherine"}]))
-
 ```
 
-1. `create-conn` creates an in-memory database connection.
-2. `transact` adds facts and advances the connection to a new database value.
-3. `db` returns the connection's current immutable database value.
-4. `q` evaluates a Datalog query against an explicit database value.
-5. `db-with` creates a hypothetical database value without changing `conn` or
-   `db`.
+`db` and `next-db` are immutable values. `db-with` does not change `conn`.
+Use `(d/connect "example.db")` for a durable store, replacing `example.db`
+with the path you want.
 
-Use `connect` when the database should persist to a VevDB store:
+See [vev-clj](https://github.com/vevdb/vev-clj) for installation and the full
+Clojure API.
 
-```clojure
-(def conn (d/connect "app.vev"))
+## Packages
+
+| Language | Status | Package |
+| --- | --- | --- |
+| C | Built in | [Header](include/vev.h) |
+| Kvist | Built in | [API](clients/kvist) |
+| Clojure | Available | [vevdb/vev-clj](https://github.com/vevdb/vev-clj) |
+| Java | Available | [vevdb/vev-java](https://github.com/vevdb/vev-java) |
+| Odin | Available | [vevdb/vev-odin](https://github.com/vevdb/vev-odin) |
+| Python | In progress | [Integration code](clients/python) |
+| Rust | In progress | [Integration code](clients/rust) |
+| Go | In progress | [Integration code](clients/go) |
+| Node.js / TypeScript | In progress | [Integration code](clients/node) |
+
+In-progress clients are experimental and not published. They remain here as
+integration tests until they move to standalone repositories.
+
+See [Packages](docs/interop.md) for package details and
+[Runtime dependencies](docs/runtime-dependencies.md) for deployment.
+
+## Model
+
+A datom is a five-part fact:
+
+```text
+entity attribute value transaction added?
 ```
 
-The application still uses VevDB transactions and queries. It does not create
-SQLite tables, run migrations, or issue SQL.
+Transactions produce new database values. Existing values stay valid. Queries,
+pull, entity reads, index reads, `as-of`, `since`, `history`, and `db-with`
+operate on explicit database values.
 
-### Java
+Durable stores use SQLite internally. Applications use VevDB APIs and do not
+manage SQL schemas.
 
-Java 25 uses the Foreign Function and Memory API through an `AutoCloseable`
-wrapper:
+## Features
 
-```java
-Vev vev = Vev.load();
-
-try (var conn = vev.createConn()) {
-    conn.transact("[{:db/id 1 :user/name \"Ada\"}]");
-    System.out.println(conn.queryText(
-        "[:find ?name :where [?e :user/name ?name]]", "[]"));
-}
-```
-
-### Python
-
-Python uses EDN text at the language boundary and context managers for native
-handle lifetimes:
-
-```python
-import vevdb
-
-with vevdb.create_conn() as conn:                                  # 1
-    conn.transact('[{:db/id 1 :user/name "Ada"}]')                 # 2
-    with conn.db() as db:                                          # 3
-        result = vevdb.q(
-            '[:find ?name :where [?e :user/name ?name]]', db)      # 4
-        profile = db.pull('[:user/name]', vevdb.Entity(1))
-```
-
-1. The context manager closes the native connection.
-2. Transaction data is passed as EDN text through the native API.
-3. The DB handle represents an immutable snapshot and has its own lifetime.
-4. Queries receive the immutable DB value explicitly.
-
-### Rust
-
-Rust wraps the same native handles with RAII:
-
-```rust
-use vevdb::Conn;
-
-fn main() -> Result<(), String> {
-    let conn = Conn::create()?;                                     // 1
-    conn.transact(r#"[{:db/id 1 :user/name "Ada"}]"#);             // 2
-
-    let db = conn.db()?;                                            // 3
-    let result = db.q(
-        "[:find ?name :where [?e :user/name ?name]]", "[]")?;      // 4
-
-    println!("{result:?}");
-    Ok(())
-}
-```
-
-1. `Conn` owns and releases the native connection.
-2. Transactions use EDN text at the C ABI boundary.
-3. `Db` owns an immutable database snapshot and releases it through `Drop`.
-4. Query inputs are encoded separately from the query itself.
-
-### Go
-
-Go provides a cgo wrapper over the native library:
-
-```go
-conn, err := vev.CreateConn()
-if err != nil {
-    panic(err)
-}
-defer conn.Close()
-
-conn.Transact(`[{:db/id 1 :user/name "Ada"}]`)
-fmt.Println(conn.QueryText(
-    `[:find ?name :where [?e :user/name ?name]]`, `[]`))
-```
-
-### Node.js
-
-Node.js and TypeScript use the native N-API addon:
-
-```javascript
-const vev = require("vev");
-const conn = vev.createConn();
-
-try {
-  conn.transact('[{:db/id 1 :user/name "Ada"}]');
-  console.log(vev.q(
-    '[:find ?name :where [?e :user/name ?name]]', conn));
-} finally {
-  conn.close();
-}
-```
-
-### Odin
-
-Download the platform-specific `vev-odin-<platform>-<version>.zip` release
-asset, unpack its `vev` directory under `vendor/`, and import the package:
-
-```odin
-import "core:fmt"
-import vev "vendor/vev"
-
-main :: proc() {
-    library, loaded := vev.load_bundled("vendor/vev")
-    assert(loaded)
-    defer vev.unload(&library)
-
-    conn, connected := vev.connect(&library, "app.vev")
-    assert(connected)
-    defer vev.close(&conn)
-
-    tx, transacted := vev.transact(
-        &conn, `[{:db/id 1 :user/name "Ada"}]`)
-    assert(transacted)
-    defer delete(tx)
-
-    result, queried := vev.query(
-        &conn, `[:find ?name . :where [?e :user/name ?name]]`)
-    assert(queried)
-    defer vev.close(&result)
-
-    value, found := vev.value(&result)
-    assert(found)
-    name, found := vev.as_string(value)
-    assert(found)
-    defer delete(name)
-    fmt.println(name)
-}
-```
-
-Complete in-memory and durable examples are available in
-[`examples/clojure/contact_book.clj`](examples/clojure/contact_book.clj) and
-[`examples/kvist/contact_book.kvist`](examples/kvist/contact_book.kvist). The
-client directories contain complete host-specific examples and package checks
-for every supported language.
-
-## Database Model
-
-VevDB stores facts as datoms consisting of entity, attribute, value,
-transaction, and added/retracted fields.
-
-- Transactions add and retract facts.
-- Connections advance to new database values when transactions commit.
-- Existing database values remain stable and queryable.
-- Queries are data and accept explicit database values and other inputs.
-- Pull expressions render entity data declaratively.
-- In-memory and durable connections expose the same database-value model.
-
-VevDB follows Datomic and DataScript syntax and semantics where they apply to an
-embedded native database. This includes transaction maps and operation vectors,
-schema attributes, lookup refs, pull patterns, query inputs, predicates,
-aggregates, rules, and immutable `db-with` operations.
-
-## Capabilities
-
-- In-memory databases with no SQLite requirement.
-- Durable local stores backed internally by SQLite.
-- Immutable database snapshots and hypothetical `db-with` values.
-- Composable `as-of`, `since`, and `history` database views over resident and
-  durable snapshots.
-- EAVT, AEVT, AVET, and VAET indexes with range and seek operations.
-- Datomic-flavored Datalog with predicates, functions, aggregates, rules,
-  negation, disjunction, relation inputs, and pull expressions.
-- Datomic-shaped transaction data, schema constraints, tempids, lookup refs,
-  upserts, tuple attributes, built-in transaction functions, and transaction
-  reports. Lower-level host callback functions are embedding extensions, not
-  Datomic stored functions.
-- Prepared query, pull, and transaction APIs for native hosts.
-- A C header and language wrappers over the native ABI.
-- A CLI for querying, transacting, pulling, and inspecting durable stores.
-
-## Build And Verify
-
-Building VevDB from source requires Kvist, Odin, Clang, and an archiver. The
-build downloads and checksum-verifies a pinned SQLite amalgamation, then links
-it statically; users do not install SQLite separately. The normal `kvist`
-command should point to a built Kvist compiler.
-
-Build the native and JVM artifacts and produce the release manifest:
-
-```sh
-scripts/build_release.sh
-```
-
-Run the parallel Clojure and Kvist contact-book applications:
-
-```sh
-scripts/contact_book.sh
-```
-
-Run the available host-language and package checks:
-
-```sh
-scripts/smoke_clients.sh
-scripts/smoke_cli.sh
-scripts/smoke_packages.sh
-```
-
-See [Getting Started](docs/getting-started.md) for local setup and complete
-examples. See [Runtime Dependencies](docs/runtime-dependencies.md) for native
-library and SQLite deployment details.
-
-## Language APIs
-
-| Host | API |
-| --- | --- |
-| Kvist | [`src/vev_app`](src/vev_app) |
-| Clojure | [`vevdb/vev-clj`](https://github.com/vevdb/vev-clj) |
-| Java | [`vevdb/vev-java`](https://github.com/vevdb/vev-java) |
-| C | [`include/vev.h`](include/vev.h) and [`clients/c`](clients/c) |
-| Python | [`clients/python`](clients/python) |
-| Rust | [`clients/rust`](clients/rust) |
-| Go | [`clients/go`](clients/go) |
-| Node.js / TypeScript | [`clients/node`](clients/node) |
-| Odin | [`clients/odin`](clients/odin) |
+- In-memory and durable databases
+- Immutable snapshots and hypothetical databases
+- Datomic-shaped transactions, schema, tempids, lookup refs, and upserts
+- Datalog queries with inputs, predicates, aggregates, rules, negation, and
+  disjunction
+- Pull and entity reads
+- EAVT, AEVT, AVET, and VAET indexes
+- Historical views and transaction logs
+- C ABI, CLI, and language packages
 
 ## Documentation
 
 - [Getting started](docs/getting-started.md)
-- [Database model](docs/data-model.md)
+- [CLI](docs/cli.md)
+- [Build from source](docs/building.md)
+- [Data model](docs/data-model.md)
 - [Transactions](docs/transactions.md)
-- [Historical database values](docs/history.md)
-- [Query model](docs/query-model.md)
-- [Pull](docs/pull-model.md)
-- [Indexes](docs/indexes.md)
-- [Durable storage](docs/storage.md)
-- [Client API contract](docs/client-api.md)
+- [Queries and pull](docs/query-model.md)
+- [History](docs/history.md)
+- [Storage](docs/storage.md)
+- [Datomic and DataScript compatibility](docs/datomic-syntax.md)
 - [C ABI](docs/c-abi.md)
-- [Language interop](docs/interop.md)
-- [Maven Central release recipe](docs/maven-central.md)
-- [MusicBrainz and Day of Datomic](docs/musicbrainz.md)
+- [Packages](docs/interop.md)
+- [Runtime dependencies](docs/runtime-dependencies.md)
+- [Benchmarks](docs/benchmarks.md)
+- [MusicBrainz validation](docs/musicbrainz.md)
 
 ## Acknowledgements
 
@@ -384,4 +185,4 @@ and license terms.
 
 ## License
 
-VevDB is licensed under the Eclipse Public License 2.0. See [LICENSE](LICENSE).
+[Eclipse Public License 2.0](LICENSE)
