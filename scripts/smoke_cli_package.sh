@@ -40,9 +40,15 @@ case "$FORMAT" in
 esac
 
 CLI="$TMP_DIR/vevdb-$VERSION/bin/$EXE_NAME"
+TX_FILE="$TMP_DIR/transactions.edn"
+QUERY_FILE="$TMP_DIR/query.edn"
+
+printf '%s\n' '[{:db/id 1 :user/name "Ada"}]' > "$TX_FILE"
+printf '%s\n' '[:find ?name :where [?e :user/name ?name]]' > "$QUERY_FILE"
+
 [[ "$("$CLI" --version)" == "vevdb $VERSION" ]]
-"$CLI" transact "$DB" '[{:db/id 1 :user/name "Ada"}]' >/dev/null
-query="$("$CLI" query "$DB" '[:find ?name :where [?e :user/name ?name]]')"
+"$CLI" transact "$DB" "$TX_FILE" >/dev/null
+query="$("$CLI" query "$DB" "$QUERY_FILE")"
 case "$query" in *'"Ada"'*) ;; *) echo "unexpected packaged CLI query: $query" >&2; exit 1 ;; esac
 
 "$ROOT/scripts/check_self_contained_native.sh" "$CLI" >/dev/null

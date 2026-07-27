@@ -49,19 +49,19 @@ vevdb query example.db \
 The database value is supplied by the CLI and is not included in the input
 vector.
 
-## Read arguments from files
+## EDN files
 
-An argument beginning with `@` means “read this argument from that file.”
+Transaction, query, query-input, and pull-pattern arguments ending in `.edn`
+are read from files.
 
 ```sh
-vevdb transact example.db @transactions.edn
-vevdb query example.db @query.edn
-vevdb query example.db @query.edn @inputs.edn
-vevdb pull example.db @pull.edn 1
+vevdb transact example.db transactions.edn
+vevdb query example.db query.edn
+vevdb query example.db query.edn inputs.edn
+vevdb pull example.db pull.edn 1
 ```
 
-Only the transaction, query, query-input, and pull-pattern arguments support
-this form. Store paths and entity IDs do not.
+Store paths and entity IDs are not EDN arguments.
 
 ## Exit status
 
