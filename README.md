@@ -61,7 +61,7 @@ prepared operations.
 Add the package:
 
 ```clojure
-{:deps {com.vevdb/vev-clj {:mvn/version "0.2.0"}}}
+{:deps {com.vevdb/vev-clj {:mvn/version "0.2.1"}}}
 ```
 
 Use the Datomic-shaped API:
