@@ -297,7 +297,6 @@ jobs:
           fi
           gh release create "${GITHUB_REF_NAME}" \
             "${release_flags[@]}" \
-            --generate-notes \
             --title "VevDB ${GITHUB_REF_NAME}" \
             upload/*
 
