@@ -1,5 +1,7 @@
 # VevDB for Kvist
 
+**Status: built in.**
+
 This package preserves Kvist's `Data`-oriented Vev API while loading the
 prebuilt Vev native engine through its stable C ABI. Importing it does not
 compile Vev's implementation into the application.
@@ -9,11 +11,13 @@ Unpack the platform bundle under `vendor/vev` and import its `kvist` package:
 ```clojure
 (import d "deps:vev/kvist")
 
-(let [conn (d.connect "app.vev")
+(let [conn (d.connect "example.db")
       db (d.db conn)
       names (d.q '[:find ?name :where [?e :person/name ?name]] db)]
   ...)
 ```
+
+Replace `example.db` with the path you want.
 
 Build with `-collection:deps=vendor`. The facade finds `libvev` from `VEV_LIB`
 for explicit development/test overrides, beside the executable for command-line

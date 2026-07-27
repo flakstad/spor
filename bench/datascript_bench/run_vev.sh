@@ -6,7 +6,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 JAVA_DIR="$ROOT/build/examples/java"
-LIB_PATH="${VEV_LIB:-$ROOT/build/lib/libvev.dylib}"
+case "$(uname -s)" in
+  Darwin) LIB_NAME="libvev.dylib" ;;
+  Linux) LIB_NAME="libvev.so" ;;
+  MINGW*|MSYS*|CYGWIN*) LIB_NAME="vev.dll" ;;
+  *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
+esac
+LIB_PATH="${VEV_LIB:-$ROOT/build/lib/$LIB_NAME}"
 
 if [[ ! -f "$LIB_PATH" ]]; then
   echo "missing Vev native library: $LIB_PATH" >&2
@@ -16,11 +22,12 @@ fi
 
 mkdir -p "$JAVA_DIR"
 
-if [[ ! -f "$JAVA_DIR/vev/Vev.class" || "$ROOT/examples/java/Vev.java" -nt "$JAVA_DIR/vev/Vev.class" ]]; then
+if [[ ! -f "$JAVA_DIR/com/vevdb/Vev.class" ||
+      "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" -nt "$JAVA_DIR/com/vevdb/Vev.class" ]]; then
   javac \
     --release 25 \
     -d "$JAVA_DIR" \
-    "$ROOT/examples/java/Vev.java"
+    "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java"
 fi
 
 BENCHMARKS=("$@")
