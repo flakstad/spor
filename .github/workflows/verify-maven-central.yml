@@ -229,8 +229,11 @@ jobs:
                 ;;
             esac
           done
-          echo "Central publication timed out" >&2
-          exit 1
+          echo "::warning::Central Portal still reports PUBLISHING; checking public coordinates"
+          {
+            echo "Central Portal still reported \`PUBLISHING\` after 10 minutes."
+            echo "Public coordinate availability and consumer tests determine the result."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Smoke public Maven Central consumers
         if: ${{ inputs.publish }}
