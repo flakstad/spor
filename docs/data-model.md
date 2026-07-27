@@ -64,10 +64,16 @@ semantics:
 - refs
 - instants
 - UUIDs
-- vectors, sets, maps, and tuples
+- vectors, sets, maps, and tuples for query inputs, pull results, and
+  transaction notation
 
 The exact runtime representation can evolve, but value equality and ordering
 rules must be pinned down early because indexes and queries depend on them.
+
+That API value domain is wider than the persisted datom value domain. Vev
+follows Datomic here: maps and sets are transaction/query structure, not values
+stored in the `v` position, and vectors are stored only as tuple values.
+Cardinality-many collections are expanded into individual datoms.
 
 ## Database value
 
@@ -156,6 +162,8 @@ Transaction syntax stays close to Datomic/DataScript:
 
 Map tx-data, lookup refs, tempids, reverse attrs, nested maps, and current-tx
 metadata aliases are part of the current in-memory engine and EDN text API.
+Nested maps are transaction shorthand for related entities, not map-valued
+datoms.
 Lower-level C/Java embedding APIs also support process-local transaction
 callbacks; these are not Datomic stored functions and are not exposed by
 `vev.core`.

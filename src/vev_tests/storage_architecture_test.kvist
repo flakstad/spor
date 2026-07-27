@@ -3974,7 +3974,7 @@
   (remove-sqlite-files "tmp.vev.store-report-direct-nested-map-ref.sqlite")
   (let [path "tmp.vev.store-report-direct-nested-map-ref.sqlite"
         [store opened-ok opened-error] (vev.open-store path)
-        seed (vev.transact-store-text (addr store) "[{:db/id 101 :db/ident :user/friend :db/valueType :db.type/ref} {:db/id 1 :user/name \"Ada\"}]")]
+        seed (vev.transact-store-text (addr store) "[{:db/id 101 :db/ident :user/friend :db/valueType :db.type/ref :db/isComponent true} {:db/id 1 :user/name \"Ada\"}]")]
     (defer (remove-sqlite-files path))
     (t.is opened-ok)
     (t.is (= opened-error ""))
@@ -4247,7 +4247,7 @@
     (vev.close-store store)
     (let [[read-store read-opened-ok read-opened-error] (vev.open-store-read-only path)
           [snapshot snapshot-ok snapshot-error] (vev.store-db (addr read-store))
-          next-snapshot (vev.db-with-store-db-text (addr snapshot) "[{:db/id 100 :db/ident :user/profile :db/valueType :db.type/ref :db/cardinality :db.cardinality/many} {:db/id 1 :user/profile [{:db/id 10 :profile/email \"a@example.com\"} {:db/id 11 :profile/email \"b@example.com\"}]}]")
+          next-snapshot (vev.db-with-store-db-text (addr snapshot) "[{:db/id 100 :db/ident :user/profile :db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true} {:db/id 1 :user/profile [{:db/id 10 :profile/email \"a@example.com\"} {:db/id 11 :profile/email \"b@example.com\"}]}]")
           original-result (vev.q-result-store-db-text (addr snapshot) "[:find ?profile :where [1 :user/profile ?profile]]")
           next-result (vev.q-result-store-db-text (addr next-snapshot) "[:find ?profile ?email :where [1 :user/profile ?profile] [?profile :profile/email ?email]]")]
       (t.is read-opened-ok)
@@ -4403,7 +4403,7 @@
         [store opened-ok opened-error] (vev.open-store path)
         schema (vev.transact-store-text
                  (addr store)
-                 "[{:db/id 100 :db/ident :user/profile :db/valueType :db.type/ref :db/cardinality :db.cardinality/many}]")]
+                 "[{:db/id 100 :db/ident :user/profile :db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}]")]
     (defer (remove-sqlite-files path))
     (t.is opened-ok)
     (t.is (= opened-error ""))

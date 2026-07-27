@@ -1165,6 +1165,27 @@
 (defn shared-write-state-declared-attr-cardinality-many? [tx-data: []Tx-Data, attr: string] -> bool
   (shared-write-state-declared-attr-has-schema-value? tx-data attr ":db/cardinality" ":db.cardinality/many"))
 
+(defn shared-write-state-declared-attr-component? [tx-data: []Tx-Data, attr: string] -> bool
+  (let [schema-e: u64 0
+        found-entity false]
+    (for [data tx-data]
+      (when (and (= data.op ":db/add")
+                 (= data.a ":db/ident")
+                 (= data.v.kind .Keyword)
+                 (= data.v.text attr))
+        (set! schema-e data.e)
+        (set! found-entity true)))
+    (when (not found-entity)
+      (return false))
+    (for [data tx-data]
+      (when (and (= data.op ":db/add")
+                 (= data.e schema-e)
+                 (= data.a ":db/isComponent")
+                 (= data.v.kind .Bool)
+                 data.v.bool-value)
+        (return true))))
+  false)
+
 (defn shared-write-state-schema-ref-target-for-tx? [state: ^Shared-Write-State, tx-data: []Tx-Data, attr: string, declared-schema?: bool = true] -> bool
   (if (reverse-attr? attr)
     (let [forward (forward-attr-for-reverse attr)]
@@ -1175,6 +1196,31 @@
     (or (set.contains? state^.schema-ref attr)
         (and declared-schema?
              (shared-write-state-declared-attr-ref? tx-data attr)))))
+
+(defn shared-write-state-source-schema-component-target-for-tx [source: DB-Read-Source, tx-data: []Tx-Data, attr: string] -> [component: bool, ok: bool, error: string]
+  (let [schema-attr attr]
+    (when (reverse-attr? attr)
+      (set! schema-attr (forward-attr-for-reverse attr)))
+    (defer
+      (when (not (= schema-attr attr))
+        (delete schema-attr)))
+    (when (shared-write-state-declared-attr-component? tx-data schema-attr)
+      (return true true ""))
+    (db-read-source-schema-component? source schema-attr)))
+
+(defn shared-write-state-nested-map-has-unique-attr-for-tx? [state: ^Shared-Write-State, tx-data: []Tx-Data, map-value: Value] -> bool
+  (when (not (= map-value.kind .Map))
+    (return false))
+  (let [index 0]
+    (while (< (+ index 1) (count map-value.items))
+      (let [key map-value.items[index]]
+        (when (and (= key.kind .Keyword)
+                   (not (= key.text ":db/id"))
+                   (or (shared-write-state-schema-unique? state key.text)
+                       (shared-write-state-declared-attr-has-schema-attr? tx-data key.text ":db/unique")))
+          (return true)))
+      (set! index (+ index 2))))
+  false)
 
 (defn shared-write-state-ref-tempid-value-for-tx? [state: ^Shared-Write-State, tx-data: []Tx-Data, attr: string, value: Value] -> bool
   (when (not (shared-write-state-schema-ref-target-for-tx? state tx-data attr))
@@ -1621,8 +1667,21 @@
             (shared-write-state-source-append-map-collection-items! state tx-data (addr pending) data)
             (continue)))
         (when data.has-nested-map
-          (if (shared-write-state-schema-ref-target-for-tx? state tx-data data.a)
-            (let [[nested-entity nested-ok nested-error] (nested-entity-ref-data data.nested-map data.nested-tempid)]
+          (when (not (shared-write-state-schema-ref-target-for-tx? state tx-data data.a))
+            (delete pending)
+            (delete out)
+            (return (make [dynamic]Tx-Data) false "nested map requires ref schema"))
+          (let [[component component-ok component-error] (shared-write-state-source-schema-component-target-for-tx source tx-data data.a)]
+            (when (not component-ok)
+              (delete pending)
+              (delete out)
+              (return (make [dynamic]Tx-Data) false component-error))
+            (when (not (or component
+                           (shared-write-state-nested-map-has-unique-attr-for-tx? state tx-data data.nested-map)))
+              (delete pending)
+              (delete out)
+              (return (make [dynamic]Tx-Data) false "nested map requires component or unique attribute")))
+          (let [[nested-entity nested-ok nested-error] (nested-entity-ref-data data.nested-map data.nested-tempid)]
               (when (not nested-ok)
                 (delete pending)
                 (delete out)
@@ -1647,10 +1706,7 @@
                   (set! data.v (value-keyword nested-entity.ident))
                   (set! nested-assigned true))
                 (when (not nested-assigned)
-                  (set! data.v (value-entity nested-entity.e)))))
-            (do
-              (set! data.v data.nested-map)
-              (set! data.has-nested-map false))))
+                  (set! data.v (value-entity nested-entity.e))))))
         (arr.push! out data)))
     (delete pending)
     (return out true "")))

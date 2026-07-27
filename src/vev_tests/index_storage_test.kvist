@@ -1942,7 +1942,7 @@
 (t.deftest shared-store-db-with-nested-map-keeps-shared-db
   (defer (free_all context.allocator))
   (let [store (vev.create-shared-store 2)
-        schema-report (vev.transact-store-text (addr store) "[{:db/id 100 :db/ident :user/address :db/valueType :db.type/ref}]")
+        schema-report (vev.transact-store-text (addr store) "[{:db/id 100 :db/ident :user/address :db/valueType :db.type/ref :db/isComponent true}]")
         report1 (vev.transact-store-text (addr store) "[{:db/id 1 :user/name \"Ada\"}]")
         [snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))
         next-snapshot (vev.db-with-store-db-text (addr snapshot) "[{:db/id 1 :user/address {:db/id \"addr\" :address/city \"London\"}}]")
@@ -1974,7 +1974,7 @@
 (t.deftest shared-store-with-report-nested-map-keeps-source-dbs
   (defer (free_all context.allocator))
   (let [store (vev.create-shared-store 2)
-        schema-report (vev.transact-store-text (addr store) "[{:db/id 100 :db/ident :user/address :db/valueType :db.type/ref}]")
+        schema-report (vev.transact-store-text (addr store) "[{:db/id 100 :db/ident :user/address :db/valueType :db.type/ref :db/isComponent true}]")
         report1 (vev.transact-store-text (addr store) "[{:db/id 1 :user/name \"Ada\"}]")
         [snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))
         report (vev.with-store-db-report-text (addr snapshot) "[{:db/id 1 :user/address {:db/id \"addr\" :address/city \"London\"}}]")
@@ -2003,7 +2003,7 @@
 (t.deftest shared-store-db-with-map-collection-keeps-shared-db
   (defer (free_all context.allocator))
   (let [store (vev.create-shared-store 2)
-        schema-report (vev.transact-store-text (addr store) "[{:db/id 100 :db/ident :user/profile :db/valueType :db.type/ref :db/cardinality :db.cardinality/many}]")
+        schema-report (vev.transact-store-text (addr store) "[{:db/id 100 :db/ident :user/profile :db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}]")
         report1 (vev.transact-store-text (addr store) "[{:db/id 1 :user/name \"Ada\"}]")
         [snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))
         next-snapshot (vev.db-with-store-db-text (addr snapshot) "[{:db/id 1 :user/profile [{:db/id 10 :profile/email \"a@example.com\"} {:db/id 11 :profile/email \"b@example.com\"}]}]")
@@ -2035,7 +2035,7 @@
   (let [store (vev.create-shared-store 2)
         report1 (vev.transact-store-text (addr store) "[{:db/id 1 :user/name \"Ada\"}]")
         [snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))
-        next-snapshot (vev.db-with-store-db-text (addr snapshot) "[{:db/id 100 :db/ident :user/address :db/valueType :db.type/ref} {:db/id 1 :user/address {:db/id \"addr\" :address/city \"London\"}}]")
+        next-snapshot (vev.db-with-store-db-text (addr snapshot) "[{:db/id 100 :db/ident :user/address :db/valueType :db.type/ref :db/isComponent true} {:db/id 1 :user/address {:db/id \"addr\" :address/city \"London\"}}]")
         result (vev.q-result-store-db-text (addr next-snapshot) "[:find ?city :where [1 :user/address ?address] [?address :address/city ?city]]")
         live-result (vev.q-result-store-text (addr store) "[:find ?city :where [1 :user/address ?address] [?address :address/city ?city]]")]
     (t.is report1.ok)
@@ -2121,7 +2121,7 @@
   (let [store (vev.create-shared-store 2)
         schema (vev.transact-store-text
                  (addr store)
-                 "[{:db/id 100 :db/ident :user/profile :db/valueType :db.type/ref :db/cardinality :db.cardinality/many}]")
+                 "[{:db/id 100 :db/ident :user/profile :db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true}]")
         [snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))
         next-snapshot (vev.db-with-store-db-text
                         (addr snapshot)
@@ -2152,7 +2152,7 @@
   (let [store (vev.create-shared-store 2)
         report1 (vev.transact-store-text (addr store) "[{:db/id 1 :user/name \"Ada\"}]")
         [snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))
-        next-snapshot (vev.db-with-store-db-text (addr snapshot) "[{:db/id 100 :db/ident :user/profile :db/valueType :db.type/ref :db/cardinality :db.cardinality/many} {:db/id 1 :user/profile [{:db/id 10 :profile/email \"a@example.com\"} {:db/id 11 :profile/email \"b@example.com\"}]}]")
+        next-snapshot (vev.db-with-store-db-text (addr snapshot) "[{:db/id 100 :db/ident :user/profile :db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/isComponent true} {:db/id 1 :user/profile [{:db/id 10 :profile/email \"a@example.com\"} {:db/id 11 :profile/email \"b@example.com\"}]}]")
         result (vev.q-result-store-db-text (addr next-snapshot) "[:find ?profile ?email :where [1 :user/profile ?profile] [?profile :profile/email ?email]]")
         live-result (vev.q-result-store-text (addr store) "[:find ?profile :where [1 :user/profile ?profile]]")]
     (t.is report1.ok)
