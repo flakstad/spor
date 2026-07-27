@@ -45,6 +45,12 @@ cp "$ROOT/clients/kvist/README.md" "$STAGE_DIR/$BUNDLE_ROOT/README.md"
 cp "$ROOT/LICENSE" "$STAGE_DIR/$BUNDLE_ROOT/LICENSE"
 cp "$ROOT/build/lib/$LIB_NAME" "$STAGE_DIR/$BUNDLE_ROOT/lib/$LIB_NAME"
 
+if command -v shasum >/dev/null 2>&1; then
+  LIBRARY_SHA256="$(shasum -a 256 "$ROOT/build/lib/$LIB_NAME" | awk '{print $1}')"
+else
+  LIBRARY_SHA256="$(sha256sum "$ROOT/build/lib/$LIB_NAME" | awk '{print $1}')"
+fi
+
 cat > "$STAGE_DIR/$BUNDLE_ROOT/manifest.json" <<EOF
 {
   "schema_version": 1,
@@ -53,7 +59,7 @@ cat > "$STAGE_DIR/$BUNDLE_ROOT/manifest.json" <<EOF
   "platform": "$PLATFORM",
   "git_commit": "$(git -C "$ROOT" rev-parse HEAD)",
   "library": "lib/$LIB_NAME",
-  "library_sha256": "$(shasum -a 256 "$ROOT/build/lib/$LIB_NAME" | awk '{print $1}')"
+  "library_sha256": "$LIBRARY_SHA256"
 }
 EOF
 

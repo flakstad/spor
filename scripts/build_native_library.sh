@@ -74,6 +74,7 @@ fi
 EXPORT_FILE="$GENERATED_DIR/vev.exports"
 python3 "$ROOT/scripts/generate_native_exports.py" \
   "$ROOT/include/vev.h" \
+  "$ROOT/src/vev_abi/vev_abi.kvist" \
   "$EXPORT_PLATFORM" \
   "$EXPORT_FILE"
 

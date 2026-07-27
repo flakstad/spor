@@ -30,6 +30,7 @@ typedef void *vev_tx_report_t;
 typedef void *vev_tx_report_array_t;
 typedef void *vev_tx_builder_t;
 typedef void *vev_tx_fn_registry_t;
+typedef void *vev_query_fn_registry_t;
 typedef const void *vev_tx_fn_args_t;
 typedef void *vev_value_handle_t;
 typedef const void *vev_value_t;
@@ -100,6 +101,14 @@ typedef const char *(*vev_tx_fn_edn_callback)(
     vev_db_t db,
     int argc,
     vev_tx_fn_args_t args);
+typedef bool (*vev_query_predicate_callback)(
+    void *user,
+    int argc,
+    vev_tx_fn_args_t args);
+typedef const char *(*vev_query_aggregate_callback)(
+    void *user,
+    int argc,
+    vev_tx_fn_args_t args);
 typedef void (*vev_tx_report_listener_callback)(void *user, vev_tx_report_t report);
 
 const char *vev_version(void);
@@ -115,6 +124,9 @@ const char *vev_connection_path(vev_connection_t conn);
 unsigned long long vev_connection_basis_t(vev_connection_t conn);
 unsigned long long vev_connection_tx_count(vev_connection_t conn);
 vev_u64_array_t vev_connection_tx_ids(vev_connection_t conn);
+const char *vev_connection_tx_data_edn(
+    vev_connection_t conn,
+    unsigned long long tx);
 const char *vev_connection_info_edn(vev_connection_t conn);
 void vev_connection_close(vev_connection_t conn);
 vev_db_t vev_connection_db(vev_connection_t conn);
@@ -296,6 +308,18 @@ bool vev_tx_fn_registry_register_edn(
     const char *ident,
     vev_tx_fn_edn_callback callback,
     void *user);
+vev_query_fn_registry_t vev_query_fn_registry_create(void);
+void vev_query_fn_registry_free(vev_query_fn_registry_t registry);
+bool vev_query_fn_registry_register_predicate(
+    vev_query_fn_registry_t registry,
+    const char *ident,
+    vev_query_predicate_callback callback,
+    void *user);
+bool vev_query_fn_registry_register_aggregate(
+    vev_query_fn_registry_t registry,
+    const char *ident,
+    vev_query_aggregate_callback callback,
+    void *user);
 vev_value_t vev_tx_fn_arg(vev_tx_fn_args_t args, int index);
 const char *vev_query_edn(vev_conn_t conn, const char *query_text);
 const char *vev_query_edn_with_inputs(
@@ -428,7 +452,29 @@ vev_result_t vev_query_db_prepared_result_with_inputs(
     vev_db_t db,
     vev_prepared_query_t query,
     const char *inputs_text);
+vev_result_t vev_query_db_prepared_result_with_inputs_and_fns(
+    vev_db_t db,
+    vev_prepared_query_t query,
+    const char *inputs_text,
+    vev_query_fn_registry_t registry);
 vev_result_t vev_query_db_prepared_result_with_rules_text_and_inputs(
+    vev_db_t db,
+    vev_prepared_query_t query,
+    const char *rules_text,
+    const char *inputs_text);
+vev_result_t vev_query_relation_db_prepared_result_with_inputs(
+    const char *rows_text,
+    vev_prepared_query_t query,
+    const char *inputs_text);
+long long vev_query_relation_db_prepared_row_count_with_inputs(
+    const char *rows_text,
+    vev_prepared_query_t query,
+    const char *inputs_text);
+const char *vev_query_db_prepared_profile_edn_with_inputs(
+    vev_db_t db,
+    vev_prepared_query_t query,
+    const char *inputs_text);
+const char *vev_query_db_prepared_profile_edn_with_rules_text_and_inputs(
     vev_db_t db,
     vev_prepared_query_t query,
     const char *rules_text,
@@ -465,6 +511,15 @@ vev_entity_string_int_triples_t vev_query_db_prepared_entity_string_int_triples_
     const char *inputs_text);
 vev_column_batch_t vev_query_db_prepared_column_batch_with_inputs(
     vev_db_t db,
+    vev_prepared_query_t query,
+    const char *inputs_text);
+vev_column_batch_t vev_query_db_prepared_column_batch_with_rules_text_and_inputs(
+    vev_db_t db,
+    vev_prepared_query_t query,
+    const char *rules_text,
+    const char *inputs_text);
+vev_column_batch_t vev_query_relation_db_prepared_column_batch_with_inputs(
+    const char *rows_text,
     vev_prepared_query_t query,
     const char *inputs_text);
 void vev_column_batch_free(vev_column_batch_t batch);

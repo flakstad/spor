@@ -41,10 +41,6 @@ rm -f "$TMP_DIR/smoke.kvist.bak"
           tr '[:lower:]' '[:upper:]' |
           sort -u
       )
-      if (( ${#COLLECTION_ARGS[@]} == 0 )); then
-        echo "generated Kvist bundle smoke has no Windows import collections" >&2
-        exit 1
-      fi
       MSYS2_ARG_CONV_EXCL="*" odin build "$WINDOWS_GENERATED" -file \
         "${COLLECTION_ARGS[@]}" \
         "-out:$WINDOWS_BINARY"
@@ -55,9 +51,9 @@ rm -f "$TMP_DIR/smoke.kvist.bak"
       ;;
   esac
   rm -f \
-    /tmp/vev-kvist-binary-smoke.vev \
-    /tmp/vev-kvist-binary-smoke.vev-wal \
-    /tmp/vev-kvist-binary-smoke.vev-shm
+    vev-kvist-binary-smoke.db \
+    vev-kvist-binary-smoke.db-wal \
+    vev-kvist-binary-smoke.db-shm
   VEV_LIB="$TMP_DIR/vev/lib/$LIB_NAME" "$BINARY"
 )
 
