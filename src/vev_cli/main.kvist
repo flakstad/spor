@@ -15,14 +15,14 @@
   vevdb --version
   vevdb info <uri>
   vevdb confirm-entity-partitions <uri>
-  vevdb transact <uri> <tx-edn | @file>
-  vevdb query <uri> <query-edn | @file> [inputs-edn]
-  vevdb pull <uri> <pattern-edn | @file> <entity-id>
+  vevdb transact <uri> <tx-edn | file.edn>
+  vevdb query <uri> <query-edn | file.edn> [inputs-edn | file.edn]
+  vevdb pull <uri> <pattern-edn | file.edn> <entity-id>
 
 examples:
-  vevdb transact app.vev '[{:db/id 1 :user/name \"Ada\"}]'
-  vevdb query app.vev '[:find ?name :where [?e :user/name ?name]]'
-  vevdb pull app.vev '[:user/name]' 1
+  vevdb transact example.db '[{:db/id 1 :user/name \"Ada\"}]'
+  vevdb query example.db '[:find ?name :where [?e :user/name ?name]]'
+  vevdb pull example.db '[:user/name]' 1
 ")
 
 (defn version [] -> string
@@ -32,11 +32,10 @@ examples:
   (vev.close-store store))
 
 (defn read-text-arg [arg: string] -> [text: string, ok: bool, error: string]
-  (if (strings.has_prefix arg "@")
-    (let [path (slice arg 1)
-          [data read-err] (os.read_entire_file path context.allocator)]
+  (if (strings.has_suffix arg ".edn")
+    (let [[data read-err] (os.read_entire_file arg context.allocator)]
       (when (!= read-err nil)
-        (return "" false (fmt.tprintf "failed to read %s" path)))
+        (return "" false (fmt.tprintf "failed to read %s" arg)))
       (return (string data) true ""))
     (return arg true "")))
 
@@ -82,7 +81,7 @@ examples:
     (when (not text-ok)
       (cli.eprintln text-error)
       (return 1))
-    (defer (when (strings.has_prefix tx-arg "@") (delete tx-text)))
+    (defer (when (strings.has_suffix tx-arg ".edn") (delete tx-text)))
     (let [[store ok error] (vev.open-store uri)]
       (when (not ok)
         (cli.eprintln error)
@@ -106,12 +105,12 @@ examples:
     (when (not text-ok)
       (cli.eprintln text-error)
       (return 1))
-    (defer (when (strings.has_prefix query-arg "@") (delete query-text)))
+    (defer (when (strings.has_suffix query-arg ".edn") (delete query-text)))
     (let [[inputs inputs-ok inputs-error] (read-text-arg inputs-text)]
       (when (not inputs-ok)
         (cli.eprintln inputs-error)
         (return 1))
-      (defer (when (strings.has_prefix inputs-text "@") (delete inputs)))
+      (defer (when (strings.has_suffix inputs-text ".edn") (delete inputs)))
       (let [[store ok error] (vev.open-store-read-only uri)]
         (when (not ok)
           (cli.eprintln error)
@@ -139,7 +138,7 @@ examples:
       (when (not text-ok)
         (cli.eprintln text-error)
         (return 1))
-      (defer (when (strings.has_prefix pattern-arg "@") (delete pattern-text)))
+      (defer (when (strings.has_suffix pattern-arg ".edn") (delete pattern-text)))
       (let [[store ok error] (vev.open-store-read-only uri)]
         (when (not ok)
           (cli.eprintln error)

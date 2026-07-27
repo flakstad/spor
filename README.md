@@ -32,10 +32,7 @@ Rust, Go, and Node.js APIs are experimental and may change.
 
 ## Quick Start
 
-The C example shows native embedding. The Clojure example shows VevDB's
-Datomic-compatible API.
-
-### C
+### C: native API
 
 ```c
 #include <stdio.h>
@@ -59,7 +56,7 @@ int main(void) {
 The [C ABI guide](docs/c-abi.md) covers builds, ownership, typed values, and
 prepared operations.
 
-### Clojure
+### Clojure: Datomic-compatible API
 
 Add the package:
 
@@ -94,6 +91,19 @@ with the path you want.
 
 See [vev-clj](https://github.com/vevdb/vev-clj) for installation and the full
 Clojure API.
+
+## CLI
+
+The CLI reads and writes durable stores without a separate server:
+
+```sh
+vevdb transact example.db transactions.edn
+vevdb query example.db query.edn
+```
+
+EDN can be passed inline or in `.edn` files. Download the CLI from a
+[VevDB release](https://github.com/vevdb/vev/releases) and see the
+[CLI guide](docs/cli.md) for all commands.
 
 ## Packages
 
