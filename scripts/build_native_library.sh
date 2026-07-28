@@ -34,15 +34,41 @@ case "$(uname -s)" in
 esac
 
 LIB_PATH="$LIB_DIR/$LIB_NAME"
+BUILD_CONFIG_PATH="$LIB_PATH.build-config"
 mkdir -p "$GENERATED_DIR" "$LIB_DIR" "$INCLUDE_DIR" "$PKGCONFIG_DIR"
 
 SQLITE_LIB_DIR="${VEV_SQLITE_LIB_DIR:-}"
-if [[ -z "$SQLITE_LIB_DIR" ]]; then
-  SQLITE_LIB_DIR="$("$ROOT/scripts/build_sqlite.sh")"
+SQLITE_MODE="${VEV_SQLITE_MODE:-}"
+if [[ -z "$SQLITE_MODE" ]]; then
+  if [[ -n "$SQLITE_LIB_DIR" ]]; then
+    SQLITE_MODE="system"
+  else
+    SQLITE_MODE="bundled"
+  fi
 fi
+case "$SQLITE_MODE" in
+  bundled)
+    if [[ -n "$SQLITE_LIB_DIR" ]]; then
+      echo "VEV_SQLITE_LIB_DIR requires VEV_SQLITE_MODE=system" >&2
+      exit 1
+    fi
+    SQLITE_LIB_DIR="$("$ROOT/scripts/build_sqlite.sh")"
+    ;;
+  system)
+    ;;
+  *)
+    echo "VEV_SQLITE_MODE must be bundled or system" >&2
+    exit 1
+    ;;
+esac
+BUILD_CONFIG="sqlite-mode=$SQLITE_MODE;sqlite-lib-dir=$SQLITE_LIB_DIR"
 
 if [[ "$IF_NEEDED" == "true" && -f "$LIB_PATH" ]]; then
   SOURCES_CURRENT="true"
+  if [[ ! -f "$BUILD_CONFIG_PATH" ||
+        "$(cat "$BUILD_CONFIG_PATH")" != "$BUILD_CONFIG" ]]; then
+    SOURCES_CURRENT="false"
+  fi
   if find "$ROOT/src/vev" "$ROOT/src/vev_abi" -type f -newer "$LIB_PATH" -print -quit | grep -q .; then
     SOURCES_CURRENT="false"
   fi
@@ -94,15 +120,27 @@ ODIN_BUILD_ARGS=(
 )
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    SQLITE_WINDOWS_DIR="$(cygpath -w "$SQLITE_LIB_DIR")"
     EXPORT_WINDOWS_FILE="$(cygpath -w "$EXPORT_FILE")"
-    ODIN_BUILD_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_WINDOWS_DIR /DEF:$EXPORT_WINDOWS_FILE")
+    LINKER_FLAGS="/DEF:$EXPORT_WINDOWS_FILE"
+    if [[ -n "$SQLITE_LIB_DIR" ]]; then
+      SQLITE_WINDOWS_DIR="$(cygpath -w "$SQLITE_LIB_DIR")"
+      LINKER_FLAGS="/LIBPATH:$SQLITE_WINDOWS_DIR $LINKER_FLAGS"
+    fi
+    ODIN_BUILD_ARGS+=("-extra-linker-flags:$LINKER_FLAGS")
     ;;
   Darwin)
-    ODIN_BUILD_ARGS+=("-extra-linker-flags:-L$SQLITE_LIB_DIR -Wl,-exported_symbols_list,$EXPORT_FILE -Wl,-install_name,@rpath/libvev.dylib")
+    LINKER_FLAGS="-Wl,-exported_symbols_list,$EXPORT_FILE -Wl,-install_name,@rpath/libvev.dylib"
+    if [[ -n "$SQLITE_LIB_DIR" ]]; then
+      LINKER_FLAGS="-L$SQLITE_LIB_DIR $LINKER_FLAGS"
+    fi
+    ODIN_BUILD_ARGS+=("-extra-linker-flags:$LINKER_FLAGS")
     ;;
   Linux)
-    ODIN_BUILD_ARGS+=("-extra-linker-flags:-L$SQLITE_LIB_DIR -Wl,--version-script=$EXPORT_FILE")
+    LINKER_FLAGS="-Wl,--version-script=$EXPORT_FILE"
+    if [[ -n "$SQLITE_LIB_DIR" ]]; then
+      LINKER_FLAGS="-L$SQLITE_LIB_DIR $LINKER_FLAGS"
+    fi
+    ODIN_BUILD_ARGS+=("-extra-linker-flags:$LINKER_FLAGS")
     ;;
 esac
 case "$(uname -s)" in
@@ -118,6 +156,7 @@ if [[ -n "$LINK_NAME" && ! -f "$LIB_DIR/$LINK_NAME" ]]; then
   exit 1
 fi
 cp "$ROOT/include/vev.h" "$INCLUDE_DIR/vev.h"
+printf '%s\n' "$BUILD_CONFIG" > "$BUILD_CONFIG_PATH"
 
 cat > "$PKGCONFIG_DIR/vev.pc" <<EOF
 prefix=\${pcfiledir}/../..

@@ -16,6 +16,7 @@ case "$(uname -s)" in
 esac
 
 OUTPUT="${VEV_CLI_OUTPUT:-$ROOT/build/$EXE_NAME}"
+BUILD_CONFIG_PATH="$OUTPUT.build-config"
 IF_NEEDED="false"
 if [[ "${1:-}" == "--if-needed" ]]; then
   IF_NEEDED="true"
@@ -27,14 +28,39 @@ if [[ $# -ne 0 ]]; then
 fi
 
 SQLITE_LIB_DIR="${VEV_SQLITE_LIB_DIR:-}"
-if [[ -z "$SQLITE_LIB_DIR" ]]; then
-  SQLITE_LIB_DIR="$("$ROOT/scripts/build_sqlite.sh")"
+SQLITE_MODE="${VEV_SQLITE_MODE:-}"
+if [[ -z "$SQLITE_MODE" ]]; then
+  if [[ -n "$SQLITE_LIB_DIR" ]]; then
+    SQLITE_MODE="system"
+  else
+    SQLITE_MODE="bundled"
+  fi
 fi
+case "$SQLITE_MODE" in
+  bundled)
+    if [[ -n "$SQLITE_LIB_DIR" ]]; then
+      echo "VEV_SQLITE_LIB_DIR requires VEV_SQLITE_MODE=system" >&2
+      exit 1
+    fi
+    SQLITE_LIB_DIR="$("$ROOT/scripts/build_sqlite.sh")"
+    ;;
+  system)
+    ;;
+  *)
+    echo "VEV_SQLITE_MODE must be bundled or system" >&2
+    exit 1
+    ;;
+esac
+BUILD_CONFIG="sqlite-mode=$SQLITE_MODE;sqlite-lib-dir=$SQLITE_LIB_DIR"
 
 mkdir -p "$GENERATED_DIR" "$(dirname "$OUTPUT")"
 
 if [[ "$IF_NEEDED" == "true" && -x "$OUTPUT" ]]; then
   CURRENT="true"
+  if [[ ! -f "$BUILD_CONFIG_PATH" ||
+        "$(cat "$BUILD_CONFIG_PATH")" != "$BUILD_CONFIG" ]]; then
+    CURRENT="false"
+  fi
   if find "$ROOT/src/vev" "$ROOT/src/vev_cli" -type f -newer "$OUTPUT" -print -quit | grep -q .; then
     CURRENT="false"
   fi
@@ -61,11 +87,15 @@ ODIN_ARGS=(
 )
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    SQLITE_WINDOWS_DIR="$(cygpath -w "$SQLITE_LIB_DIR")"
-    ODIN_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_WINDOWS_DIR")
+    if [[ -n "$SQLITE_LIB_DIR" ]]; then
+      SQLITE_WINDOWS_DIR="$(cygpath -w "$SQLITE_LIB_DIR")"
+      ODIN_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_WINDOWS_DIR")
+    fi
     ;;
   *)
-    ODIN_ARGS+=("-extra-linker-flags:-L$SQLITE_LIB_DIR")
+    if [[ -n "$SQLITE_LIB_DIR" ]]; then
+      ODIN_ARGS+=("-extra-linker-flags:-L$SQLITE_LIB_DIR")
+    fi
     ;;
 esac
 
@@ -77,4 +107,5 @@ case "$(uname -s)" in
     odin build "${ODIN_ARGS[@]}"
     ;;
 esac
+printf '%s\n' "$BUILD_CONFIG" > "$BUILD_CONFIG_PATH"
 printf '%s\n' "$OUTPUT"

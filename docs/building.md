@@ -14,6 +14,34 @@ A native build needs:
 
 The build downloads a pinned SQLite amalgamation and verifies its checksum.
 
+## SQLite
+
+VevDB links SQLite into the native library by default. This is the build used
+for releases:
+
+```sh
+scripts/build_native_library.sh
+```
+
+To use SQLite supplied by your application or system:
+
+```sh
+VEV_SQLITE_MODE=system scripts/build_native_library.sh
+```
+
+The linker must be able to find `sqlite3`. Set `VEV_SQLITE_LIB_DIR` when it is
+not on the normal library path. Setting it also selects `system` mode:
+
+```sh
+VEV_SQLITE_LIB_DIR=/path/to/sqlite/lib \
+scripts/build_native_library.sh
+```
+
+The same settings work with `scripts/build_cli.sh`.
+
+VevDB does not yet have a SQLite-free build. In-memory databases do not use
+SQLite at runtime, but the native library still links it.
+
 ## Native library
 
 ```sh
@@ -70,7 +98,8 @@ The release build requires every supported language toolchain, including JDK
 - `KVIST_BIN`: Kvist executable
 - `KVIST_REPO_DIR`: Kvist checkout
 - `KVIST_PACKAGES_DIR`: Kvist package directory
-- `VEV_SQLITE_LIB_DIR`: prebuilt SQLite library directory
+- `VEV_SQLITE_MODE`: `bundled` (default) or `system`
+- `VEV_SQLITE_LIB_DIR`: SQLite library directory in `system` mode
 - `VEV_LIB`: native VevDB library for client tests
 
 Build output stays under `build/`.
