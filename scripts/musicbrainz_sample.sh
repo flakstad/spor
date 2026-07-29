@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DATOMIC_HOME="${DATOMIC_HOME:-/Users/andreas/datomic/datomic-pro-1.0.7277}"
+DATOMIC_HOME="${DATOMIC_HOME:-}"
 DATOMIC_BIN="$DATOMIC_HOME/bin/datomic"
 TRANSACTOR_BIN="$DATOMIC_HOME/bin/transactor"
 
@@ -50,7 +50,7 @@ commands:
   status            print local paths and transactor status
 
 env:
-  DATOMIC_HOME      default: /Users/andreas/datomic/datomic-pro-1.0.7277
+  DATOMIC_HOME      required path to a Datomic Pro installation
   DATOMIC_PORT      default: 4334
   DATOMIC_H2_PORT   default: DATOMIC_PORT + 1
   DATOMIC_DB_NAME   default: mbrainz-1968-1973
@@ -59,6 +59,10 @@ EOF
 }
 
 require-datomic() {
+  if [[ -z "$DATOMIC_HOME" ]]; then
+    echo "Set DATOMIC_HOME to a Datomic Pro installation." >&2
+    exit 1
+  fi
   if [[ ! -x "$DATOMIC_BIN" || ! -x "$TRANSACTOR_BIN" ]]; then
     echo "Datomic binaries not found under DATOMIC_HOME=$DATOMIC_HOME" >&2
     exit 1

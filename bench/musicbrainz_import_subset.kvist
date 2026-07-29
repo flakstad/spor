@@ -199,7 +199,7 @@
 
 (defn main []
   (defer (free_all context.allocator))
-  (let [path (cli.option os.args "--input" "/Users/andreas/Projects/vev/build/musicbrainz/vev-mbrainz-subset.edn")
+  (let [path (cli.option os.args "--input" "build/musicbrainz/vev-mbrainz-subset.edn")
         sqlite-output (cli.option os.args "--sqlite-output" "")
         schema-path (cli.option os.args "--schema" "")
         values-path (cli.option os.args "--values" "")

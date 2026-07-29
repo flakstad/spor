@@ -5,10 +5,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DATALEVIN_BENCH="${DATALEVIN_BENCH:-/Users/andreas/Projects/datalevin/benchmarks/datascript-bench}"
+DATALEVIN_BENCH="${DATALEVIN_BENCH:-}"
 
-if [[ ! -d "$DATALEVIN_BENCH" ]]; then
+if [[ -z "$DATALEVIN_BENCH" || ! -d "$DATALEVIN_BENCH" ]]; then
   echo "Datalevin datascript-bench not found: $DATALEVIN_BENCH" >&2
+  echo "Set DATALEVIN_BENCH to the upstream benchmarks/datascript-bench directory." >&2
   exit 1
 fi
 

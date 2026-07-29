@@ -7,13 +7,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-KVIST_ROOT="${KVIST_ROOT:-/Users/andreas/Projects/kvist/.worktrees/codex-item-kvist-case-default}"
-KVIST_BIN="${KVIST_BIN:-$KVIST_ROOT/kvist}"
-KVIST_PACKAGES_DIR="${KVIST_PACKAGES_DIR:-/Users/andreas/Projects/kvist/packages}"
+KVIST_BIN="${KVIST_BIN:-kvist}"
+KVIST_WORKDIR="${KVIST_ROOT:-$REPO_ROOT}"
+
+if [[ -n "${KVIST_ROOT:-}" ]]; then
+  export KVIST_PACKAGES_DIR="${KVIST_PACKAGES_DIR:-$KVIST_ROOT/packages}"
+fi
 
 KVIST_BIN="$KVIST_BIN" \
-KVIST_REPO_DIR="$KVIST_ROOT" \
-KVIST_PACKAGES_DIR="$KVIST_PACKAGES_DIR" \
+KVIST_REPO_DIR="${KVIST_ROOT:-}" \
 "$REPO_ROOT/scripts/build_c_abi.sh" >/dev/null
 
 mkdir -p "$REPO_ROOT/build/bench"
@@ -30,8 +32,8 @@ C_OUT="$(mktemp)"
 trap 'rm -f "$NATIVE_OUT" "$C_OUT"' EXIT
 
 (
-  cd "$KVIST_ROOT"
-  KVIST_PACKAGES_DIR="$KVIST_PACKAGES_DIR" "$KVIST_BIN" run "$REPO_ROOT/bench/abi_native.kvist"
+  cd "$KVIST_WORKDIR"
+  "$KVIST_BIN" run "$REPO_ROOT/bench/abi_native.kvist"
 ) > "$NATIVE_OUT"
 
 "$REPO_ROOT/build/bench/c_abi" > "$C_OUT"

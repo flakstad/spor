@@ -5,9 +5,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-INPUT="${MATH_BENCH_JSON:-/Users/andreas/Projects/datalevin/benchmarks/math-bench/data.json.gz}"
+INPUT="${MATH_BENCH_JSON:-}"
 OUTPUT_DIR="${MATH_BENCH_BUILD:-$ROOT/build/math_bench}"
 CHUNK_SIZE="${MATH_BENCH_CHUNK_SIZE:-50000}"
+
+if [[ -z "$INPUT" || ! -f "$INPUT" ]]; then
+  echo "Set MATH_BENCH_JSON to Datalevin's benchmarks/math-bench/data.json.gz" >&2
+  exit 1
+fi
 
 mkdir -p "$OUTPUT_DIR"
 

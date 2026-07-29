@@ -7,10 +7,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-KVIST_ROOT="${KVIST_ROOT:-/Users/andreas/Projects/kvist}"
-KVIST_BIN="${KVIST_BIN:-$KVIST_ROOT/.worktrees/codex-item-kvist-case-default/kvist}"
-KVIST_PACKAGES_DIR="${KVIST_PACKAGES_DIR:-$KVIST_ROOT/packages}"
-DATASCRIPT_ROOT="${DATASCRIPT_ROOT:-/Users/andreas/Projects/datascript}"
+KVIST_BIN="${KVIST_BIN:-kvist}"
+KVIST_WORKDIR="${KVIST_ROOT:-$REPO_ROOT}"
+DATASCRIPT_ROOT="${DATASCRIPT_ROOT:-}"
+
+if [[ -n "${KVIST_ROOT:-}" ]]; then
+  export KVIST_PACKAGES_DIR="${KVIST_PACKAGES_DIR:-$KVIST_ROOT/packages}"
+fi
+
+if [[ -z "$DATASCRIPT_ROOT" ]]; then
+  echo "DATASCRIPT_ROOT must point to a DataScript checkout" >&2
+  exit 1
+fi
 
 VEV_OUT="$(mktemp)"
 DS_OUT="$(mktemp)"
@@ -19,8 +27,8 @@ DS_ERR="$(mktemp)"
 trap 'rm -f "$VEV_OUT" "$DS_OUT" "$VEV_ERR" "$DS_ERR"' EXIT
 
 if ! (
-  cd "$KVIST_ROOT"
-  KVIST_PACKAGES_DIR="$KVIST_PACKAGES_DIR" "$KVIST_BIN" run "$REPO_ROOT/bench/query_rules.kvist"
+  cd "$KVIST_WORKDIR"
+  "$KVIST_BIN" run "$REPO_ROOT/bench/query_rules.kvist"
 ) > "$VEV_OUT" 2> "$VEV_ERR"; then
   cat "$VEV_ERR" >&2
   exit 1

@@ -5,10 +5,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-KVIST_ROOT="${KVIST_ROOT:-/Users/andreas/Projects/kvist}"
 KVIST_BIN="${KVIST_BIN:-kvist}"
-KVIST_PACKAGES_DIR="${KVIST_PACKAGES_DIR:-$KVIST_ROOT/packages}"
+KVIST_WORKDIR="${KVIST_ROOT:-$ROOT}"
 BUILD_DIR="${MATH_BENCH_BUILD:-$ROOT/build/math_bench}"
+
+if [[ -n "${KVIST_ROOT:-}" ]]; then
+  export KVIST_PACKAGES_DIR="${KVIST_PACKAGES_DIR:-$KVIST_ROOT/packages}"
+fi
 
 if [[ ! -f "$BUILD_DIR/schema.edn" || ! -f "$BUILD_DIR/manifest.edn" ]]; then
   "$ROOT/bench/math_bench/run_export.sh"
@@ -26,8 +29,8 @@ if [[ $# -gt 0 ]]; then
 fi
 
 (
-  cd "$KVIST_ROOT"
-  KVIST_PACKAGES_DIR="$KVIST_PACKAGES_DIR" "$KVIST_BIN" build "$ROOT/bench/math_bench/math_bench.kvist" \
+  cd "$KVIST_WORKDIR"
+  "$KVIST_BIN" build "$ROOT/bench/math_bench/math_bench.kvist" \
     --out "$BUILD_DIR/vev_math_bench"
 )
 

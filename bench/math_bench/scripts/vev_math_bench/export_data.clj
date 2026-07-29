@@ -23,7 +23,7 @@
    [:db/add 107 :db/cardinality :db.cardinality/many]])
 
 (defn parse-args [args]
-  (loop [opts {:input "/Users/andreas/Projects/datalevin/benchmarks/math-bench/data.json.gz"
+  (loop [opts {:input nil
                :output-dir "build/math_bench"
                :chunk-size 50000}
          args args]
@@ -33,7 +33,9 @@
         "--output-dir" (recur (assoc opts :output-dir (second args)) (nnext args))
         "--chunk-size" (recur (assoc opts :chunk-size (parse-long (second args))) (nnext args))
         (throw (ex-info "unknown option" {:arg arg})))
-      opts)))
+      (if (:input opts)
+        opts
+        (throw (ex-info "missing required --input" {}))))))
 
 (defn read-json [path]
   (with-open [in (io/input-stream path)]
