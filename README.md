@@ -21,15 +21,10 @@ transactor process. It runs in-process as a lightweight native library, either
 in memory or durably with bundled SQLite. It does not require a Clojure runtime
 or a large GraalVM native image.
 
-Datomic is VevDB's semantic reference and tutorial corpus, not its
-architectural specification. Tutorials about transactions, queries, pull,
-entities, indexes, history, and immutable database values work with documented
-require, setup, lifecycle, and synchronous-return adaptations.
-
-The full Peer inventory and each operation's Vev disposition are recorded in
-[`compat/datomic-peer-api.edn`](compat/datomic-peer-api.edn). VevDB does not
-implement Peer deployment, JVM, asynchronous-delivery, partition, or lifecycle
-features that do not fit an embedded native database.
+VevDB follows Datomic's data model and much of its familiar API. Datomic
+tutorials about transactions, queries, pull, entities, indexes, history, and
+immutable database values carry over with small changes for setup and
+synchronous calls.
 
 The engine is written in [Kvist](https://github.com/kvist-lang/kvist) and
 compiles through Odin to a native library. Clojure and Kvist are the paired
@@ -67,7 +62,7 @@ prepared operations.
 Add the package:
 
 ```clojure
-{:deps {com.vevdb/vev-clj {:mvn/version "0.2.2"}}}
+{:deps {com.vevdb/vev-clj {:mvn/version "0.2.3"}}}
 ```
 
 Use `vev.core`, conventionally aliased as `d`:

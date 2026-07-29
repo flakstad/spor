@@ -230,21 +230,24 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
                         {:db/id 2 :item/score 20}])
       (let [target (with-open [snapshot (d/db conn)]
                      (inc (d/basis-t snapshot)))
-            coordinated (d/sync conn target)]
-        (d/transact writer [[:db/add 3 :item/score 30]])
-        (let [synced (deref coordinated 5000 ::timeout)]
-          (assert (not= ::timeout synced))
+            write-result (future
+                           (Thread/sleep 50)
+                           (d/transact writer
+                                       [[:db/add 3 :item/score 30]]))]
+        (with-open [synced (d/sync conn target)]
           (assert (>= (d/basis-t synced) target))
           (assert (= [10 20]
                      (mapv :v (d/index-range synced :item/score nil 30))))
           (assert (= [20 30]
-                     (mapv :v (d/index-range synced :item/score 15 nil))))
-          (.close ^java.lang.AutoCloseable synced))))
+                     (mapv :v (d/index-range synced :item/score 15 nil)))))
+        @write-result))
     (finally
       (doseq [suffix ["" "-wal" "-shm"]]
         (java.nio.file.Files/deleteIfExists
          (java.nio.file.Path/of (str path suffix)
                                 (make-array String 0)))))))
+
+(shutdown-agents)
 EOF
 
 (
@@ -259,22 +262,21 @@ cat > "$TMP_DIR/clojure-sync-process.clj" <<'EOF'
   (case mode
     "reader"
     (with-open [conn (d/connect path)]
-      (let [coordinated (d/sync conn 1)]
-        (spit ready "ready")
-        (let [snapshot (deref coordinated 10000 ::timeout)]
-          (assert (not= ::timeout snapshot))
-          (with-open [snapshot snapshot]
-            (assert (>= (d/basis-t snapshot) 1))
-            (assert (= #{["visible"]}
-                       (d/q '[:find ?value
-                              :where [1 :fixture/sync-value ?value]]
-                            snapshot)))))))
+      (spit ready "ready")
+      (with-open [snapshot (d/sync conn 1)]
+        (assert (>= (d/basis-t snapshot) 1))
+        (assert (= #{["visible"]}
+                   (d/q '[:find ?value
+                          :where [1 :fixture/sync-value ?value]]
+                        snapshot)))))
 
     "writer"
     (with-open [conn (d/connect path)]
       (d/transact conn [[:db/add 1 :fixture/sync-value "visible"]]))
 
     (throw (ex-info "unknown sync fixture mode" {:mode mode}))))
+
+(shutdown-agents)
 EOF
 
 SYNC_DB="$TMP_DIR/cross-process-sync.vev"

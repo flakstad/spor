@@ -4,7 +4,7 @@ The public Clojure package lives in
 [vevdb/vev-clj](https://github.com/vevdb/vev-clj).
 
 ```clojure
-{:deps {com.vevdb/vev-clj {:mvn/version "0.2.2"}}}
+{:deps {com.vevdb/vev-clj {:mvn/version "0.2.3"}}}
 ```
 
 This in-tree copy lets the engine test coordinated C ABI, Java, and Clojure
