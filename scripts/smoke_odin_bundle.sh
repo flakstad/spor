@@ -98,7 +98,11 @@ EOF
 
 (
   cd "$TMP_DIR/consumer"
-  odin build . -out:"$TMP_DIR/consumer-smoke$EXE_SUFFIX"
+  if [[ "$PLATFORM" == "linux-aarch64" ]]; then
+    odin build . -thread-count:1 -out:"$TMP_DIR/consumer-smoke$EXE_SUFFIX"
+  else
+    odin build . -out:"$TMP_DIR/consumer-smoke$EXE_SUFFIX"
+  fi
   "./../consumer-smoke$EXE_SUFFIX" >/dev/null
 )
 
