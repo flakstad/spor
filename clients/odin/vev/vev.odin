@@ -204,8 +204,12 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.connection_query_value_with_inputs == nil ||
 	   library.api.connection_compact_indexes == nil ||
 	   library.api.connection_maintain_indexes == nil ||
-	   library.api.connection_latest_index_merge_run_count == nil ||
-	   library.api.db_release == nil ||
+	   library.api.connection_latest_index_merge_run_count == nil {
+		dynlib.unload_library(library.api.__handle)
+		return {}, false
+	}
+
+	if library.api.db_release == nil ||
 	   library.api.db_basis_t == nil ||
 	   library.api.db_next_t == nil ||
 	   library.api.db_has_as_of_t == nil ||
@@ -230,8 +234,12 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.db_attribute_value == nil ||
 	   library.api.db_datoms_value == nil ||
 	   library.api.db_index_pull_value == nil ||
-	   library.api.db_index_range_value == nil ||
-	   library.api.entity_free == nil ||
+	   library.api.db_index_range_value == nil {
+		dynlib.unload_library(library.api.__handle)
+		return {}, false
+	}
+
+	if library.api.entity_free == nil ||
 	   library.api.entity_found == nil ||
 	   library.api.entity_id == nil ||
 	   library.api.entity_contains == nil ||
@@ -249,8 +257,12 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.tx_report_resolve_tempid_edn == nil ||
 	   library.api.tx_report_db_before == nil ||
 	   library.api.tx_report_db_after == nil ||
-	   library.api.tx_report_free == nil ||
-	   library.api.value_handle_free == nil ||
+	   library.api.tx_report_free == nil {
+		dynlib.unload_library(library.api.__handle)
+		return {}, false
+	}
+
+	if library.api.value_handle_free == nil ||
 	   library.api.value_handle_value == nil ||
 	   library.api.value_handle_edn == nil ||
 	   library.api.value_kind == nil ||
@@ -269,8 +281,12 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.u64_array_free == nil ||
 	   library.api.u64_array_count == nil ||
 	   library.api.u64_array_value == nil ||
-	   library.api.string_free == nil ||
-	   library.api.abi_version() != ABI_VERSION {
+	   library.api.string_free == nil {
+		dynlib.unload_library(library.api.__handle)
+		return {}, false
+	}
+
+	if library.api.abi_version() != ABI_VERSION {
 		dynlib.unload_library(library.api.__handle)
 		return {}, false
 	}

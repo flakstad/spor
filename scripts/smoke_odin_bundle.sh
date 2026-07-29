@@ -98,13 +98,7 @@ EOF
 
 (
   cd "$TMP_DIR/consumer"
-  if [[ "$PLATFORM" == "linux-aarch64" ]]; then
-    ulimit -s 65536
-    odin build . -no-threaded-checker \
-      -out:"$TMP_DIR/consumer-smoke$EXE_SUFFIX"
-  else
-    odin build . -out:"$TMP_DIR/consumer-smoke$EXE_SUFFIX"
-  fi
+  odin build . -out:"$TMP_DIR/consumer-smoke$EXE_SUFFIX"
   "./../consumer-smoke$EXE_SUFFIX" >/dev/null
 )
 
