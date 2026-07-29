@@ -11,9 +11,11 @@ DATOMIC_URI="${DATOMIC_URI:-datomic:dev://localhost:4334/mbrainz-1968-1973}"
 ENGINE="all"
 RUN_KVIST="true"
 QUERY_STATS="false"
+CLIENT_LAYERS="false"
 WARMUP_RUNS="0"
 MEASURE_RUNS="1"
 PREPARED_VEV="false"
+BUDGET_FILE=""
 
 usage() {
   cat <<EOF
@@ -26,9 +28,11 @@ options:
   --engine all|vev|datomic  Clojure comparison engine; default: all
   --workload name           workload name or suffix; default: all
   --query-stats             print Vev query stats for selected workload(s)
+  --client-layers           time native-result, Java columns, Clojure rows, and q
   --prepared-vev            prepare each Vev query once per workload before timing
   --warmup-runs n           unreported warmup runs per workload; default: 0
   --measure-runs n          measured runs per workload; default: 1
+  --budget-file path        assert Vev results against a local EDN budget
   --skip-datomic            run only Vev Clojure plus Kvist validation
   --skip-kvist              skip the Kvist workshop validation
   --datomic-uri uri         Datomic URI; default: $DATOMIC_URI
@@ -44,9 +48,11 @@ while [[ $# -gt 0 ]]; do
     --engine) ENGINE="$2"; shift 2 ;;
     --workload) WORKLOAD="$2"; shift 2 ;;
     --query-stats) QUERY_STATS="true"; shift ;;
+    --client-layers) CLIENT_LAYERS="true"; shift ;;
     --prepared-vev) PREPARED_VEV="true"; shift ;;
     --warmup-runs) WARMUP_RUNS="$2"; shift 2 ;;
     --measure-runs) MEASURE_RUNS="$2"; shift 2 ;;
+    --budget-file) BUDGET_FILE="$2"; shift 2 ;;
     --skip-datomic) ENGINE="vev"; shift ;;
     --skip-kvist) RUN_KVIST="false"; shift ;;
     --datomic-uri) DATOMIC_URI="$2"; shift 2 ;;
@@ -88,7 +94,9 @@ clojure \
   --engine "$ENGINE" \
   --workload "${WORKLOAD:-all}" \
   --query-stats "$QUERY_STATS" \
+  --client-layers "$CLIENT_LAYERS" \
   --prepared-vev "$PREPARED_VEV" \
   --warmup-runs "$WARMUP_RUNS" \
   --measure-runs "$MEASURE_RUNS" \
+  --budget-file "$BUDGET_FILE" \
   --datomic-uri "$DATOMIC_URI"

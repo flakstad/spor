@@ -26,6 +26,7 @@ SQLITE_TRANSIENT :: rawptr(~uintptr(0))
 foreign sqlite {
     sqlite3_open :: proc(filename: cstring, db: ^^SQLite3) -> c.int ---
     sqlite3_close :: proc(db: ^SQLite3) -> c.int ---
+    sqlite3_get_autocommit :: proc(db: ^SQLite3) -> c.int ---
     sqlite3_errmsg :: proc(db: ^SQLite3) -> cstring ---
     sqlite3_exec :: proc(db: ^SQLite3, sql: cstring, callback: rawptr, arg: rawptr, errmsg: ^^c.char) -> c.int ---
     sqlite3_free :: proc(ptr: rawptr) ---
@@ -803,6 +804,24 @@ sqlite_begin_immediate_raw :: proc(handle: rawptr) -> (bool, string) {
     return sqlite_exec_ok((^SQLite3)(handle), \"BEGIN IMMEDIATE\")
 }
 
+sqlite_begin_query_read_raw :: proc(handle: rawptr) -> (bool, bool, string) {
+    if handle == nil {
+        return false, false, \"sqlite handle was nil\"
+    }
+    db := (^SQLite3)(handle)
+    if sqlite3_get_autocommit(db) == 0 {
+        return false, true, \"\"
+    }
+    ok, err := sqlite_exec_ok(db, \"BEGIN\")
+    return ok, ok, err
+}
+
+sqlite_end_query_read_raw :: proc(handle: rawptr, started: bool) {
+    if started && handle != nil {
+        _, _ = sqlite_exec_ok((^SQLite3)(handle), \"ROLLBACK\")
+    }
+}
+
 sqlite_rollback_raw :: proc(handle: rawptr) {
     if handle != nil {
         _, _ = sqlite_exec_ok((^SQLite3)(handle), \"ROLLBACK\")
@@ -1253,6 +1272,32 @@ sqlite_latest_index_root_basis_raw :: proc(handle: rawptr) -> (u64, bool, string
         return 0, false, \"sqlite DB has no Vev index roots\"
     }
     return 0, false, sqlite_error_text(db, \"sqlite latest index root read failed\")
+}
+
+sqlite_latest_index_root_identity_raw :: proc(handle: rawptr) -> (u64, u64, bool, string) {
+    if handle == nil {
+        return 0, 0, false, \"sqlite handle was nil\"
+    }
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql := \"SELECT basis_tx, root_id FROM vev_index_roots ORDER BY root_id DESC LIMIT 1\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return 0, 0, false, \"failed to allocate sqlite SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return 0, 0, false, sqlite_error_text(db, \"sqlite prepare latest index root identity failed\")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    rc := sqlite3_step(stmt)
+    if rc == SQLITE_ROW {
+        return u64(sqlite3_column_int64(stmt, 0)), u64(sqlite3_column_int64(stmt, 1)), true, \"\"
+    }
+    if rc == SQLITE_DONE {
+        return 0, 0, false, \"sqlite DB has no Vev index roots\"
+    }
+    return 0, 0, false, sqlite_error_text(db, \"sqlite latest index root identity read failed\")
 }
 
 sqlite_latest_index_chunk_row_count_wide_raw :: proc(handle: rawptr, index_name: string) -> (u64, u64, bool, string) {
@@ -4765,6 +4810,368 @@ sqlite_direct_frontier_datom_parts_raw :: proc(handle: rawptr, order_text: strin
     return entities_out, values, value_entities, txs, added, true, \"\"
 }
 
+sqlite_direct_same_entity_ref_fanout_parts_raw :: proc(handle: rawptr, name_attr: string, edge_attr: string, wanted_names: []string) -> ([dynamic]string, [dynamic]string, bool, string) {
+    left_values := make([dynamic]string)
+    right_values := make([dynamic]string)
+    if handle == nil {
+        return left_values, right_values, false, \"sqlite handle was nil\"
+    }
+    if len(wanted_names) == 0 {
+        return left_values, right_values, true, \"\"
+    }
+    parts := make([dynamic]string, 0, len(wanted_names) * 2 + 2)
+    append(&parts, \"SELECT n1.value_text, n2.value_text FROM vev_datoms n1 JOIN vev_datoms edge1 ON edge1.value_entity = n1.e AND edge1.a = ? JOIN vev_datoms edge2 ON edge2.e = edge1.e AND edge2.a = ? AND edge2.value_entity <> n1.e JOIN vev_datoms n2 ON n2.e = edge2.value_entity AND n2.a = ? WHERE n1.a = ? AND n1.value_text IN (\")
+    for _, index in wanted_names {
+        if index > 0 {
+            append(&parts, \",\")
+        }
+        append(&parts, \"?\")
+    }
+    append(&parts, \") GROUP BY n1.value_text, n2.value_text\")
+    sql := strings.concatenate(parts[:])
+    delete(parts)
+    defer delete(sql)
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return left_values, right_values, false, \"failed to allocate sqlite same-entity ref fanout SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return left_values, right_values, false, sqlite_error_text(db, \"sqlite prepare same-entity ref fanout read failed\")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    if sqlite_bind_text_borrowed(stmt, 1, edge_attr) != SQLITE_OK ||
+       sqlite_bind_text_borrowed(stmt, 2, edge_attr) != SQLITE_OK ||
+       sqlite_bind_text_borrowed(stmt, 3, name_attr) != SQLITE_OK ||
+       sqlite_bind_text_borrowed(stmt, 4, name_attr) != SQLITE_OK {
+        return left_values, right_values, false, sqlite_error_text(db, \"sqlite bind same-entity ref fanout attrs failed\")
+    }
+    for wanted_name, index in wanted_names {
+        if sqlite_bind_text_borrowed(stmt, i32(index) + 5, wanted_name) != SQLITE_OK {
+            return left_values, right_values, false, sqlite_error_text(db, \"sqlite bind same-entity ref fanout value failed\")
+        }
+    }
+    for {
+        rc := sqlite3_step(stmt)
+        if rc == SQLITE_DONE {
+            break
+        }
+        if rc != SQLITE_ROW {
+            return left_values, right_values, false, sqlite_error_text(db, \"sqlite same-entity ref fanout read failed\")
+        }
+        left, left_ok := sqlite_column_text_owned(stmt, 0)
+        if !left_ok {
+            return left_values, right_values, false, \"sqlite same-entity ref fanout row had null left value\"
+        }
+        right, right_ok := sqlite_column_text_owned(stmt, 1)
+        if !right_ok {
+            delete(left)
+            return left_values, right_values, false, \"sqlite same-entity ref fanout row had null right value\"
+        }
+        append(&left_values, left)
+        append(&right_values, right)
+    }
+    return left_values, right_values, true, \"\"
+}
+
+sqlite_direct_same_value_collaborator_parts_raw :: proc(handle: rawptr, anchor_name_attr: string, edge_attr: string, shared_value_attr: string, output_name_attr: string, anchor_value: string, excluded_values: []string) -> ([dynamic]string, [dynamic]string, bool, string) {
+    output_values := make([dynamic]string)
+    shared_values := make([dynamic]string)
+    if handle == nil {
+        return output_values, shared_values, false, \"sqlite handle was nil\"
+    }
+    parts := make([dynamic]string, 0, len(excluded_values) * 2 + 3)
+    append(&parts, \"SELECT output_name.value_text, shared_value.value_text FROM vev_datoms anchor_name INDEXED BY vev_datoms_avet CROSS JOIN vev_datoms anchor_edge INDEXED BY vev_datoms_vaet_entity ON anchor_edge.value_entity = anchor_name.e AND anchor_edge.a = ? CROSS JOIN vev_datoms shared_value INDEXED BY vev_datoms_eavt_entity_cover ON shared_value.e = anchor_edge.e AND shared_value.a = ? CROSS JOIN vev_datoms same_value INDEXED BY vev_datoms_avet ON same_value.a = ? AND same_value.value_text = shared_value.value_text CROSS JOIN vev_datoms collaborator_edge INDEXED BY vev_datoms_eavt_entity_cover ON collaborator_edge.e = same_value.e AND collaborator_edge.a = ? AND collaborator_edge.value_entity <> anchor_name.e CROSS JOIN vev_datoms output_name INDEXED BY vev_datoms_eavt_entity_cover ON output_name.e = collaborator_edge.value_entity AND output_name.a = ? WHERE anchor_name.a = ? AND anchor_name.value_text = ?\")
+    if len(excluded_values) > 0 {
+        append(&parts, \" AND shared_value.value_text NOT IN (\")
+        for _, index in excluded_values {
+            if index > 0 {
+                append(&parts, \",\")
+            }
+            append(&parts, \"?\")
+        }
+        append(&parts, \")\")
+    }
+    append(&parts, \" GROUP BY output_name.value_text, shared_value.value_text\")
+    sql := strings.concatenate(parts[:])
+    delete(parts)
+    defer delete(sql)
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return output_values, shared_values, false, \"failed to allocate sqlite same-value collaborator SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return output_values, shared_values, false, sqlite_error_text(db, \"sqlite prepare same-value collaborator read failed\")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    bindings := []string{edge_attr, shared_value_attr, shared_value_attr, edge_attr, output_name_attr, anchor_name_attr, anchor_value}
+    for binding, index in bindings {
+        if sqlite_bind_text_borrowed(stmt, i32(index) + 1, binding) != SQLITE_OK {
+            return output_values, shared_values, false, sqlite_error_text(db, \"sqlite bind same-value collaborator read failed\")
+        }
+    }
+    for excluded_value, index in excluded_values {
+        if sqlite_bind_text_borrowed(stmt, i32(index) + 8, excluded_value) != SQLITE_OK {
+            return output_values, shared_values, false, sqlite_error_text(db, \"sqlite bind same-value collaborator exclusion failed\")
+        }
+    }
+    for {
+        rc := sqlite3_step(stmt)
+        if rc == SQLITE_DONE {
+            break
+        }
+        if rc != SQLITE_ROW {
+            return output_values, shared_values, false, sqlite_error_text(db, \"sqlite same-value collaborator read failed\")
+        }
+        output_value, output_ok := sqlite_column_text_owned(stmt, 0)
+        if !output_ok {
+            return output_values, shared_values, false, \"sqlite same-value collaborator row had null output value\"
+        }
+        shared_value, shared_ok := sqlite_column_text_owned(stmt, 1)
+        if !shared_ok {
+            delete(output_value)
+            return output_values, shared_values, false, \"sqlite same-value collaborator row had null shared value\"
+        }
+        append(&output_values, output_value)
+        append(&shared_values, shared_value)
+    }
+    return output_values, shared_values, true, \"\"
+}
+
+sqlite_direct_collab_net_two_parts_raw :: proc(handle: rawptr, anchor_name_attr: string, output_name_attr: string, edge_attr: string, input_names: []string) -> ([dynamic]string, [dynamic]string, bool, string) {
+    input_values := make([dynamic]string)
+    output_values := make([dynamic]string)
+    if handle == nil {
+        return input_values, output_values, false, \"sqlite handle was nil\"
+    }
+    if len(input_names) == 0 {
+        return input_values, output_values, true, \"\"
+    }
+    parts := make([dynamic]string, 0, len(input_names) * 2 + 3)
+    append(&parts, \"WITH anchor(anchor_e, input_name) AS MATERIALIZED (SELECT e, value_text FROM vev_datoms INDEXED BY vev_datoms_avet WHERE a = ? AND value_text IN (\")
+    for _, index in input_names {
+        if index > 0 {
+            append(&parts, \",\")
+        }
+        append(&parts, \"?\")
+    }
+    append(&parts, \")), direct(anchor_e, neighbor_e) AS MATERIALIZED (SELECT anchor.anchor_e, edge2.value_entity FROM anchor CROSS JOIN vev_datoms edge1 INDEXED BY vev_datoms_vaet_entity ON edge1.value_entity = anchor.anchor_e AND edge1.a = ? CROSS JOIN vev_datoms edge2 INDEXED BY vev_datoms_eavt_entity_cover ON edge2.e = edge1.e AND edge2.a = ? AND edge2.value_entity <> anchor.anchor_e GROUP BY anchor.anchor_e, edge2.value_entity), reach(anchor_e, neighbor_e) AS (SELECT anchor_e, neighbor_e FROM direct UNION SELECT direct.anchor_e, edge4.value_entity FROM direct CROSS JOIN vev_datoms edge3 INDEXED BY vev_datoms_vaet_entity ON edge3.value_entity = direct.neighbor_e AND edge3.a = ? CROSS JOIN vev_datoms edge4 INDEXED BY vev_datoms_eavt_entity_cover ON edge4.e = edge3.e AND edge4.a = ? AND edge4.value_entity <> direct.neighbor_e AND edge4.value_entity <> direct.anchor_e) SELECT anchor.input_name, output_name.value_text FROM anchor CROSS JOIN reach ON reach.anchor_e = anchor.anchor_e CROSS JOIN vev_datoms output_name INDEXED BY vev_datoms_eavt_entity_cover ON output_name.e = reach.neighbor_e AND output_name.a = ? GROUP BY anchor.input_name, output_name.value_text\")
+    sql := strings.concatenate(parts[:])
+    delete(parts)
+    defer delete(sql)
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return input_values, output_values, false, \"failed to allocate sqlite collaboration depth-2 SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return input_values, output_values, false, sqlite_error_text(db, \"sqlite prepare collaboration depth-2 read failed\")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    if sqlite_bind_text_borrowed(stmt, 1, anchor_name_attr) != SQLITE_OK {
+        return input_values, output_values, false, sqlite_error_text(db, \"sqlite bind collaboration depth-2 anchor attr failed\")
+    }
+    for input_name, index in input_names {
+        if sqlite_bind_text_borrowed(stmt, i32(index) + 2, input_name) != SQLITE_OK {
+            return input_values, output_values, false, sqlite_error_text(db, \"sqlite bind collaboration depth-2 input failed\")
+        }
+    }
+    attr_start := i32(len(input_names)) + 2
+    attr_bindings := []string{edge_attr, edge_attr, edge_attr, edge_attr, output_name_attr}
+    for attr, index in attr_bindings {
+        if sqlite_bind_text_borrowed(stmt, attr_start + i32(index), attr) != SQLITE_OK {
+            return input_values, output_values, false, sqlite_error_text(db, \"sqlite bind collaboration depth-2 attr failed\")
+        }
+    }
+    for {
+        rc := sqlite3_step(stmt)
+        if rc == SQLITE_DONE {
+            break
+        }
+        if rc != SQLITE_ROW {
+            return input_values, output_values, false, sqlite_error_text(db, \"sqlite collaboration depth-2 read failed\")
+        }
+        input_value, input_ok := sqlite_column_text_owned(stmt, 0)
+        if !input_ok {
+            return input_values, output_values, false, \"sqlite collaboration depth-2 row had null input value\"
+        }
+        output_value, output_ok := sqlite_column_text_owned(stmt, 1)
+        if !output_ok {
+            delete(input_value)
+            return input_values, output_values, false, \"sqlite collaboration depth-2 row had null output value\"
+        }
+        append(&input_values, input_value)
+        append(&output_values, output_value)
+    }
+    return input_values, output_values, true, \"\"
+}
+
+sqlite_direct_input_ref_value_parts_raw :: proc(handle: rawptr, anchor_attr: string, anchor_value: string, ref_attr: string, output_attr: string) -> ([dynamic]string, bool, string) {
+    output_values := make([dynamic]string)
+    if handle == nil {
+        return output_values, false, \"sqlite handle was nil\"
+    }
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql := \"SELECT output.value_text FROM vev_datoms anchor INDEXED BY vev_datoms_avet CROSS JOIN vev_datoms edge INDEXED BY vev_datoms_vaet_entity ON edge.value_entity = anchor.e AND edge.a = ? CROSS JOIN vev_datoms output INDEXED BY vev_datoms_eavt_entity_cover ON output.e = edge.e AND output.a = ? WHERE anchor.a = ? AND anchor.value_text = ? GROUP BY output.value_text\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return output_values, false, \"failed to allocate sqlite input-ref-value SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return output_values, false, sqlite_error_text(db, \"sqlite prepare input-ref-value read failed\")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    bindings := []string{ref_attr, output_attr, anchor_attr, anchor_value}
+    for binding, index in bindings {
+        if sqlite_bind_text_borrowed(stmt, i32(index) + 1, binding) != SQLITE_OK {
+            return output_values, false, sqlite_error_text(db, \"sqlite bind input-ref-value read failed\")
+        }
+    }
+    for {
+        rc := sqlite3_step(stmt)
+        if rc == SQLITE_DONE {
+            break
+        }
+        if rc != SQLITE_ROW {
+            return output_values, false, sqlite_error_text(db, \"sqlite input-ref-value read failed\")
+        }
+        output_value, output_ok := sqlite_column_text_owned(stmt, 0)
+        if !output_ok {
+            return output_values, false, \"sqlite input-ref-value row had null output value\"
+        }
+        append(&output_values, output_value)
+    }
+    return output_values, true, \"\"
+}
+
+sqlite_direct_track_release_parts_raw :: proc(handle: rawptr, artist_name_attr: string, artist_name: string, track_artist_attr: string, track_name_attr: string, medium_track_attr: string, release_media_attr: string, release_name_attr: string, release_year_attr: string) -> ([dynamic]string, [dynamic]string, [dynamic]string, bool, string) {
+    titles := make([dynamic]string)
+    albums := make([dynamic]string)
+    years := make([dynamic]string)
+    if handle == nil {
+        return titles, albums, years, false, \"sqlite handle was nil\"
+    }
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql := \"SELECT title.value_text, album.value_text, release_year.value_text FROM vev_datoms artist_name INDEXED BY vev_datoms_avet CROSS JOIN vev_datoms track_artist INDEXED BY vev_datoms_vaet_entity ON track_artist.value_entity = artist_name.e AND track_artist.a = ? CROSS JOIN vev_datoms title INDEXED BY vev_datoms_eavt_entity_cover ON title.e = track_artist.e AND title.a = ? CROSS JOIN vev_datoms medium_track INDEXED BY vev_datoms_vaet_entity ON medium_track.value_entity = track_artist.e AND medium_track.a = ? CROSS JOIN vev_datoms release_media INDEXED BY vev_datoms_vaet_entity ON release_media.value_entity = medium_track.e AND release_media.a = ? CROSS JOIN vev_datoms album INDEXED BY vev_datoms_eavt_entity_cover ON album.e = release_media.e AND album.a = ? CROSS JOIN vev_datoms release_year INDEXED BY vev_datoms_eavt_entity_cover ON release_year.e = release_media.e AND release_year.a = ? WHERE artist_name.a = ? AND artist_name.value_text = ? GROUP BY title.value_text, album.value_text, release_year.value_text\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return titles, albums, years, false, \"failed to allocate sqlite track-release SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return titles, albums, years, false, sqlite_error_text(db, \"sqlite prepare track-release read failed\")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    bindings := []string{track_artist_attr, track_name_attr, medium_track_attr, release_media_attr, release_name_attr, release_year_attr, artist_name_attr, artist_name}
+    for binding, index in bindings {
+        if sqlite_bind_text_borrowed(stmt, i32(index) + 1, binding) != SQLITE_OK {
+            return titles, albums, years, false, sqlite_error_text(db, \"sqlite bind track-release read failed\")
+        }
+    }
+    for {
+        rc := sqlite3_step(stmt)
+        if rc == SQLITE_DONE {
+            break
+        }
+        if rc != SQLITE_ROW {
+            return titles, albums, years, false, sqlite_error_text(db, \"sqlite track-release read failed\")
+        }
+        title, title_ok := sqlite_column_text_owned(stmt, 0)
+        if !title_ok {
+            return titles, albums, years, false, \"sqlite track-release row had null title\"
+        }
+        album, album_ok := sqlite_column_text_owned(stmt, 1)
+        if !album_ok {
+            delete(title)
+            return titles, albums, years, false, \"sqlite track-release row had null album\"
+        }
+        year, year_ok := sqlite_column_text_owned(stmt, 2)
+        if !year_ok {
+            delete(title)
+            delete(album)
+            return titles, albums, years, false, \"sqlite track-release row had null year\"
+        }
+        append(&titles, title)
+        append(&albums, album)
+        append(&years, year)
+    }
+    return titles, albums, years, true, \"\"
+}
+
+sqlite_direct_fulltext_track_info_parts_raw :: proc(handle: rawptr, fulltext_attr: string, search: string, track_artist_attr: string, artist_name_attr: string, medium_track_attr: string, release_medium_attr: string, first_release_attr: string, second_release_attr: string) -> ([dynamic]string, [dynamic]string, [dynamic]string, [dynamic]string, bool, string) {
+    titles := make([dynamic]string)
+    artists := make([dynamic]string)
+    first_release_values := make([dynamic]string)
+    second_release_values := make([dynamic]string)
+    if handle == nil {
+        return titles, artists, first_release_values, second_release_values, false, \"sqlite handle was nil\"
+    }
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql := \"SELECT title.value_text, artist_name.value_text, first_release.value_text, second_release.value_text FROM vev_fulltext fulltext CROSS JOIN vev_datoms title INDEXED BY vev_datoms_log_index ON title.log_index = fulltext.log_index CROSS JOIN vev_datoms track_artist INDEXED BY vev_datoms_eavt_entity_cover ON track_artist.e = title.e AND track_artist.a = ? CROSS JOIN vev_datoms artist_name INDEXED BY vev_datoms_eavt_entity_cover ON artist_name.e = track_artist.value_entity AND artist_name.a = ? CROSS JOIN vev_datoms medium_track INDEXED BY vev_datoms_vaet_entity ON medium_track.value_entity = title.e AND medium_track.a = ? CROSS JOIN vev_datoms release_medium INDEXED BY vev_datoms_vaet_entity ON release_medium.value_entity = medium_track.e AND release_medium.a = ? CROSS JOIN vev_datoms first_release INDEXED BY vev_datoms_eavt_entity_cover ON first_release.e = release_medium.e AND first_release.a = ? CROSS JOIN vev_datoms second_release INDEXED BY vev_datoms_eavt_entity_cover ON second_release.e = release_medium.e AND second_release.a = ? WHERE fulltext.attr = ? AND vev_fulltext MATCH ? GROUP BY title.value_text, artist_name.value_text, first_release.value_text, second_release.value_text\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return titles, artists, first_release_values, second_release_values, false, \"failed to allocate sqlite fulltext track info SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return titles, artists, first_release_values, second_release_values, false, sqlite_error_text(db, \"sqlite prepare fulltext track info read failed\")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    bindings := []string{track_artist_attr, artist_name_attr, medium_track_attr, release_medium_attr, first_release_attr, second_release_attr, fulltext_attr, search}
+    for binding, index in bindings {
+        if sqlite_bind_text_borrowed(stmt, i32(index) + 1, binding) != SQLITE_OK {
+            return titles, artists, first_release_values, second_release_values, false, sqlite_error_text(db, \"sqlite bind fulltext track info read failed\")
+        }
+    }
+    for {
+        rc := sqlite3_step(stmt)
+        if rc == SQLITE_DONE {
+            break
+        }
+        if rc != SQLITE_ROW {
+            return titles, artists, first_release_values, second_release_values, false, sqlite_error_text(db, \"sqlite fulltext track info read failed\")
+        }
+        title, title_ok := sqlite_column_text_owned(stmt, 0)
+        if !title_ok {
+            return titles, artists, first_release_values, second_release_values, false, \"sqlite fulltext track info row had null title\"
+        }
+        artist, artist_ok := sqlite_column_text_owned(stmt, 1)
+        if !artist_ok {
+            delete(title)
+            return titles, artists, first_release_values, second_release_values, false, \"sqlite fulltext track info row had null artist\"
+        }
+        first_release_value, first_release_ok := sqlite_column_text_owned(stmt, 2)
+        if !first_release_ok {
+            delete(title)
+            delete(artist)
+            return titles, artists, first_release_values, second_release_values, false, \"sqlite fulltext track info row had null first release value\"
+        }
+        second_release_value, second_release_ok := sqlite_column_text_owned(stmt, 3)
+        if !second_release_ok {
+            delete(title)
+            delete(artist)
+            delete(first_release_value)
+            return titles, artists, first_release_values, second_release_values, false, \"sqlite fulltext track info row had null second release value\"
+        }
+        append(&titles, title)
+        append(&artists, artist)
+        append(&first_release_values, first_release_value)
+        append(&second_release_values, second_release_value)
+    }
+    return titles, artists, first_release_values, second_release_values, true, \"\"
+}
+
 sqlite_direct_eavt_entity_attrs_datom_parts_raw :: proc(handle: rawptr, entities: []u64, attrs: []string) -> ([dynamic]u64, [dynamic]string, [dynamic]string, [dynamic]i64, [dynamic]u64, [dynamic]bool, bool, string) {
     entities_out := make([dynamic]u64)
     attrs_out := make([dynamic]string)
@@ -5511,6 +5918,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     basis))
 
 (def sqlite-index-leaf-chunk-size 128)
+;; Small deltas remain entry-backed for selective reads. Larger transactions
+;; use bounded payload leaves so persistence does not issue one INSERT per datom.
+(def sqlite-index-entry-backed-delta-limit 160)
+(def sqlite-index-bulk-leaf-chunk-size 512)
 (def sqlite-index-parent-fanout 64)
 (def sqlite-index-merge-root-fanout 4)
 (def sqlite-index-merge-root-max-direct-runs 5)
@@ -5961,11 +6372,25 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (return (persist-entry-backed-index-leaf-sqlite-handle-with-stmts handle stmts basis-tx index-name items)))
   (let [leaf-ids (make [dynamic]u64) :defer
         state (Persist-Index-Merge-State {})
+        leaf-size (if (<= (count items) sqlite-index-entry-backed-delta-limit)
+                    sqlite-index-leaf-chunk-size
+                    sqlite-index-bulk-leaf-chunk-size)
         start 0]
     (while (< start (count items))
-      (let [end (min (+ start sqlite-index-leaf-chunk-size) (count items))
+      (let [end (min (+ start leaf-size) (count items))
             leaf-items (slice items start end)
-            [leaf-id leaf-ok leaf-error] (persist-entry-backed-index-leaf-sqlite-handle-with-stmts handle stmts basis-tx index-name leaf-items)]
+            leaf-id: u64 0
+            leaf-ok false
+            leaf-error ""]
+        (if (<= (count items) sqlite-index-entry-backed-delta-limit)
+          (let [[next-id next-ok next-error] (persist-entry-backed-index-leaf-sqlite-handle-with-stmts handle stmts basis-tx index-name leaf-items)]
+            (set! leaf-id next-id)
+            (set! leaf-ok next-ok)
+            (set! leaf-error next-error))
+          (let [[next-id next-ok next-error] (persist-one-index-chunk-sqlite-handle-with-stmts handle stmts basis-tx index-name leaf-items)]
+            (set! leaf-id next-id)
+            (set! leaf-ok next-ok)
+            (set! leaf-error next-error)))
         (when (not leaf-ok)
           (return 0 false leaf-error))
         (when (not state.has-entry)
@@ -7761,6 +8186,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   unique: bool
   unique-kind: string
   cardinality-many: bool
+  fulltext: bool
 })
 
 (defstruct SQLite-Index-Root-Page {
@@ -8044,11 +8470,18 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     page.refs[0]
     0))
 
+(defstruct SQLite-Index-Page-Cache-Key {
+  root-id: u64
+  manifest-id: u64
+  start: int
+})
+
 (defstruct SQLite-Index-Page-Cache-State {
   root-ids: [dynamic]u64
   manifest-ids: [dynamic]u64
   starts: [dynamic]int
   pages: [dynamic]SQLite-Loaded-Index-Page
+  indexes: map[SQLite-Index-Page-Cache-Key]int
   refs: [dynamic]int
   hits: int
   misses: int
@@ -8068,6 +8501,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
                                                  manifest-ids: (make [dynamic]u64)
                                                  starts: (make [dynamic]int)
                                                  pages: (make [dynamic]SQLite-Loaded-Index-Page)
+                                                 indexes: (make (map SQLite-Index-Page-Cache-Key int))
                                                  refs: (make [dynamic]int 0 1)}))
     (arr.push! state^.refs 1)
     (SQLite-Index-Page-Cache {state: state})))
@@ -8094,6 +8528,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (delete cache.state^.manifest-ids)
     (delete cache.state^.starts)
     (delete cache.state^.pages)
+    (delete cache.state^.indexes)
     (delete cache.state^.refs)
     (free cache.state)))
 
@@ -8131,40 +8566,29 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn sqlite-index-page-cache-find-retained [cache: SQLite-Index-Page-Cache, root-id: u64, manifest-id: u64, start: int] -> [page: SQLite-Loaded-Index-Page, found: bool]
   (when (= cache.state nil)
     (return (SQLite-Loaded-Index-Page {}) false))
-  (when (and cache.state^.last-valid
-             (>= cache.state^.last-index 0)
-             (< cache.state^.last-index (count cache.state^.pages))
-             (= cache.state^.root-ids[cache.state^.last-index] root-id)
-             (= cache.state^.manifest-ids[cache.state^.last-index] manifest-id)
-             (= cache.state^.starts[cache.state^.last-index] start))
-    (mut! cache.state^.hits += 1)
-    (return (retain-sqlite-loaded-index-page cache.state^.pages[cache.state^.last-index]) true))
-  (when (and cache.state^.previous-valid
-             (>= cache.state^.previous-index 0)
-             (< cache.state^.previous-index (count cache.state^.pages))
-             (= cache.state^.root-ids[cache.state^.previous-index] root-id)
-             (= cache.state^.manifest-ids[cache.state^.previous-index] manifest-id)
-             (= cache.state^.starts[cache.state^.previous-index] start))
-    (sqlite-index-page-cache-remember-hit! cache cache.state^.previous-index)
-    (mut! cache.state^.hits += 1)
-    (return (retain-sqlite-loaded-index-page cache.state^.pages[cache.state^.last-index]) true))
-  (for [candidate index cache.state^.pages]
-    (when (and (= cache.state^.root-ids[index] root-id)
-               (= cache.state^.manifest-ids[index] manifest-id)
-               (= cache.state^.starts[index] start))
+  (let [key (SQLite-Index-Page-Cache-Key {root-id: root-id
+                                          manifest-id: manifest-id
+                                          start: start})
+        [index found] (mmap.get cache.state^.indexes key)]
+    (when found
+      (when (or (< index 0)
+                (>= index (count cache.state^.pages)))
+        (mut! cache.state^.misses += 1)
+        (return (SQLite-Loaded-Index-Page {}) false))
       (sqlite-index-page-cache-remember-hit! cache index)
       (mut! cache.state^.hits += 1)
-      (return (retain-sqlite-loaded-index-page candidate) true)))
+      (return (retain-sqlite-loaded-index-page cache.state^.pages[index]) true)))
   (mut! cache.state^.misses += 1)
   (return (SQLite-Loaded-Index-Page {}) false))
 
 (defn sqlite-index-page-cache-store! [cache: ^SQLite-Index-Page-Cache, root-id: u64, manifest-id: u64, start: int, page: SQLite-Loaded-Index-Page]
   (when (= cache^.state nil)
     (return))
-  (for [_candidate index cache^.state^.pages]
-    (when (and (= cache^.state^.root-ids[index] root-id)
-               (= cache^.state^.manifest-ids[index] manifest-id)
-               (= cache^.state^.starts[index] start))
+  (let [key (SQLite-Index-Page-Cache-Key {root-id: root-id
+                                          manifest-id: manifest-id
+                                          start: start})
+        [index found] (mmap.get cache^.state^.indexes key)]
+    (when found
       (release-sqlite-loaded-index-page! cache^.state^.pages[index])
       (set! cache^.state^.pages[index] (retain-sqlite-loaded-index-page page))
       (sqlite-index-page-cache-remember-hit! cache^ index)
@@ -8173,7 +8597,13 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (arr.push! cache^.state^.manifest-ids manifest-id)
   (arr.push! cache^.state^.starts start)
   (arr.push! cache^.state^.pages (retain-sqlite-loaded-index-page page))
-  (sqlite-index-page-cache-remember-hit! cache^ (- (count cache^.state^.pages) 1)))
+  (let [index (- (count cache^.state^.pages) 1)]
+    (mmap.assoc! cache^.state^.indexes
+                 (SQLite-Index-Page-Cache-Key {root-id: root-id
+                                               manifest-id: manifest-id
+                                               start: start})
+                 index)
+    (sqlite-index-page-cache-remember-hit! cache^ index)))
 
 (defstruct SQLite-Index-Snapshot {
   handle: rawptr
@@ -8189,8 +8619,11 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   indexes: SQLite-Index-Snapshot
   datom-stmt: rawptr
   datom-cache-log-indexes: [dynamic]int
-  datom-cache-valids: [dynamic]bool
   datom-cache-datoms: [dynamic]Datom
+  datom-cache-indexes: map[int]int
+  datom-cache-next-evict: int
+  schema-ref-cache-attrs: [dynamic]string
+  schema-ref-cache: map[string]bool
   basis-tx: u64
   root-row-id: u64
   datom-count: int
@@ -8198,50 +8631,67 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   path: string
 })
 
-(def sqlite-db-snapshot-datom-cache-capacity 512)
+(def sqlite-db-snapshot-datom-cache-capacity 8192)
 
 (defn sqlite-db-snapshot-empty-datom-cache-log-indexes [] -> [dynamic]int
-  (arr.repeat sqlite-db-snapshot-datom-cache-capacity -1))
-
-(defn sqlite-db-snapshot-empty-datom-cache-valids [] -> [dynamic]bool
-  (arr.repeat sqlite-db-snapshot-datom-cache-capacity false))
+  (make [dynamic]int))
 
 (defn sqlite-db-snapshot-empty-datom-cache-datoms [] -> [dynamic]Datom
-  (arr.repeat sqlite-db-snapshot-datom-cache-capacity (Datom {})))
+  (make [dynamic]Datom))
 
-(defn sqlite-db-snapshot-datom-cache-slot [log-index: int] -> int
-  (let [slot (% log-index sqlite-db-snapshot-datom-cache-capacity)]
-    (if (< slot 0)
-      (+ slot sqlite-db-snapshot-datom-cache-capacity)
-      slot)))
+(defn sqlite-db-snapshot-schema-ref-cache-find [snapshot: ^SQLite-DB-Snapshot, attr: string] -> [ref: bool, found: bool]
+  (mmap.get snapshot^.schema-ref-cache attr))
+
+(defn sqlite-db-snapshot-schema-ref-cache-store! [snapshot: ^SQLite-DB-Snapshot, attr: string, ref: bool]
+  (let [[_ found] (mmap.get snapshot^.schema-ref-cache attr)]
+    (when found
+      (return)))
+  (let [owned-attr (string-owned attr)]
+    (arr.push! snapshot^.schema-ref-cache-attrs owned-attr)
+    (mmap.assoc! snapshot^.schema-ref-cache owned-attr ref)))
 
 (defn sqlite-db-snapshot-cache-find-datom [snapshot: ^SQLite-DB-Snapshot, log-index: int] -> [datom: Datom, found: bool]
-  (let [slot (sqlite-db-snapshot-datom-cache-slot log-index)]
-    (when (and (< slot (count snapshot^.datom-cache-valids))
-               snapshot^.datom-cache-valids[slot]
-               (= snapshot^.datom-cache-log-indexes[slot] log-index))
+  (let [[slot found] (mmap.get snapshot^.datom-cache-indexes log-index)]
+    (when found
       (return (datom-owned snapshot^.datom-cache-datoms[slot]) true)))
   (return (Datom {}) false))
 
 (defn sqlite-db-snapshot-cache-store-datom! [snapshot: ^SQLite-DB-Snapshot, log-index: int, datom: Datom]
-  (let [slot (sqlite-db-snapshot-datom-cache-slot log-index)]
-    (when (and (< slot (count snapshot^.datom-cache-valids))
-               snapshot^.datom-cache-valids[slot])
+  (let [[slot found] (mmap.get snapshot^.datom-cache-indexes log-index)]
+    (when found
       (delete-owned-datom snapshot^.datom-cache-datoms[slot]))
-    (set! snapshot^.datom-cache-log-indexes[slot] log-index)
-    (set! snapshot^.datom-cache-valids[slot] true)
-    (set! snapshot^.datom-cache-datoms[slot] (datom-owned datom))))
+    (if found
+      (set! snapshot^.datom-cache-datoms[slot] (datom-owned datom))
+      (if (< (count snapshot^.datom-cache-datoms) sqlite-db-snapshot-datom-cache-capacity)
+        (let [next-slot (count snapshot^.datom-cache-datoms)]
+          (arr.push! snapshot^.datom-cache-log-indexes log-index)
+          (arr.push! snapshot^.datom-cache-datoms (datom-owned datom))
+          (mmap.assoc! snapshot^.datom-cache-indexes log-index next-slot))
+        (let [evict-slot snapshot^.datom-cache-next-evict
+              evicted-log-index snapshot^.datom-cache-log-indexes[evict-slot]]
+          (mmap.dissoc! snapshot^.datom-cache-indexes evicted-log-index)
+          (delete-owned-datom snapshot^.datom-cache-datoms[evict-slot])
+          (set! snapshot^.datom-cache-log-indexes[evict-slot] log-index)
+          (set! snapshot^.datom-cache-datoms[evict-slot] (datom-owned datom))
+          (mmap.assoc! snapshot^.datom-cache-indexes log-index evict-slot)
+          (set! snapshot^.datom-cache-next-evict (% (+ evict-slot 1) sqlite-db-snapshot-datom-cache-capacity)))))))
 
 (defn delete-sqlite-db-snapshot-datom-cache! [snapshot: ^SQLite-DB-Snapshot]
-  (for [valid index snapshot^.datom-cache-valids]
-    (when valid
-      (delete-owned-datom snapshot^.datom-cache-datoms[index])))
   (delete snapshot^.datom-cache-log-indexes)
-  (delete snapshot^.datom-cache-valids)
-  (delete snapshot^.datom-cache-datoms)
+  (delete-owned-datoms snapshot^.datom-cache-datoms)
+  (delete snapshot^.datom-cache-indexes)
   (set! snapshot^.datom-cache-log-indexes (make [dynamic]int))
-  (set! snapshot^.datom-cache-valids (make [dynamic]bool))
-  (set! snapshot^.datom-cache-datoms (make [dynamic]Datom)))
+  (set! snapshot^.datom-cache-datoms (make [dynamic]Datom))
+  (set! snapshot^.datom-cache-indexes (make (map int int)))
+  (set! snapshot^.datom-cache-next-evict 0))
+
+(defn delete-sqlite-db-snapshot-schema-ref-cache! [snapshot: ^SQLite-DB-Snapshot]
+  (for [attr snapshot^.schema-ref-cache-attrs]
+    (delete attr))
+  (delete snapshot^.schema-ref-cache-attrs)
+  (delete snapshot^.schema-ref-cache)
+  (set! snapshot^.schema-ref-cache-attrs (make [dynamic]string))
+  (set! snapshot^.schema-ref-cache (make (map string bool))))
 
 (defenum Store-Conn-Kind [
   Empty
@@ -8368,6 +8818,35 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
             (return (set.empty string) false fulltext-error))
           (when fulltext
             (set.add! out (string-owned datom.a))))))
+    (for [fulltext-datom datoms]
+      (when (and fulltext-datom.added
+                 (= fulltext-datom.a ":db/fulltext")
+                 (= fulltext-datom.v.kind .Bool)
+                 fulltext-datom.v.bool-value)
+        (for [ident-datom datoms]
+          (when (and ident-datom.added
+                     (= ident-datom.e fulltext-datom.e)
+                     (= ident-datom.a ":db/ident")
+                     (= ident-datom.v.kind .Keyword)
+                     (not (set.contains? out ident-datom.v.text)))
+            (set.add! out (string-owned ident-datom.v.text))))))
+    (return out true "")))
+
+(defn source-fulltext-attrs-for-direct-append-cached [store: ^SQLite-Conn, source: DB-Read-Source, datoms: []Datom] -> [attrs: (map string (struct {})), ok: bool, error: string]
+  (let [out (set.empty string)
+        checked (set.empty string)]
+    (defer (delete-owned-string-set checked))
+    (for [datom datoms]
+      (when (not (set.contains? checked datom.a))
+        (set.add! checked (string-owned datom.a))
+        (let [[info info-ok info-error] (sqlite-conn-direct-attr-info store source datom.a)]
+          (when (not info-ok)
+            (delete-owned-string-set out)
+            (return (set.empty string) false info-error))
+          (when info.fulltext
+            (set.add! out (string-owned datom.a))))))
+    ;; A schema transaction can declare a full-text attribute that is not in
+    ;; the source or cache yet.
     (for [fulltext-datom datoms]
       (when (and fulltext-datom.added
                  (= fulltext-datom.a ":db/fulltext")
@@ -9077,7 +9556,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (sqlite-rollback-if-owned! handle owns-tx)
           (return (SQLite-Durable-Published-Root {}) false tx-error)))
       (let [datom-start (time.now)
-            [fulltext-attrs fulltext-ok fulltext-error] (source-fulltext-attrs-for-append source tx-data)]
+            [fulltext-attrs fulltext-ok fulltext-error] (source-fulltext-attrs-for-direct-append-cached store source tx-data)]
         (when (not fulltext-ok)
           (set! profile^.append-datoms-us (+ profile^.append-datoms-us (sqlite-profile-elapsed-us datom-start)))
           (sqlite-rollback-if-owned! handle owns-tx)
@@ -10501,6 +10980,210 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
                                   tx: txs[index]
                                   added: added[index]}))))
     (return datoms true "")))
+
+(defn sqlite-direct-same-entity-ref-fanout-values [handle: rawptr, name-attr: string, edge-attr: string, wanted-values: []Value] -> [left: [dynamic]Value, right: [dynamic]Value, ok: bool, error: string]
+  (let [serialized-values (make [dynamic]string 0 (count wanted-values))]
+    (defer (delete-owned-strings-array serialized-values))
+    (for [value wanted-values]
+      (arr.push! serialized-values (value-serializable-text value)))
+    (let [[left-texts right-texts loaded-ok loaded-error] (sqlite-direct-same-entity-ref-fanout-parts-raw handle name-attr edge-attr (slice serialized-values 0))
+          left-values (make [dynamic]Value 0 (count left-texts))
+          right-values (make [dynamic]Value 0 (count right-texts))]
+      (defer (delete-owned-strings-array left-texts))
+      (defer (delete-owned-strings-array right-texts))
+      (when (not loaded-ok)
+        (delete-owned-values-array left-values)
+        (delete-owned-values-array right-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false loaded-error))
+      (when (not (= (count left-texts) (count right-texts)))
+        (delete-owned-values-array left-values)
+        (delete-owned-values-array right-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false "sqlite same-entity ref fanout columns were uneven"))
+      (for [left-text index left-texts]
+        (let [[left-value left-ok left-error] (value-from-owned-serial-text left-text)]
+          (when (not left-ok)
+            (delete-owned-values-array left-values)
+            (delete-owned-values-array right-values)
+            (return (make [dynamic]Value) (make [dynamic]Value) false left-error))
+          (let [[right-value right-ok right-error] (value-from-owned-serial-text right-texts[index])]
+            (when (not right-ok)
+              (delete-owned-value left-value)
+              (delete-owned-values-array left-values)
+              (delete-owned-values-array right-values)
+              (return (make [dynamic]Value) (make [dynamic]Value) false right-error))
+            (arr.push! left-values left-value)
+            (arr.push! right-values right-value))))
+      (return left-values right-values true ""))))
+
+(defn sqlite-direct-same-value-collaborator-values [handle: rawptr, anchor-name-attr: string, edge-attr: string, shared-value-attr: string, output-name-attr: string, anchor-value: Value, excluded-values: []Value] -> [output-values: [dynamic]Value, shared-values: [dynamic]Value, ok: bool, error: string]
+  (let [serialized-anchor (value-serializable-text anchor-value) :defer
+        serialized-excluded (make [dynamic]string 0 (count excluded-values))]
+    (defer (delete-owned-strings-array serialized-excluded))
+    (for [value excluded-values]
+      (arr.push! serialized-excluded (value-serializable-text value)))
+    (let [[output-texts shared-texts loaded-ok loaded-error]
+          (sqlite-direct-same-value-collaborator-parts-raw handle anchor-name-attr edge-attr shared-value-attr output-name-attr serialized-anchor (slice serialized-excluded 0))
+          parsed-output-values (make [dynamic]Value 0 (count output-texts))
+          parsed-shared-values (make [dynamic]Value 0 (count shared-texts))]
+      (defer (delete-owned-strings-array output-texts))
+      (defer (delete-owned-strings-array shared-texts))
+      (when (not loaded-ok)
+        (delete-owned-values-array parsed-output-values)
+        (delete-owned-values-array parsed-shared-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false loaded-error))
+      (when (not (= (count output-texts) (count shared-texts)))
+        (delete-owned-values-array parsed-output-values)
+        (delete-owned-values-array parsed-shared-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false "sqlite same-value collaborator columns were uneven"))
+      (for [output-text index output-texts]
+        (let [[output-value output-ok output-error] (value-from-owned-serial-text output-text)]
+          (when (not output-ok)
+            (delete-owned-values-array parsed-output-values)
+            (delete-owned-values-array parsed-shared-values)
+            (return (make [dynamic]Value) (make [dynamic]Value) false output-error))
+          (let [[shared-value shared-ok shared-error] (value-from-owned-serial-text shared-texts[index])]
+            (when (not shared-ok)
+              (delete-owned-value output-value)
+              (delete-owned-values-array parsed-output-values)
+              (delete-owned-values-array parsed-shared-values)
+              (return (make [dynamic]Value) (make [dynamic]Value) false shared-error))
+            (arr.push! parsed-output-values output-value)
+            (arr.push! parsed-shared-values shared-value))))
+      (return parsed-output-values parsed-shared-values true ""))))
+
+(defn sqlite-direct-collab-net-two-values [handle: rawptr, anchor-name-attr: string, output-name-attr: string, edge-attr: string, input-names: []Value] -> [input-values: [dynamic]Value, output-values: [dynamic]Value, ok: bool, error: string]
+  (let [serialized-inputs (make [dynamic]string 0 (count input-names))]
+    (defer (delete-owned-strings-array serialized-inputs))
+    (for [value input-names]
+      (arr.push! serialized-inputs (value-serializable-text value)))
+    (let [[input-texts output-texts loaded-ok loaded-error]
+          (sqlite-direct-collab-net-two-parts-raw handle anchor-name-attr output-name-attr edge-attr (slice serialized-inputs 0))
+          parsed-input-values (make [dynamic]Value 0 (count input-texts))
+          parsed-output-values (make [dynamic]Value 0 (count output-texts))]
+      (defer (delete-owned-strings-array input-texts))
+      (defer (delete-owned-strings-array output-texts))
+      (when (not loaded-ok)
+        (delete-owned-values-array parsed-input-values)
+        (delete-owned-values-array parsed-output-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false loaded-error))
+      (when (not (= (count input-texts) (count output-texts)))
+        (delete-owned-values-array parsed-input-values)
+        (delete-owned-values-array parsed-output-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false "sqlite collaboration depth-2 columns were uneven"))
+      (for [input-text index input-texts]
+        (let [[input-value input-ok input-error] (value-from-owned-serial-text input-text)]
+          (when (not input-ok)
+            (delete-owned-values-array parsed-input-values)
+            (delete-owned-values-array parsed-output-values)
+            (return (make [dynamic]Value) (make [dynamic]Value) false input-error))
+          (let [[output-value output-ok output-error] (value-from-owned-serial-text output-texts[index])]
+            (when (not output-ok)
+              (delete-owned-value input-value)
+              (delete-owned-values-array parsed-input-values)
+              (delete-owned-values-array parsed-output-values)
+              (return (make [dynamic]Value) (make [dynamic]Value) false output-error))
+            (arr.push! parsed-input-values input-value)
+            (arr.push! parsed-output-values output-value))))
+      (return parsed-input-values parsed-output-values true ""))))
+
+(defn sqlite-direct-input-ref-values [handle: rawptr, anchor-attr: string, anchor-value: Value, ref-attr: string, output-attr: string] -> [values: [dynamic]Value, ok: bool, error: string]
+  (let [serialized-anchor (value-serializable-text anchor-value) :defer
+        [output-texts loaded-ok loaded-error] (sqlite-direct-input-ref-value-parts-raw handle anchor-attr serialized-anchor ref-attr output-attr)
+        parsed-values (make [dynamic]Value 0 (count output-texts))]
+    (defer (delete-owned-strings-array output-texts))
+    (when (not loaded-ok)
+      (delete-owned-values-array parsed-values)
+      (return (make [dynamic]Value) false loaded-error))
+    (for [output-text output-texts]
+      (let [[output-value output-ok output-error] (value-from-owned-serial-text output-text)]
+        (when (not output-ok)
+          (delete-owned-values-array parsed-values)
+          (return (make [dynamic]Value) false output-error))
+        (arr.push! parsed-values output-value)))
+    (return parsed-values true "")))
+
+(defn sqlite-direct-track-release-values [handle: rawptr, artist-name-attr: string, artist-name: Value, track-artist-attr: string, track-name-attr: string, medium-track-attr: string, release-media-attr: string, release-name-attr: string, release-year-attr: string] -> [values: [dynamic]Value, ok: bool, error: string]
+  (let [serialized-name (value-serializable-text artist-name) :defer
+        [title-texts album-texts year-texts loaded-ok loaded-error]
+        (sqlite-direct-track-release-parts-raw handle artist-name-attr serialized-name track-artist-attr track-name-attr medium-track-attr release-media-attr release-name-attr release-year-attr)
+        parsed-values (make [dynamic]Value 0 (* (count title-texts) 3))]
+    (defer (delete-owned-strings-array title-texts))
+    (defer (delete-owned-strings-array album-texts))
+    (defer (delete-owned-strings-array year-texts))
+    (when (not loaded-ok)
+      (delete-owned-values-array parsed-values)
+      (return (make [dynamic]Value) false loaded-error))
+    (when (not (and (= (count title-texts) (count album-texts))
+                    (= (count title-texts) (count year-texts))))
+      (delete-owned-values-array parsed-values)
+      (return (make [dynamic]Value) false "sqlite track-release columns were uneven"))
+    (for [title-text index title-texts]
+      (let [[title title-ok title-error] (value-from-owned-serial-text title-text)
+            [album album-ok album-error] (value-from-owned-serial-text album-texts[index])
+            [year year-ok year-error] (value-from-owned-serial-text year-texts[index])]
+        (when (not (and title-ok album-ok year-ok))
+          (when title-ok (delete-owned-value title))
+          (when album-ok (delete-owned-value album))
+          (when year-ok (delete-owned-value year))
+          (delete-owned-values-array parsed-values)
+          (return (make [dynamic]Value)
+                  false
+                  (cond
+                    (not title-ok) title-error
+                    (not album-ok) album-error
+                    :else year-error)))
+        (arr.push! parsed-values title)
+        (arr.push! parsed-values album)
+        (arr.push! parsed-values year)))
+    (return parsed-values true "")))
+
+(defn sqlite-direct-fulltext-track-info-values [handle: rawptr, fulltext-attr: string, search: string, track-artist-attr: string, artist-name-attr: string, medium-track-attr: string, release-medium-attr: string, first-release-attr: string, second-release-attr: string] -> [values: [dynamic]Value, ok: bool, error: string]
+  (let [[title-texts artist-texts first-release-texts second-release-texts loaded-ok loaded-error]
+        (sqlite-direct-fulltext-track-info-parts-raw handle
+                                                     fulltext-attr
+                                                     search
+                                                     track-artist-attr
+                                                     artist-name-attr
+                                                     medium-track-attr
+                                                     release-medium-attr
+                                                     first-release-attr
+                                                     second-release-attr)
+        parsed-values (make [dynamic]Value 0 (* (count title-texts) 4))]
+    (defer (delete-owned-strings-array title-texts))
+    (defer (delete-owned-strings-array artist-texts))
+    (defer (delete-owned-strings-array first-release-texts))
+    (defer (delete-owned-strings-array second-release-texts))
+    (when (not loaded-ok)
+      (delete-owned-values-array parsed-values)
+      (return (make [dynamic]Value) false loaded-error))
+    (when (not (and (= (count title-texts) (count artist-texts))
+                    (= (count title-texts) (count first-release-texts))
+                    (= (count title-texts) (count second-release-texts))))
+      (delete-owned-values-array parsed-values)
+      (return (make [dynamic]Value) false "sqlite fulltext track info columns were uneven"))
+    (for [title-text index title-texts]
+      (let [[title title-ok title-error] (value-from-owned-serial-text title-text)
+            [artist artist-ok artist-error] (value-from-owned-serial-text artist-texts[index])
+            [first-release first-release-ok first-release-error] (value-from-owned-serial-text first-release-texts[index])
+            [second-release second-release-ok second-release-error] (value-from-owned-serial-text second-release-texts[index])]
+        (when (not (and title-ok artist-ok first-release-ok second-release-ok))
+          (when title-ok (delete-owned-value title))
+          (when artist-ok (delete-owned-value artist))
+          (when first-release-ok (delete-owned-value first-release))
+          (when second-release-ok (delete-owned-value second-release))
+          (delete-owned-values-array parsed-values)
+          (return (make [dynamic]Value)
+                  false
+                  (cond
+                    (not title-ok) title-error
+                    (not artist-ok) artist-error
+                    (not first-release-ok) first-release-error
+                    :else second-release-error)))
+        (arr.push! parsed-values title)
+        (arr.push! parsed-values artist)
+        (arr.push! parsed-values first-release)
+        (arr.push! parsed-values second-release)))
+    (return parsed-values true "")))
 
 (defn sqlite-direct-eavt-entity-attrs-datoms [handle: rawptr, entities: []u64, attrs: []string] -> [datoms: [dynamic]Datom, ok: bool, error: string]
   (let [[loaded-entities loaded-attrs value-texts value-entities txs added loaded-ok loaded-error] (sqlite-direct-eavt-entity-attrs-datom-parts-raw handle entities attrs)
@@ -12222,8 +12905,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (return (SQLite-DB-Snapshot {indexes: indexes
                                      datom-stmt: datom-stmt
                                      datom-cache-log-indexes: (sqlite-db-snapshot-empty-datom-cache-log-indexes)
-                                     datom-cache-valids: (sqlite-db-snapshot-empty-datom-cache-valids)
                                      datom-cache-datoms: (sqlite-db-snapshot-empty-datom-cache-datoms)
+                                     datom-cache-indexes: (make (map int int))
+                                     schema-ref-cache-attrs: (make [dynamic]string)
+                                     schema-ref-cache: (make (map string bool))
                                      basis-tx: basis-tx
                                      root-row-id: root-row-id
                                      datom-count: (int datom-count)
@@ -12243,8 +12928,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (return (SQLite-DB-Snapshot {indexes: indexes
                                      datom-stmt: datom-stmt
                                      datom-cache-log-indexes: (sqlite-db-snapshot-empty-datom-cache-log-indexes)
-                                     datom-cache-valids: (sqlite-db-snapshot-empty-datom-cache-valids)
                                      datom-cache-datoms: (sqlite-db-snapshot-empty-datom-cache-datoms)
+                                     datom-cache-indexes: (make (map int int))
+                                     schema-ref-cache-attrs: (make [dynamic]string)
+                                     schema-ref-cache: (make (map string bool))
                                      basis-tx: basis-tx
                                      root-row-id: published.root-row-id
                                      datom-count: (int datom-count)
@@ -12269,8 +12956,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
             (return (SQLite-DB-Snapshot {indexes: indexes
                                          datom-stmt: datom-stmt
                                          datom-cache-log-indexes: (sqlite-db-snapshot-empty-datom-cache-log-indexes)
-                                         datom-cache-valids: (sqlite-db-snapshot-empty-datom-cache-valids)
                                          datom-cache-datoms: (sqlite-db-snapshot-empty-datom-cache-datoms)
+                                         datom-cache-indexes: (make (map int int))
+                                         schema-ref-cache-attrs: (make [dynamic]string)
+                                         schema-ref-cache: (make (map string bool))
                                          basis-tx: basis-tx
                                          root-row-id: published.root-row-id
                                          datom-count: indexes.eavt.row-count
@@ -13180,14 +13869,22 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (when unique
             (delete unique-kind))
           (return (SQLite-Direct-Attr-Info {}) false many-error))
+      (let [[fulltext fulltext-ok fulltext-error] (db-read-source-schema-bool? source attr ":db/fulltext")]
+        (when (not fulltext-ok)
+          (when has-type
+            (delete schema-type))
+          (when unique
+            (delete unique-kind))
+          (return (SQLite-Direct-Attr-Info {}) false fulltext-error))
         (let [entry (SQLite-Direct-Attr-Info {attr: (string-owned attr)
-                                             has-type: has-type
-                                             schema-type: (if has-type schema-type "")
-                                             unique: unique
-                                             unique-kind: (if unique unique-kind "")
-                                             cardinality-many: many})]
-          (arr.push! store^.direct-attr-cache entry)
-          (return entry true ""))))))
+                                               has-type: has-type
+                                               schema-type: (if has-type schema-type "")
+                                               unique: unique
+                                               unique-kind: (if unique unique-kind "")
+                                               cardinality-many: many
+                                               fulltext: fulltext})]
+            (arr.push! store^.direct-attr-cache entry)
+            (return entry true "")))))))
 
 (defstruct Source-Overlay-Batch-Index {
   unique-entity: (map string u64)
@@ -13901,12 +14598,23 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (when (not begin-ok)
       (return (Store-Tx-Report {}) false false begin-error)))
   ;; The write lock must be held before selecting the transaction basis.
-  ;; Another connection may have committed since any of these caches were
-  ;; populated.
-  (sqlite-conn-invalidate-write-state-cache! store)
-  (sqlite-conn-invalidate-direct-attr-cache! store)
-  (sqlite-conn-invalidate-log-metadata-cache! store)
-  (sqlite-conn-invalidate-current-root-cache! store)
+  ;; Reuse the direct-write caches when the published root row still matches.
+  ;; Comparing the row id as well as the basis detects maintenance that
+  ;; republishes compacted roots without advancing the transaction basis.
+  (let [reuse-caches false]
+    (when store^.current-root-cache-valid
+      (let [[basis root-row-id identity-ok identity-error] (sqlite-latest-index-root-identity-raw store^.handle)]
+        (when (not identity-ok)
+          (sqlite-rollback-raw store^.handle)
+          (return (Store-Tx-Report {}) false false identity-error))
+        (when (and (= basis store^.current-root-cache-basis)
+                   (= root-row-id store^.current-root-cache-published.root-row-id))
+          (set! reuse-caches true))))
+    (when (not reuse-caches)
+      (sqlite-conn-invalidate-write-state-cache! store)
+      (sqlite-conn-invalidate-direct-attr-cache! store)
+      (sqlite-conn-invalidate-log-metadata-cache! store)
+      (sqlite-conn-invalidate-current-root-cache! store)))
   (let [[direct-report direct-used direct-ok direct-error]
         (transact-sqlite-store-report-direct-tx-data-mode store tx-data false)]
     (when (or (not direct-ok) (not direct-used))
@@ -14581,6 +15289,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (with-tx-data db tx-data)))
 
 (defn with-store-db-report-tx-data [snapshot: ^Store-DB, tx-data: []Tx-Data] -> Store-Tx-Report
+  (for [data tx-data]
+    (when (= data.op ":db.fn/call-ident")
+      (return (failed-store-tx-report snapshot^ "transaction fn not registered"))))
   (when (= snapshot^.kind .Filtered)
     (when snapshot^.filter-history
       (return (failed-store-tx-report snapshot^ "history DB values cannot be used with transactions")))
@@ -15514,6 +16225,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (sqlite-finalize-stmt-raw snapshot^.datom-stmt)
   (close-sqlite-index-snapshot! (addr snapshot^.indexes))
   (delete-sqlite-db-snapshot-datom-cache! snapshot)
+  (delete-sqlite-db-snapshot-schema-ref-cache! snapshot)
   (delete snapshot^.path)
   (set! snapshot^ (SQLite-DB-Snapshot {})))
 
@@ -15807,6 +16519,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
              (datoms-contain-retraction? datoms))
     (set! store^.has-retractions-cache true)))
 
+(defn datoms-modify-fulltext-schema? [datoms: []Datom] -> bool
+  (for [datom datoms]
+    (when (= datom.a ":db/fulltext")
+      (return true)))
+  false)
+
 (defn sqlite-conn-advance-write-state-cache-after-datoms! [store: ^SQLite-Conn, datoms: []Datom]
   (sqlite-conn-advance-log-metadata-cache-after-datoms! store datoms)
   (when store^.write-state-cache-valid
@@ -15815,7 +16533,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (do
         (sqlite-conn-invalidate-write-state-cache! store)
         (sqlite-conn-invalidate-direct-attr-cache! store))
-      (shared-write-state-advance-next-entity-from-datoms! (addr store^.write-state-cache) datoms))))
+      (shared-write-state-advance-next-entity-from-datoms! (addr store^.write-state-cache) datoms)))
+  (when (datoms-modify-fulltext-schema? datoms)
+    (sqlite-conn-invalidate-direct-attr-cache! store)))
 
 (defn rollback-sqlite-conn! [store: ^SQLite-Conn, before: DB]
   (let [restored (conn-from-db before)]
@@ -16260,6 +16980,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
      (failed-tx-report (build-db (make [dynamic]Datom)) "store is not open")))
 
 (defn transact-store-report-tx-data [store: ^Store-Conn, tx-data: []Tx-Data] -> Store-Tx-Report
+  (for [data tx-data]
+    (when (= data.op ":db.fn/call-ident")
+      (case store^.kind
+        .SQLite (return (failed-sqlite-store-tx-report (addr store^.sqlite) "transaction fn not registered"))
+        .Shared (return (failed-store-tx-report (shared-store-db (addr store^.shared)) "transaction fn not registered"))
+        (return (failed-store-tx-report (Store-DB {}) "store is not open")))))
   (case store^.kind
     .SQLite
       (let [direct-start (time.now)

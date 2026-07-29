@@ -2725,6 +2725,9 @@ public final class Vev implements AutoCloseable {
                 int count = (int) columnBatchCount.invoke(raw);
                 int columnCount = (int) columnBatchColumnCount.invoke(raw);
                 if (columnCount <= 0) return null;
+                boolean hasStringDictionary =
+                    (int) columnBatchStringDictionaryCount.invoke(raw) > 0;
+                int stringColumn = 0;
                 int[] kinds = new int[columnCount];
                 Object[] columns = new Object[columnCount];
                 for (int column = 0; column < columnCount; column++) {
@@ -2734,8 +2737,13 @@ public final class Vev implements AutoCloseable {
                         case COLUMN_ENTITY -> longColumn(
                             (MemorySegment) columnBatchColumnEntitiesData.invoke(raw, column),
                             count);
-                        case COLUMN_STRING, COLUMN_KEYWORD, COLUMN_SYMBOL, COLUMN_UUID ->
-                            columnBatchStringColumn(raw, column, count);
+                        case COLUMN_STRING, COLUMN_KEYWORD, COLUMN_SYMBOL, COLUMN_UUID -> {
+                            String[] values = hasStringDictionary && stringColumn == 0
+                                ? columnBatchStrings(raw, count)
+                                : columnBatchStringColumn(raw, column, count);
+                            stringColumn++;
+                            yield values;
+                        }
                         case COLUMN_INT -> longColumn(
                             (MemorySegment) columnBatchColumnIntsData.invoke(raw, column),
                             count);

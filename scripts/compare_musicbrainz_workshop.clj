@@ -2,7 +2,8 @@
 ;; SPDX-License-Identifier: EPL-2.0
 
 (ns compare-musicbrainz-workshop
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [datomic.api :as datomic]
             [musicbrainz-workshop :as workshop]
             [vev.core :as vev])
@@ -128,17 +129,30 @@
     :args john-lennon-args}
    {:name "mbrainz-track-release-rule"
     :query workshop/mbrainz-track-release-rule-query
+    :rules? true
     :args sample-rules-john-lennon-args}
    {:name "mbrainz-track-search-info"
     :query workshop/mbrainz-track-search-info-query
+    :rules? true
     :args sample-rules-always-args}
    {:name "mbrainz-collab"
     :query workshop/mbrainz-collab-query
+    :rules? true
     :args #(into [@workshop/mbrainz-sample-rules] (beatles-args))}
    {:name "mbrainz-collab-net-2"
     :query workshop/mbrainz-collab-net-2-query
+    :rules? true
     :args sample-rules-george-harrison-args}
    {:name "mbrainz-collab-nested"
+    :prepared-query workshop/mbrainz-collab-nested-query
+    :prepared-run (fn [db prepared]
+                    (vev/q prepared
+                           db
+                           @workshop/mbrainz-sample-rules
+                           (vev/q prepared
+                                  db
+                                  @workshop/mbrainz-sample-rules
+                                  [["Diana Ross"]])))
     :run (fn [q db]
            (run-q q db
                   workshop/mbrainz-collab-nested-query
@@ -172,14 +186,13 @@
     ((:run workload) q db)))
 
 (defn execute-prepared-vev-workload [db prepared workload]
-  (if (:query workload)
-    (run-workload-prepared-query db prepared workload)
-    ((:run workload) vev/q db)))
+  (if-let [prepared-run (:prepared-run workload)]
+    (prepared-run db prepared)
+    (run-workload-prepared-query db prepared workload)))
 
 (defn run-prepared-vev-workload [db workload warmup-runs measure-runs]
-  (if-not (:query workload)
-    (run-workload "vev-clojure-prepared" vev/q db workload warmup-runs measure-runs)
-    (with-open [prepared (vev/prepare db (:query workload))]
+  (if-let [query (or (:query workload) (:prepared-query workload))]
+    (with-open [prepared (vev/prepare db query)]
       (dotimes [_ warmup-runs]
         (execute-prepared-vev-workload db prepared workload))
       (let [measurements (doall
@@ -221,7 +234,84 @@
          :workload (:name workload)
          :rows row-count
          :fingerprint fingerprint
-         :elapsed-us elapsed}))))
+         :elapsed-us elapsed}))
+    (run-workload "vev-clojure-prepared" vev/q db workload warmup-runs measure-runs)))
+
+(defn execute-vev-client-layer [layer db prepared workload]
+  (let [args ((:args workload))
+        rules (when (:rules? workload) (first args))
+        inputs (if rules (rest args) args)]
+    (case layer
+      :native-result
+      (with-open [result (if rules
+                           (apply vev/query-result-with-rules db prepared rules inputs)
+                           (apply vev/query-result db prepared inputs))]
+        (.rowCount result))
+
+      :java-columns
+      (let [result (apply vev/column-batch prepared db args)]
+        (when result
+          (.rowCount result)))
+
+      :clojure-rows
+      (count (apply vev/rows prepared db args))
+
+      :clojure-q
+      (count (result-rows (apply vev/q prepared db args))))))
+
+(defn run-vev-client-layer [db workload layer warmup-runs measure-runs]
+  (with-open [prepared (vev/prepare db (:query workload))]
+    (dotimes [_ warmup-runs]
+      (execute-vev-client-layer layer db prepared workload))
+    (let [measurements
+          (doall
+           (repeatedly measure-runs
+                       #(let [[row-count elapsed]
+                              (elapsed-us
+                               (fn []
+                                 (execute-vev-client-layer layer db prepared workload)))]
+                          {:elapsed-us elapsed
+                           :rows row-count})))
+          first-measurement (first measurements)
+          row-count (:rows first-measurement)
+          inconsistent (seq (remove #(= row-count (:rows %)) measurements))
+          elapsed-values (map :elapsed-us measurements)
+          elapsed (median elapsed-values)]
+      (when inconsistent
+        (throw (ex-info "client layer produced unavailable or inconsistent results"
+                        {:workload (:name workload)
+                         :layer layer
+                         :measurements measurements})))
+      (if (nil? row-count)
+        (do
+          (println
+           (fmt "engine=vev-client-layer layer=%s workload=%s ok=false reason=unsupported"
+                (name layer)
+                (:name workload)))
+          nil)
+        (do
+          (println
+           (fmt "engine=vev-client-layer layer=%s workload=%s ok=true rows=%d elapsed_us=%.0f runs=%d warmup_runs=%d best_us=%.0f worst_us=%.0f"
+                (name layer)
+                (:name workload)
+                row-count
+                elapsed
+                measure-runs
+                warmup-runs
+                (apply min elapsed-values)
+                (apply max elapsed-values)))
+          {:engine "vev-client-layer"
+           :layer layer
+           :workload (:name workload)
+           :rows row-count
+           :elapsed-us elapsed})))))
+
+(defn run-vev-client-layers [db selected-items warmup-runs measure-runs]
+  (let [layers [:native-result :java-columns :clojure-rows :clojure-q]]
+    (doseq [workload selected-items
+            :when (:query workload)
+            layer layers]
+      (run-vev-client-layer db workload layer warmup-runs measure-runs))))
 
 (defn run-workload [engine-name q db workload warmup-runs measure-runs]
   (dotimes [_ warmup-runs]
@@ -292,7 +382,7 @@
             elapsed
             (stats-line (:query-stats result)))))))
 
-(defn run-vev [selected query-stats? prepared? warmup-runs measure-runs]
+(defn run-vev [selected query-stats? prepared? client-layers? warmup-runs measure-runs]
   (with-open [conn (workshop/connect)
               db (workshop/db conn)]
     (let [selected-items (selected-workloads selected)
@@ -304,6 +394,8 @@
       (when query-stats?
         (doseq [workload selected-items]
           (run-vev-query-stats db workload)))
+      (when client-layers?
+        (run-vev-client-layers db selected-items warmup-runs measure-runs))
       results)))
 
 (defn run-datomic [uri selected warmup-runs measure-runs]
@@ -365,6 +457,55 @@
       (throw (ex-info "MusicBrainz workshop comparison failed"
                       {:failures @failures})))))
 
+(defn assert-vev-budget!
+  [path selected prepared-vev? warmup-runs measure-runs vev-results]
+  (let [budget (edn/read-string (slurp path))
+        expected-settings (:settings budget)
+        actual-settings {:prepared-vev prepared-vev?
+                         :warmup-runs warmup-runs
+                         :measure-runs measure-runs}]
+    (when-not (= expected-settings actual-settings)
+      (throw (ex-info "benchmark settings do not match budget"
+                      {:budget-file path
+                       :expected expected-settings
+                       :actual actual-settings})))
+    (let [results-by-name (result-map vev-results)
+          failures (atom [])]
+      (doseq [workload (map :name (selected-workloads selected))]
+        (let [expected (get-in budget [:workloads workload])
+              actual (get results-by-name workload)]
+          (cond
+            (nil? expected)
+            (swap! failures conj {:workload workload :reason :missing-budget})
+
+            (nil? actual)
+            (swap! failures conj {:workload workload :reason :missing-result})
+
+            :else
+            (let [correct? (and (= (:rows expected) (:rows actual))
+                                (= (:fingerprint expected) (:fingerprint actual)))
+                  within-budget? (<= (:elapsed-us actual) (:max-median-us expected))]
+              (println
+               (fmt "BUDGET workload=%s ok=%s rows=%d fingerprint=%s median_us=%.0f max_median_us=%d"
+                    workload
+                    (str (and correct? within-budget?))
+                    (:rows actual)
+                    (:fingerprint actual)
+                    (:elapsed-us actual)
+                    (:max-median-us expected)))
+              (when-not (and correct? within-budget?)
+                (swap! failures conj
+                       {:workload workload
+                        :reason (cond
+                                  (not correct?) :result-mismatch
+                                  :else :performance-regression)
+                        :expected expected
+                        :actual actual}))))))
+      (when (seq @failures)
+        (throw (ex-info "Vev MusicBrainz durable budget failed"
+                        {:budget-file path
+                         :failures @failures}))))))
+
 (defn arg-value [args name default-value]
   (let [idx (.indexOf args name)]
     (if (and (>= idx 0) (< (inc idx) (count args)))
@@ -372,7 +513,7 @@
       default-value)))
 
 (defn truthy-arg? [value]
-  (#{"1" "true" "yes" "on"} (str/lower-case value)))
+  (boolean (#{"1" "true" "yes" "on"} (str/lower-case value))))
 
 (defn int-arg [args name default-value]
   (let [raw (arg-value args name (str default-value))
@@ -389,6 +530,8 @@
         datomic-uri (arg-value args "--datomic-uri" default-datomic-uri)
         query-stats? (truthy-arg? (arg-value args "--query-stats" "false"))
         prepared-vev? (truthy-arg? (arg-value args "--prepared-vev" "false"))
+        client-layers? (truthy-arg? (arg-value args "--client-layers" "false"))
+        budget-file (arg-value args "--budget-file" "")
         warmup-runs (int-arg args "--warmup-runs" 0)
         measure-runs (int-arg args "--measure-runs" 1)]
     (when (< measure-runs 1)
@@ -397,9 +540,19 @@
     (let [datomic-results (when (or (= engine "all") (= engine "datomic"))
                             (run-datomic datomic-uri selected warmup-runs measure-runs))
           vev-results (when (or (= engine "all") (= engine "vev"))
-                        (run-vev selected query-stats? prepared-vev? warmup-runs measure-runs))]
+                        (run-vev selected query-stats? prepared-vev? client-layers? warmup-runs measure-runs))]
       (when (and vev-results datomic-results)
         (compare-results! selected vev-results datomic-results))
+      (when-not (= budget-file "")
+        (when-not vev-results
+          (throw (ex-info "budget requires the Vev engine"
+                          {:budget-file budget-file :engine engine})))
+        (assert-vev-budget! budget-file
+                            selected
+                            prepared-vev?
+                            warmup-runs
+                            measure-runs
+                            vev-results))
       (shutdown-agents)
       (System/exit 0))))
 

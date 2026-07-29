@@ -3,6 +3,9 @@
 The benchmark scripts compare local builds and check performance regressions.
 They do not define published performance numbers.
 
+See the [2026-07-29 benchmark snapshot](../bench/results/2026-07-29.md) for
+the latest dated local results.
+
 ## C ABI overhead
 
 Compare native Kvist calls with matching C ABI calls:
@@ -37,6 +40,19 @@ DATALEVIN_BENCH=/path/to/datalevin/benchmarks/datascript-bench \
 
 See [DataScript benchmark adapter](../bench/datascript_bench/README.md) for
 workloads and timing options.
+
+## Transactions
+
+Build `bench/write_bench.kvist` for native in-memory and durable Vev writes.
+The matching Datomic adapter targets either an in-memory database or a local
+dev transactor:
+
+```sh
+bench/write_bench/run_datomic.sh \
+  --uri datomic:mem://vev-write-bench \
+  --batch 100 \
+  --total 10000
+```
 
 ## Recursive rules
 
@@ -77,3 +93,20 @@ MusicBrainz benchmarks use the durable store created by the
 scripts/musicbrainz_clojure_vev_matrix.sh --help
 scripts/compare_musicbrainz_workshop.sh --help
 ```
+
+To check the restored durable performance and result fingerprints on the
+reference machine:
+
+```sh
+scripts/compare_musicbrainz_workshop.sh \
+  --engine vev \
+  --skip-kvist \
+  --prepared-vev \
+  --warmup-runs 10 \
+  --measure-runs 25 \
+  --budget-file bench/musicbrainz_durable_budget.edn
+```
+
+The checked-in budget is a same-machine regression guard, not a portable CI
+limit. It validates the benchmark settings, row counts, fingerprints, and
+median workload times.

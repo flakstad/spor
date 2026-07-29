@@ -1,0 +1,22 @@
+{:settings {:prepared-vev true
+            :warmup-runs 10
+            :measure-runs 25}
+ :workloads
+ {"mbrainz-title-by-artist"
+  {:rows 70 :fingerprint "5c36ddd76e2d9a45" :max-median-us 900}
+  "mbrainz-title-album-year-by-artist"
+  {:rows 93 :fingerprint "d2548ca97497433f" :max-median-us 3400}
+  "mbrainz-pre-1970-title-album-year"
+  {:rows 18 :fingerprint "4598839c2af58631" :max-median-us 1800}
+  "mbrainz-track-release-rule"
+  {:rows 93 :fingerprint "d2548ca97497433f" :max-median-us 2700}
+  "mbrainz-track-search-info"
+  {:rows 92 :fingerprint "1d14f508a95941fd" :max-median-us 5500}
+  "mbrainz-collab"
+  {:rows 5 :fingerprint "35305b2b80000441" :max-median-us 1500}
+  "mbrainz-collab-net-2"
+  {:rows 3 :fingerprint "9d4606f7c70396bb" :max-median-us 1400}
+  "mbrainz-collab-nested"
+  {:rows 2 :fingerprint "0ba13093fe8a03ae" :max-median-us 2100}
+  "mbrainz-bill-withers-collaborations"
+  {:rows 83 :fingerprint "90603a9e5a54a04e" :max-median-us 1350}}}

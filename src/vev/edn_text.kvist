@@ -2573,6 +2573,11 @@
     (let [[typed-result typed-stats typed-used] (db-read-source-q-query-relation-value-typed-with-sources-inputs-and-fns source sources prepared.query inputs registry)]
       (when typed-used
         (set! typed-stats.clauses (query-logical-clause-count prepared.query))
+        (when (and (> (count inputs) 0)
+                   (= typed-stats.input-bindings 0))
+          (let [[input-binding-count input-binding-ok] (db-read-source-query-input-binding-count source prepared.query inputs)]
+            (when input-binding-ok
+              (set! typed-stats.input-bindings input-binding-count))))
         (return (profiled-result-set typed-result typed-stats)))
       (delete-result-rows-owned-values typed-result.rows)
       (let [result (db-read-source-q-query-with-sources-inputs-and-fns source sources prepared.query inputs registry)

@@ -37,13 +37,13 @@
       (return true)))
   false)
 
-(defn has-text-keyword-row? [result: vev.Result-Set, text: string, keyword: string] -> bool
+(defn has-text-keyword-row? [result: vev.Result-Set, text: string, keyword-text: string] -> bool
   (for [row result.rows]
     (when (and (= (count row.values) 2)
                (= row.values[0].kind .String)
                (= row.values[0].text text)
                (= row.values[1].kind .Keyword)
-               (= row.values[1].text keyword))
+               (= row.values[1].text keyword-text))
       (return true)))
   false)
 

@@ -277,7 +277,7 @@
   [^DB db]
   (->DB (:engine db) (.retain (:native db))))
 
-(defrecord PreparedQuery [^Vev engine native query]
+(defrecord PreparedQuery [^Vev engine native query rules-text-cache]
   java.lang.AutoCloseable
   (close [_]
     (.close ^java.lang.AutoCloseable native)))
@@ -976,7 +976,7 @@
   "Prepare a query from Clojure data or EDN text."
   [source query]
   (let [engine (:engine source)]
-    (->PreparedQuery engine (.prepare engine (edn-text query)) query)))
+    (->PreparedQuery engine (.prepare engine (edn-text query)) query (atom nil))))
 
 (defn prepared-edn
   "Return the portable EDN-ish parser value for a prepared query or pull pattern."
@@ -1482,6 +1482,14 @@
     (vec rules)
     rules))
 
+(defn- prepared-rules-text [^PreparedQuery prepared rules]
+  (let [cached @(:rules-text-cache prepared)]
+    (if (and cached (identical? rules (:rules cached)))
+      (:text cached)
+      (let [text (edn-text rules)]
+        (reset! (:rules-text-cache prepared) {:rules rules :text text})
+        text))))
+
 (defn- split-rules-input [query inputs]
   (let [in-forms (query-in-forms query)
         inputv (vec inputs)]
@@ -1553,7 +1561,7 @@
 (defn query-result-with-rules
   "Run a prepared query with rules and return the native result handle. Caller owns it."
   [source ^PreparedQuery prepared rules & inputs]
-  (let [rules-edn (edn-text rules)
+  (let [rules-edn (prepared-rules-text prepared rules)
         input-edn (inputs-text inputs)]
     (cond
       (instance? Conn source)
@@ -1703,7 +1711,7 @@
       nil)))
 
 (defn- column-result-with-rules [source ^PreparedQuery prepared rules inputs]
-  (let [rules-edn (edn-text rules)
+  (let [rules-edn (prepared-rules-text prepared rules)
         input-edn (inputs-text inputs)]
     (cond
       (instance? DB source)
@@ -2247,7 +2255,7 @@
   [^PreparedQuery prepared ^DB db rules & inputs]
   (edn/read-string (.profileEdn (:native db)
                                 (:native prepared)
-                                (edn-text rules)
+                                (prepared-rules-text prepared rules)
                                 (inputs-text inputs))))
 
 (defn- query-output [source prepared rules inputs result-fn column-fn entity-fn string-fn pair-fn string-pair-fn string-int-fn string-string-fn triple-fn string-string-int-triple-fn]

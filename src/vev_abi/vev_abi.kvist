@@ -2868,9 +2868,6 @@ abi_free_stmt :: proc(stmt: rawptr) {
         out))))
 
 (defn- column-batch-from-query-inputs [db: vev.DB, query: vev.Query, inputs: []vev.Query-Input] -> Vev-Column-Batch
-  (let [relation-out (column-batch-from-relation-engine db query inputs)]
-    (when (not (= (rawptr relation-out) nil))
-      (return relation-out)))
   (let [[triples triple-ok] (vev.q-query-entity-string-int-triples db query inputs)]
     (if triple-ok
       (return (Vev-Column-Batch (abi-alloc-column-batch 4 (abi-alloc-entity-string-int-triples triples))))
@@ -2887,6 +2884,15 @@ abi_free_stmt :: proc(stmt: rawptr) {
     (if string-ok
       (return (Vev-Column-Batch (abi-alloc-column-batch 2 (abi-alloc-string-array strings))))
       (delete strings)))
+  (let [[top-n-plan top-n-ok] (vev.query-attr-top-n-aggregate-plan query)]
+    (when top-n-ok
+      (let [profiled (vev.q-attr-top-n-aggregate-profiled db query top-n-plan (vev.query-stats-empty))
+            out (column-batch-from-result profiled.result)]
+        (vev.delete-profiled-result-set-owned-values profiled)
+        (return out))))
+  (let [relation-out (column-batch-from-relation-engine db query inputs)]
+    (when (not (= (rawptr relation-out) nil))
+      (return relation-out)))
   (let [db-alias db
         source (vev.resident-db-read-source (addr db-alias))
         result (vev.db-read-source-q-query-with-inputs source query inputs)
@@ -2895,9 +2901,6 @@ abi_free_stmt :: proc(stmt: rawptr) {
     out))
 
 (defn- column-batch-from-source-query-inputs [source: vev.DB-Read-Source, sources: []vev.DB-Read-Named-Source, query: vev.Query, inputs: []vev.Query-Input] -> Vev-Column-Batch
-  (let [relation-out (column-batch-from-source-relation-engine source sources query inputs)]
-    (when (not (= (rawptr relation-out) nil))
-      (return relation-out)))
   (when (= (count sources) 0)
     (let [[triples triple-ok _] (vev.q-db-read-source-entity-string-int-triples source query inputs)]
       (if triple-ok
@@ -2935,6 +2938,19 @@ abi_free_stmt :: proc(stmt: rawptr) {
       (if string-ok
         (return (Vev-Column-Batch (abi-alloc-column-batch 2 (abi-alloc-string-array strings))))
         (delete strings))))
+  (let [[top-n-plan top-n-ok] (vev.query-attr-top-n-aggregate-plan query)]
+    (when top-n-ok
+      (let [result (vev.q-db-read-source-attr-top-n-aggregates source query top-n-plan)
+            out (column-batch-from-result result)]
+        (vev.delete-result-set-owned-values result)
+        (return out))))
+  (when (not (and (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (or (> (count query.not-groups) 0)
+                      (> (count query.or-groups) 0))))
+    (let [relation-out (column-batch-from-source-relation-engine source sources query inputs)]
+      (when (not (= (rawptr relation-out) nil))
+        (return relation-out))))
   (Vev-Column-Batch nil))
 
 (defn- column-batch-entity-id [value: vev.Value] -> [entity: u64, ok: bool]
@@ -6680,10 +6696,23 @@ abi_free_stmt :: proc(stmt: rawptr) {
     (return (Vev-Column-Batch nil)))
   (let [inputs-text-value (text-from-c inputs-text)
         store-ptr-value (store-db-ptr db)
-        query-ptr-value (prepared-query-ptr query)]
+        query-ptr-value (prepared-query-ptr query)
+        [resident-ptr-value resident-ok] (resident-db-ptr db)]
     (when (not query-ptr-value^.ok)
       (delete inputs-text-value)
       (return (Vev-Column-Batch nil)))
+    (when resident-ok
+      (when (= inputs-text-value "[]")
+        (delete inputs-text-value)
+        (return (column-batch-from-query-inputs resident-ptr-value^ query-ptr-value^.query ([]vev.Query-Input []))))
+      (let [[inputs input-ok _] (vev.parse-query-inputs-text-for-query query-ptr-value^.query inputs-text-value)]
+        (delete inputs-text-value)
+        (when (not input-ok)
+          (vev.delete-owned-query-inputs inputs)
+          (return (Vev-Column-Batch nil)))
+        (let [out (column-batch-from-query-inputs resident-ptr-value^ query-ptr-value^.query (slice inputs 0))]
+          (vev.delete-owned-query-inputs inputs)
+          (return out))))
     (let [[source source-ok _] (vev.store-db-read-source store-ptr-value)]
       (when (not source-ok)
         (delete inputs-text-value)

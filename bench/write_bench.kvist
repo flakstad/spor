@@ -67,6 +67,20 @@
       (vev.delete-live-tx-report-shallow report)
       true)))
 
+(defn seed-write-schema-memory [conn: ^vev.Conn] -> bool
+  (let [tx (make [dynamic]vev.Tx-Data 0 4) :defer]
+    (arr.push! tx (vev.add 201 ":db/ident" (vev.value-keyword ":item/key")))
+    (arr.push! tx (vev.add 201 ":db/valueType" (vev.value-keyword ":db.type/long")))
+    (arr.push! tx (vev.add 202 ":db/ident" (vev.value-keyword ":item/value")))
+    (arr.push! tx (vev.add 202 ":db/valueType" (vev.value-keyword ":db.type/string")))
+    (let [report (vev.transact-tx-data conn (slice tx 0))]
+      (when (not report.ok)
+        (fmt.printf "engine=vev-memory workload=write-schema ok=false error=%s\n" report.error)
+        (vev.delete-tx-report-shallow report)
+        (return false))
+      (vev.delete-live-tx-report-shallow report)
+      true)))
+
 (defn item-entity [index: int] -> u64
   (+ (u64 index) 1000))
 
@@ -101,7 +115,7 @@
   (delete groups))
 
 (defn print-write-header [workload: string, batch-size: int, total: int]
-  (fmt.printf "engine=vev-sqlite workload=%s batch=%d total=%d columns=writes,elapsed_s,throughput_writes_per_s,call_latency_ms,commit_latency_ms\n"
+  (fmt.printf "engine=vev-sqlite workload=%s entities_per_tx=%d total=%d columns=entities,elapsed_s,throughput_entities_per_s,call_latency_ms,commit_latency_ms\n"
               workload
               batch-size
               total))
@@ -314,7 +328,7 @@
           (fmt.printf "engine=vev-store workload=pure-store-report ok=false error=%s\n" auto-error)
           (vev.close-store store)
           (return))))
-    (fmt.printf "engine=vev-store workload=pure-store-report batch=%d total=%d compact_every=%d maintain_every=%d maintain_steps=%d maintain_target=%d auto_maintain_steps=%d auto_maintain_target=%d auto_maintain_trigger=%d columns=writes,elapsed_s,throughput_writes_per_s,call_latency_ms,commit_latency_ms,maintenance_latency_ms,maintenance_runs,pending_maintenance,max_merge_runs,eavt_root_level,eavt_root_children,eavt_tree_nodes,eavt_tree_leaves,outer_unaccounted_ms,direct_call_ms,direct_inner_unaccounted_ms,auto_maintenance_ms,listener_ms,open_before_ms,read_source_ms,resolve_ms,overlay_ms,append_ms,append_begin_ms,append_tx_ms,append_datoms_ms,append_meta_ms,append_roots_ms,append_root_build_ms,append_root_sort_ms,append_root_check_ms,append_root_persist_ms,append_eavt_root_build_ms,append_aevt_root_build_ms,append_avet_root_build_ms,append_vaet_root_build_ms,append_root_publish_ms,append_commit_ms,report_open_ms\n"
+    (fmt.printf "engine=vev-store workload=pure-store-report entities_per_tx=%d total=%d compact_every=%d maintain_every=%d maintain_steps=%d maintain_target=%d auto_maintain_steps=%d auto_maintain_target=%d auto_maintain_trigger=%d columns=entities,elapsed_s,throughput_entities_per_s,call_latency_ms,commit_latency_ms,maintenance_latency_ms,maintenance_runs,pending_maintenance,max_merge_runs,eavt_root_level,eavt_root_children,eavt_tree_nodes,eavt_tree_leaves,outer_unaccounted_ms,direct_call_ms,direct_inner_unaccounted_ms,auto_maintenance_ms,listener_ms,open_before_ms,read_source_ms,resolve_ms,overlay_ms,append_ms,append_begin_ms,append_tx_ms,append_datoms_ms,append_meta_ms,append_roots_ms,append_root_build_ms,append_root_sort_ms,append_root_check_ms,append_root_persist_ms,append_eavt_root_build_ms,append_aevt_root_build_ms,append_avet_root_build_ms,append_vaet_root_build_ms,append_root_publish_ms,append_commit_ms,report_open_ms\n"
                 batch-size
                 total
                 compact-every
@@ -520,7 +534,7 @@
   (delete snapshots))
 
 (defn print-snapshot-heavy-header [batch-size: int, total: int]
-  (fmt.printf "engine=vev-sqlite workload=snapshot-heavy batch=%d total=%d columns=writes,retained_snapshots,elapsed_s,throughput_writes_per_s,call_latency_ms,commit_latency_ms,snapshot_latency_ms\n"
+  (fmt.printf "engine=vev-sqlite workload=snapshot-heavy entities_per_tx=%d total=%d columns=entities,retained_snapshots,elapsed_s,throughput_entities_per_s,call_latency_ms,commit_latency_ms,snapshot_latency_ms\n"
               batch-size
               total))
 
@@ -668,7 +682,7 @@
       (delete retained)
       (vev.delete-shared-conn conn)
       (return))
-    (fmt.printf "engine=vev-shared workload=%s chunk=%d batch=%d total=%d columns=writes,retained_snapshots,elapsed_s,throughput_writes_per_s,call_latency_ms,commit_latency_ms,snapshot_latency_ms\n"
+    (fmt.printf "engine=vev-shared workload=%s chunk=%d entities_per_tx=%d total=%d columns=entities,retained_snapshots,elapsed_s,throughput_entities_per_s,call_latency_ms,commit_latency_ms,snapshot_latency_ms\n"
                 workload
                 chunk-size
                 batch-size
@@ -727,6 +741,102 @@
 (defn measure-shared-snapshot-heavy-direct-write [chunk-size: int, batch-size: int, total: int, report-every: int]
   (measure-shared-snapshot-heavy-write-mode chunk-size batch-size total report-every true))
 
+(defn measure-memory-write [batch-size: int, total: int, report-every: int]
+  (let [conn (vev.create-conn)]
+    (when (not (seed-write-schema-memory (addr conn)))
+      (return))
+    (fmt.printf "engine=vev-memory workload=write entities_per_tx=%d total=%d columns=entities,elapsed_s,throughput_entities_per_s,call_latency_ms,commit_latency_ms\n"
+                batch-size
+                total)
+    (let [start (time.now)
+          interval-start start
+          call-us 0.0
+          commit-us 0.0
+          commits 0
+          inserted 0
+          written 0]
+      (while (< written total)
+        (let [remaining (- total written)
+              actual-batch (min batch-size remaining)
+              tx (item-batch-tx (+ written 1) actual-batch 0)
+              before (time.now)
+              report (vev.transact-tx-data (addr conn) (slice tx 0))
+              elapsed (bench.elapsed-us before)]
+          (set! call-us (+ call-us elapsed))
+          (set! commit-us (+ commit-us elapsed))
+          (set! commits (+ commits 1))
+          (when (not report.ok)
+            (fmt.printf "engine=vev-memory workload=write ok=false error=%s\n" report.error)
+            (vev.delete-tx-report-shallow report)
+            (delete tx)
+            (return))
+          (vev.delete-live-tx-report-shallow report)
+          (delete tx)
+          (set! inserted (+ inserted actual-batch))
+          (set! written (+ written actual-batch))
+          (when (or (= written total)
+                    (= (% written report-every) 0))
+            (print-write-row written inserted start interval-start call-us commit-us commits)
+            (set! call-us 0.0)
+            (set! commit-us 0.0)
+            (set! commits 0)
+            (set! interval-start (time.now))))))))
+
+(defn measure-shared-memory-write [chunk-size: int, batch-size: int, total: int, report-every: int]
+  (let [conn (vev.create-shared-conn chunk-size)]
+    (when (not (seed-write-schema-shared (addr conn)))
+      (vev.delete-shared-conn conn)
+      (return))
+    (fmt.printf "engine=vev-shared workload=write entities_per_tx=%d total=%d columns=entities,elapsed_s,throughput_entities_per_s,call_latency_ms\n"
+                batch-size
+                total)
+    (let [start (time.now)
+          interval-start start
+          call-us 0.0
+          commits 0
+          inserted 0
+          written 0]
+      (while (< written total)
+        (let [remaining (- total written)
+              actual-batch (min batch-size remaining)
+              tx (item-batch-tx (+ written 1) actual-batch 0)
+              before (time.now)
+              report (vev.shared-conn-transact-report (addr conn) (slice tx 0))
+              elapsed (bench.elapsed-us before)]
+          (set! call-us (+ call-us elapsed))
+          (set! commits (+ commits 1))
+          (when (not report.ok)
+            (fmt.printf "engine=vev-shared workload=write ok=false error=%s\n" report.error)
+            (vev.delete-shared-tx-report-shallow report)
+            (delete tx)
+            (vev.delete-shared-conn conn)
+            (return))
+          (vev.delete-shared-tx-report-shallow report)
+          (delete tx)
+          (set! inserted (+ inserted actual-batch))
+          (set! written (+ written actual-batch))
+          (when (or (= written total)
+                    (= (% written report-every) 0))
+            (let [elapsed-us (bench.elapsed-us start)
+                  elapsed-s (/ elapsed-us 1000000.0)
+                  throughput (/ (* (f64 inserted) 1000000.0) elapsed-us)
+                  call-ms (/ call-us (* (f64 commits) 1000.0))]
+              (discard interval-start)
+              (fmt.printf "%d,%.3f,%.2f,%.3f\n" written elapsed-s throughput call-ms))
+            (set! call-us 0.0)
+            (set! commits 0)
+            (set! interval-start (time.now)))))
+      (let [source (vev.shared-conn-read-source (addr conn))
+            [datoms datoms-ok datoms-error] (vev.db-read-source-datoms-by-attr source ":item/key")]
+        (when (or (not datoms-ok)
+                  (not (= (count datoms) total)))
+          (fmt.printf "engine=vev-shared workload=write validation_ok=false expected=%d actual=%d error=%s\n"
+                      total
+                      (count datoms)
+                      datoms-error))
+        (vev.delete-owned-datoms datoms))
+      (vev.delete-shared-conn conn))))
+
 (defn measure-shared-store-db-heavy-write [chunk-size: int, batch-size: int, total: int, report-every: int]
   (let [store (vev.create-shared-store chunk-size)
         retained (make [dynamic]vev.Store-DB)]
@@ -734,7 +844,7 @@
       (delete retained)
       (vev.close-store store)
       (return))
-    (fmt.printf "engine=vev-shared workload=shared-store-db-heavy chunk=%d batch=%d total=%d columns=writes,retained_snapshots,elapsed_s,throughput_writes_per_s,call_latency_ms,commit_latency_ms,snapshot_latency_ms\n"
+    (fmt.printf "engine=vev-shared workload=shared-store-db-heavy chunk=%d entities_per_tx=%d total=%d columns=entities,retained_snapshots,elapsed_s,throughput_entities_per_s,call_latency_ms,commit_latency_ms,snapshot_latency_ms\n"
                 chunk-size
                 batch-size
                 total)
@@ -809,7 +919,7 @@
       (when (not keep?)
         (remove-sqlite-files path))
       (return))
-    (fmt.printf "engine=vev-store workload=sqlite-store-db-heavy batch=%d total=%d durability=%s columns=writes,retained_snapshots,elapsed_s,throughput_writes_per_s,call_latency_ms,commit_latency_ms,snapshot_latency_ms,direct_call_ms,open_before_ms,read_source_ms,resolve_ms,overlay_ms,append_ms,report_open_ms,append_roots_ms,append_root_build_ms,append_root_persist_ms,append_root_publish_ms,append_commit_ms\n"
+    (fmt.printf "engine=vev-store workload=sqlite-store-db-heavy entities_per_tx=%d total=%d durability=%s columns=entities,retained_snapshots,elapsed_s,throughput_entities_per_s,call_latency_ms,commit_latency_ms,snapshot_latency_ms,direct_call_ms,open_before_ms,read_source_ms,resolve_ms,overlay_ms,append_ms,report_open_ms,append_roots_ms,append_root_build_ms,append_root_persist_ms,append_root_publish_ms,append_commit_ms\n"
                 batch-size
                 total
                 durability-mode)
@@ -886,7 +996,7 @@
       (when (not keep?)
         (remove-sqlite-files path))
       (return))
-    (fmt.printf "engine=vev-store workload=sqlite-store-db-heavy-group-commit group=%d total=%d durability=%s columns=writes,retained_snapshots,elapsed_s,throughput_writes_per_s,call_latency_ms,commit_latency_ms,snapshot_latency_ms,direct_call_ms,open_before_ms,read_source_ms,resolve_ms,overlay_ms,append_ms,report_open_ms,append_roots_ms,append_root_build_ms,append_root_persist_ms,append_root_publish_ms,append_commit_ms\n"
+    (fmt.printf "engine=vev-store workload=sqlite-store-db-heavy-group-commit transactions_per_commit=%d total=%d durability=%s columns=entities,retained_snapshots,elapsed_s,throughput_entities_per_s,call_latency_ms,commit_latency_ms,snapshot_latency_ms,direct_call_ms,open_before_ms,read_source_ms,resolve_ms,overlay_ms,append_ms,report_open_ms,append_roots_ms,append_root_build_ms,append_root_persist_ms,append_root_publish_ms,append_commit_ms\n"
                 group-size
                 total
                 durability-mode)
@@ -971,7 +1081,7 @@
             elapsed-us (bench.elapsed-us before)
             elapsed-ms (/ elapsed-us 1000.0)]
         (if drain-ok
-          (fmt.printf "engine=vev-store workload=pure-store-report-deferred-maintenance batch=%d total=%d maintain_steps=%d columns=pending_before,pending_after,passes,steps,elapsed_ms\n%d,%d,%d,%d,%.3f\n"
+          (fmt.printf "engine=vev-store workload=pure-store-report-deferred-maintenance entities_per_tx=%d total=%d maintain_steps=%d columns=pending_before,pending_after,passes,steps,elapsed_ms\n%d,%d,%d,%d,%.3f\n"
                       batch-size
                       total
                       deferred-maintain-steps
@@ -1289,7 +1399,7 @@
         batch-index 0]
     (while (< batch-index (count batch-sizes))
       (let [batch-size batch-sizes[batch-index]
-            path (fmt.tprintf "%s.batch-%d" base-path batch-size)]
+            path (fmt.tprintf "%s.entities-per-tx-%d" base-path batch-size)]
         (run-pure-workload path batch-size total report-every))
       (set! batch-index (+ batch-index 1)))))
 
@@ -1298,8 +1408,9 @@
   (let [total (max 1 (cli.int-option os.args "--total" 200))
         report-every (max 1 (cli.int-option os.args "--report-every" 100))
         mixed-operations (max 1 (cli.int-option os.args "--mixed-operations" (* total 2)))
-        seed-batch (max 1 (cli.int-option os.args "--seed-batch" 100))
-        selected-batch (cli.int-option os.args "--batch" 0)
+        seed-batch (max 1 (cli.int-option os.args "--seed-entities-per-tx" (cli.int-option os.args "--seed-batch" 100)))
+        selected-batch (cli.int-option os.args "--entities-per-tx" (cli.int-option os.args "--batch" 0))
+        transactions-per-commit (cli.int-option os.args "--transactions-per-commit" (max 1 selected-batch))
         compact-every (max 0 (cli.int-option os.args "--compact-every" 0))
         maintain-every (max 0 (cli.int-option os.args "--maintain-every" 0))
         maintain-steps (max 1 (cli.int-option os.args "--maintain-steps" 1))
@@ -1310,6 +1421,7 @@
         deferred-maintain-steps (max 1 (cli.int-option os.args "--deferred-maintain-steps" 128))
         read-samples (max 1 (cli.int-option os.args "--read-samples" 10))
         chunk-size (max 1 (cli.int-option os.args "--chunk-size" 1024))
+        memory-chunk-size (max 1 (cli.int-option os.args "--memory-chunk-size" 128))
         workload (cli.option os.args "--workload" "both")
         durability-mode (cli.option os.args "--durability" ":normal")
         keep? (flag-present? os.args "--keep")
@@ -1318,6 +1430,10 @@
       (if (> selected-batch 0)
         (measure-pure-write path selected-batch total report-every)
         (run-all-pure-workloads path total report-every))
+      (if (= workload "memory")
+        (measure-shared-memory-write memory-chunk-size (max 1 selected-batch) total report-every)
+        (if (= workload "memory-legacy")
+          (measure-memory-write (max 1 selected-batch) total report-every)
         (if (= workload "pure-store-report")
           (run-pure-store-report-workload path (max 1 selected-batch) total report-every compact-every maintain-every maintain-steps maintain-target auto-maintain-steps auto-maintain-target auto-maintain-trigger keep?)
         (if (= workload "pure-store-report-deferred")
@@ -1327,7 +1443,7 @@
           (if (= workload "sqlite-store-db-heavy")
             (measure-sqlite-store-db-heavy-write path (max 1 selected-batch) total report-every keep? durability-mode)
           (if (= workload "sqlite-store-db-heavy-group-commit")
-            (measure-sqlite-store-db-heavy-group-commit-write path (max 1 selected-batch) total report-every keep? durability-mode)
+            (measure-sqlite-store-db-heavy-group-commit-write path transactions-per-commit total report-every keep? durability-mode)
           (if (= workload "mixed")
             (measure-mixed-read-write path total mixed-operations report-every)
             (if (= workload "snapshot-heavy")
@@ -1350,9 +1466,9 @@
                           (measure-mixed-read-write mixed-path total mixed-operations report-every))
                         (measure-snapshot-heavy-write snapshot-path (max 1 selected-batch) total report-every)
                         (measure-sqlite-store-db-heavy-write (fmt.tprintf "%s.sqlite-store-db-heavy" path) (max 1 selected-batch) total report-every keep? durability-mode)
-                        (measure-sqlite-store-db-heavy-group-commit-write (fmt.tprintf "%s.sqlite-store-db-heavy-group-commit" path) (max 1 selected-batch) total report-every keep? durability-mode)
+                        (measure-sqlite-store-db-heavy-group-commit-write (fmt.tprintf "%s.sqlite-store-db-heavy-group-commit" path) transactions-per-commit total report-every keep? durability-mode)
                         (measure-shared-snapshot-heavy-write chunk-size (max 1 selected-batch) total report-every)
                         (measure-shared-snapshot-heavy-direct-write chunk-size (max 1 selected-batch) total report-every)
                         (measure-shared-store-db-heavy-write chunk-size (max 1 selected-batch) total report-every)
                         (remove-sqlite-files mixed-path))
-                      (fmt.printf "unknown --workload %s; expected pure, pure-store-report, pure-store-report-deferred, manifest-chain-read, sqlite-store-db-heavy, sqlite-store-db-heavy-group-commit, mixed, snapshot-heavy, shared-snapshot-heavy, shared-snapshot-heavy-direct, shared-store-db-heavy, or both\n" workload)))))))))))))))
+                      (fmt.printf "unknown --workload %s; expected memory, memory-legacy, pure, pure-store-report, pure-store-report-deferred, manifest-chain-read, sqlite-store-db-heavy, sqlite-store-db-heavy-group-commit, mixed, snapshot-heavy, shared-snapshot-heavy, shared-snapshot-heavy-direct, shared-store-db-heavy, or both\n" workload)))))))))))))))))

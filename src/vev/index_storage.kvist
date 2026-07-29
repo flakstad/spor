@@ -10,6 +10,8 @@
 
 (defstruct Shared-Int-Index {
   chunks: [dynamic]Shared-Int-Chunk
+  chunk-starts: [dynamic]int
+  refs: [dynamic]int
   count: int
   chunk-size: int
 })
@@ -22,6 +24,7 @@
 (defstruct Shared-Datom-Log {
   chunks: [dynamic]Shared-Datom-Chunk
   chunk-starts: [dynamic]int
+  refs: [dynamic]int
   count: int
   chunk-size: int
 })
@@ -42,7 +45,10 @@
 (defstruct Shared-Write-State {
   conn: Conn
   owns-resident-db: bool
+  resident-current: bool
   has-tuple-schema: bool
+  schema-cache-complete: bool
+  schema-cardinality-many: (map string (struct {}))
   schema-ref: (map string (struct {}))
   schema-unique: (map string (struct {}))
   schema-unique-identity: (map string (struct {}))
@@ -90,6 +96,16 @@
     (arr.push! refs 1)
     (Shared-Int-Chunk {values: owned refs: refs})))
 
+(defn shared-int-chunk-with-appended-slice [base: Shared-Int-Chunk, values: []int] -> Shared-Int-Chunk
+  (let [refs (make [dynamic]int 0 1)
+        owned (make [dynamic]int 0 (+ (count base.values) (count values)))]
+    (arr.push! refs 1)
+    (for [value base.values]
+      (arr.push! owned value))
+    (for [value values]
+      (arr.push! owned value))
+    (Shared-Int-Chunk {values: owned refs: refs})))
+
 (defn shared-int-chunk-from-range [start: int, end: int] -> Shared-Int-Chunk
   (let [refs (make [dynamic]int 0 1)
         owned (make [dynamic]int 0 (max 0 (- end start)))
@@ -110,9 +126,22 @@
     (delete chunk.refs)))
 
 (defn shared-int-index-empty [chunk-size: int] -> Shared-Int-Index
-  (Shared-Int-Index {chunks: (make [dynamic]Shared-Int-Chunk)
-                     count: 0
-                     chunk-size: (max 1 chunk-size)}))
+  (let [refs (make [dynamic]int 0 1)]
+    (arr.push! refs 1)
+    (Shared-Int-Index {chunks: (make [dynamic]Shared-Int-Chunk)
+                       chunk-starts: (make [dynamic]int)
+                       refs: refs
+                       count: 0
+                       chunk-size: (max 1 chunk-size)})))
+
+(defn shared-int-index-rebuild-chunk-starts! [index: ^Shared-Int-Index]
+  (delete index^.chunk-starts)
+  (set! index^.chunk-starts (make [dynamic]int 0 (count index^.chunks)))
+  (let [start 0]
+    (for [chunk index^.chunks]
+      (arr.push! index^.chunk-starts start)
+      (set! start (+ start (count chunk.values))))
+    (set! index^.count start)))
 
 (defn shared-int-index-from-slice [values: []int, chunk-size: int] -> Shared-Int-Index
   (let [out (shared-int-index-empty chunk-size)
@@ -123,22 +152,35 @@
             chunk (shared-int-chunk (slice values start end))]
         (arr.push! out.chunks chunk)
         (set! start end)))
-    (set! out.count (count values))
+    (shared-int-index-rebuild-chunk-starts! (addr out))
     out))
 
 (defn retain-shared-int-index [index: Shared-Int-Index] -> Shared-Int-Index
-  (let [chunks (make [dynamic]Shared-Int-Chunk 0 (count index.chunks))]
+  (set! index.refs[0] (+ index.refs[0] 1))
+  index)
+
+(defn clone-shared-int-index-root [index: Shared-Int-Index] -> Shared-Int-Index
+  (let [chunks (make [dynamic]Shared-Int-Chunk 0 (count index.chunks))
+        chunk-starts (arr.into [dynamic]int (slice index.chunk-starts 0))
+        refs (make [dynamic]int 0 1)]
+    (arr.push! refs 1)
     (for [chunk index.chunks]
       (retain-shared-int-chunk! chunk)
       (arr.push! chunks chunk))
     (Shared-Int-Index {chunks: chunks
+                       chunk-starts: chunk-starts
+                       refs: refs
                        count: index.count
                        chunk-size: index.chunk-size})))
 
 (defn delete-shared-int-index [index: Shared-Int-Index]
-  (for [chunk index.chunks]
-    (release-shared-int-chunk! chunk))
-  (delete index.chunks))
+  (set! index.refs[0] (- index.refs[0] 1))
+  (when (= index.refs[0] 0)
+    (for [chunk index.chunks]
+      (release-shared-int-chunk! chunk))
+    (delete index.chunks)
+    (delete index.chunk-starts)
+    (delete index.refs)))
 
 (defn shared-int-index-count [index: Shared-Int-Index] -> int
   index.count)
@@ -147,13 +189,23 @@
   (when (or (< position 0)
             (>= position index.count))
     (return 0 false))
-  (let [remaining position]
-    (for [chunk index.chunks]
-      (let [chunk-count (count chunk.values)]
-        (if (< remaining chunk-count)
-          (return chunk.values[remaining] true)
-          (set! remaining (- remaining chunk-count))))))
-  (return 0 false))
+  (let [low 0
+        high (count index.chunk-starts)]
+    (while (< low high)
+      (let [mid (/ (+ low high) 2)]
+        (if (<= index.chunk-starts[mid] position)
+          (set! low (+ mid 1))
+          (set! high mid))))
+    (let [chunk-index (- low 1)]
+      (when (or (< chunk-index 0)
+                (>= chunk-index (count index.chunks)))
+        (return 0 false))
+      (let [offset (- position index.chunk-starts[chunk-index])
+            chunk index.chunks[chunk-index]]
+        (when (or (< offset 0)
+                  (>= offset (count chunk.values)))
+          (return 0 false))
+        (return chunk.values[offset] true)))))
 
 (defn shared-int-index-ref-count-at [index: Shared-Int-Index, chunk-index: int] -> [refs: int, ok: bool]
   (when (or (< chunk-index 0)
@@ -180,14 +232,25 @@
       (and ok (= candidate value)))))
 
 (defn shared-int-index-with-appended-slice [base: Shared-Int-Index, values: []int] -> Shared-Int-Index
-  (let [out (retain-shared-int-index base)
+  (let [out (clone-shared-int-index-root base)
         start 0]
+    (when (and (> (count values) 0)
+               (> (count out.chunks) 0))
+      (let [last-index (- (count out.chunks) 1)
+            last out.chunks[last-index]
+            available (- out.chunk-size (count last.values))
+            take (min available (count values))]
+        (when (> take 0)
+          (let [replacement (shared-int-chunk-with-appended-slice last (slice values 0 take))]
+            (release-shared-int-chunk! last)
+            (set! out.chunks[last-index] replacement)
+            (set! start take)))))
     (while (< start (count values))
       (let [end (min (+ start out.chunk-size) (count values))
             chunk (shared-int-chunk (slice values start end))]
         (arr.push! out.chunks chunk)
         (set! start end)))
-    (set! out.count (+ out.count (count values)))
+    (shared-int-index-rebuild-chunk-starts! (addr out))
     out))
 
 (defn shared-int-index-with-appended-tail [base: Shared-Int-Index, values: []int] -> Shared-Int-Index
@@ -196,14 +259,32 @@
     (shared-int-index-from-slice values base.chunk-size)))
 
 (defn shared-int-index-with-appended-range [base: Shared-Int-Index, start: int, end: int] -> Shared-Int-Index
-  (let [out (retain-shared-int-index base)
+  (let [out (clone-shared-int-index-root base)
         offset start]
+    (when (and (< offset end)
+               (> (count out.chunks) 0))
+      (let [last-index (- (count out.chunks) 1)
+            last out.chunks[last-index]
+            available (- out.chunk-size (count last.values))
+            take (min available (- end offset))]
+        (when (> take 0)
+          (let [tail (make [dynamic]int 0 take) :defer
+                value offset]
+            (while (< value (+ offset take))
+              (arr.push! tail value)
+              (set! value (+ value 1)))
+            (let [replacement (shared-int-chunk-with-appended-slice last (slice tail 0))]
+              (release-shared-int-chunk! last)
+              (set! out.chunks[last-index] replacement)
+              (set! out.count (+ out.count take))
+              (set! offset (+ offset take)))))))
     (while (< offset end)
       (let [chunk-end (min (+ offset out.chunk-size) end)
             chunk (shared-int-chunk-from-range offset chunk-end)]
         (arr.push! out.chunks chunk)
         (set! out.count (+ out.count (- chunk-end offset)))
         (set! offset chunk-end)))
+    (shared-int-index-rebuild-chunk-starts! (addr out))
     out))
 
 (defn shared-int-index-with-appended-sorted-datoms [base: Shared-Int-Index, datoms: []Datom, start-index: int, order: string] -> Shared-Int-Index
@@ -270,7 +351,7 @@
       (let [end (min (+ offset out.chunk-size) (count values))]
         (arr.push! out.chunks (shared-int-chunk (slice values offset end)))
         (set! offset end)))
-    (set! out.count (count values))
+    (shared-int-index-rebuild-chunk-starts! (addr out))
     out))
 
 (defn shared-int-index-flush-pending! [out: ^Shared-Int-Index, pending: ^[dynamic]int]
@@ -303,6 +384,48 @@
           (set! offset end)
           (when (>= (count pending^) out^.chunk-size)
             (shared-int-index-flush-pending! out pending)))))))
+
+(defn shared-int-index-append-new-chunks! [out: ^Shared-Int-Index, values: []int]
+  (let [offset 0]
+    (when (and (> (count values) 0)
+               (> (count out^.chunks) 0))
+      (let [last-index (- (count out^.chunks) 1)
+            last out^.chunks[last-index]
+            available (- out^.chunk-size (count last.values))
+            take (min available (count values))]
+        (when (> take 0)
+          (let [replacement (shared-int-chunk-with-appended-slice last (slice values 0 take))]
+            (release-shared-int-chunk! last)
+            (set! out^.chunks[last-index] replacement)
+            (set! out^.count (+ out^.count take))
+            (set! offset take)))))
+    (let [remaining (- (count values) offset)
+          chunk-count (max 1 (/ (+ remaining (- out^.chunk-size 1)) out^.chunk-size))
+          balanced-size (max 1 (/ (+ remaining (- chunk-count 1)) chunk-count))]
+    (while (< offset (count values))
+      (let [end (min (+ offset balanced-size) (count values))]
+        (arr.push! out^.chunks (shared-int-chunk (slice values offset end)))
+        (set! out^.count (+ out^.count (- end offset)))
+        (set! offset end))))))
+
+(defn shared-int-index-coalesce-adjacent! [index: ^Shared-Int-Index]
+  (when (< (count index^.chunks) 2)
+    (return))
+  (let [chunks (make [dynamic]Shared-Int-Chunk 0 (count index^.chunks))]
+    (for [chunk index^.chunks]
+      (if (and (> (count chunks) 0)
+               (<= (+ (count chunks[(- (count chunks) 1)].values)
+                      (count chunk.values))
+                   index^.chunk-size))
+        (let [last-index (- (count chunks) 1)
+              last chunks[last-index]
+              combined (shared-int-chunk-with-appended-slice last (slice chunk.values 0))]
+          (release-shared-int-chunk! last)
+          (release-shared-int-chunk! chunk)
+          (set! chunks[last-index] combined))
+        (arr.push! chunks chunk)))
+    (delete index^.chunks)
+    (set! index^.chunks chunks)))
 
 (defn shared-int-chunk-before-or-at-added? [datoms: []Datom, order: string, chunk: Shared-Int-Chunk, added-index: int] -> bool
   (when (= (count chunk.values) 0)
@@ -397,6 +520,7 @@
               (set! chunk-offset 0)))))
     (shared-int-index-flush-pending! (addr out) (addr pending))
     (delete pending)
+    (shared-int-index-rebuild-chunk-starts! (addr out))
     out))
 
 (defn shared-int-index-with-merged-appended-indexes-across-append [base: Shared-Int-Index, base-datoms: []Datom, appended: []Datom, start-index: int, order: string, added: []int] -> Shared-Int-Index
@@ -447,57 +571,57 @@
               (set! chunk-offset 0)))))
     (shared-int-index-flush-pending! (addr out) (addr pending))
     (delete pending)
+    (shared-int-index-rebuild-chunk-starts! (addr out))
     out))
 
 (defn shared-int-index-with-merged-appended-datom-slice-direct [base: Shared-Int-Index, log: Shared-Datom-Log, appended: []Datom, start-index: int, order: string] -> Shared-Int-Index
   (let [out (shared-int-index-empty base.chunk-size)
-        pending (make [dynamic]int 0 base.chunk-size)
         added (sorted-appended-datom-slice-indexes appended start-index order) :defer
         chunk-index 0
-        chunk-offset 0
         added-index 0]
-    (while (or (< chunk-index (count base.chunks))
-               (< added-index (count added)))
-      (cond
-        (>= chunk-index (count base.chunks))
+    (while (< chunk-index (count base.chunks))
+      (let [chunk base.chunks[chunk-index]]
+        (if (or (= (count chunk.values) 0)
+                (>= added-index (count added)))
           (do
-            (shared-int-index-append-slice! (addr out) (addr pending) (slice added added-index))
-            (set! added-index (count added)))
-        (>= added-index (count added))
-          (if (= chunk-offset 0)
-            (do
-              (shared-int-index-flush-pending! (addr out) (addr pending))
-              (retain-shared-int-chunk! base.chunks[chunk-index])
-              (arr.push! out.chunks base.chunks[chunk-index])
-              (set! out.count (+ out.count (count base.chunks[chunk-index].values)))
-              (set! chunk-index (+ chunk-index 1)))
-            (do
-              (shared-int-index-push-merged-value! (addr out) (addr pending) base.chunks[chunk-index].values[chunk-offset])
-              (set! chunk-offset (+ chunk-offset 1))
-              (when (>= chunk-offset (count base.chunks[chunk-index].values))
-                (set! chunk-index (+ chunk-index 1))
-                (set! chunk-offset 0))))
-        (and (= chunk-offset 0)
-             (shared-int-chunk-before-or-at-added-direct? log appended start-index order base.chunks[chunk-index] added[added-index]))
-          (do
-            (shared-int-index-flush-pending! (addr out) (addr pending))
-            (retain-shared-int-chunk! base.chunks[chunk-index])
-            (arr.push! out.chunks base.chunks[chunk-index])
-            (set! out.count (+ out.count (count base.chunks[chunk-index].values)))
-            (set! chunk-index (+ chunk-index 1)))
-        (shared-datom-index-less? log appended start-index order added[added-index] base.chunks[chunk-index].values[chunk-offset])
-          (do
-            (shared-int-index-push-merged-value! (addr out) (addr pending) added[added-index])
-            (set! added-index (+ added-index 1)))
-        :else
-          (do
-            (shared-int-index-push-merged-value! (addr out) (addr pending) base.chunks[chunk-index].values[chunk-offset])
-            (set! chunk-offset (+ chunk-offset 1))
-            (when (>= chunk-offset (count base.chunks[chunk-index].values))
-              (set! chunk-index (+ chunk-index 1))
-              (set! chunk-offset 0)))))
-    (shared-int-index-flush-pending! (addr out) (addr pending))
-    (delete pending)
+            (retain-shared-int-chunk! chunk)
+            (arr.push! out.chunks chunk)
+            (set! out.count (+ out.count (count chunk.values))))
+          (let [last-base chunk.values[(- (count chunk.values) 1)]
+                included-end added-index]
+            (while (and (< included-end (count added))
+                        (not (shared-datom-index-less? log appended start-index order last-base added[included-end])))
+              (set! included-end (+ included-end 1)))
+            (if (= included-end added-index)
+              (do
+                (retain-shared-int-chunk! chunk)
+                (arr.push! out.chunks chunk)
+                (set! out.count (+ out.count (count chunk.values))))
+              (let [merged (make [dynamic]int 0 (+ (count chunk.values) (- included-end added-index))) :defer
+                    base-offset 0
+                    add-offset added-index]
+                (while (and (< base-offset (count chunk.values))
+                            (< add-offset included-end))
+                  (if (shared-datom-index-less? log appended start-index order added[add-offset] chunk.values[base-offset])
+                    (do
+                      (arr.push! merged added[add-offset])
+                      (set! add-offset (+ add-offset 1)))
+                    (do
+                      (arr.push! merged chunk.values[base-offset])
+                      (set! base-offset (+ base-offset 1)))))
+                (while (< base-offset (count chunk.values))
+                  (arr.push! merged chunk.values[base-offset])
+                  (set! base-offset (+ base-offset 1)))
+                (while (< add-offset included-end)
+                  (arr.push! merged added[add-offset])
+                  (set! add-offset (+ add-offset 1)))
+                (shared-int-index-append-new-chunks! (addr out) (slice merged 0))
+                (set! added-index included-end)))))
+        (set! chunk-index (+ chunk-index 1))))
+    (when (< added-index (count added))
+      (shared-int-index-append-new-chunks! (addr out) (slice added added-index)))
+    (shared-int-index-coalesce-adjacent! (addr out))
+    (shared-int-index-rebuild-chunk-starts! (addr out))
     out))
 
 (defn shared-int-index-prefix-matches-slice? [base: Shared-Int-Index, values: []int] -> bool
@@ -585,6 +709,16 @@
       (arr.push! owned (datom-owned datom)))
     (Shared-Datom-Chunk {values: owned refs: refs})))
 
+(defn shared-datom-chunk-with-appended-slice [base: Shared-Datom-Chunk, values: []Datom] -> Shared-Datom-Chunk
+  (let [refs (make [dynamic]int 0 1)
+        owned (make [dynamic]Datom 0 (+ (count base.values) (count values)))]
+    (arr.push! refs 1)
+    (for [datom base.values]
+      (arr.push! owned (datom-owned datom)))
+    (for [datom values]
+      (arr.push! owned (datom-owned datom)))
+    (Shared-Datom-Chunk {values: owned refs: refs})))
+
 (defn retain-shared-datom-chunk! [chunk: Shared-Datom-Chunk]
   (set! chunk.refs[0] (+ chunk.refs[0] 1)))
 
@@ -597,10 +731,13 @@
     (delete chunk.refs)))
 
 (defn shared-datom-log-empty [chunk-size: int] -> Shared-Datom-Log
-  (Shared-Datom-Log {chunks: (make [dynamic]Shared-Datom-Chunk)
-                     chunk-starts: (make [dynamic]int)
-                     count: 0
-                     chunk-size: (max 1 chunk-size)}))
+  (let [refs (make [dynamic]int 0 1)]
+    (arr.push! refs 1)
+    (Shared-Datom-Log {chunks: (make [dynamic]Shared-Datom-Chunk)
+                       chunk-starts: (make [dynamic]int)
+                       refs: refs
+                       count: 0
+                       chunk-size: (max 1 chunk-size)})))
 
 (defn shared-datom-log-from-slice [values: []Datom, chunk-size: int] -> Shared-Datom-Log
   (let [out (shared-datom-log-empty chunk-size)
@@ -616,21 +753,31 @@
     out))
 
 (defn retain-shared-datom-log [log: Shared-Datom-Log] -> Shared-Datom-Log
+  (set! log.refs[0] (+ log.refs[0] 1))
+  log)
+
+(defn clone-shared-datom-log-root [log: Shared-Datom-Log] -> Shared-Datom-Log
   (let [chunks (make [dynamic]Shared-Datom-Chunk 0 (count log.chunks))
-        chunk-starts (arr.into [dynamic]int (slice log.chunk-starts 0))]
+        chunk-starts (arr.into [dynamic]int (slice log.chunk-starts 0))
+        refs (make [dynamic]int 0 1)]
+    (arr.push! refs 1)
     (for [chunk log.chunks]
       (retain-shared-datom-chunk! chunk)
       (arr.push! chunks chunk))
     (Shared-Datom-Log {chunks: chunks
                        chunk-starts: chunk-starts
+                       refs: refs
                        count: log.count
                        chunk-size: log.chunk-size})))
 
 (defn delete-shared-datom-log [log: Shared-Datom-Log]
-  (for [chunk log.chunks]
-    (release-shared-datom-chunk! chunk))
-  (delete log.chunks)
-  (delete log.chunk-starts))
+  (set! log.refs[0] (- log.refs[0] 1))
+  (when (= log.refs[0] 0)
+    (for [chunk log.chunks]
+      (release-shared-datom-chunk! chunk))
+    (delete log.chunks)
+    (delete log.chunk-starts)
+    (delete log.refs)))
 
 (defn shared-datom-log-ref-count-at [log: Shared-Datom-Log, chunk-index: int] -> [refs: int, ok: bool]
   (when (or (< chunk-index 0)
@@ -639,9 +786,20 @@
   (return log.chunks[chunk-index].refs[0] true))
 
 (defn shared-datom-log-with-appended-slice [base: Shared-Datom-Log, values: []Datom] -> Shared-Datom-Log
-  (let [out (retain-shared-datom-log base)
+  (let [out (clone-shared-datom-log-root base)
         base-count out.count
         start 0]
+    (when (and (> (count values) 0)
+               (> (count out.chunks) 0))
+      (let [last-index (- (count out.chunks) 1)
+            last out.chunks[last-index]
+            available (- out.chunk-size (count last.values))
+            take (min available (count values))]
+        (when (> take 0)
+          (let [replacement (shared-datom-chunk-with-appended-slice last (slice values 0 take))]
+            (release-shared-datom-chunk! last)
+            (set! out.chunks[last-index] replacement)
+            (set! start take)))))
     (while (< start (count values))
       (let [end (min (+ start out.chunk-size) (count values))
             chunk (shared-datom-chunk (slice values start end))]
@@ -749,7 +907,10 @@
         size (max 1 chunk-size)]
     (Shared-Conn {write: (Shared-Write-State {conn: conn
                                               owns-resident-db: true
+                                              resident-current: true
                                               has-tuple-schema: (db-has-tuple-schema? conn.db)
+                                              schema-cache-complete: true
+                                              schema-cardinality-many: (shared-write-state-clone-schema-set conn.db.schema-cardinality-many)
                                               schema-ref: (shared-write-state-clone-schema-set conn.db.schema-ref)
                                               schema-unique: (shared-write-state-clone-schema-set conn.db.schema-unique)
                                               schema-unique-identity: (shared-write-state-clone-schema-unique-identity conn.db)
@@ -779,6 +940,7 @@
 (defn shared-write-state-advance! [state: ^Shared-Write-State, after: DB]
   (set! state^.conn.db after)
   (set! state^.conn.next-tx (+ state^.conn.next-tx 1))
+  (set! state^.resident-current true)
   (shared-write-state-refresh-from-current! state))
 
 (defn shared-write-state-advance-next-entity-from-datoms! [state: ^Shared-Write-State, datoms: []Datom]
@@ -836,6 +998,10 @@
       (return))))
 
 (defn shared-write-state-sync-schema-attr-from-after! [state: ^Shared-Write-State, after: DB, attr: string]
+  (if (schema-cardinality-many? after attr)
+    (when (not (set.contains? state^.schema-cardinality-many attr))
+      (set.add! state^.schema-cardinality-many (string-owned attr)))
+    (shared-write-state-remove-schema-key! (addr state^.schema-cardinality-many) attr))
   (if (schema-ref? after attr)
     (shared-write-state-add-schema-ref! state attr)
     (shared-write-state-remove-schema-key! (addr state^.schema-ref) attr))
@@ -893,7 +1059,13 @@
         (set! state^.has-tuple-schema true)
         true)
     (= datom.a ":db/cardinality")
-      true
+      (let [[attr attr-ok attr-owned] (shared-write-state-schema-attr-for-datom source datoms datom.e)]
+        (when (not attr-ok)
+          (return false))
+        (shared-write-state-sync-schema-attr-from-after! state after attr)
+        (when attr-owned
+          (delete attr))
+        true)
     (= datom.a ":db/isComponent")
       true
     :else
@@ -908,6 +1080,7 @@
 (defn shared-write-state-advance-with-apply! [state: ^Shared-Write-State, source: DB-Read-Source, after: DB, applied: Tx-Apply-Result]
   (set! state^.conn.db after)
   (set! state^.conn.next-tx (+ state^.conn.next-tx 1))
+  (set! state^.resident-current true)
   (if (shared-write-state-datoms-modify-schema? (slice applied.tx-data 0))
     (if (shared-write-state-advance-schema-incremental! state source after (slice applied.tx-data 0))
       (shared-write-state-advance-next-entity-from-datoms! state (slice applied.tx-data 0))
@@ -916,6 +1089,8 @@
 
 (defn shared-write-state-refresh-from-current! [state: ^Shared-Write-State]
   (let [after state^.conn.db]
+    (delete-owned-string-set state^.schema-cardinality-many)
+    (set! state^.schema-cardinality-many (shared-write-state-clone-schema-set after.schema-cardinality-many))
     (delete-owned-string-set state^.schema-ref)
     (set! state^.schema-ref (shared-write-state-clone-schema-set after.schema-ref))
     (delete-owned-string-set state^.schema-unique)
@@ -923,6 +1098,7 @@
     (delete-owned-string-set state^.schema-unique-identity)
     (set! state^.schema-unique-identity (shared-write-state-clone-schema-unique-identity after))
     (set! state^.has-tuple-schema (db-has-tuple-schema? after))
+    (set! state^.schema-cache-complete true)
     (set! state^.next-entity-id (next-entity-id (slice after.datoms 0)))))
 
 (defn shared-write-state-notify! [state: ^Shared-Write-State, report: Tx-Report]
@@ -2964,7 +3140,10 @@
           (return (Shared-Write-State {conn: (Conn {next-tx: next-tx
                                                      listeners: (make [dynamic]Tx-Listener)})
                                       owns-resident-db: false
+                                      resident-current: false
                                       has-tuple-schema: has-tuple
+                                      schema-cache-complete: false
+                                      schema-cardinality-many: (set.empty string)
                                       schema-ref: schema-ref
                                       schema-unique: schema-unique
                                       schema-unique-identity: schema-unique-identity
@@ -2988,6 +3167,7 @@
       (return out-state true ""))))
 
 (defn delete-shared-write-state-metadata [state: Shared-Write-State]
+  (delete-owned-string-set state.schema-cardinality-many)
   (delete-owned-string-set state.schema-ref)
   (delete-owned-string-set state.schema-unique)
   (delete-owned-string-set state.schema-unique-identity)
@@ -2997,6 +3177,40 @@
 
 (defn shared-write-state-owns-resident-db? [state: Shared-Write-State] -> bool
   state.owns-resident-db)
+
+(defn shared-db-snapshot-materialize-db [snapshot: Shared-DB-Snapshot] -> [db: DB, ok: bool]
+  (let [datoms (make [dynamic]Datom 0 snapshot.datoms.count)
+        position 0]
+    (while (< position snapshot.datoms.count)
+      (let [[datom datom-ok] (shared-datom-log-at snapshot.datoms position)]
+        (when (not datom-ok)
+          (delete-owned-datoms datoms)
+          (return (build-db (make [dynamic]Datom)) false))
+        (arr.push! datoms datom)
+        (set! position (+ position 1))))
+    (return (build-db datoms) true)))
+
+(defn shared-conn-ensure-resident! [conn: ^Shared-Conn] -> bool
+  (when conn^.write.resident-current
+    (return true))
+  (let [[resident resident-ok] (shared-db-snapshot-materialize-db conn^.snapshot)]
+    (when (not resident-ok)
+      (delete-owned-db resident)
+      (return false))
+    (when conn^.write.owns-resident-db
+      (delete-resident-db conn^.write.conn.db))
+    (set! conn^.write.conn.db resident)
+    (set! conn^.write.conn.next-tx (shared-write-state-next-tx (addr conn^.write)))
+    (set! conn^.write.owns-resident-db true)
+    (set! conn^.write.resident-current true)
+    true))
+
+(defn shared-conn-drop-stale-resident! [conn: ^Shared-Conn]
+  (when conn^.write.owns-resident-db
+    (delete-resident-db conn^.write.conn.db))
+  (set! conn^.write.conn.db (DB {}))
+  (set! conn^.write.owns-resident-db false)
+  (set! conn^.write.resident-current false))
 
 (defn source-append-ops-all-new-entities? [next-entity: u64, ops: []Tx-Op] -> bool
   (for [op ops]
@@ -3021,6 +3235,11 @@
       (delete-owned-datoms out)
       (return has-conflict true ""))))
 
+(defn shared-write-state-cardinality-many? [state: Shared-Write-State, source: DB-Read-Source, attr: string] -> [many: bool, ok: bool, error: string]
+  (if state.schema-cache-complete
+    (return (set.contains? state.schema-cardinality-many attr) true "")
+    (db-read-source-schema-cardinality-many? source attr)))
+
 (defn source-append-ops-eligible? [source: DB-Read-Source, state: Shared-Write-State, ops: []Tx-Op] -> [eligible: bool, new-entities-after-existing: bool, ok: bool, error: string]
   (let [all-new-entities (source-append-ops-all-new-entities? state.next-entity-id ops)]
   (let [seen-cardinality-one-attrs (set.empty string)
@@ -3041,7 +3260,7 @@
           (delete fact-key)
           (return false false true ""))
         (set.add! seen-facts fact-key))
-      (let [[many many-ok many-error] (db-read-source-schema-cardinality-many? source op.a)]
+      (let [[many many-ok many-error] (shared-write-state-cardinality-many? state source op.a)]
         (when (not many-ok)
           (return false false false many-error))
         (if many
@@ -3233,6 +3452,8 @@
   (shared-db-snapshot-read-source (addr conn^.snapshot)))
 
 (defn shared-conn-transact [conn: ^Shared-Conn, tx-data: []Tx-Data] -> Tx-Report
+  (when (not (shared-conn-ensure-resident! conn))
+    (return (failed-tx-report (DB {}) "failed to materialize shared resident DB")))
   (let [before (shared-write-state-before-db (addr conn^.write))
         tx (shared-write-state-next-tx (addr conn^.write))
         source (shared-conn-read-source conn)
@@ -3265,6 +3486,8 @@
           report)))))
 
 (defn shared-conn-transact-direct [conn: ^Shared-Conn, tx-data: []Tx-Data] -> Tx-Report
+  (when (not (shared-conn-ensure-resident! conn))
+    (return (failed-tx-report (DB {}) "failed to materialize shared resident DB")))
   (let [report (transact-tx-data (addr conn^.write.conn) tx-data)]
     (when (not report.ok)
       (return report))
@@ -3275,6 +3498,8 @@
     report))
 
 (defn shared-conn-transact-with-string-fns [conn: ^Shared-Conn, tx-data: []Tx-Data, registry: []Tx-Fn-String] -> Tx-Report
+  (when (not (shared-conn-ensure-resident! conn))
+    (return (failed-tx-report (DB {}) "failed to materialize shared resident DB")))
   (let [report (transact-tx-data-with-string-fns (addr conn^.write.conn) tx-data registry)]
     (when (not report.ok)
       (return report))
@@ -3285,6 +3510,8 @@
     report))
 
 (defn shared-conn-transact-with-source-string-fns [conn: ^Shared-Conn, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String] -> Tx-Report
+  (when (not (shared-conn-ensure-resident! conn))
+    (return (failed-tx-report (DB {}) "failed to materialize shared resident DB")))
   (let [before (shared-write-state-before-db (addr conn^.write))
         tx (shared-write-state-next-tx (addr conn^.write))
         source (shared-conn-read-source conn)
@@ -3304,7 +3531,7 @@
                 [fn-index fn-ok] (tx-fn-source-string-index registry data.ident)]
             (when (not fn-ok)
               (return (failed-source-registered-tx before ops tx-meta tempids segment "transaction fn not registered")))
-            (let [result (call-source-registered-tx-fn registry[fn-index] source data)]
+            (let [result (call-source-registered-tx-fn registry[fn-index] current-source data)]
               (when (not result.ok)
                 (delete result.tx-data)
                 (return (failed-source-registered-tx before ops tx-meta tempids segment result.error)))
@@ -3346,7 +3573,70 @@
           (return report))))
     (failed-tx-report (shared-write-state-before-db (addr conn^.write)) "unreachable source transaction function path")))
 
+(defn shared-conn-transact-report-source-append [conn: ^Shared-Conn, tx-data: []Tx-Data] -> [report: Shared-Tx-Report, used: bool]
+  (when (> (count conn^.write.conn.listeners) 0)
+    (return (Shared-Tx-Report {}) false))
+  (let [source (shared-conn-read-source conn)
+        tx (shared-write-state-next-tx (addr conn^.write))
+        resolved (shared-write-state-resolve-tx-data-source-only (addr conn^.write) source tx-data)]
+    (when (not resolved.ok)
+      (delete-resolved-tx resolved)
+      (return (Shared-Tx-Report {}) false))
+    (let [compacted (compact-redundant-add-ops (slice resolved.ops 0))]
+      (for [op compacted]
+        (when (and (= op.e tx)
+                   (= op.a ":db/txInstant"))
+          (delete compacted)
+          (delete-resolved-tx resolved)
+          (return (Shared-Tx-Report {}) false)))
+      (arr.push! compacted (tx-add tx ":db/txInstant" (current-instant)))
+      (let [[eligible new-entities-after-existing eligible-ok _] (source-append-ops-eligible? source conn^.write (slice compacted 0))]
+        (when (or (not eligible-ok)
+                  (not eligible))
+          (delete compacted)
+          (delete-resolved-tx resolved)
+          (return (Shared-Tx-Report {}) false))
+        (let [start-index conn^.snapshot.datoms.count
+              appended (source-append-datoms-from-ops (slice compacted 0) tx)
+              before-snapshot (retain-shared-db-snapshot conn^.snapshot)
+              next-snapshot (shared-db-snapshot-with-appended-datoms-direct conn^.snapshot
+                                                                            (slice appended 0)
+                                                                            start-index
+                                                                            new-entities-after-existing)
+              after-snapshot (retain-shared-db-snapshot next-snapshot)
+              owned-meta (clone-tx-meta (slice resolved.tx-meta 0))
+              owned-tempids (arr.into [dynamic]Tempid (slice resolved.tempids 0))
+              tx-instant appended[(- (count appended) 1)].v]
+          (arr.push! owned-meta (Tx-Meta {a: ":db/txInstant" v: tx-instant}))
+          (let [[_ has-current-tx] (tempid-lookup (slice owned-tempids 0) ":db/current-tx")]
+            (when (not has-current-tx)
+              (arr.push! owned-tempids (Tempid {tempid: ":db/current-tx" e: tx}))))
+          (let [out-report (Shared-Tx-Report {ok: true
+                                              error: ""
+                                              db-before: before-snapshot
+                                              db-after: after-snapshot
+                                              tx-data: appended
+                                              tx: tx
+                                              tx-meta: owned-meta
+                                              tempids: owned-tempids
+                                              datom-start-index: start-index
+                                              append-only: true
+                                              new-entities-after-existing: new-entities-after-existing})]
+            (set! conn^.write.conn.next-tx (+ tx 1))
+            (shared-write-state-advance-next-entity-from-datoms! (addr conn^.write) (slice appended 0))
+            (shared-conn-drop-stale-resident! conn)
+            (delete-shared-db-snapshot conn^.snapshot)
+            (set! conn^.snapshot next-snapshot)
+            (delete compacted)
+            (delete-resolved-tx resolved)
+            (return out-report true)))))))
+
 (defn shared-conn-transact-report [conn: ^Shared-Conn, tx-data: []Tx-Data] -> Shared-Tx-Report
+  (let [[source-report source-used] (shared-conn-transact-report-source-append conn tx-data)]
+    (when source-used
+      (return source-report)))
+  (when (not (shared-conn-ensure-resident! conn))
+    (return (failed-shared-tx-report (retain-shared-db-snapshot conn^.snapshot) "failed to materialize shared resident DB")))
   (let [before-snapshot (retain-shared-db-snapshot conn^.snapshot)
         before (shared-write-state-before-db (addr conn^.write))
         tx (shared-write-state-next-tx (addr conn^.write))

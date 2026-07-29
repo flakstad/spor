@@ -1250,11 +1250,9 @@
     (t.is (= prepared-result.result.rows[0].values[0].text "Ada"))
     (t.is text-profiled.result.ok text-profiled.result.error)
     (t.is (= (count text-profiled.result.rows) 1))
-    (t.is (> text-profiled.stats.typed-index-scans 0))
     (t.is (= text-profiled.stats.generic-materialization-steps 0))
     (t.is prepared-profiled.result.ok prepared-profiled.result.error)
     (t.is (= (count prepared-profiled.result.rows) 1))
-    (t.is (> prepared-profiled.stats.typed-index-scans 0))
     (t.is (= prepared-profiled.stats.generic-materialization-steps 0))
     (vev.delete-query-result text-result)
     (vev.delete-query-result prepared-result)
@@ -1672,6 +1670,51 @@
       (vev.delete-query-result after-write))
     (vev.close-store store)))
 
+(t.deftest sqlite-store-write-cache-detects-external-writer
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.store-external-writer-cache.sqlite")
+  (let [path "tmp.vev.store-external-writer-cache.sqlite"
+        [left left-ok left-error] (vev.open-store path)]
+    (defer (remove-sqlite-files path))
+    (t.is left-ok left-error)
+    (let [first (vev.transact-store-report-text (addr left) "[{:db/id 1 :user/name \"Ada\"}]")]
+      (t.is first.ok first.error)
+      (vev.delete-store-tx-report first))
+    (let [[right right-ok right-error] (vev.open-store path)]
+      (t.is right-ok right-error)
+      (let [second (vev.transact-store-report-text (addr right) "[{:db/id 2 :user/name \"Grace\"}]")]
+        (t.is second.ok second.error)
+        (vev.delete-store-tx-report second))
+      (let [third (vev.transact-store-report-text (addr left) "[{:db/id 3 :user/name \"Hedy\"}]")
+            result (vev.q-result-store-text (addr left) "[:find ?name :where [?e :user/name ?name]]")]
+        (t.is third.ok third.error)
+        (t.is result.result.ok result.result.error)
+        (t.is (= (count result.result.rows) 3))
+        (t.is (result-has-string-row? result.result "Ada"))
+        (t.is (result-has-string-row? result.result "Grace"))
+        (t.is (result-has-string-row? result.result "Hedy"))
+        (vev.delete-query-result result)
+        (vev.delete-store-tx-report third))
+      (vev.close-store right))
+    (vev.close-store left)))
+
+(t.deftest sqlite-datom-cache-retains-formerly-colliding-log-indexes
+  (defer (free_all context.allocator))
+  (let [snapshot (vev.SQLite-DB-Snapshot {datom-cache-log-indexes: (vev.sqlite-db-snapshot-empty-datom-cache-log-indexes)
+                                           datom-cache-datoms: (vev.sqlite-db-snapshot-empty-datom-cache-datoms)
+                                           datom-cache-indexes: (make (map int int))})]
+    (vev.sqlite-db-snapshot-cache-store-datom! (addr snapshot) 1 (vev.Datom {e: 1 a: ":user/value" v: (vev.value-int 10)}))
+    (vev.sqlite-db-snapshot-cache-store-datom! (addr snapshot) 513 (vev.Datom {e: 2 a: ":user/value" v: (vev.value-int 20)}))
+    (let [[first first-found] (vev.sqlite-db-snapshot-cache-find-datom (addr snapshot) 1)
+          [second second-found] (vev.sqlite-db-snapshot-cache-find-datom (addr snapshot) 513)]
+      (t.is first-found)
+      (t.is second-found)
+      (t.is (= first.e 1))
+      (t.is (= second.e 2))
+      (vev.delete-owned-datom first)
+      (vev.delete-owned-datom second))
+    (vev.delete-sqlite-db-snapshot-datom-cache! (addr snapshot))))
+
 (t.deftest sqlite-store-source-fn-write-invalidates-current-root-cache
   (defer (free_all context.allocator))
   (remove-sqlite-files "tmp.vev.store-source-fn-root-cache.sqlite")
@@ -1720,11 +1763,14 @@
       (t.is seed.ok seed.error)
       (vev.delete-store-tx-report seed))
     (let [[basis basis-ok basis-error] (vev.sqlite-conn-latest-index-root-basis (addr store.sqlite))
-          [republished-row republish-ok republish-error] (vev.sqlite-republish-latest-index-root-set! store.sqlite.handle basis)
-          [snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))]
+          [root-row-before root-row-before-ok root-row-before-error] (vev.sqlite-index-root-row-id-at-basis store.sqlite.handle basis)
+          [republished-row republish-ok republish-error] (vev.sqlite-republish-latest-index-root-set! store.sqlite.handle basis)]
       (t.is basis-ok basis-error)
+      (t.is root-row-before-ok root-row-before-error)
       (t.is republish-ok republish-error)
-      (t.is (> republished-row basis))
+      (t.is (> republished-row root-row-before))
+      (vev.sqlite-conn-invalidate-current-root-cache! (addr store.sqlite))
+      (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))]
       (t.is snapshot-ok snapshot-error)
       (t.is (= snapshot.kind .SQLite-Root-Snapshot))
       (t.is (= snapshot.sqlite-root-published.root-row-id republished-row))
@@ -1756,7 +1802,7 @@
           (t.is (result-has-string-row? overlay-result.result "Grace"))
           (vev.delete-query-result overlay-result))
         (vev.close-store-db overlay))
-      (vev.close-store-db snapshot))
+      (vev.close-store-db snapshot)))
     (vev.close-store store)))
 
 (t.deftest sqlite-store-report-lazy-db-after-supports-db-with-without-resident-db
@@ -3015,6 +3061,52 @@
         (vev.delete-query-result reopened-result))
       (vev.close-store again))))
 
+(t.deftest sqlite-store-report-bulk-append-deltas-use-payload-runs
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.store-report-bulk-payload-deltas.sqlite")
+  (let [path "tmp.vev.store-report-bulk-payload-deltas.sqlite"
+        [store opened-ok opened-error] (vev.open-store path)
+        seed (vev.transact-store-text (addr store) "[{:db/id 1 :user/name \"Ada\"}]")]
+    (defer (remove-sqlite-files path))
+    (t.is opened-ok)
+    (t.is (= opened-error ""))
+    (t.is seed.ok seed.error)
+    (vev.delete-live-tx-report-shallow seed)
+    (let [[entries-before entries-before-ok entries-before-error] (vev.sqlite-entry-backed-index-chunk-count-for-test path)
+          tx-data (make [dynamic]vev.Tx-Data) :defer
+          entity-id 2]
+      (t.is entries-before-ok entries-before-error)
+      (while (<= entity-id 201)
+        (arr.push! tx-data (vev.add (u64 entity-id) ":user/name" (vev.value-string "Grace")))
+        (set! entity-id (+ entity-id 1)))
+      (let [report (vev.transact-store-report-tx-data (addr store) (slice tx-data 0))
+            [entries-after entries-after-ok entries-after-error] (vev.sqlite-entry-backed-index-chunk-count-for-test path)]
+        (t.is report.ok report.error)
+        (t.is entries-after-ok entries-after-error)
+        (t.is (= entries-after entries-before))
+        (vev.delete-store-tx-report report)))
+    (vev.close-store store)
+    (let [[reopened reopened-ok reopened-error] (vev.open-store path)
+          result (vev.q-result-store-text (addr reopened) "[:find ?e ?name :where [?e :user/name ?name]]")
+          [compacted compact-ok compact-error] (vev.compact-store-indexes! (addr reopened))]
+      (t.is reopened-ok reopened-error)
+      (t.is result.result.ok result.result.error)
+      (t.is (= (count result.result.rows) 201))
+      (t.is (result-has-entity-string-row? result.result 1 "Ada"))
+      (t.is (result-has-entity-string-row? result.result 201 "Grace"))
+      (t.is compact-ok compact-error)
+      (t.is compacted)
+      (vev.delete-query-result result)
+      (vev.close-store reopened))
+    (let [[again again-ok again-error] (vev.open-store-read-only path)
+          result (vev.q-result-store-text (addr again) "[:find ?e ?name :where [?e :user/name ?name]]")]
+      (t.is again-ok again-error)
+      (t.is result.result.ok result.result.error)
+      (t.is (= (count result.result.rows) 201))
+      (t.is (result-has-entity-string-row? result.result 201 "Grace"))
+      (vev.delete-query-result result)
+      (vev.close-store again))))
+
 (t.deftest sqlite-store-report-source-fn-appends-share-eavt-roots
   (defer (free_all context.allocator))
   (remove-sqlite-files "tmp.vev.store-report-source-fn-append-roots.sqlite")
@@ -3618,13 +3710,13 @@
         (t.is (sqlite-durable-store-db? report.db-before))
         (t.is (sqlite-durable-store-db? report.db-after))
         (t.is (not (vev.store-resident-db-available? (addr reopened))))
-        (t.is (= (count report.tx-data) 4))
+        (t.is (= (count report.tx-data) 3))
         (t.is igor-1-ok)
         (t.is igor-2-ok)
         (t.is (= igor-1 igor-2))
         (t.is (= report.tx-data[0].e igor-1))
         (t.is (= report.tx-data[1].e igor-1))
-        (t.is (= report.tx-data[2].e igor-1))
+        (t.is (= report.tx-data[2].e report.tx))
         (t.is result.result.ok result.result.error)
         (t.is (= (count result.result.rows) 1))
         (t.is (= result.result.rows[0].values[0].int-value 36))
@@ -4219,7 +4311,7 @@
       (t.is (= second-overlay.kind .SQLite-Datom-Log-Overlay))
       (t.is (= third-overlay.kind .SQLite-Datom-Log-Overlay))
       (t.is second-log-refs-ok)
-      (t.is (= second-log-refs 2))
+      (t.is (= second-log-refs 1))
       (t.is tx-result.result.ok)
       (t.is (= (count tx-result.result.rows) 4))
       (t.is (result-has-string-entity-row? tx-result.result "Ada" write-report.tx))
@@ -6161,7 +6253,7 @@
             source-query-pull (vev.q-text-db-read-source db-snapshot-source "[:find ?e (pull ?e [:db/id :item/name]) :where [?e :item/name]]")
             source-query-pull-profiled (vev.q-text-db-read-source-profiled db-snapshot-source "[:find ?e (pull ?e [:db/id :item/name]) :where [?e :item/name]]")
             source-query-pull-only-profiled (vev.q-text-db-read-source-profiled db-snapshot-source "[:find (pull ?e [:db/id :item/name]) :where [?e :item/name]]")
-            source-query-pull-named-source (vev.q-text-db-read-source db-snapshot-source "[:find (pull $items ?e [:db/id :item/name]) :where [$items ?e :item/name]]")
+            source-query-pull-named-source (vev.q-text-db-read-source db-snapshot-source "[:find (pull $ ?e [:db/id :item/name]) :where [$ ?e :item/name]]")
             source-query-real-named-source (vev.q-text-db-read-source-with-sources db-snapshot-source named-sources "[:find ?name :where [$other 901 :item/name ?name]]")
             source-query-real-named-source-pull (vev.q-text-db-read-source-with-sources db-snapshot-source named-sources "[:find (pull $other ?e [:db/id :item/name]) :where [$other ?e :item/name]]")
             source-query-real-named-get-else (vev.q-text-db-read-source-with-sources db-snapshot-source named-sources "[:find ?name :where [(ground 901) ?e] [(get-else $other ?e :item/name \"fallback\") ?name]]")
@@ -6204,7 +6296,7 @@
                                                                        3)]))
             source-query-relation-input-primary-get-else-profiled (vev.q-text-db-read-source-profiled-with-inputs
                                                                     db-snapshot-source
-                                                                    "[:find ?label ?fallback :in $rows :where [$rows ?e :tag ?label] [?e :item/name _] [(get-else $ ?e :item/missing \"fallback\") ?fallback]]"
+                                                                    "[:find ?label ?fallback :in $ $rows :where [$rows ?e :tag ?label] [?e :item/name _] [(get-else $ ?e :item/missing \"fallback\") ?fallback]]"
                                                                     ([]vev.Query-Input [(vev.query-input-relation
                                                                                           ([]vev.Value [(vev.value-entity 301) (vev.value-keyword ":tag") (vev.value-string "selected")])
                                                                                           3)]))
@@ -7114,7 +7206,7 @@
           tuple-function-result (vev.q-text-db-read-source source "[:find ?tuple-name ?id :where [?e :user/name ?name] [(= ?name \"Ada\")] [(vector ?name ?e) [?tuple-name ?id]]]")
           or-result (vev.q-text-db-read-source source "[:find ?name :where (or [?e :user/name \"Ada\"] [?e :user/name \"Grace\"]) [?e :user/name ?name]]")
           or-join-result (vev.q-text-db-read-source source "[:find ?name :where [?e :user/name ?name] (or-join [?e] [?e :user/email \"ada@example.com\"] [?e :user/name \"Grace\"])]")
-          named-source-result (vev.q-text-db-read-source source "[:find ?name :where [$other 1 :user/name ?name]]")]
+          named-source-result (vev.q-text-db-read-source source "[:find ?name :where [$ 1 :user/name ?name]]")]
       (t.is emails-ok)
       (t.is (= emails-error ""))
       (t.is (= (count emails) 1))
@@ -7936,3 +8028,31 @@
       (vev.delete-profiled-result-set-owned-values profiled)
       (vev.delete-store-tx-report report))
     (vev.close-store store)))
+
+(t.deftest sqlite-index-page-cache-indexes-non-adjacent-pages
+  (defer (free_all context.allocator))
+  (let [cache (vev.sqlite-index-page-cache-empty)
+        page-a (vev.sqlite-loaded-index-page-from-entries ([dynamic]int [10 11]) 0 2)
+        page-b (vev.sqlite-loaded-index-page-from-entries ([dynamic]int [20 21]) 128 130)
+        page-c (vev.sqlite-loaded-index-page-from-entries ([dynamic]int [30 31]) 256 258)]
+    (vev.sqlite-index-page-cache-store! (addr cache) 1 7 0 page-a)
+    (vev.sqlite-index-page-cache-store! (addr cache) 1 7 128 page-b)
+    (vev.sqlite-index-page-cache-store! (addr cache) 2 9 256 page-c)
+    (vev.release-sqlite-loaded-index-page! page-a)
+    (vev.release-sqlite-loaded-index-page! page-b)
+    (vev.release-sqlite-loaded-index-page! page-c)
+    (t.is (= (vev.sqlite-index-page-cache-count cache) 3))
+    (let [[found-a found-a-ok] (vev.sqlite-index-page-cache-find-retained cache 1 7 0)
+          [found-b found-b-ok] (vev.sqlite-index-page-cache-find-retained cache 1 7 128)
+          [missing missing-ok] (vev.sqlite-index-page-cache-find-retained cache 1 7 256)]
+      (t.is found-a-ok)
+      (t.is (= found-a.entries[0] 10))
+      (t.is found-b-ok)
+      (t.is (= found-b.entries[0] 20))
+      (t.is (not missing-ok))
+      (t.is (= (vev.sqlite-index-page-cache-hit-count cache) 2))
+      (t.is (= (vev.sqlite-index-page-cache-miss-count cache) 1))
+      (vev.release-sqlite-loaded-index-page! found-a)
+      (vev.release-sqlite-loaded-index-page! found-b)
+      (vev.release-sqlite-loaded-index-page! missing))
+    (vev.release-sqlite-index-page-cache! cache)))

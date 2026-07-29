@@ -37,7 +37,8 @@ if [[ "${VEV_COMPARE_SKIP_BASELINES:-0}" != "1" ]]; then
     )
     (
       cd "$ROOT"
-      bench/datascript_bench/run_vev.sh "${queries[@]}"
+      VEV_BENCH_ISOLATED_DBS="${VEV_BENCH_ISOLATED_DBS:-true}" \
+        bench/datascript_bench/run_vev.sh "${queries[@]}"
     )
     exit 0
   fi
@@ -64,8 +65,8 @@ run_version() {
         clojure -Srepro \
           -J--add-opens=java.base/java.nio=ALL-UNNAMED \
           -J--add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
-          -Sdeps "{:paths [\"$DATALEVIN_BENCH/src\"] :deps {datalevin/datalevin {:mvn/version \"0.10.5\"}}}" \
-          -M -m datalevin-bench.datalevin "${queries[@]}"
+          -Sdeps "{:paths [\"$ROOT/bench/datascript_bench/src\" \"$DATALEVIN_BENCH/src\"] :deps {datalevin/datalevin {:mvn/version \"0.10.5\"}}}" \
+          -M -m vev-datascript-bench.datalevin-runner "${queries[@]}"
       ) >"$out"
       ;;
     datomic)
@@ -78,7 +79,8 @@ run_version() {
     vev)
       (
         cd "$ROOT"
-        bench/datascript_bench/run_vev.sh "${queries[@]}"
+        VEV_BENCH_ISOLATED_DBS="${VEV_BENCH_ISOLATED_DBS:-true}" \
+          bench/datascript_bench/run_vev.sh "${queries[@]}"
       ) >"$out"
       ;;
     *)

@@ -722,8 +722,8 @@
 
 (defn run-find-value [db: vev.DB, query: string, kind: Find-Value-Kind] -> [value: vev.Value, ok: bool]
   (case kind
-    .Collection (return (vev.value-vector (slice (vev.q-text-collection db query) 0)) true)
-    .Tuple (return (vev.value-vector (slice (vev.q-text-tuple db query) 0)) true)
+    .Collection (return (vev.value-vector-owned (vev.q-text-collection db query)) true)
+    .Tuple (return (vev.value-vector-owned (vev.q-text-tuple db query)) true)
     .Scalar (let [[value ok] (vev.q-text-scalar db query)]
               (return value ok))
     (return (vev.value-nil) false))
@@ -733,7 +733,7 @@
   (for [warmup-index (arr.range 0 warmups)]
     (discard warmup-index)
     (let [[value _] (run-find-value db query kind)]
-      (discard value)))
+      (vev.delete-owned-value value)))
   (let [samples (make [dynamic]f64 0 samples-count)]
     (defer (delete samples))
     (for [sample-index (arr.range 0 samples-count)]
@@ -741,7 +741,7 @@
       (let [start (time.now)
             [value _] (run-find-value db query kind)
             elapsed (bench.elapsed-us start)]
-        (discard value)
+        (vev.delete-owned-value value)
         (arr.push! samples elapsed)))
     (let [[value ok] (run-find-value db query kind)]
       (find-value-timing value ok kind (bench.timing-from-samples (slice samples 0))))))
@@ -774,7 +774,8 @@
       measured.timing.p90-us
       measured.timing.max-us)
     (when print-rows
-      (print-find-value-rows workload measured))))
+      (print-find-value-rows workload measured))
+    (vev.delete-owned-value measured.value)))
 
 (defn q-text-keyed [db: vev.DB, query: string, kind: string] -> [dynamic]vev.Keyed-Row
   (if (= kind ":strs")
