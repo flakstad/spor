@@ -1,6 +1,6 @@
 # History
 
-VevDB provides Datomic-shaped historical database values.
+VevDB provides immutable historical database values over the same datom model.
 
 | Operation | Boundary | Result |
 | --- | --- | --- |

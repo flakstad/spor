@@ -4,37 +4,299 @@
 (import data "kvist:data")
 
 (defn main []
+  (let [uuid (d.squuid)]
+    (defer (data.release uuid))
+    (when (not (= (% (d.squuid-time-millis uuid) 1000) 0))
+      (panic "binary Kvist squuid did not preserve second precision")))
   (let [path "vev-kvist-binary-smoke.db"
-        conn (d.connect path)]
+        conn (d.connect path)
+        schema-tx (u64 0)
+        data-tx (u64 0)
+        ada-id (u64 0)]
     (defer (d.close conn))
-    (let [schema
+      (let [schema
           (d.transact
             conn
             [[:db/add 100 :db/ident :person/id]
              [:db/add 100 :db/valueType :db.type/string]
-             [:db/add 100 :db/unique :db.unique/identity]])]
+             [:db/add 100 :db/cardinality :db.cardinality/one]
+             [:db/add 100 :db/unique :db.unique/identity]
+             [:db/add 101 :db/ident :person/friend]
+             [:db/add 101 :db/valueType :db.type/ref]
+             [:db/add 101 :db/cardinality :db.cardinality/one]
+             [:db/add 102 :db/ident :person/nickname]
+             [:db/add 102 :db/valueType :db.type/string]
+             [:db/add 102 :db/cardinality :db.cardinality/one]])]
+      (defer (d.close (addr schema)))
       (when (not schema.ok)
-        (panic schema.error)))
-    (let [report
+        (panic schema.error))
+      (when (< schema.tx (u64 4611686018427387904))
+        (panic "binary Kvist schema report returned a transaction count"))
+      (set! schema-tx schema.tx))
+      (let [report
           (d.transact
             conn
             [{:db/id "person-ada"
               :person/id "ada"
-              :person/name "Ada"}])]
+              :person/name "Ada"
+              :person/friend "person-grace"}
+             {:db/id "person-grace"
+              :person/id "grace"
+              :person/name "Grace"}])]
+      (defer (d.close (addr report)))
       (when (not report.ok)
-        (panic report.error)))
+        (panic report.error))
+      (when (not (= report.error-kind .None))
+        (panic "binary Kvist successful report carried an error kind"))
+      (when (<= report.tx schema-tx)
+        (panic "binary Kvist data report returned an invalid transaction id"))
+      (when (= (data.count report.tx-data) 0)
+        (panic "binary Kvist transaction report omitted tx-data"))
+      (when (= (data.count report.tx-meta) 0)
+        (panic "binary Kvist transaction report omitted tx metadata"))
+      (let [[resolved resolved-ok]
+            (d.resolve-tempid report.db-after report.tempids "person-ada")]
+        (when (or (not resolved-ok) (= resolved (u64 0)))
+          (panic "binary Kvist transaction report omitted tempids"))
+        (set! ada-id resolved))
+      (when (< (d.basis-t report.db-after) (u64 2))
+        (panic "binary Kvist transaction report omitted db-after"))
+      (let [name-query
+            '[:find ?name .
+              :in $ ?id
+              :where [?e :person/id ?id]
+                     [?e :person/name ?name]]
+            before-name (d.q name-query report.db-before "ada")
+            after-name (d.q name-query report.db-after "ada")]
+        (when (not (data.nil? before-name))
+          (panic "binary Kvist transaction report db-before was not immutable"))
+        (when (or (not (data.string? after-name))
+                  (not (= (data.string after-name) "Ada")))
+          (panic "binary Kvist transaction report db-after omitted transaction")))
+      (set! data-tx report.tx))
+    (let [[tx-ids ids-ok ids-error] (d.log-tx-ids conn)]
+      (defer (delete tx-ids))
+      (defer (delete ids-error))
+      (when (not ids-ok)
+        (panic ids-error))
+      (when (or (not (= (count tx-ids) 2))
+                (not (= tx-ids[0] schema-tx))
+                (not (= tx-ids[1] data-tx)))
+        (panic "binary Kvist log returned fabricated transaction ids")))
+    (let [log-value (d.log conn)]
+      (defer (d.close log-value))
+      (let [transactions (d.tx-range log-value)
+            bounded (d.tx-range-between
+                      log-value data-tx (+ data-tx (u64 1)))]
+        (defer (data.release transactions))
+        (defer (data.release bounded))
+        (when (not (= (data.count transactions) 2))
+          (panic "binary Kvist tx-range omitted transactions"))
+        (when (not (= (data.count bounded) 1))
+          (panic "binary Kvist bounded tx-range used fabricated coordinates"))
+        (let [transaction (data.nth bounded 0)
+              tx-data (data.get-in transaction [:data])]
+          (when (or (not (data.vector? tx-data))
+                    (= (data.count tx-data) 0))
+            (panic "binary Kvist tx-range omitted transaction datoms")))))
     (when (< (d.latest-index-merge-run-count conn ":eavt") 0)
       (panic "binary Kvist client could not inspect index run count"))
     (when (not (d.maintain-indexes! conn 8))
       (panic "binary Kvist client could not maintain indexes"))
     (when (not (d.compact-indexes! conn))
       (panic "binary Kvist client could not compact indexes"))
+    (let [failed
+          (d.transact
+            conn
+            [[:db/add 1 :person/id nil]])]
+      (defer (d.close (addr failed)))
+      (when (or failed.ok
+                (not (= failed.error-kind .Transaction-Failed)))
+        (panic "binary Kvist transact error was not Vev-shaped")))
     (let [db (d.db conn)]
       (defer (d.close db))
+      (let [synced (d.sync conn)
+            as-of-db (d.as-of db schema-tx)
+            since-db (d.since db schema-tx)
+            history-db (d.history db)]
+        (defer (d.close synced))
+        (defer (d.close as-of-db))
+        (defer (d.close since-db))
+        (defer (d.close history-db))
+        (let [[as-of-value as-of-present] (d.as-of-t as-of-db)
+              [since-value since-present] (d.since-t since-db)]
+          (when (or (not (= (d.basis-t synced) (d.basis-t db)))
+                    (not as-of-present)
+                    (not since-present)
+                    (not (= as-of-value (d.tx-to-t schema-tx)))
+                    (not (= since-value (d.tx-to-t schema-tx)))
+                    (not (= (d.t-to-tx (d.tx-to-t data-tx)) data-tx))
+                    (d.is-history db)
+                    (not (d.history? history-db)))
+            (panic "binary Kvist time API did not match Clojure semantics"))))
+      (let [exact (d.datoms db ":avet" [:person/id "ada"])
+            sought (d.seek-datoms db ":avet" [:person/id "a"])
+            reverse (d.rseek-datoms db ":avet" [:person/id "z"])
+            ranged (d.index-range db ":person/id" "a" "z")
+            schema-ident (d.ident db (u64 100))]
+        (defer (data.release exact))
+        (defer (data.release sought))
+        (defer (data.release reverse))
+        (defer (data.release ranged))
+        (defer (data.release schema-ident))
+        (when (or (= (data.count exact) 0)
+                  (= (data.count sought) 0)
+                  (= (data.count reverse) 0)
+                  (= (data.count ranged) 0)
+                  (not (data.keyword? schema-ident))
+                  (not (= (data.keyword schema-ident) ":person/id")))
+          (panic "binary Kvist index API did not match Clojure semantics")))
+      (let [stats (d.db-stats db)]
+        (defer (data.release stats))
+        (let [datom-count (data.get-in stats [:datoms])
+              person-id-count
+              (data.get-in stats [:attrs :person/id :count])]
+          (when (or (not (data.int? datom-count))
+                    (<= (data.int datom-count) 0)
+                    (not (data.int? person-id-count))
+                    (not (= (data.int person-id-count) 2)))
+            (panic "binary Kvist DB stats did not match current datoms"))))
+      (let [attr (d.attribute db ":person/id")]
+        (defer (data.release attr))
+        (let [ident (data.get-in attr [:ident])
+              value-type (data.get-in attr [:value-type])
+              cardinality (data.get-in attr [:cardinality])]
+          (when (or (not (data.keyword? ident))
+                    (not (= (data.keyword ident) ":person/id"))
+                    (not (data.keyword? value-type))
+                    (not (= (data.keyword value-type) ":db.type/string"))
+                    (not (data.keyword? cardinality))
+                    (not (= (data.keyword cardinality)
+                            ":db.cardinality/one")))
+            (panic "binary Kvist attribute metadata was not Datomic-shaped"))))
       (when (not (d.lookup-ref-string-exists? db ":person/id" "ada"))
         (panic "binary Kvist lookup-ref did not find existing identity"))
       (when (d.lookup-ref-string-exists? db ":person/id" "missing")
         (panic "binary Kvist lookup-ref found missing identity"))
+      (let [pulled
+            (d.index-pull
+              db
+              {:index :avet
+               :selector [:person/id :person/name]
+               :start [:person/id]
+               :limit 1})]
+        (defer (data.release pulled))
+        (let [first-result (data.nth pulled 0)
+              pulled-id (data.get-in first-result [:person/id])
+              pulled-name (data.get-in first-result [:person/name])]
+          (when (or (not (= (data.count pulled) 1))
+                    (not (data.string? pulled-id))
+                    (not (= (data.string pulled-id) "ada"))
+                    (not (data.string? pulled-name))
+                    (not (= (data.string pulled-name) "Ada")))
+            (panic "binary Kvist index-pull was not Datomic-shaped"))))
+      (let [pulled
+            (d.index-pull
+              db
+              {:index :avet
+               :selector [:person/id]
+               :start [:person/id]
+               :reverse true
+               :offset 1
+               :limit 1})]
+        (defer (data.release pulled))
+        (let [first-result (data.nth pulled 0)
+              pulled-id (data.get-in first-result [:person/id])]
+          (when (or (not (= (data.count pulled) 1))
+                    (not (data.string? pulled-id))
+                    (not (= (data.string pulled-id) "ada")))
+            (panic "binary Kvist reverse index-pull ignored offset or limit"))))
+      (let [pulled
+            (d.index-pull
+              db
+              {:index :aevt
+               :selector [:person/id]
+               :start [:person/friend]})]
+        (defer (data.release pulled))
+        (let [first-result (data.nth pulled 0)
+              pulled-id (data.get-in first-result [:person/id])]
+          (when (or (not (= (data.count pulled) 1))
+                    (not (data.string? pulled-id))
+                    (not (= (data.string pulled-id) "grace")))
+            (panic "binary Kvist AEVT index-pull did not pull ref target"))))
+      (let [lookup-value (data.from-string "ada")
+            by-lookup (d.entity-lookup-ref db ":person/id" lookup-value)
+            by-unified (d.entity db [:person/id "ada"])
+            by-id (d.entity db ada-id)
+            schema-entity (d.entity-ident db ":person/id")]
+        (defer (data.release lookup-value))
+        (defer (d.close by-lookup))
+        (defer (d.close by-unified))
+        (defer (d.close by-id))
+        (defer (d.close schema-entity))
+        (when (or (not (d.entity-found? by-lookup))
+                  (not (d.entity-found? by-unified))
+                  (not (d.entity-found? by-id))
+                  (not (d.entity-found? schema-entity)))
+          (panic "binary Kvist entity lookup did not resolve entities"))
+        (let [[lookup-id lookup-id-ok] (d.entity-id by-lookup)
+              [resolved-id resolved-id-ok]
+              (d.entid db [:person/id "ada"])]
+          (when (or (not lookup-id-ok)
+                    (not resolved-id-ok)
+                    (not (= lookup-id ada-id))
+                    (not (= resolved-id ada-id)))
+            (panic "binary Kvist entid did not preserve entity identity")))
+        (when (or (not (d.entity-contains? by-lookup ":person/name"))
+                  (d.entity-contains? by-lookup ":person/missing"))
+          (panic "binary Kvist entity membership was incorrect"))
+        (let [name (d.entity-get by-lookup ":person/name")
+              missing (d.entity-get by-lookup ":person/missing")
+              touched (d.touch by-lookup)]
+          (defer (data.release name))
+          (defer (data.release missing))
+          (defer (data.release touched))
+          (let [touched-name (data.get-in touched [:person/name])]
+            (when (or (not (data.string? name))
+                      (not (= (data.string name) "Ada"))
+                      (not (data.nil? missing))
+                      (not (data.string? touched-name))
+                      (not (= (data.string touched-name) "Ada")))
+              (panic "binary Kvist entity values were not Datomic-shaped")))))
+      (let [lookup-value (data.from-string "ada")
+            pulled
+            (d.pull
+              db
+              '[:person/id
+                [:person/nickname :default "Unknown"]
+                {:person/friend [:person/id]}]
+              [:person/id "ada"])]
+        (defer (data.release lookup-value))
+        (defer (data.release pulled))
+        (let [pulled-id (data.get-in pulled [:person/id])
+              nickname (data.get-in pulled [:person/nickname])
+              friend-id (data.get-in pulled [:person/friend :person/id])]
+          (when (or (not (data.string? pulled-id))
+                    (not (= (data.string pulled-id) "ada"))
+                    (not (data.string? nickname))
+                    (not (= (data.string nickname) "Unknown"))
+                    (not (data.string? friend-id))
+                    (not (= (data.string friend-id) "grace")))
+            (panic "binary Kvist pull pattern was not Datomic-shaped"))))
+      (let [grace-value (data.from-string "grace")
+            [grace-id grace-ok]
+            (d.entid-lookup-ref db ":person/id" grace-value)]
+        (defer (data.release grace-value))
+        (when (not grace-ok)
+          (panic "binary Kvist pull-many could not resolve entity"))
+        (let [pulled
+              (d.pull-many
+                db
+                '[:person/id]
+                ([]u64 [ada-id grace-id]))]
+          (defer (data.release pulled))
+          (when (not (= (data.count pulled) 2))
+            (panic "binary Kvist pull-many omitted entities"))))
       (let [name
             (d.q
               '[:find ?name .
@@ -45,4 +307,52 @@
               "ada")]
         (when (or (not (data.string? name))
                   (not (= (data.string name) "Ada")))
-          (panic "unexpected binary Kvist query result"))))))
+          (panic "unexpected binary Kvist query result")))
+      (let [with-report
+            (d.with
+              db
+              [[:db/add
+                [:person/id "ada"]
+                :person/name
+                "Augusta Ada"]])]
+        (defer (d.close (addr with-report)))
+        (when (or (not with-report.ok)
+                  (= (data.count with-report.tx-data) 0))
+          (panic "binary Kvist with report omitted transaction data"))
+        (let [name-query
+              '[:find ?name .
+                :in $ ?id
+                :where [?e :person/id ?id]
+                       [?e :person/name ?name]]
+              before-name
+              (d.q name-query with-report.db-before "ada")
+              after-name
+              (d.q name-query with-report.db-after "ada")
+              connection-name
+              (d.q name-query db "ada")]
+          (when (or (not (= (data.string before-name) "Ada"))
+                    (not (= (data.string after-name) "Augusta Ada"))
+                    (not (= (data.string connection-name) "Ada")))
+            (panic "binary Kvist with report did not preserve immutable DB values"))))
+      (let [next-db
+            (d.db-with db
+                       [[:db/add ada-id :person/name "Countess Ada"]])]
+        (defer (d.close next-db))
+        (let [next-name
+              (d.q
+                '[:find ?name .
+                  :where [?e :person/id "ada"]
+                         [?e :person/name ?name]]
+                next-db)]
+          (defer (data.release next-name))
+          (when (or (not (data.string? next-name))
+                    (not (= (data.string next-name) "Countess Ada")))
+            (panic "binary Kvist db-with did not return the resulting DB"))))
+      (let [failed
+            (d.with
+              db
+              [[:db/add 1 :person/id nil]])]
+        (defer (d.close (addr failed)))
+        (when (or failed.ok
+                  (not (= failed.error-kind .Transaction-Failed)))
+          (panic "binary Kvist with error was not Vev-shaped"))))))

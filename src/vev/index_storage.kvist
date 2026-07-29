@@ -929,7 +929,7 @@
   (delete-shared-db-snapshot report.db-after)
   (delete report.tx-data)
   (delete report.tx-meta)
-  (delete report.tempids))
+  (delete-owned-tempids report.tempids))
 
 (defn shared-write-state-before-db [state: ^Shared-Write-State] -> DB
   state^.conn.db)
@@ -3391,7 +3391,7 @@
 (defn failed-source-registered-tx [before: DB, ops: [dynamic]Tx-Op, tx-meta: [dynamic]Tx-Meta, tempids: [dynamic]Tempid, segment: [dynamic]Tx-Data, error: string] -> Tx-Report
   (delete ops)
   (delete tx-meta)
-  (delete tempids)
+  (delete-owned-tempids tempids)
   (delete segment)
   (failed-tx-report before error))
 
@@ -3549,7 +3549,7 @@
       (when (not applied.ok)
         (delete ops)
         (delete tx-meta)
-        (delete tempids)
+        (delete-owned-tempids tempids)
         (delete-tx-apply-result applied)
         (return (failed-tx-report before applied.error)))
       (let [append-snapshot (if applied.append-only
@@ -3605,12 +3605,14 @@
                                                                             new-entities-after-existing)
               after-snapshot (retain-shared-db-snapshot next-snapshot)
               owned-meta (clone-tx-meta (slice resolved.tx-meta 0))
-              owned-tempids (arr.into [dynamic]Tempid (slice resolved.tempids 0))
+              owned-tempids (clone-tempids-owned (slice resolved.tempids 0))
               tx-instant appended[(- (count appended) 1)].v]
           (arr.push! owned-meta (Tx-Meta {a: ":db/txInstant" v: tx-instant}))
           (let [[_ has-current-tx] (tempid-lookup (slice owned-tempids 0) ":db/current-tx")]
             (when (not has-current-tx)
-              (arr.push! owned-tempids (Tempid {tempid: ":db/current-tx" e: tx}))))
+              (arr.push! owned-tempids
+                         (Tempid {tempid: (string-owned ":db/current-tx")
+                                  e: tx}))))
           (let [out-report (Shared-Tx-Report {ok: true
                                               error: ""
                                               db-before: before-snapshot
@@ -3669,7 +3671,7 @@
           (shared-write-state-notify! (addr conn^.write) live-report)
           (let [owned-tx-data (arr.into [dynamic]Datom (slice live-report.tx-data 0))
                 owned-tx-meta (clone-tx-meta (slice live-report.tx-meta 0))
-                owned-tempids (arr.into [dynamic]Tempid (slice live-report.tempids 0))
+                owned-tempids (clone-tempids-owned (slice live-report.tempids 0))
                 shared-report (Shared-Tx-Report {ok: true
                                                  error: ""
                                                  db-before: before-snapshot

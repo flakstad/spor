@@ -73,7 +73,7 @@ VevDB also accepts schemaless attributes.
 
 ## Indexes
 
-Database values expose four Datomic-shaped indexes:
+Database values expose four datom indexes:
 
 - EAVT: entity, attribute, value, transaction
 - AEVT: attribute, entity, value, transaction

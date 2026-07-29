@@ -21,14 +21,20 @@ transactor process. It runs in-process as a lightweight native library, either
 in memory or durably with bundled SQLite. It does not require a Clojure runtime
 or a large GraalVM native image.
 
-Because VevDB follows the Datomic API and data model, Datomic and DataScript
-tutorials for transactions, queries, pull, and immutable database values should
-work out of the box.
+Datomic is VevDB's semantic reference and tutorial corpus, not its
+architectural specification. Tutorials about transactions, queries, pull,
+entities, indexes, history, and immutable database values work with documented
+require, setup, lifecycle, and synchronous-return adaptations.
+
+The full Peer inventory and each operation's Vev disposition are recorded in
+[`compat/datomic-peer-api.edn`](compat/datomic-peer-api.edn). VevDB does not
+implement Peer deployment, JVM, asynchronous-delivery, partition, or lifecycle
+features that do not fit an embedded native database.
 
 The engine is written in [Kvist](https://github.com/kvist-lang/kvist) and
-compiles through Odin to a native library. The Kvist API and C ABI are built
-in. Clojure, Java, and Odin have standalone packages. The unpublished Python,
-Rust, Go, and Node.js APIs are experimental and may change.
+compiles through Odin to a native library. Clojure and Kvist are the paired
+primary APIs, backed by the C ABI. Java, Odin, Python, Rust, Go, and Node.js
+packages adapt to their host languages and may expose different surfaces.
 
 ## Quick Start
 
@@ -56,7 +62,7 @@ int main(void) {
 The [C ABI guide](docs/c-abi.md) covers builds, ownership, typed values, and
 prepared operations.
 
-### Clojure: Datomic-compatible API
+### Clojure: familiar data API
 
 Add the package:
 
@@ -64,7 +70,7 @@ Add the package:
 {:deps {com.vevdb/vev-clj {:mvn/version "0.2.2"}}}
 ```
 
-Use the Datomic-shaped API:
+Use `vev.core`, conventionally aliased as `d`:
 
 ```clojure
 (require '[vev.core :as d])
@@ -144,7 +150,7 @@ manage SQL schemas.
 
 - In-memory and durable databases
 - Immutable snapshots and hypothetical databases
-- Datomic-shaped transactions, schema, tempids, lookup refs, and upserts
+- Data-oriented transactions, schema, tempids, lookup refs, and upserts
 - Datalog queries with inputs, predicates, aggregates, rules, negation, and
   disjunction
 - Pull and entity reads
@@ -162,7 +168,7 @@ manage SQL schemas.
 - [Queries and pull](docs/query-model.md)
 - [History](docs/history.md)
 - [Storage](docs/storage.md)
-- [Datomic and DataScript compatibility](docs/datomic-syntax.md)
+- [Datomic and VevDB](docs/datomic-syntax.md)
 - [C ABI](docs/c-abi.md)
 - [Packages](docs/interop.md)
 - [Runtime dependencies](docs/runtime-dependencies.md)

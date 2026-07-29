@@ -14,6 +14,8 @@ TX_PARTITION_BASE :: u64(4_611_686_018_427_387_904)
 @(private)
 API :: struct {
 	abi_version: proc "c" () -> u32 `dynlib:"vev_abi_version"`,
+	squuid: proc "c" () -> cstring `dynlib:"vev_squuid"`,
+	squuid_time_millis: proc "c" (uuid_text: cstring) -> i64 `dynlib:"vev_squuid_time_millis"`,
 	open_memory: proc "c" () -> rawptr `dynlib:"vev_conn_open_memory"`,
 	close_conn: proc "c" (conn: rawptr) `dynlib:"vev_conn_close"`,
 	conn_db: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_conn_db"`,
@@ -24,6 +26,7 @@ API :: struct {
 	connection_error: proc "c" (conn: rawptr) -> cstring `dynlib:"vev_connection_error"`,
 	connection_basis_t: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_basis_t"`,
 	connection_tx_count: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_tx_count"`,
+	connection_tx_ids: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_tx_ids"`,
 	connection_close: proc "c" (conn: rawptr) `dynlib:"vev_connection_close"`,
 	connection_db: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_db"`,
 	connection_transact_edn_report: proc "c" (conn: rawptr, tx_text: cstring) -> rawptr `dynlib:"vev_connection_transact_edn_report"`,
@@ -45,15 +48,36 @@ API :: struct {
 	db_since_instant_millis: proc "c" (db: rawptr, unix_millis: i64) -> rawptr `dynlib:"vev_db_since_instant_millis"`,
 	db_history: proc "c" (db: rawptr) -> rawptr `dynlib:"vev_db_history"`,
 	db_tx_range_value: proc "c" (db: rawptr, start_kind: int, start_value: i64, end_kind: int, end_value: i64) -> rawptr `dynlib:"vev_db_tx_range_value"`,
+	db_stats_value: proc "c" (db: rawptr) -> rawptr `dynlib:"vev_db_stats_value"`,
+	with_edn_report: proc "c" (db: rawptr, tx_text: cstring) -> rawptr `dynlib:"vev_with_edn_report"`,
+	db_with_edn: proc "c" (db: rawptr, tx_text: cstring) -> rawptr `dynlib:"vev_db_with_edn"`,
 	db_query_value_with_inputs: proc "c" (db: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_db_query_value_with_inputs"`,
+	db_entity: proc "c" (db: rawptr, entity: u64) -> rawptr `dynlib:"vev_db_entity"`,
 	db_entity_lookup_ref_string: proc "c" (db: rawptr, attr, value: cstring) -> rawptr `dynlib:"vev_db_entity_lookup_ref_string"`,
+	db_entity_lookup_ref_edn: proc "c" (db: rawptr, attr, value_edn: cstring) -> rawptr `dynlib:"vev_db_entity_lookup_ref_edn"`,
+	db_entity_ident: proc "c" (db: rawptr, ident: cstring) -> rawptr `dynlib:"vev_db_entity_ident"`,
+	db_attribute_value: proc "c" (db: rawptr, attr: cstring) -> rawptr `dynlib:"vev_db_attribute_value"`,
+	db_datoms_value: proc "c" (db: rawptr, mode: int, index, components_edn: cstring) -> rawptr `dynlib:"vev_db_datoms_value"`,
+	db_index_pull_value: proc "c" (db: rawptr, index, selector_edn, start_edn: cstring, reverse: bool, offset, limit: i64) -> rawptr `dynlib:"vev_db_index_pull_value"`,
+	db_index_range_value: proc "c" (db: rawptr, attr, start_edn, end_edn: cstring) -> rawptr `dynlib:"vev_db_index_range_value"`,
 	entity_free: proc "c" (entity: rawptr) `dynlib:"vev_entity_free"`,
 	entity_found: proc "c" (entity: rawptr) -> bool `dynlib:"vev_entity_found"`,
+	entity_id: proc "c" (entity: rawptr) -> u64 `dynlib:"vev_entity_id"`,
+	entity_contains: proc "c" (entity: rawptr, attr: cstring) -> bool `dynlib:"vev_entity_contains"`,
+	entity_get: proc "c" (entity: rawptr, attr: cstring) -> rawptr `dynlib:"vev_entity_get"`,
+	entity_values: proc "c" (entity: rawptr, attr: cstring) -> rawptr `dynlib:"vev_entity_values"`,
+	entity_touch: proc "c" (entity: rawptr) -> rawptr `dynlib:"vev_entity_touch"`,
+	pull_edn: proc "c" (db: rawptr, pattern_edn: cstring, entity: u64) -> rawptr `dynlib:"vev_pull_edn"`,
+	pull_many_edn: proc "c" (db: rawptr, pattern_edn: cstring, entities: rawptr, entity_count: int) -> rawptr `dynlib:"vev_pull_many_edn"`,
 	prepare_query_edn: proc "c" (query_text: cstring) -> rawptr `dynlib:"vev_prepare_query_edn"`,
 	prepared_query_ok: proc "c" (query: rawptr) -> bool `dynlib:"vev_prepared_query_ok"`,
 	prepared_query_free: proc "c" (query: rawptr) `dynlib:"vev_prepared_query_free"`,
 	db_query_prepared_value_with_inputs: proc "c" (db, query: rawptr, inputs_text: cstring) -> rawptr `dynlib:"vev_db_query_prepared_value_with_inputs"`,
 	tx_report_edn: proc "c" (report: rawptr) -> cstring `dynlib:"vev_tx_report_edn"`,
+	tx_report_value: proc "c" (report: rawptr) -> rawptr `dynlib:"vev_tx_report_value"`,
+	tx_report_resolve_tempid_edn: proc "c" (report: rawptr, tempid_edn: cstring) -> u64 `dynlib:"vev_tx_report_resolve_tempid_edn"`,
+	tx_report_db_before: proc "c" (report: rawptr) -> rawptr `dynlib:"vev_tx_report_db_before"`,
+	tx_report_db_after: proc "c" (report: rawptr) -> rawptr `dynlib:"vev_tx_report_db_after"`,
 	tx_report_free: proc "c" (report: rawptr) `dynlib:"vev_tx_report_free"`,
 	value_handle_free: proc "c" (handle: rawptr) `dynlib:"vev_value_handle_free"`,
 	value_handle_value: proc "c" (handle: rawptr) -> rawptr `dynlib:"vev_value_handle_value"`,
@@ -71,6 +95,9 @@ API :: struct {
 	value_map_key: proc "c" (value: rawptr, index: int) -> rawptr `dynlib:"vev_value_map_key"`,
 	value_map_value: proc "c" (value: rawptr, index: int) -> rawptr `dynlib:"vev_value_map_value"`,
 	value_map_get: proc "c" (value: rawptr, key: cstring) -> rawptr `dynlib:"vev_value_map_get"`,
+	u64_array_free: proc "c" (array: rawptr) `dynlib:"vev_u64_array_free"`,
+	u64_array_count: proc "c" (array: rawptr) -> int `dynlib:"vev_u64_array_count"`,
+	u64_array_value: proc "c" (array: rawptr, index: int) -> u64 `dynlib:"vev_u64_array_value"`,
 	string_free: proc "c" (text: cstring) `dynlib:"vev_string_free"`,
 	__handle: dynlib.Library,
 }
@@ -94,11 +121,21 @@ DB :: struct {
 	handle: rawptr,
 }
 
+Entity :: struct {
+	library: ^Library,
+	handle: rawptr,
+}
+
 Log :: struct {
 	database: DB,
 }
 
 Data :: struct {
+	library: ^Library,
+	handle: rawptr,
+}
+
+Native_Tx_Report :: struct {
 	library: ^Library,
 	handle: rawptr,
 }
@@ -148,6 +185,8 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	}
 
 	if library.api.abi_version == nil ||
+	   library.api.squuid == nil ||
+	   library.api.squuid_time_millis == nil ||
 	   library.api.open_memory == nil ||
 	   library.api.close_conn == nil ||
 	   library.api.conn_db == nil ||
@@ -158,6 +197,7 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.connection_error == nil ||
 	   library.api.connection_basis_t == nil ||
 	   library.api.connection_tx_count == nil ||
+	   library.api.connection_tx_ids == nil ||
 	   library.api.connection_close == nil ||
 	   library.api.connection_db == nil ||
 	   library.api.connection_transact_edn_report == nil ||
@@ -179,15 +219,36 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.db_since_instant_millis == nil ||
 	   library.api.db_history == nil ||
 	   library.api.db_tx_range_value == nil ||
+	   library.api.db_stats_value == nil ||
+	   library.api.with_edn_report == nil ||
+	   library.api.db_with_edn == nil ||
 	   library.api.db_query_value_with_inputs == nil ||
+	   library.api.db_entity == nil ||
 	   library.api.db_entity_lookup_ref_string == nil ||
+	   library.api.db_entity_lookup_ref_edn == nil ||
+	   library.api.db_entity_ident == nil ||
+	   library.api.db_attribute_value == nil ||
+	   library.api.db_datoms_value == nil ||
+	   library.api.db_index_pull_value == nil ||
+	   library.api.db_index_range_value == nil ||
 	   library.api.entity_free == nil ||
 	   library.api.entity_found == nil ||
+	   library.api.entity_id == nil ||
+	   library.api.entity_contains == nil ||
+	   library.api.entity_get == nil ||
+	   library.api.entity_values == nil ||
+	   library.api.entity_touch == nil ||
+	   library.api.pull_edn == nil ||
+	   library.api.pull_many_edn == nil ||
 	   library.api.prepare_query_edn == nil ||
 	   library.api.prepared_query_ok == nil ||
 	   library.api.prepared_query_free == nil ||
 	   library.api.db_query_prepared_value_with_inputs == nil ||
 	   library.api.tx_report_edn == nil ||
+	   library.api.tx_report_value == nil ||
+	   library.api.tx_report_resolve_tempid_edn == nil ||
+	   library.api.tx_report_db_before == nil ||
+	   library.api.tx_report_db_after == nil ||
 	   library.api.tx_report_free == nil ||
 	   library.api.value_handle_free == nil ||
 	   library.api.value_handle_value == nil ||
@@ -205,6 +266,9 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.value_map_key == nil ||
 	   library.api.value_map_value == nil ||
 	   library.api.value_map_get == nil ||
+	   library.api.u64_array_free == nil ||
+	   library.api.u64_array_count == nil ||
+	   library.api.u64_array_value == nil ||
 	   library.api.string_free == nil ||
 	   library.api.abi_version() != ABI_VERSION {
 		dynlib.unload_library(library.api.__handle)
@@ -212,6 +276,27 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	}
 
 	return library, true
+}
+
+squuid :: proc(library: ^Library, allocator := context.allocator) -> (value: string, ok: bool) {
+	if library == nil || library.api.squuid == nil {
+		return "", false
+	}
+	native_value := library.api.squuid()
+	if native_value == nil {
+		return "", false
+	}
+	defer library.api.string_free(native_value)
+	return strings.clone(string(native_value), allocator), true
+}
+
+squuid_time_millis :: proc(library: ^Library, value: string) -> (unix_millis: i64, ok: bool) {
+	if library == nil || library.api.squuid_time_millis == nil {
+		return 0, false
+	}
+	value_cstring := strings.clone_to_cstring(value, context.temp_allocator)
+	unix_millis = library.api.squuid_time_millis(value_cstring)
+	return unix_millis, unix_millis >= 0
 }
 
 load_bundled :: proc(package_root: string) -> (library: Library, ok: bool) {
@@ -335,6 +420,29 @@ connection_tx_count :: proc(connection: ^Durable_Connection) -> (count: u64, ok:
 		return 0, false
 	}
 	return connection.library.api.connection_tx_count(connection.handle), true
+}
+
+connection_tx_ids :: proc(
+	connection: ^Durable_Connection,
+	allocator := context.allocator,
+) -> (values: [dynamic]u64, ok: bool) {
+	if connection == nil || connection.handle == nil {
+		return {}, false
+	}
+	handle := connection.library.api.connection_tx_ids(connection.handle)
+	if handle == nil {
+		return {}, false
+	}
+	defer connection.library.api.u64_array_free(handle)
+	count := connection.library.api.u64_array_count(handle)
+	if count < 0 {
+		return {}, false
+	}
+	values = make([dynamic]u64, 0, count, allocator)
+	for index in 0 ..< count {
+		append(&values, connection.library.api.u64_array_value(handle, index))
+	}
+	return values, true
 }
 
 compact_indexes :: proc(connection: ^Durable_Connection) -> bool {
@@ -478,6 +586,258 @@ lookup_ref_string_exists :: proc(database: ^DB, attr, value: string) -> bool {
 	return database.library.api.entity_found(entity)
 }
 
+entity :: proc(database: ^DB, entity_id: u64) -> (result: Entity, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	handle := database.library.api.db_entity(database.handle, entity_id)
+	if handle == nil || !database.library.api.entity_found(handle) {
+		if handle != nil {
+			database.library.api.entity_free(handle)
+		}
+		return {}, false
+	}
+	return Entity{library = database.library, handle = handle}, true
+}
+
+entity_lookup_ref :: proc(
+	database: ^DB,
+	attr, value_edn: string,
+) -> (result: Entity, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	attr_cstring := strings.clone_to_cstring(attr, context.temp_allocator)
+	value_cstring := strings.clone_to_cstring(value_edn, context.temp_allocator)
+	handle := database.library.api.db_entity_lookup_ref_edn(
+		database.handle,
+		attr_cstring,
+		value_cstring,
+	)
+	if handle == nil || !database.library.api.entity_found(handle) {
+		if handle != nil {
+			database.library.api.entity_free(handle)
+		}
+		return {}, false
+	}
+	return Entity{library = database.library, handle = handle}, true
+}
+
+entity_ident :: proc(database: ^DB, ident: string) -> (result: Entity, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	ident_cstring := strings.clone_to_cstring(ident, context.temp_allocator)
+	handle := database.library.api.db_entity_ident(database.handle, ident_cstring)
+	if handle == nil || !database.library.api.entity_found(handle) {
+		if handle != nil {
+			database.library.api.entity_free(handle)
+		}
+		return {}, false
+	}
+	return Entity{library = database.library, handle = handle}, true
+}
+
+entity_id :: proc(entity_value: ^Entity) -> (id: u64, ok: bool) {
+	if entity_value == nil || entity_value.handle == nil {
+		return 0, false
+	}
+	id = entity_value.library.api.entity_id(entity_value.handle)
+	return id, id != 0
+}
+
+entity_contains :: proc(entity_value: ^Entity, attr: string) -> bool {
+	if entity_value == nil || entity_value.handle == nil {
+		return false
+	}
+	attr_cstring := strings.clone_to_cstring(attr, context.temp_allocator)
+	return entity_value.library.api.entity_contains(entity_value.handle, attr_cstring)
+}
+
+entity_get :: proc(entity_value: ^Entity, attr: string) -> (result: Data, ok: bool) {
+	if entity_value == nil || entity_value.handle == nil {
+		return {}, false
+	}
+	attr_cstring := strings.clone_to_cstring(attr, context.temp_allocator)
+	handle := entity_value.library.api.entity_get(entity_value.handle, attr_cstring)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = entity_value.library, handle = handle}, true
+}
+
+entity_values :: proc(entity_value: ^Entity, attr: string) -> (result: Data, ok: bool) {
+	if entity_value == nil || entity_value.handle == nil {
+		return {}, false
+	}
+	attr_cstring := strings.clone_to_cstring(attr, context.temp_allocator)
+	handle := entity_value.library.api.entity_values(entity_value.handle, attr_cstring)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = entity_value.library, handle = handle}, true
+}
+
+entity_touch :: proc(entity_value: ^Entity) -> (result: Data, ok: bool) {
+	if entity_value == nil || entity_value.handle == nil {
+		return {}, false
+	}
+	handle := entity_value.library.api.entity_touch(entity_value.handle)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = entity_value.library, handle = handle}, true
+}
+
+close_entity :: proc(entity_value: ^Entity) {
+	if entity_value == nil || entity_value.handle == nil {
+		return
+	}
+	entity_value.library.api.entity_free(entity_value.handle)
+	entity_value^ = {}
+}
+
+attribute :: proc(database: ^DB, attr: string) -> (result: Data, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	attr_cstring := strings.clone_to_cstring(attr, context.temp_allocator)
+	handle := database.library.api.db_attribute_value(
+		database.handle,
+		attr_cstring,
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = database.library, handle = handle}, true
+}
+
+datoms :: proc(
+	database: ^DB,
+	mode: int,
+	index, components_edn: string,
+) -> (result: Data, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	index_cstring := strings.clone_to_cstring(index, context.temp_allocator)
+	components_cstring := strings.clone_to_cstring(
+		components_edn,
+		context.temp_allocator,
+	)
+	handle := database.library.api.db_datoms_value(
+		database.handle,
+		mode,
+		index_cstring,
+		components_cstring,
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = database.library, handle = handle}, true
+}
+
+index_pull :: proc(
+	database: ^DB,
+	index, selector_edn, start_edn: string,
+	reverse := false,
+	offset: i64 = 0,
+	limit: i64 = -1,
+) -> (result: Data, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	index_cstring := strings.clone_to_cstring(index, context.temp_allocator)
+	selector_cstring := strings.clone_to_cstring(selector_edn, context.temp_allocator)
+	start_cstring := strings.clone_to_cstring(start_edn, context.temp_allocator)
+	handle := database.library.api.db_index_pull_value(
+		database.handle,
+		index_cstring,
+		selector_cstring,
+		start_cstring,
+		reverse,
+		offset,
+		limit,
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = database.library, handle = handle}, true
+}
+
+index_range :: proc(
+	database: ^DB,
+	attr, start_edn, end_edn: string,
+) -> (result: Data, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	attr_cstring := strings.clone_to_cstring(attr, context.temp_allocator)
+	start_cstring := strings.clone_to_cstring(start_edn, context.temp_allocator)
+	end_cstring := strings.clone_to_cstring(end_edn, context.temp_allocator)
+	handle := database.library.api.db_index_range_value(
+		database.handle,
+		attr_cstring,
+		start_cstring,
+		end_cstring,
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = database.library, handle = handle}, true
+}
+
+pull :: proc(
+	database: ^DB,
+	pattern_edn: string,
+	entity_id: u64,
+) -> (result: Data, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	pattern_cstring := strings.clone_to_cstring(
+		pattern_edn,
+		context.temp_allocator,
+	)
+	handle := database.library.api.pull_edn(
+		database.handle,
+		pattern_cstring,
+		entity_id,
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = database.library, handle = handle}, true
+}
+
+pull_many :: proc(
+	database: ^DB,
+	pattern_edn: string,
+	entities: []u64,
+) -> (result: Data, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	pattern_cstring := strings.clone_to_cstring(
+		pattern_edn,
+		context.temp_allocator,
+	)
+	entity_data: rawptr = nil
+	if len(entities) > 0 {
+		entity_data = rawptr(&entities[0])
+	}
+	handle := database.library.api.pull_many_edn(
+		database.handle,
+		pattern_cstring,
+		entity_data,
+		len(entities),
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = database.library, handle = handle}, true
+}
+
 as_of_coordinate :: proc(database: ^DB, tx: u64) -> (filtered: DB, ok: bool) {
 	if database == nil || database.handle == nil {
 		return {}, false
@@ -608,6 +968,32 @@ tx_range :: proc(
 	return Data{library = log_value.database.library, handle = handle}, true
 }
 
+tx_range_all :: proc(log_value: ^Log) -> (transactions: Data, ok: bool) {
+	return tx_range(log_value, nil, nil)
+}
+
+tx_range_coordinates :: proc(
+	log_value: ^Log,
+	start, end: u64,
+) -> (transactions: Data, ok: bool) {
+	return tx_range(
+		log_value,
+		Time_Point(start),
+		Time_Point(end),
+	)
+}
+
+db_stats :: proc(database: ^DB) -> (stats: Data, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	handle := database.library.api.db_stats_value(database.handle)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = database.library, handle = handle}, true
+}
+
 transact_memory :: proc(
 	connection: ^Connection,
 	tx: string,
@@ -652,6 +1038,122 @@ transact_durable :: proc(
 	defer connection.library.api.string_free(native_result)
 	result = strings.clone(string(native_result), allocator)
 	return result, strings.contains(result, ":ok true")
+}
+
+transact_report_durable :: proc(
+	connection: ^Durable_Connection,
+	tx: string,
+) -> (report: Native_Tx_Report, ok: bool) {
+	if connection == nil || connection.handle == nil {
+		return {}, false
+	}
+	tx_text := strings.clone_to_cstring(tx, context.temp_allocator)
+	handle := connection.library.api.connection_transact_edn_report(
+		connection.handle,
+		tx_text,
+	)
+	if handle == nil {
+		return {}, false
+	}
+	return Native_Tx_Report{library = connection.library, handle = handle}, true
+}
+
+with_report :: proc(
+	database: ^DB,
+	tx: string,
+) -> (report: Native_Tx_Report, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	tx_text := strings.clone_to_cstring(tx, context.temp_allocator)
+	handle := database.library.api.with_edn_report(database.handle, tx_text)
+	if handle == nil {
+		return {}, false
+	}
+	return Native_Tx_Report{library = database.library, handle = handle}, true
+}
+
+db_with :: proc(database: ^DB, tx: string) -> (result: DB, ok: bool) {
+	if database == nil || database.handle == nil {
+		return {}, false
+	}
+	tx_text := strings.clone_to_cstring(tx, context.temp_allocator)
+	handle := database.library.api.db_with_edn(database.handle, tx_text)
+	if handle == nil {
+		return {}, false
+	}
+	return DB{library = database.library, handle = handle}, true
+}
+
+tx_report_edn :: proc(
+	report: ^Native_Tx_Report,
+	allocator := context.allocator,
+) -> (result: string, ok: bool) {
+	if report == nil || report.handle == nil {
+		return "", false
+	}
+	native_result := report.library.api.tx_report_edn(report.handle)
+	if native_result == nil {
+		return "", false
+	}
+	defer report.library.api.string_free(native_result)
+	return strings.clone(string(native_result), allocator), true
+}
+
+tx_report_value :: proc(report: ^Native_Tx_Report) -> (result: Value, ok: bool) {
+	if report == nil || report.handle == nil {
+		return {}, false
+	}
+	handle := report.library.api.tx_report_value(report.handle)
+	if handle == nil {
+		return {}, false
+	}
+	return Value{library = report.library, handle = handle}, true
+}
+
+tx_report_resolve_tempid :: proc(
+	report: ^Native_Tx_Report,
+	tempid_edn: string,
+) -> (entity: u64, ok: bool) {
+	if report == nil || report.handle == nil {
+		return 0, false
+	}
+	tempid_cstring := strings.clone_to_cstring(tempid_edn, context.temp_allocator)
+	entity = report.library.api.tx_report_resolve_tempid_edn(
+		report.handle,
+		tempid_cstring,
+	)
+	return entity, entity != 0
+}
+
+tx_report_db_before :: proc(report: ^Native_Tx_Report) -> (database: DB, ok: bool) {
+	if report == nil || report.handle == nil {
+		return {}, false
+	}
+	handle := report.library.api.tx_report_db_before(report.handle)
+	if handle == nil {
+		return {}, false
+	}
+	return DB{library = report.library, handle = handle}, true
+}
+
+tx_report_db_after :: proc(report: ^Native_Tx_Report) -> (database: DB, ok: bool) {
+	if report == nil || report.handle == nil {
+		return {}, false
+	}
+	handle := report.library.api.tx_report_db_after(report.handle)
+	if handle == nil {
+		return {}, false
+	}
+	return DB{library = report.library, handle = handle}, true
+}
+
+close_tx_report :: proc(report: ^Native_Tx_Report) {
+	if report == nil || report.handle == nil {
+		return
+	}
+	report.library.api.tx_report_free(report.handle)
+	report^ = {}
 }
 
 query_memory :: proc(
@@ -928,7 +1430,7 @@ db :: proc{db_memory, db_durable}
 log :: proc{log_memory, log_durable}
 as_of :: proc{as_of_coordinate, as_of_time}
 since :: proc{since_coordinate, since_time}
-close :: proc{close_memory, close_durable, close_db, close_log, close_data, close_prepared_query}
+close :: proc{close_memory, close_durable, close_db, close_entity, close_log, close_data, close_prepared_query, close_tx_report}
 transact :: proc{transact_memory, transact_durable}
 query :: proc{query_memory, query_durable, query_db}
 edn :: proc{edn_data, edn_value}

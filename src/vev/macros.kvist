@@ -75,8 +75,7 @@
 (defmacro- current-tx-form? [form]
   (cond
     (keyword? form) (= (source form) ":db/current-tx")
-    (string? form) (or (= (text form) "datomic.tx")
-                       (= (text form) "datascript.tx"))
+    (string? form) (= (text form) "datomic.tx")
     :else false))
 
 (defmacro- emit-index-arg [form]

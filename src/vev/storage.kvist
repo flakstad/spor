@@ -14263,6 +14263,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (value-map
     ([]Value [(value-keyword (string-owned ":ok")) (value-bool report.ok)
               (value-keyword (string-owned ":error")) (value-string (string-owned report.error))
+              (value-keyword (string-owned ":vev/error"))
+              (if report.ok
+                (value-nil)
+                (value-keyword (string-owned ":vev.error/transaction-failed")))
               (value-keyword (string-owned ":tx")) (if report.ok (value-entity report.tx) (value-nil))
               (value-keyword (string-owned ":tx-data")) (datoms-value (slice report.tx-data 0))
               (value-keyword (string-owned ":tempids")) (tempids-value (slice report.tempids 0))
@@ -14273,13 +14277,13 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (close-store-db report.db-after)
   (delete-owned-datoms report.tx-data)
   (delete report.tx-meta)
-  (delete report.tempids))
+  (delete-owned-tempids report.tempids))
 
 (defn delete-store-tx-report-preserve-db-before [report: Store-Tx-Report]
   (close-store-db report.db-after)
   (delete-owned-datoms report.tx-data)
   (delete report.tx-meta)
-  (delete report.tempids))
+  (delete-owned-tempids report.tempids))
 
 (defn delete-store-tx-reports [reports: [dynamic]Store-Tx-Report]
   (for [report reports]
@@ -14287,7 +14291,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (delete reports))
 
 (defn clone-store-tx-report [report: Store-Tx-Report] -> Store-Tx-Report
-  (let [tempids (arr.into [dynamic]Tempid (slice report.tempids 0))]
+  (let [tempids (clone-tempids-owned (slice report.tempids 0))]
     (Store-Tx-Report {ok: report.ok
                       error: report.error
                       db-before: (retain-store-db report.db-before)
@@ -14350,16 +14354,17 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     out))
 
 (defn store-report-tempids-with-current-tx [tempids: []Tempid, tx: u64] -> [dynamic]Tempid
-  (let [out (arr.into [dynamic]Tempid tempids)
+  (let [out (clone-tempids-owned tempids)
         [_ has-current-tx] (tempid-lookup (slice out 0) ":db/current-tx")]
     (when (not has-current-tx)
-      (arr.push! out (Tempid {tempid: ":db/current-tx" e: tx})))
+      (arr.push! out
+                 (Tempid {tempid: (string-owned ":db/current-tx") e: tx})))
     out))
 
 (defn store-tx-report-from-resident-report [report: Tx-Report] -> Store-Tx-Report
   (let [before (Store-DB {kind: .Resident resident: (clone-db report.db-before)})
         after (Store-DB {kind: .Resident resident: (clone-db report.db-after)})
-        tempids (arr.into [dynamic]Tempid (slice report.tempids 0))]
+        tempids (clone-tempids-owned (slice report.tempids 0))]
     (Store-Tx-Report {ok: report.ok
                       error: report.error
                       db-before: before
@@ -14383,7 +14388,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (do
       (delete report.tx-data)
       (delete report.tx-meta)
-      (delete report.tempids)
+      (delete-owned-tempids report.tempids)
       (delete-tx-publish-plan report.publish-plan))))
 
 (defn store-tx-report-from-temp-resident-report [report: Tx-Report] -> Store-Tx-Report
@@ -14393,7 +14398,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 
 (defn initial-source-overlay-report-from-resident-report [before: Store-DB, report: Tx-Report] -> Store-Tx-Report
   (let [after-snapshot (shared-db-snapshot-from-db report.db-after sqlite-db-source-default-page-size)
-        tempids (arr.into [dynamic]Tempid (slice report.tempids 0))]
+        tempids (clone-tempids-owned (slice report.tempids 0))]
     (Store-Tx-Report {ok: report.ok
                       error: report.error
                       db-before: (retain-store-db before)
@@ -14762,7 +14767,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn failed-store-source-registered-tx [snapshot: Store-DB, ops: [dynamic]Tx-Op, tx-meta: [dynamic]Tx-Meta, tempids: [dynamic]Tempid, segment: [dynamic]Tx-Data, error: string] -> Store-Tx-Report
   (delete ops)
   (delete tx-meta)
-  (delete tempids)
+  (delete-owned-tempids tempids)
   (delete segment)
   (failed-store-tx-report snapshot error))
 
@@ -14805,19 +14810,19 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (when (not instant-ok)
         (delete ops)
         (delete tx-meta)
-        (delete tempids)
+        (delete-owned-tempids tempids)
         (return (failed-store-tx-report snapshot^ instant-error))))
     (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-ops source (slice ops 0))]
       (when (not overlay-ok)
         (delete ops)
         (delete tx-meta)
-        (delete tempids)
+        (delete-owned-tempids tempids)
         (return (failed-store-tx-report snapshot^ overlay-error)))
       (let [report (store-tx-report-from-source-overlay-parts snapshot^ (slice overlay-ops 0) tx (slice tx-meta 0) (slice tempids 0) state^.next-entity-id)]
         (delete-owned-tx-ops overlay-ops)
         (delete ops)
         (delete tx-meta)
-        (delete tempids)
+        (delete-owned-tempids tempids)
         report))))
 
 (defn with-store-db-report-tx-data-with-source-string-fns [snapshot: ^Store-DB, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
@@ -15330,7 +15335,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
                           resident: (build-db (clone-owned-datom-slice (slice resident-report.db-before.datoms 0)))})
         after (Store-DB {kind: .Resident
                          resident: (build-db (clone-owned-datom-slice (slice resident-report.db-after.datoms 0)))})
-        tempids (arr.into [dynamic]Tempid (slice resident-report.tempids 0))
+        tempids (clone-tempids-owned (slice resident-report.tempids 0))
         report (Store-Tx-Report {ok: resident-report.ok
                                  error: (string-owned resident-report.error)
                                  db-before: before
@@ -15361,14 +15366,14 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (delete report.error)
       (delete-owned-datoms report.tx-data)
       (delete report.tx-meta)
-      (delete report.tempids)
+      (delete-owned-tempids report.tempids)
       (delete-tx-publish-plan report.publish-plan))
     (do
       (delete-owned-db report.db-before)
       (delete report.error)
       (delete report.tx-data)
       (delete report.tx-meta)
-      (delete report.tempids)
+      (delete-owned-tempids report.tempids)
       (delete-tx-publish-plan report.publish-plan))))
 
 (defn db-with-store-db-tx-data [snapshot: ^Store-DB, tx-data: []Tx-Data] -> Store-DB
@@ -15880,6 +15885,13 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (arr.push! out arg.value)))
     (return out true "")))
 
+(defn store-index-attribute-position [order: Public-Index-Order, value-count: int] -> int
+  (let [position
+        (if (or (= order .EAVT) (= order .VAET))
+          1
+          0)]
+    (if (< position value-count) position -1)))
+
 (defn store-db-index-datoms [snapshot: ^Store-DB, mode: int, order-text: string, args: []Index-Arg] -> [datoms: [dynamic]Datom, ok: bool, error: string]
   (let [[order order-ok] (store-public-index-order order-text)]
     (when (not order-ok)
@@ -15891,6 +15903,21 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (when (not values-ok)
           (return (make [dynamic]Datom) false values-error))
         (defer (delete values))
+        (let [attr-position (store-index-attribute-position order (count values))
+              resolved-attr-owned false]
+          (when (and (>= attr-position 0)
+                     (or (= values[attr-position].kind .Entity)
+                         (= values[attr-position].kind .Int)))
+            (let [[resolved resolved-ok resolved-error]
+                  (db-read-source-resolve-attribute-value
+                    source values[attr-position])]
+              (when (not resolved-ok)
+                (return (make [dynamic]Datom) false resolved-error))
+              (set! values[attr-position] resolved)
+              (set! resolved-attr-owned true)))
+          (defer
+            (when resolved-attr-owned
+              (delete-owned-value values[attr-position])))
         (let [all (make [dynamic]Datom)
               [scan-ok scan-error] (db-read-source-append-index-datoms! (addr all) source order ([]Value []))]
           (when (not scan-ok)
@@ -15916,7 +15943,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
                                 (= compare 0))]
                   (when include
                     (arr.push! out (datom-owned datom))))))
-            (return out true "")))))))
+            (return out true ""))))))))
 
 (defn store-db-index-range-datoms [snapshot: ^Store-DB, attr: string, start: Index-Arg, has-start: bool, end: Index-Arg, has-end: bool] -> [datoms: [dynamic]Datom, ok: bool, error: string]
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
@@ -17006,7 +17033,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     .Shared
       (let [report (shared-conn-transact-report (addr store^.shared) tx-data)]
         (when report.ok
-          (let [tempids (arr.into [dynamic]Tempid (slice report.tempids 0))]
+          (let [tempids (clone-tempids-owned (slice report.tempids 0))]
             (let [out (Store-Tx-Report {ok: true
                                          error: ""
                                          db-before: (Store-DB {kind: .Shared-Snapshot shared-snapshot: report.db-before})
@@ -17314,7 +17341,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (do
       (delete report.tx-data)
       (delete report.tx-meta)
-      (delete report.tempids)
+      (delete-owned-tempids report.tempids)
       (delete-tx-publish-plan report.publish-plan))))
 
 (defn shared-store-report-tx-data-with-source-string-fns [store: ^Store-Conn, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
@@ -17322,7 +17349,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         report (shared-conn-transact-with-source-string-fns (addr store^.shared) tx-data registry)]
     (if report.ok
       (let [after-snapshot (retain-shared-db-snapshot store^.shared.snapshot)
-            tempids (arr.into [dynamic]Tempid (slice report.tempids 0))
+            tempids (clone-tempids-owned (slice report.tempids 0))
             out (Store-Tx-Report {ok: true
                                   error: ""
                                   db-before: (Store-DB {kind: .Shared-Snapshot shared-snapshot: before-snapshot})

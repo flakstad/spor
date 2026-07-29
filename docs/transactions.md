@@ -1,6 +1,6 @@
 # Transactions
 
-Transactions accept Datomic-shaped maps and operation vectors.
+Transactions accept the familiar entity-map and operation-vector data forms.
 
 ```clojure
 [{:db/id -1

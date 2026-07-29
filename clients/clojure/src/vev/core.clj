@@ -6,8 +6,7 @@
   (:require [clojure.edn :as edn]
             [clojure.set :as set])
   (:import [java.nio.file Path]
-           [java.util.function Function]
-           [com.vevdb Vev Vev$ColumnResult Vev$DB Vev$Datom Vev$Entity Vev$EntityView Vev$Keyword Vev$Log Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxReportListener]))
+           [com.vevdb Vev Vev$ColumnResult Vev$DB Vev$Datom Vev$Entity Vev$EntityView Vev$Keyword Vev$Log Vev$MapValue Vev$PreparedPullPattern Vev$QueryAggregate Vev$QueryPredicate Vev$Symbol Vev$TxReport Vev$TxReportListener]))
 
 (defn- path [value]
   (cond
@@ -23,6 +22,10 @@
     :else
     (binding [*print-namespace-maps* false]
       (pr-str value))))
+
+(defn- edn-scalar-text [value]
+  (binding [*print-namespace-maps* false]
+    (pr-str value)))
 
 (declare query-input-value)
 
@@ -373,25 +376,23 @@
     :else
     (throw (ex-info "expected Vev connection" {:source conn}))))
 
-(defn- db-future [conn native-future]
-  (.thenApply native-future
-              (reify Function
-                (apply [_ native-db]
-                  (->DB (:engine conn) native-db)))))
+(defn- await-db [conn native-future]
+  (->DB (:engine conn) (.get native-future)))
 
 (defn sync
-  "Return a future yielding a DB coordinated with other connections.
+  "Return a DB coordinated with other connections.
 
   With no `t`, captures a DB containing every transaction complete when this
-  function was called. With `t`, completes once the connection can acquire a DB
-  whose basis t is at least `t`."
+  function was called. With `t`, waits until the connection can acquire a DB
+  whose basis t is at least `t`. Unlike Datomic Peer, Vev returns the DB
+  directly because synchronization is a local embedded operation."
   ([conn]
    (cond
      (instance? Conn conn)
-     (db-future conn (.sync (:native conn)))
+     (await-db conn (.sync (:native conn)))
 
      (instance? DurableConn conn)
-     (db-future conn (.sync (:native conn)))
+     (await-db conn (.sync (:native conn)))
 
      :else
      (throw (ex-info "expected Vev connection" {:source conn}))))
@@ -400,10 +401,10 @@
      (throw (ex-info "sync t must be a non-negative integer" {:t t})))
    (cond
      (instance? Conn conn)
-     (db-future conn (.sync (:native conn) (long t)))
+     (await-db conn (.sync (:native conn) (long t)))
 
      (instance? DurableConn conn)
-     (db-future conn (.sync (:native conn) (long t)))
+     (await-db conn (.sync (:native conn) (long t)))
 
      :else
      (throw (ex-info "expected Vev connection" {:source conn})))))
@@ -477,16 +478,15 @@
 
                  (and (vector? eid)
                       (= 2 (count eid))
-                      (keyword? (first eid))
-                      (string? (second eid)))
-                 (.entityLookupRefString ^Vev$DB (:native db)
-                                         (edn-text (first eid))
-                                         (second eid))
+                      (keyword? (first eid)))
+                 (.entityLookupRefEdn ^Vev$DB (:native db)
+                                      (edn-text (first eid))
+                                      (edn-scalar-text (second eid)))
 
                  :else
                  (throw (ex-info "unsupported entity id"
                                  {:eid eid
-                                  :supported #{:integer :ident-keyword :string-lookup-ref}})))]
+                                  :supported #{:integer :ident-keyword :lookup-ref}})))]
     (if (and lookup? (not (.found ^Vev$EntityView native)))
       (do
         (.close ^Vev$EntityView native)
@@ -514,6 +514,32 @@
     eid
     (:db/ident (entity db eid))))
 
+(defn attribute
+  "Return Datomic-shaped metadata for an installed attribute, or nil.
+
+  Undeclared Vev attributes remain a flexible extension and are not reported
+  as installed schema attributes."
+  [^DB db attr]
+  (when-let [eid (entid db attr)]
+    (when-let [schema-entity (entity db eid)]
+      (let [ident-value (:db/ident schema-entity)
+            value-type (:db/valueType schema-entity)
+            cardinality (:db/cardinality schema-entity)
+            unique (:db/unique schema-entity)
+            indexed (true? (:db/index schema-entity))
+            fulltext (true? (:db/fulltext schema-entity))]
+        (when (and ident-value value-type cardinality)
+          {:id eid
+           :ident ident-value
+           :value-type value-type
+           :cardinality cardinality
+           :indexed indexed
+           :has-avet (or indexed (some? unique) fulltext)
+           :unique unique
+           :is-component (true? (:db/isComponent schema-entity))
+           :no-history (true? (:db/noHistory schema-entity))
+           :fulltext fulltext})))))
+
 (defn- native-index-value [value]
   (cond
     (keyword? value) (Vev$Keyword. (str value))
@@ -537,6 +563,22 @@
             (:v value)
             (:tx value)
             (:added value))))
+
+(defn- transaction-report
+  [engine ^Vev$TxReport report]
+  (let [raw (clj-value (.value report))]
+    (when-not (:ok raw)
+      (throw
+       (ex-info (or (:error raw) "Vev transaction failed")
+                {:vev/error (or (:vev/error raw)
+                                :vev.error/transaction-failed)
+                 :vev/message (:error raw)
+                 :vev/tx (:tx raw)
+                 :vev/report raw})))
+    {:db-before (->DB engine (.dbBefore report))
+     :db-after (->DB engine (.dbAfter report))
+     :tx-data (mapv datom-from-map (:tx-data raw))
+     :tempids (or (:tempids raw) {})}))
 
 (defn- index-datoms [^DB db operation index components]
   (let [native-db ^Vev$DB (:native db)
@@ -572,6 +614,42 @@
                             (native-index-value start)
                             (native-index-value end))]
     (mapv datom-from-map values)))
+
+(defn db-stats
+  "Return counts of current datoms and datoms by attribute.
+
+  The shape matches Datomic Peer. Vev's flexible attributes are included, and
+  Vev does not fabricate Datomic's system-schema statistics."
+  [^DB db]
+  (let [all-datoms (datoms db :eavt)]
+    {:datoms (count all-datoms)
+     :attrs (->> all-datoms
+                 (group-by :a)
+                 (reduce-kv (fn [out attr values]
+                              (assoc out
+                                     (or (ident db attr) attr)
+                                     {:count (count values)}))
+                            {}))}))
+
+(defn resolve-tempid
+  "Resolve `tempid` through a transaction report's tempid map."
+  [_db tempids tempid]
+  (get tempids tempid))
+
+(defn squuid
+  "Return a semi-sequential UUID using Datomic's seconds-in-high-bits layout."
+  []
+  (let [random (java.util.UUID/randomUUID)
+        seconds (quot (System/currentTimeMillis) 1000)
+        timed-msb (bit-or (bit-shift-left seconds 32)
+                          (bit-and 0x00000000ffffffff
+                                   (.getMostSignificantBits random)))]
+    (java.util.UUID. timed-msb (.getLeastSignificantBits random))))
+
+(defn squuid-time-millis
+  "Return the millisecond time component encoded in a squuid."
+  [^java.util.UUID value]
+  (* 1000 (unsigned-bit-shift-right (.getMostSignificantBits value) 32)))
 
 (defn- entity-contains?
   [^EntityView entity-view attr]
@@ -656,14 +734,24 @@
 (defn transact
   "Transact Clojure data or EDN text against a connection.
 
-  Returns a Clojure transaction report map."
+  Returns a Datomic-shaped transaction report map synchronously. Rejected
+  transactions throw ExceptionInfo; use `try-transact` for an explicit result."
   [conn tx]
   (with-open [report (if (instance? TxBuilder tx)
                        (.transactReport (:native conn) (:native tx))
                        (.transactReport (:native conn) (edn-text tx)))]
-    (clj-value (.value report))))
+    (transaction-report (:engine conn) report)))
 
 (def transact! transact)
+
+(defn try-transact
+  "Transact and return `{:ok true :report report}` or
+  `{:ok false :error exception :data ex-data}`."
+  [conn tx]
+  (try
+    {:ok true :report (transact conn tx)}
+    (catch clojure.lang.ExceptionInfo error
+      {:ok false :error error :data (ex-data error)})))
 
 (defn transact-bulk
   "Commit several native TxBuilder values as one durable transaction.
@@ -685,7 +773,7 @@
     (with-open [report (.transactReport (:native conn)
                                         (java.util.ArrayList.
                                          (mapv :native builders)))]
-      (clj-value (.value report)))))
+      (transaction-report (:engine conn) report))))
 
 (defn transact-logical-bulk
   "Commit several native TxBuilder values as several logical transactions under
@@ -705,7 +793,9 @@
     (with-open [reports (.transactLogicalReports (:native conn)
                                                  (java.util.ArrayList.
                                                   (mapv :native builders)))]
-      (mapv clj-value (.values reports)))))
+      (mapv (fn [index]
+              (transaction-report (:engine conn) (.get reports index)))
+            (range (.size reports))))))
 
 (defn transact-logical
   "Commit several Clojure tx-data values or EDN tx strings as several logical
@@ -721,7 +811,9 @@
     (with-open [reports (.transactLogicalEdnReports (:native conn)
                                                     (java.util.ArrayList.
                                                      texts))]
-      (mapv clj-value (.values reports)))))
+      (mapv (fn [index]
+              (transaction-report (:engine conn) (.get reports index)))
+            (range (.size reports))))))
 
 (defn- listener-name [key]
   (cond
@@ -740,7 +832,7 @@
   [conn key f]
   (let [callback (reify Vev$TxReportListener
                    (accept [_ report]
-                     (f (clj-value report))))]
+                     (f (transaction-report (:engine conn) report))))]
     (cond
       (instance? Conn conn)
       (->TxListenerRegistration
@@ -790,19 +882,25 @@
   (.with (:native db) (edn-text tx)))
 
 (defn with
-  "Apply tx data to an immutable DB and return a transaction report map."
+  "Apply tx data to an immutable DB and return a Datomic-shaped transaction
+  report map synchronously. Rejected transactions throw ExceptionInfo."
   [^DB db tx]
   (with-open [report (.withReport (:native db) (edn-text tx))]
-    (clj-value (.value report))))
+    (transaction-report (:engine db) report)))
 
 (defn with-report
-  "Apply tx data to an immutable DB and return a transaction report map with
-  owned `:db-before` and `:db-after` DB values."
+  "Compatibility alias for `with`."
   [^DB db tx]
-  (with-open [report (.withReport (:native db) (edn-text tx))]
-    (assoc (clj-value (.value report))
-           :db-before (->DB (:engine db) (.dbBefore report))
-           :db-after (->DB (:engine db) (.dbAfter report)))))
+  (with db tx))
+
+(defn try-with
+  "Apply a speculative transaction and return an explicit success/error
+  result. The success report owns its before/after DB values."
+  [db tx]
+  (try
+    {:ok true :report (with db tx)}
+    (catch clojure.lang.ExceptionInfo error
+      {:ok false :error error :data (ex-data error)})))
 
 (defn db-with
   "Apply tx data to an immutable DB and return the resulting immutable DB value."
@@ -876,10 +974,12 @@
   [^DB db]
   (.sinceT (:native db)))
 
-(defn history?
+(defn is-history
   "Return true when db is a history database value."
   [^DB db]
   (.isHistory (:native db)))
+
+(def history? is-history)
 
 (defn tx-range
   "Return transaction maps from log between start (inclusive) and end
@@ -2640,6 +2740,37 @@
                                        (edn-text attr)
                                        (into-array java.util.UUID values))))))
         (mapv #(pull source pattern %) eids)))))
+
+(defn index-pull
+  "Walk AVET or AEVT from `:start`, pulling each indexed entity.
+
+  The Peer keys `:index`, `:selector`, `:start`, and `:reverse` are
+  supported. `:offset` and `:limit` are accepted as eager-delivery
+  conveniences; the result is a vector rather than a lazy sequence."
+  [db {:keys [index selector start reverse offset limit]
+       :or {offset 0 limit -1}}]
+  (when-not (#{:avet :aevt} index)
+    (throw (ex-info "index-pull requires :avet or :aevt"
+                    {:index index})))
+  (when-not (and (vector? start) (seq start))
+    (throw (ex-info "index-pull requires a non-empty :start vector"
+                    {:start start})))
+  (when (and (= index :avet)
+             (= 1 (count start))
+             (= :db.cardinality/many
+                (:cardinality (attribute db (first start)))))
+    (throw (ex-info "AVET index-pull requires a value for cardinality-many attributes"
+                    {:start start})))
+  (let [attr (first start)
+        values (if (and reverse (= 1 (count start)))
+                 (clojure.core/reverse (datoms db index attr))
+                 (let [walk (if reverse rseek-datoms seek-datoms)]
+                   (take-while #(= attr (:a %))
+                               (apply walk db index start))))
+        target (if (= index :avet) :e :v)
+        pulled (map #(pull db selector (get % target))
+                    (drop (max 0 offset) values))]
+    (vec (if (neg? limit) pulled (take limit pulled)))))
 
 (defn rows-legacy
   "Deprecated connection-first row helper kept for early examples."

@@ -131,6 +131,7 @@ public final class Vev implements AutoCloseable {
     private final MethodHandle dbWithEdn;
     private final MethodHandle dbEntity;
     private final MethodHandle dbEntityLookupRefString;
+    private final MethodHandle dbEntityLookupRefEdn;
     private final MethodHandle dbEntityIdent;
     private final MethodHandle dbDatomsValue;
     private final MethodHandle dbIndexRangeValue;
@@ -493,6 +494,7 @@ public final class Vev implements AutoCloseable {
         this.dbWithEdn = downcall("vev_db_with_edn", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbEntity = downcall("vev_db_entity", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
         this.dbEntityLookupRefString = downcall("vev_db_entity_lookup_ref_string", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        this.dbEntityLookupRefEdn = downcall("vev_db_entity_lookup_ref_edn", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbEntityIdent = downcall("vev_db_entity_ident", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbDatomsValue = downcall("vev_db_datoms_value", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         this.dbIndexRangeValue = downcall("vev_db_index_range_value", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
@@ -1141,7 +1143,7 @@ public final class Vev implements AutoCloseable {
     }
 
     private void txReportListenerCallback(TxReportListener listener, MemorySegment user, MemorySegment report) throws Throwable {
-        listener.accept(valueToJava((MemorySegment) txReportValue.invoke(report)));
+        listener.accept(new TxReport(report, false));
     }
 
     private static boolean isNull(MemorySegment segment) {
@@ -2258,6 +2260,18 @@ public final class Vev implements AutoCloseable {
                     handle.raw,
                     local.allocateFrom(attr),
                     local.allocateFrom(value));
+                if (isNull(raw)) throw new IllegalStateException("failed to create lookup-ref entity view");
+                return new EntityView(raw);
+            }
+        }
+
+        public EntityView entityLookupRefEdn(String attr, String valueEdn) throws Throwable {
+            requireOpen();
+            try (Arena local = Arena.ofConfined()) {
+                MemorySegment raw = (MemorySegment) dbEntityLookupRefEdn.invoke(
+                    handle.raw,
+                    local.allocateFrom(attr),
+                    local.allocateFrom(valueEdn));
                 if (isNull(raw)) throw new IllegalStateException("failed to create lookup-ref entity view");
                 return new EntityView(raw);
             }

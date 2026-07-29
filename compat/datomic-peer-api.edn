@@ -1,0 +1,156 @@
+;; Datomic Peer compatibility inventory.
+;;
+;; Datomic is Vev's semantic reference and tutorial corpus, not its
+;; architectural specification. `disposition` records how each Peer operation
+;; relates to Vev; it is deliberately not a completion score.
+{:format-version 2
+ :reference {:implementation :datomic-peer
+             :version "1.0.7277"
+             :api "https://docs.datomic.com/clojure/index.html"}
+ :policy {:goal :core-model-tutorial-compatibility
+          :clojure-namespace vev.core
+          :tutorial-adaptations #{:replace-require
+                                  :replace-deployment-setup
+                                  :remove-async-deref}
+          :native-api-principle :independent-vev-use-case
+          :primary-apis #{:clojure :kvist}
+          :primary-api-principle :paired-capabilities
+          :c-abi-role :complete-primary-api-substrate
+          :secondary-client-principle :host-language-idioms
+          :async-delivery :direct
+          :unknown-attributes :vev-flexible-extension
+          :error-taxonomy :vev-native
+          :excluded-conventions #{:vendor-specific-anomaly-data}
+          :primary-api-name-adaptations
+          {t->tx {:clojure t->tx :kvist t-to-tx}
+           tx->t {:clojure tx->t :kvist tx-to-t}
+           query {:clojure query :kvist q}}
+          :comparison {:query-order :only-when-specified
+                       :allocated-ids :logical-identity
+                       :implicit-instants :controlled-or-normalized
+                       :floating-point :scenario-tolerance
+                       :error-text :not-compared}}
+ :aliases [{:syntax datomic.api/entid
+            :canonical entid
+            :scope :query-tutorial}
+           {:syntax clojure.string/*
+            :canonical :documented-vev-query-operations
+            :scope :query-tutorial}
+           {:syntax "datomic.tx"
+            :canonical :db/current-tx
+            :scope :transaction-tutorial}]
+ :operations
+ [{:name as-of :area :time :disposition :native :vev-api as-of}
+  {:name as-of-t :area :time :disposition :native :vev-api as-of-t}
+  {:name attribute :area :schema :disposition :native :vev-api attribute
+   :coverage :vev-schema-model}
+  {:name basis-t :area :database :disposition :native :vev-api basis-t}
+  {:name connect :area :connection :disposition :native :vev-api connect
+   :coverage :adapted
+   :differences #{:embedded-local-path-and-lifecycle}}
+  {:name datoms :area :index :disposition :native :vev-api datoms}
+  {:name db :area :database :disposition :native :vev-api db}
+  {:name db-stats :area :database :disposition :native :vev-api db-stats
+   :coverage :vev-native-shape}
+  {:name entid :area :entity :disposition :native :vev-api entid
+   :coverage :bounded
+   :differences #{:documented-portable-value-domain}}
+  {:name entity :area :entity :disposition :native :vev-api entity
+   :coverage :bounded
+   :differences #{:documented-portable-value-domain}}
+  {:name entity-db :area :entity :disposition :adapter :vev-api entity-db
+   :reason :clojure-entity-convenience}
+  {:name filter :area :database :disposition :non-goal
+   :reason :host-predicate-filtered-db-model}
+  {:name history :area :time :disposition :native :vev-api history}
+  {:name is-history :area :time :disposition :native :vev-api is-history}
+  {:name ident :area :entity :disposition :native :vev-api ident}
+  {:name index-pull :area :pull :disposition :native :vev-api index-pull}
+  {:name index-range :area :index :disposition :native :vev-api index-range}
+  {:name is-filtered :area :database :disposition :non-goal
+   :reason :filtered-db-model-not-supported}
+  {:name log :area :log :disposition :native :vev-api log}
+  {:name next-t :area :database :disposition :native :vev-api next-t}
+  {:name pull :area :pull :disposition :native :vev-api pull
+   :coverage :documented-vev-pull-dialect}
+  {:name pull-many :area :pull :disposition :native :vev-api pull-many
+   :coverage :documented-vev-pull-dialect}
+  {:name q :area :query :disposition :native :vev-api q
+   :coverage :documented-vev-query-dialect
+   :differences #{:no-exhaustive-peer-builtins :no-nested-q}}
+  {:name query :area :query :disposition :native :vev-api query
+   :coverage :adapted
+   :differences #{:no-interrupting-timeout}}
+  {:name resolve-tempid :area :transaction :disposition :native
+   :vev-api resolve-tempid}
+  {:name seek-datoms :area :index :disposition :native :vev-api seek-datoms}
+  {:name since :area :time :disposition :native :vev-api since}
+  {:name since-t :area :time :disposition :native :vev-api since-t}
+  {:name squuid :area :utility :disposition :native :vev-api squuid}
+  {:name squuid-time-millis :area :utility :disposition :native
+   :vev-api squuid-time-millis}
+  {:name sync :area :connection :disposition :native :vev-api sync
+   :coverage :adapted
+   :differences #{:embedded-coordination :returns-db-directly}}
+  {:name t->tx :area :time :disposition :native :vev-api t->tx}
+  {:name touch :area :entity :disposition :native :vev-api touch}
+  {:name transact :area :transaction :disposition :native :vev-api transact
+   :coverage :adapted
+   :differences #{:returns-report-directly :vev-native-errors}}
+  {:name tx->t :area :time :disposition :native :vev-api tx->t}
+  {:name tx-range :area :log :disposition :native :vev-api tx-range}
+  {:name with :area :transaction :disposition :native :vev-api with
+   :coverage :adapted
+   :differences #{:returns-report-directly :vev-native-errors}}
+
+  {:name add-listener :area :async :disposition :non-goal
+   :reason :peer-operation-context
+   :vev-alternative listen}
+  {:name administer-system :area :deployment :disposition :non-goal
+   :reason :datomic-deployment-model}
+  {:name cancel :area :operation :disposition :non-goal
+   :reason :datomic-jvm-operation-context}
+  {:name create-database :area :deployment :disposition :non-goal
+   :reason :datomic-database-catalog}
+  {:name delete-database :area :deployment :disposition :non-goal
+   :reason :datomic-database-catalog}
+  {:name entid-at :area :entity :disposition :non-goal
+   :reason :datomic-partition-id-architecture}
+  {:name function :area :stored-function :disposition :non-goal
+   :reason :persisted-jvm-code}
+  {:name gc-storage :area :deployment :disposition :non-goal
+   :reason :datomic-storage-architecture}
+  {:name get-database-names :area :deployment :disposition :non-goal
+   :reason :datomic-database-catalog}
+  {:name implicit-part :area :entity :disposition :non-goal
+   :reason :datomic-partition-id-architecture}
+  {:name implicit-part-id :area :entity :disposition :non-goal
+   :reason :datomic-partition-id-architecture}
+  {:name invoke :area :stored-function :disposition :non-goal
+   :reason :persisted-jvm-code}
+  {:name part :area :entity :disposition :non-goal
+   :reason :datomic-partition-id-architecture}
+  {:name qseq :area :query :disposition :non-goal
+   :reason :clojure-lazy-delivery}
+  {:name release :area :connection :disposition :non-goal
+   :reason :datomic-peer-connection-lifecycle}
+  {:name remove-tx-report-queue :area :async :disposition :non-goal
+   :reason :jvm-blocking-queue-delivery}
+  {:name rename-database :area :deployment :disposition :non-goal
+   :reason :datomic-database-catalog}
+  {:name request-index :area :deployment :disposition :non-goal
+   :reason :datomic-index-architecture}
+  {:name shutdown :area :deployment :disposition :non-goal
+   :reason :jvm-peer-lifecycle}
+  {:name sync-excise :area :deployment :disposition :non-goal
+   :reason :datomic-deployment-model}
+  {:name sync-index :area :deployment :disposition :non-goal
+   :reason :datomic-index-architecture}
+  {:name sync-schema :area :deployment :disposition :non-goal
+   :reason :datomic-index-architecture}
+  {:name tempid :area :transaction :disposition :non-goal
+   :reason :datomic-partition-and-id-allocation}
+  {:name transact-async :area :async :disposition :non-goal
+   :reason :jvm-future-delivery}
+  {:name tx-report-queue :area :async :disposition :non-goal
+   :reason :jvm-blocking-queue-delivery}]}

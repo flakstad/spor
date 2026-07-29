@@ -9,7 +9,7 @@
 (import arr "kvist:arr")
 (import fmt "core:fmt")
 (import strings "core:strings")
-(import sync "core:sync")
+(import os-sync "core:sync")
 (import time "core:time")
 
 (defstruct Conn-State {
@@ -17,7 +17,7 @@
   connection: native.Durable-Connection
   query-texts: [dynamic]string
   queries: [dynamic]native.Prepared-Query
-  query-lock: sync.Mutex
+  query-lock: os-sync.Mutex
 })
 
 (defstruct DB-State {
@@ -25,13 +25,38 @@
   conn: ^Conn-State
 })
 
+(defstruct Log-State {
+  log-value: native.Log
+  conn: ^Conn-State
+})
+
+(defstruct Entity-State {
+  entity-value: native.Entity
+})
+
 (def Conn (distinct rawptr))
 (def DB (distinct rawptr))
+(def Log (distinct rawptr))
+(def Entity (distinct rawptr))
+
+(defenum Tx-Error-Kind [
+  None
+  Transaction-Failed
+  Unknown
+])
 
 (defstruct Tx-Report {
   ok: bool
   error: string
+  error-kind: Tx-Error-Kind
   tx: u64
+  db-before: DB
+  db-after: DB
+  tx-data: Data
+  tempids: Data
+  tx-meta: Data
+  internal-owner-data: Data
+  native-report: native.Native-Tx-Report
 })
 
 (defstruct Value {
@@ -47,6 +72,18 @@
 
 (defn- db-state [db-value: DB] -> ^DB-State
   (transmute ^DB-State (rawptr db-value)))
+
+(defn- log-state [log-value: Log] -> ^Log-State
+  (transmute ^Log-State (rawptr log-value)))
+
+(defn- entity-state [entity-value: Entity] -> ^Entity-State
+  (transmute ^Entity-State (rawptr entity-value)))
+
+(defn- db-from-native [state: ^Conn-State, database: native.DB] -> DB
+  (let [out (alloc DB-State)]
+    (set! out^.database database)
+    (set! out^.conn state)
+    (DB (rawptr out))))
 
 (defn try-connect [path: string] -> [conn: Conn, ok: bool, error: string]
   (let [state (alloc Conn-State)
@@ -114,10 +151,7 @@
         [database ok] (native.db (addr state^.connection))]
     (when (not ok)
       (panic "could not retain Vev DB snapshot"))
-    (let [out (alloc DB-State)]
-      (set! out^.database database)
-      (set! out^.conn state)
-      (DB (rawptr out)))))
+    (db-from-native state database)))
 
 (defn close-db [db-value: DB]
   (when (= (rawptr db-value) nil)
@@ -125,6 +159,176 @@
   (let [state (db-state db-value)]
     (native.close (addr state^.database))
     (free state)))
+
+(defn- entity-from-native [entity-value: native.Entity] -> Entity
+  (let [out (alloc Entity-State)]
+    (set! out^.entity-value entity-value)
+    (Entity (rawptr out))))
+
+(defn entity-id-ref [db-value: DB, entity-id: u64] -> Entity
+  (let [state (db-state db-value)
+        [entity-value ok] (native.entity (addr state^.database) entity-id)]
+    (if ok
+      (entity-from-native entity-value)
+      (Entity nil))))
+
+(defn entity-lookup-ref [db-value: DB, attr: string, value: Data] -> Entity
+  (let [state (db-state db-value)
+        value-text (edn.write value)]
+    (defer (delete value-text))
+    (let [[entity-value ok]
+          (native.entity-lookup-ref
+            (addr state^.database) attr value-text)]
+      (if ok
+        (entity-from-native entity-value)
+        (Entity nil)))))
+
+(defn entity-ident [db-value: DB, ident: string] -> Entity
+  (let [state (db-state db-value)
+        [entity-value ok]
+        (native.entity-ident (addr state^.database) ident)]
+    (if ok
+      (entity-from-native entity-value)
+      (Entity nil))))
+
+(defn entity-ref [db-value: DB, requested: Data] -> Entity
+  (cond
+    (data.int? requested)
+      (entity-id-ref db-value (u64 (data.int requested)))
+    (data.keyword? requested)
+      (entity-ident db-value (data.keyword requested))
+    (and (data.vector? requested)
+         (= (data.count requested) 2)
+         (data.keyword? (data.nth requested 0)))
+      (entity-lookup-ref db-value
+                         (data.keyword (data.nth requested 0))
+                         (data.nth requested 1))
+    :else (Entity nil)))
+
+(def entity (overload entity-id-ref entity-ref))
+
+(defn close-entity [entity-value: Entity]
+  (when (= (rawptr entity-value) nil)
+    (return))
+  (let [state (entity-state entity-value)]
+    (native.close (addr state^.entity-value))
+    (free state)))
+
+(defn entity-found? [entity-value: Entity] -> bool
+  (not (= (rawptr entity-value) nil)))
+
+(defn entity-id [entity-value: Entity] -> [id: u64, ok: bool]
+  (when (= (rawptr entity-value) nil)
+    (return (u64 0) false))
+  (let [state (entity-state entity-value)]
+    (native.entity-id (addr state^.entity-value))))
+
+(defn entid-id [db-value: DB, requested-id: u64] -> [id: u64, ok: bool]
+  (let [entity-value (entity-id-ref db-value requested-id)]
+    (when (not (entity-found? entity-value))
+      (return (u64 0) false))
+    (defer (close-entity entity-value))
+    (entity-id entity-value)))
+
+(defn entid-ref [db-value: DB, requested: Data] -> [id: u64, ok: bool]
+  (let [entity-value (entity-ref db-value requested)]
+    (when (not (entity-found? entity-value))
+      (return (u64 0) false))
+    (defer (close-entity entity-value))
+    (entity-id entity-value)))
+
+(def entid (overload entid-id entid-ref))
+
+(defn ident [db-value: DB, entity-id: u64] -> Data
+  (let [entity-value (entity-id-ref db-value entity-id)]
+    (when (not (entity-found? entity-value))
+      (return (data.from-nil)))
+    (defer (close-entity entity-value))
+    (entity-get entity-value ":db/ident")))
+
+(defn entid-lookup-ref [db-value: DB, attr: string, value: Data]
+  -> [id: u64, ok: bool]
+  (let [entity-value (entity-lookup-ref db-value attr value)]
+    (when (not (entity-found? entity-value))
+      (return (u64 0) false))
+    (defer (close-entity entity-value))
+    (entity-id entity-value)))
+
+(defn entity-contains? [entity-value: Entity, attr: string] -> bool
+  (when (= (rawptr entity-value) nil)
+    (return false))
+  (let [state (entity-state entity-value)]
+    (native.entity-contains (addr state^.entity-value) attr)))
+
+(defn- native-data-result [result: native.Data, ok: bool] -> Data
+  (when (not ok)
+    (return (data.from-nil)))
+  (let [owned result]
+    (defer (native.close (addr owned)))
+    (let [[value value-ok] (native.value (addr owned))]
+      (if value-ok
+        (native-value-data value)
+        (data.from-nil)))))
+
+(defn- native-entity-data
+  [entity-value: Entity, attr: string, all-values: bool] -> Data
+  (when (= (rawptr entity-value) nil)
+    (return (data.from-nil)))
+  (let [state (entity-state entity-value)]
+    (if all-values
+      (let [[result ok]
+            (native.entity-values (addr state^.entity-value) attr)]
+        (native-data-result result ok))
+      (let [[result ok]
+            (native.entity-get (addr state^.entity-value) attr)]
+        (native-data-result result ok)))))
+
+(defn entity-get [entity-value: Entity, attr: string] -> Data
+  (native-entity-data entity-value attr false))
+
+(defn entity-values [entity-value: Entity, attr: string] -> Data
+  (native-entity-data entity-value attr true))
+
+(defn touch [entity-value: Entity] -> Data
+  (when (= (rawptr entity-value) nil)
+    (return (data.from-nil)))
+  (let [state (entity-state entity-value)
+        [result ok] (native.entity-touch (addr state^.entity-value))]
+    (when (not ok)
+      (return (data.from-nil)))
+    (defer (native.close (addr result)))
+    (let [[value value-ok] (native.value (addr result))]
+      (if value-ok
+        (native-value-data value)
+        (data.from-nil)))))
+
+(defn log [conn: Conn] -> Log
+  (let [state (conn-state conn)
+        [native-log ok] (native.log-durable (addr state^.connection))]
+    (when (not ok)
+      (panic "could not retain Vev log"))
+    (let [out (alloc Log-State)]
+      (set! out^.log-value native-log)
+      (set! out^.conn state)
+      (Log (rawptr out)))))
+
+(defn close-log [log-value: Log]
+  (when (= (rawptr log-value) nil)
+    (return))
+  (let [state (log-state log-value)]
+    (native.close (addr state^.log-value))
+    (free state)))
+
+(defn close-tx-report [report: ^Tx-Report]
+  (when (= report nil)
+    (return))
+  (close-db report.db-before)
+  (close-db report.db-after)
+  ; tx-data, tempids, and tx-meta are borrowed from this retained parse tree.
+  (data.release report.internal-owner-data)
+  (native.close (addr report.native-report))
+  (delete report.error)
+  (set! report^ (Tx-Report {})))
 
 (defn history [db-value: DB] -> DB
   (let [state (db-state db-value)
@@ -150,6 +354,221 @@
       (panic "could not read Vev DB next t"))
     value))
 
+(defn as-of-coordinate [db-value: DB, tx: u64] -> DB
+  (let [state (db-state db-value)
+        [database ok] (native.as-of (addr state^.database) tx)]
+    (when (not ok)
+      (panic "could not create Vev as-of DB"))
+    (db-from-native state^.conn database)))
+
+(defn as-of-instant [db-value: DB, unix-millis: i64] -> DB
+  (let [state (db-state db-value)
+        instant (time.unix 0 (* unix-millis 1000000))
+        [database ok] (native.as-of (addr state^.database) instant)]
+    (when (not ok)
+      (panic "could not create Vev as-of DB"))
+    (db-from-native state^.conn database)))
+
+(def as-of (overload as-of-coordinate as-of-instant))
+
+(defn since-coordinate [db-value: DB, tx: u64] -> DB
+  (let [state (db-state db-value)
+        [database ok] (native.since (addr state^.database) tx)]
+    (when (not ok)
+      (panic "could not create Vev since DB"))
+    (db-from-native state^.conn database)))
+
+(defn since-instant [db-value: DB, unix-millis: i64] -> DB
+  (let [state (db-state db-value)
+        instant (time.unix 0 (* unix-millis 1000000))
+        [database ok] (native.since (addr state^.database) instant)]
+    (when (not ok)
+      (panic "could not create Vev since DB"))
+    (db-from-native state^.conn database)))
+
+(def since (overload since-coordinate since-instant))
+
+(defn as-of-t [db-value: DB] -> [t: u64, present: bool]
+  (let [state (db-state db-value)]
+    (native.as-of-t (addr state^.database))))
+
+(defn since-t [db-value: DB] -> [t: u64, present: bool]
+  (let [state (db-state db-value)]
+    (native.since-t (addr state^.database))))
+
+(defn is-history [db-value: DB] -> bool
+  (let [state (db-state db-value)]
+    (native.is-history (addr state^.database))))
+
+(def history? is-history)
+
+(defn t-to-tx [t: u64] -> u64
+  (native.t-to-tx t))
+
+(defn tx-to-t [tx: u64] -> u64
+  (native.tx-to-t tx))
+
+(defn sync-db [conn: Conn] -> DB
+  (db conn))
+
+(defn sync-to [conn: Conn, target-t: u64] -> DB
+  (let [snapshot (db conn)]
+    (if (>= (basis-t snapshot) target-t)
+      snapshot
+      (do
+        (close-db snapshot)
+        (time.sleep (* 10 time.Millisecond))
+        (sync-to conn target-t)))))
+
+(def sync (overload sync-db sync-to))
+
+(defn db-stats [db-value: DB] -> Data
+  (let [state (db-state db-value)
+        [result ok] (native.db-stats (addr state^.database))]
+    (when (not ok)
+      (panic "could not read Vev DB stats"))
+    (defer (native.close (addr result)))
+    (let [[value value-ok] (native.value (addr result))]
+      (when (not value-ok)
+        (panic "could not decode Vev DB stats"))
+      (native-value-data value))))
+
+(defn attribute [db-value: DB, attr: string] -> Data
+  (let [state (db-state db-value)
+        [result ok] (native.attribute (addr state^.database) attr)]
+    (when (not ok)
+      (return (data.from-nil)))
+    (defer (native.close (addr result)))
+    (let [[value value-ok] (native.value (addr result))]
+      (when (not value-ok)
+        (return (data.from-nil)))
+      (native-value-data value))))
+
+(defn index-datoms [db-value: DB, mode: int, index: string, components: Data]
+  -> Data
+  (let [components-text (edn.write components)
+        state (db-state db-value)
+        [result ok]
+        (native.datoms
+          (addr state^.database) mode index components-text)]
+    (defer (delete components-text))
+    (when (not ok)
+      (panic "Vev index read failed"))
+    (native-data-result result true)))
+
+(defn datoms [db-value: DB, index: string, components: Data] -> Data
+  (index-datoms db-value 0 index components))
+
+(defn seek-datoms [db-value: DB, index: string, components: Data] -> Data
+  (index-datoms db-value 1 index components))
+
+(defn rseek-datoms [db-value: DB, index: string, components: Data] -> Data
+  (index-datoms db-value 2 index components))
+
+(defn index-range
+  [db-value: DB, attr: string, start: Data, end: Data] -> Data
+  (let [start-text (edn.write start)
+        end-text (edn.write end)
+        state (db-state db-value)
+        [result ok]
+        (native.index-range
+          (addr state^.database) attr start-text end-text)]
+    (defer (delete start-text))
+    (defer (delete end-text))
+    (when (not ok)
+      (panic "Vev index-range failed"))
+    (native-data-result result true)))
+
+(defn index-pull [db-value: DB, options: Data] -> Data
+  (let [index-value (data.get-in options [:index])
+        selector (data.get-in options [:selector])
+        start (data.get-in options [:start])
+        reverse-value (data.get-in options [:reverse])
+        offset-value (data.get-in options [:offset])
+        limit-value (data.get-in options [:limit])]
+    (when (or (not (data.keyword? index-value))
+              (data.nil? selector)
+              (not (data.vector? start))
+              (= (data.count start) 0))
+      (panic "index-pull requires :index, :selector, and non-empty :start"))
+    (let [selector-text (edn.write selector)
+          start-text (edn.write start)]
+      (defer (delete selector-text))
+      (defer (delete start-text))
+      (let [state (db-state db-value)
+            reverse (and (data.bool? reverse-value)
+                         (data.bool reverse-value))
+            offset (if (data.int? offset-value)
+                     (data.int offset-value)
+                     (i64 0))
+            limit (if (data.int? limit-value)
+                    (data.int limit-value)
+                    (i64 -1))
+            [result ok]
+            (native.index-pull
+              (addr state^.database)
+              (data.keyword index-value)
+              selector-text
+              start-text
+              reverse
+              offset
+              limit)]
+        (when (not ok)
+          (panic "Vev index-pull failed"))
+        (native-data-result result true)))))
+
+(defn pull-id [db-value: DB, pattern: Data, entity-id: u64] -> Data
+  (let [pattern-text (edn.write pattern)]
+    (defer (delete pattern-text))
+    (let [state (db-state db-value)
+          [result ok]
+          (native.pull (addr state^.database) pattern-text entity-id)]
+      (when (not ok)
+        (panic "Vev pull failed"))
+      (native-data-result result true))))
+
+(defn pull-ref [db-value: DB, pattern: Data, requested: Data] -> Data
+  (let [[entity-id ok] (entid-ref db-value requested)]
+    (if ok
+      (pull-id db-value pattern entity-id)
+      (data.from-nil))))
+
+(def pull (overload pull-id pull-ref))
+
+(defn pull-lookup-ref
+  [db-value: DB, pattern: Data, attr: string, value: Data] -> Data
+  (let [[entity-id ok] (entid-lookup-ref db-value attr value)]
+    (if ok
+      (pull db-value pattern entity-id)
+      (data.from-nil))))
+
+(defn pull-many-ids [db-value: DB, pattern: Data, entities: []u64] -> Data
+  (let [pattern-text (edn.write pattern)]
+    (defer (delete pattern-text))
+    (let [state (db-state db-value)
+          [result ok]
+          (native.pull-many
+            (addr state^.database) pattern-text entities)]
+      (when (not ok)
+        (panic "Vev pull-many failed"))
+      (native-data-result result true))))
+
+(defn pull-many-refs [db-value: DB, pattern: Data, requested: Data] -> Data
+  (when (not (data.vector? requested))
+    (panic "pull-many entity references must be a vector"))
+  (let [items (make [dynamic]Data 0 (data.count requested))]
+    (defer
+      (do
+        (for [item items]
+          (data.release item))
+        (delete items)))
+    (for [index (arr.range 0 (data.count requested))]
+      (arr.push! items
+                 (pull-ref db-value pattern (data.nth requested index))))
+    (data.vector-from-array (slice items 0))))
+
+(def pull-many (overload pull-many-ids pull-many-refs))
+
 (defn lookup-ref-string-exists?
   [db-value: DB, attr: string, value: string] -> bool
   (let [state (db-state db-value)]
@@ -162,8 +581,8 @@
   (delete values))
 
 (defn- prepared-query [state: ^Conn-State, query-text: string] -> native.Prepared-Query
-  (sync.mutex-lock (addr state^.query-lock))
-  (defer (sync.mutex-unlock (addr state^.query-lock)))
+  (os-sync.mutex-lock (addr state^.query-lock))
+  (defer (os-sync.mutex-unlock (addr state^.query-lock)))
   (for [index (arr.range 0 (count state^.query-texts))]
     (when (= state^.query-texts[index] query-text)
       (return state^.queries[index])))
@@ -289,32 +708,167 @@
 (defmacro q [query db-value & inputs]
   `(q-data ~query ~db-value [~@inputs]))
 
+(defn- tx-report-from-native
+  [state: ^Conn-State,
+   native-report: native.Native-Tx-Report,
+   handle-ok: bool,
+   before: native.DB,
+   before-ok: bool,
+   after: native.DB,
+   after-ok: bool] -> Tx-Report
+  (let [report-handle native-report
+        [report-value value-ok]
+        (native.tx-report-edn (addr report-handle))]
+    (defer (delete report-value))
+    (when (not (and handle-ok value-ok (> (count report-value) 0)))
+      (return
+        (Tx-Report
+          {ok: false
+           error: (clone-text "Vev transaction returned no report")
+           error-kind: .Unknown
+           tx: (u64 0)
+           db-before: (if before-ok
+                        (db-from-native state before)
+                        (DB nil))
+           db-after: (if after-ok
+                       (db-from-native state after)
+                       (DB nil))
+           tx-data: (data.from-nil)
+           tempids: (data.from-nil)
+           tx-meta: (data.from-nil)
+           internal-owner-data: (data.from-nil)
+           native-report: report-handle})))
+    (let [report (edn.read report-value)
+          ok-value (data.get-in report [:ok])
+          error-value (data.get-in report [:error])
+          error-kind-value (data.get-in report [:vev/error])
+          tx-value (data.get-in report [:tx])
+          tx-data-value (data.get-in report [:tx-data])
+          tempids-value (data.get-in report [:tempids])
+          tx-meta-value (data.get-in report [:tx-meta])
+          report-ok (and handle-ok (data.bool? ok-value) (data.bool ok-value))
+          report-error
+            (if (and (not report-ok) (data.string? error-value))
+              (clone-text (data.string error-value))
+              (clone-text (if report-ok "" "Vev transaction rejected")))
+          report-error-kind: Tx-Error-Kind
+            (if report-ok
+              .None
+              (if (and (data.keyword? error-kind-value)
+                       (= (data.keyword error-kind-value)
+                          ":vev.error/transaction-failed"))
+                .Transaction-Failed
+                .Unknown))
+          report-tx
+            (if (and report-ok
+                     (data.vector? tx-value)
+                     (= (data.count tx-value) 2)
+                     (data.int? (data.nth tx-value 1)))
+              (u64 (data.int (data.nth tx-value 1)))
+              (if (and report-ok (data.int? tx-value))
+                (u64 (data.int tx-value))
+                (u64 0)))]
+      (Tx-Report
+        {ok: report-ok
+         error: report-error
+         error-kind: report-error-kind
+         tx: report-tx
+         db-before: (if before-ok
+                      (db-from-native state before)
+                      (DB nil))
+         db-after: (if after-ok
+                     (db-from-native state after)
+                     (DB nil))
+         tx-data: tx-data-value
+         tempids: tempids-value
+         tx-meta: tx-meta-value
+         internal-owner-data: report
+         native-report: report-handle}))))
+
 (defn transact-data [conn: Conn, tx: Data] -> Tx-Report
   (let [tx-text (edn.write tx)]
     (defer (delete tx-text))
     (let [state (conn-state conn)
-          [report-text ok] (native.transact (addr state^.connection) tx-text)]
-      (defer (delete report-text))
-      (let [[tx-count count-ok]
-            (native.connection-tx-count (addr state^.connection))]
-        (Tx-Report
-          {ok: ok
-           error: (if ok (clone-text "") (clone-text "Vev transaction rejected"))
-           tx: (if count-ok tx-count (u64 0))})))))
+          [before before-ok] (native.db (addr state^.connection))
+          [native-report handle-ok]
+          (native.transact-report-durable (addr state^.connection) tx-text)
+          [after after-ok] (native.db (addr state^.connection))]
+      (tx-report-from-native
+        state native-report handle-ok before before-ok after after-ok))))
 
 (defmacro transact [conn tx]
   `(transact-data ~conn ~tx))
 
+(defn with-data [db-value: DB, tx: Data] -> Tx-Report
+  (let [tx-text (edn.write tx)]
+    (defer (delete tx-text))
+    (let [state (db-state db-value)
+          [native-report handle-ok]
+          (native.with-report (addr state^.database) tx-text)
+          [before before-ok]
+          (native.tx-report-db-before (addr native-report))
+          [after after-ok]
+          (native.tx-report-db-after (addr native-report))]
+      (tx-report-from-native
+        state^.conn native-report handle-ok before before-ok after after-ok))))
+
+(defmacro with [db-value tx]
+  `(with-data ~db-value ~tx))
+
+(defn db-with-data [db-value: DB, tx: Data] -> DB
+  (let [tx-text (edn.write tx)
+        state (db-state db-value)
+        [database ok] (native.db-with (addr state^.database) tx-text)]
+    (defer (delete tx-text))
+    (when (not ok)
+      (panic "Vev db-with failed"))
+    (db-from-native state^.conn database)))
+
+(defmacro db-with [db-value tx]
+  `(db-with-data ~db-value ~tx))
+
+(def try-transact transact-data)
+(def try-with with-data)
+
+(defn resolve-tempid [_db: DB, tempids: Data, tempid: string] -> [entity: u64, ok: bool]
+  (let [resolved (data.get-in tempids [tempid])]
+    (when (data.int? resolved)
+      (return (u64 (data.int resolved)) true))
+    (when (and (data.vector? resolved)
+               (= (data.count resolved) 2)
+               (data.int? (data.nth resolved 1)))
+      (return (u64 (data.int (data.nth resolved 1))) true))
+    (return (u64 0) false)))
+
 (defn log-tx-ids [conn: Conn] -> [tx-ids: [dynamic]u64, ok: bool, error: string]
   (let [state (conn-state conn)
-        [tx-count count-ok]
-        (native.connection-tx-count (addr state^.connection))
-        out (make [dynamic]u64 0 (int tx-count))]
-    (when (not count-ok)
-      (return out false (clone-text "could not read Vev transaction count")))
-    (for [index (arr.range 0 (int tx-count))]
-      (arr.push! out (u64 (+ index 1))))
-    (return out true (clone-text ""))))
+        [actual-ids read-ok] (native.connection-tx-ids (addr state^.connection))]
+    (if read-ok
+      (return actual-ids true (clone-text ""))
+      (return actual-ids false (clone-text "could not read Vev transaction ids")))))
+
+(defn tx-range [log-value: Log] -> Data
+  (let [state (log-state log-value)
+        [result ok] (native.tx-range-all (addr state^.log-value))]
+    (when (not ok)
+      (panic "could not read Vev transaction range"))
+    (defer (native.close (addr result)))
+    (let [[value value-ok] (native.value (addr result))]
+      (when (not value-ok)
+        (panic "could not decode Vev transaction range"))
+      (native-value-data value))))
+
+(defn tx-range-between [log-value: Log, start: u64, end: u64] -> Data
+  (let [state (log-state log-value)
+        [result ok]
+        (native.tx-range-coordinates (addr state^.log-value) start end)]
+    (when (not ok)
+      (panic "could not read Vev transaction range"))
+    (defer (native.close (addr result)))
+    (let [[value value-ok] (native.value (addr result))]
+      (when (not value-ok)
+        (panic "could not decode Vev transaction range"))
+      (native-value-data value))))
 
 (defn instant-text [unix-millis: i64] -> string
   (let [[datetime ok]
@@ -329,6 +883,36 @@
                  datetime.minute
                  datetime.second
                  (/ datetime.nano 1000000))))
+
+(defn squuid [] -> Data
+  (let [[library library-ok] (native.load-default)]
+    (when (not library-ok)
+      (panic "could not load Vev for squuid"))
+    (defer (native.unload (addr library)))
+    (let [[value value-ok] (native.squuid (addr library))]
+      (when (not value-ok)
+        (panic "could not create Vev squuid"))
+      (defer (delete value))
+      (let [payload (data.from-string value)]
+        (defer (data.release payload))
+        (data.tagged "uuid" payload)))))
+
+(defn squuid-time-millis [value: Data] -> i64
+  (when (not (and (data.tagged? value)
+                  (= (data.tag value) "uuid")
+                  (data.string? (data.tagged-value value))))
+    (panic "squuid-time-millis requires a UUID"))
+  (let [[library library-ok] (native.load-default)]
+    (when (not library-ok)
+      (panic "could not load Vev for squuid-time-millis"))
+    (defer (native.unload (addr library)))
+    (let [[unix-millis value-ok]
+          (native.squuid-time-millis
+            (addr library)
+            (data.string (data.tagged-value value)))]
+      (when (not value-ok)
+        (panic "invalid Vev squuid"))
+      unix-millis)))
 
 (defn instant-from-text [text: string] -> [value: Value, ok: bool]
   (let [normalized text]
@@ -345,4 +929,4 @@
     (defer (data.release payload))
     (data.tagged "inst" payload)))
 
-(def close (overload close-conn close-db))
+(def close (overload close-conn close-db close-entity close-log close-tx-report))

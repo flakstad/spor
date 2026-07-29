@@ -151,6 +151,64 @@ jobs:
             vev/build/jvm/*.jar
             vev/build/jvm/*.pom
 
+  peer-compat:
+    name: Datomic Peer compatibility
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out Vev
+        uses: actions/checkout@v4
+        with:
+          path: vev
+
+      - name: Check out Kvist
+        uses: actions/checkout@v4
+        with:
+          repository: kvist-lang/kvist
+          path: kvist
+          fetch-depth: 0
+
+      - name: Select pinned Kvist revision
+        working-directory: kvist
+        run: git checkout --detach "$(cat ../vev/KVIST_REVISION)"
+
+      - name: Install Odin
+        uses: laytan/setup-odin@v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Kvist
+        working-directory: kvist
+        run: |
+          odin build src/cli/kvist -o:speed -out:./kvist
+          echo "$PWD" >> "$GITHUB_PATH"
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+
+      - name: Fetch pinned tutorial sources
+        working-directory: vev
+        run: scripts/fetch_workshop_sources.sh
+
+      - name: Run Datomic semantic comparisons
+        working-directory: vev
+        run: |
+          scripts/check_datomic_peer_manifest.sh
+          scripts/smoke_datomic_semantics_c.sh
+          scripts/smoke_kvist_bundle.sh
+          scripts/compare_datomic_semantics.sh
+          scripts/compare_history_time_filters.sh
+          scripts/compare_aggregates_tutorial.sh
+
   manifest:
     name: combined release
     needs: package
@@ -254,7 +312,7 @@ jobs:
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: manifest
+    needs: [manifest, peer-compat]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

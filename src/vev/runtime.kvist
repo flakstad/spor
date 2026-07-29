@@ -17,6 +17,39 @@
 (defn current-instant [] -> Value
   (value-instant (/ (time.to-unix-nanoseconds (time.now)) 1000000)))
 
+(defn squuid-text [] -> string
+  (let [seconds (u64 (/ (time.to-unix-nanoseconds (time.now)) 1000000000))
+        random-most (rand.uint64)
+        least (rand.uint64)]
+    (fmt.tprintf "%08x-%04x-%04x-%04x-%012x"
+                 (% seconds (u64 4294967296))
+                 (% (/ random-most (u64 65536)) (u64 65536))
+                 (% random-most (u64 65536))
+                 (% (/ least (u64 281474976710656)) (u64 65536))
+                 (% least (u64 281474976710656)))))
+
+(defn- hex-nibble [value: u8] -> [nibble: u64, ok: bool]
+  (cond
+    (and (>= value 48) (<= value 57))
+      (return (u64 (- value 48)) true)
+    (and (>= value 65) (<= value 70))
+      (return (u64 (+ 10 (- value 65))) true)
+    (and (>= value 97) (<= value 102))
+      (return (u64 (+ 10 (- value 97))) true)
+    :else
+      (return (u64 0) false)))
+
+(defn squuid-time-millis [value: string] -> [unix-millis: i64, ok: bool]
+  (when (< (count value) 8)
+    (return (i64 0) false))
+  (let [seconds (u64 0)]
+    (for [index (arr.range 0 8)]
+      (let [[nibble nibble-ok] (hex-nibble value[index])]
+        (when (not nibble-ok)
+          (return (i64 0) false))
+        (set! seconds (+ (* seconds 16) nibble))))
+    (return (i64 (* seconds 1000)) true)))
+
 (defn instant-text [unix-millis: i64] -> string
   (let [[datetime ok] (time.time-to-datetime (time.unix 0 (* unix-millis 1000000)))]
     (when (not ok)
@@ -117,7 +150,7 @@
       (delete-owned-value op.v)))
   (delete resolved.ops)
   (delete resolved.tx-meta)
-  (delete resolved.tempids))
+  (delete-owned-tempids resolved.tempids))
 
 (defn delete-resolved-tx-after-tempids-moved [resolved: Resolved-Tx]
   (for [op resolved.ops]
@@ -555,7 +588,7 @@
   (delete report.error)
   (delete report.tx-data)
   (delete report.tx-meta)
-  (delete report.tempids)
+  (delete-owned-tempids report.tempids)
   (delete-tx-publish-plan report.publish-plan))
 
 (defn delete-live-tx-report-shallow [report: Tx-Report]
@@ -564,7 +597,7 @@
   (delete report.error)
   (delete report.tx-data)
   (delete report.tx-meta)
-  (delete report.tempids)
+  (delete-owned-tempids report.tempids)
   (delete-tx-publish-plan report.publish-plan))
 
 (defn clone-datoms [datoms: [dynamic]Datom] -> [dynamic]Datom
@@ -579,7 +612,7 @@
 (defn clone-tx-report [report: Tx-Report] -> Tx-Report
   (let [tx-data (arr.into [dynamic]Datom (slice report.tx-data 0))
         tx-meta (clone-tx-meta (slice report.tx-meta 0))
-        tempids (arr.into [dynamic]Tempid (slice report.tempids 0))]
+        tempids (clone-tempids-owned (slice report.tempids 0))]
     (Tx-Report {ok: report.ok
                 error: (string-owned report.error)
                 db-before: (clone-db report.db-before)
@@ -16832,6 +16865,8 @@
   (cond
     (= schema-type ":db.type/string") (= value.kind .String)
     (= schema-type ":db.type/long") (= value.kind .Int)
+    (= schema-type ":db.type/double") (= value.kind .Float)
+    (= schema-type ":db.type/float") (= value.kind .Float)
     (= schema-type ":db.type/boolean") (= value.kind .Bool)
     (= schema-type ":db.type/ref") (= value.kind .Entity)
     (= schema-type ":db.type/keyword") (= value.kind .Keyword)
@@ -17245,8 +17280,9 @@
   (mmap.get index^ tempid))
 
 (defn push-resolved-tempid! [tempids: ^[dynamic]Tempid, index: (ptr (map string u64)), tempid: string, e: u64]
-  (arr.push! tempids^ (Tempid {tempid: tempid e: e}))
-  (mmap.assoc! index^ tempid e))
+  (let [owned (string-owned tempid)]
+    (arr.push! tempids^ (Tempid {tempid: owned e: e}))
+    (mmap.assoc! index^ owned e)))
 
 (defn ensure-resolved-tempid! [tempids: ^[dynamic]Tempid, index: (ptr (map string u64)), tempid: string, e: u64]
   (let [[_ ok] (resolved-tempid-lookup index tempid)]
@@ -18264,6 +18300,8 @@
     (= schema-attr ":db/valueType")
       (or (= value ":db.type/string")
           (= value ":db.type/long")
+          (= value ":db.type/double")
+          (= value ":db.type/float")
           (= value ":db.type/boolean")
           (= value ":db.type/ref")
           (= value ":db.type/keyword")
@@ -18804,10 +18842,9 @@
   (delete-tx-publish-plan result.publish-plan))
 
 (defn tx-report-from-apply-result [before: DB, after: DB, applied: Tx-Apply-Result, tx-meta: []Tx-Meta, tempids: [dynamic]Tempid] -> Tx-Report
-  (let [report-tempids (arr.into [dynamic]Tempid (slice tempids 0))
+  (let [report-tempids tempids
         report-meta (clone-tx-meta tx-meta)
         has-tx-instant false]
-    (delete tempids)
     (for [meta report-meta]
       (when (= meta.a ":db/txInstant")
         (set! has-tx-instant true)))
@@ -18820,7 +18857,9 @@
           (break))))
     (let [[_ has-current-tx] (tempid-lookup (slice report-tempids 0) ":db/current-tx")]
       (when (not has-current-tx)
-        (arr.push! report-tempids (Tempid {tempid: ":db/current-tx" e: applied.tx}))))
+        (arr.push! report-tempids
+                   (Tempid {tempid: (string-owned ":db/current-tx")
+                            e: applied.tx}))))
     (Tx-Report {db-before: before
                 db-after: after
                 ok: true
@@ -18927,7 +18966,7 @@
 (defn transact-ops-with-tempids-from-before [conn: ^Conn, before: DB, ops: []Tx-Op, tx-meta: []Tx-Meta, tempids: [dynamic]Tempid] -> Tx-Report
   (let [applied (apply-resolved-ops-to-datoms before ops conn^.next-tx)]
     (when (not applied.ok)
-      (delete tempids)
+      (delete-owned-tempids tempids)
       (delete-tx-apply-result applied)
       (return (failed-tx-report before applied.error)))
     (let [after (if applied.append-only
@@ -19119,7 +19158,7 @@
 (defn failed-registered-tx [before: DB, ops: [dynamic]Tx-Op, tx-meta: [dynamic]Tx-Meta, tempids: [dynamic]Tempid, segment: [dynamic]Tx-Data, error: string] -> Tx-Report
   (delete ops)
   (delete tx-meta)
-  (delete tempids)
+  (delete-owned-tempids tempids)
   (delete segment)
   (failed-tx-report before error))
 
@@ -19307,6 +19346,10 @@
   (value-map
     ([]Value [(value-keyword (string-owned ":ok")) (value-bool report.ok)
               (value-keyword (string-owned ":error")) (value-string (string-owned report.error))
+              (value-keyword (string-owned ":vev/error"))
+              (if report.ok
+                (value-nil)
+                (value-keyword (string-owned ":vev.error/transaction-failed")))
               (value-keyword (string-owned ":tx")) (if report.ok (value-entity report.tx) (value-nil))
               (value-keyword (string-owned ":tx-data")) (datoms-value (slice report.tx-data 0))
               (value-keyword (string-owned ":tempids")) (tempids-value (slice report.tempids 0))

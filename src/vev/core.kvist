@@ -159,6 +159,17 @@
   e: u64
 })
 
+(defn clone-tempids-owned [tempids: []Tempid] -> [dynamic]Tempid
+  (let [out (make [dynamic]Tempid 0 (count tempids))]
+    (for [item tempids]
+      (arr.push! out (Tempid {tempid: (string-owned item.tempid) e: item.e})))
+    out))
+
+(defn delete-owned-tempids [tempids: [dynamic]Tempid]
+  (for [item tempids]
+    (delete item.tempid))
+  (delete tempids))
+
 (defstruct Resolved-Tx {
   ok: bool
   error: string
@@ -1304,8 +1315,7 @@
 
 (defn current-tx-tempid? [tempid: string] -> bool
   (or (= tempid ":db/current-tx")
-      (= tempid "datomic.tx")
-      (= tempid "datascript.tx")))
+      (= tempid "datomic.tx")))
 
 (defn current-tx-value? [value: Value] -> bool
   (and (or (= value.kind .Keyword)
@@ -1315,7 +1325,7 @@
 (defn ensure-tempid! [tempids: ^[dynamic]Tempid, tempid: string, e: u64]
   (let [[_ ok] (tempid-lookup (slice tempids^ 0) tempid)]
     (when (not ok)
-      (arr.push! tempids^ (Tempid {tempid: tempid e: e})))))
+      (arr.push! tempids^ (Tempid {tempid: (string-owned tempid) e: e})))))
 
 (defn next-entity-id [datoms: []Datom] -> u64
   (let [next: u64 1]

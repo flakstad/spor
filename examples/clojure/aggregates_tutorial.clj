@@ -149,12 +149,8 @@
   (remove-store! default-uri)
   (io/make-parents default-uri)
   (with-open [conn (d/connect default-uri)]
-    (doseq [[tx-index tx] (map-indexed vector (filter aggregate-fact-form? (read-upstream-forms)))]
-      (let [report (d/transact conn tx)]
-        (when-not (:ok report)
-          (throw (ex-info "failed to transact upstream aggregate fixture"
-                          {:tx-index tx-index
-                           :error (:error report)})))))
+    (doseq [tx (filter aggregate-fact-form? (read-upstream-forms))]
+      (d/transact conn tx))
     (d/connection-info conn)))
 
 (defn- close-enough? [expected actual tolerance]

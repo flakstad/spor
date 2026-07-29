@@ -4184,7 +4184,7 @@
       (t.is reopened-ok)
       (t.is (= reopened-error ""))
       (t.is (not (vev.store-resident-db-available? (addr reopened))))
-      (let [report (vev.transact-store-report-text (addr reopened) "[[:db/add 10 :user/name \"X\"] [:db/add 10 :created-at :db/current-tx] [:db/add :db/current-tx :prop1 \"prop1\"] [:db/add \"datomic.tx\" :prop2 \"prop2\"] [:db/add \"datascript.tx\" :prop3 \"prop3\"]]")
+      (let [report (vev.transact-store-report-text (addr reopened) "[[:db/add 10 :user/name \"X\"] [:db/add 10 :created-at :db/current-tx] [:db/add :db/current-tx :prop1 \"prop1\"] [:db/add \"datomic.tx\" :prop2 \"prop2\"]]")
             tx-result (vev.q-result-store-text (addr reopened) "[:find ?tx :where [10 :created-at ?tx]]")
             props-result (vev.q-result-store-text (addr reopened) "[:find ?p :where [?tx :prop1 \"prop1\"] [?tx ?p _]]")]
         (t.is report.ok report.error)
@@ -4197,7 +4197,7 @@
         (t.is (= (count tx-result.result.rows) 1))
         (t.is (= tx-result.result.rows[0].values[0].entity report.tx))
         (t.is props-result.result.ok props-result.result.error)
-        (t.is (= (count props-result.result.rows) 4))
+        (t.is (= (count props-result.result.rows) 3))
         (vev.delete-query-result tx-result)
         (vev.delete-query-result props-result)
         (vev.delete-store-tx-report report))

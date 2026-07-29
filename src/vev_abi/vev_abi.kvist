@@ -3994,6 +3994,21 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (u32 1))
 
 @export
+(defn vev_squuid :abi "c" [] -> cstring
+  (odin "context = runtime.default_context()")
+  (c-string-owned (vev.squuid-text)))
+
+@export
+(defn vev_squuid_time_millis :abi "c" [uuid-text: cstring] -> i64
+  (odin "context = runtime.default_context()")
+  (when (= uuid-text nil)
+    (return (i64 -1)))
+  (let [value (text-from-c uuid-text)
+        [unix-millis ok] (vev.squuid-time-millis value)]
+    (delete value)
+    (if ok unix-millis (i64 -1))))
+
+@export
 (defn vev_conn_open_memory :abi "c" [] -> Vev-Conn
   (odin "context = runtime.default_context()")
   (let [conn (abi-alloc-conn)
@@ -4568,6 +4583,26 @@ abi_free_stmt :: proc(stmt: rawptr) {
       (entity-handle-null))))
 
 @export
+(defn vev_db_entity_lookup_ref_edn :abi "c" [db: Vev-DB, attr: cstring, value-edn: cstring] -> Vev-Entity
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr db) nil) (= attr nil) (= value-edn nil))
+    (return (entity-handle-null)))
+  (let [attr-text (text-from-c attr)
+        value-text (text-from-c value-edn)
+        [lookup-value value-ok _] (value-from-edn-text value-text)]
+    (delete value-text)
+    (when (not value-ok)
+      (delete attr-text)
+      (return (entity-handle-null)))
+    (defer (vev.delete-owned-value lookup-value))
+    (let [store-ptr-value (store-db-ptr db)
+          [entity entity-ok _] (vev.store-db-entity-lookup-ref store-ptr-value attr-text lookup-value)]
+      (delete attr-text)
+      (if entity-ok
+        (entity-handle-from-owned-entity entity)
+        (entity-handle-null)))))
+
+@export
 (defn vev_db_entity_ident :abi "c" [db: Vev-DB, ident: cstring] -> Vev-Entity
   (odin "context = runtime.default_context()")
   (when (or (= (rawptr db) nil) (= ident nil))
@@ -4579,6 +4614,71 @@ abi_free_stmt :: proc(stmt: rawptr) {
     (if entity-ok
       (entity-handle-from-owned-entity entity)
       (entity-handle-null))))
+
+@export
+(defn vev_db_attribute_value :abi "c" [db: Vev-DB, attr: cstring] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr db) nil) (= attr nil))
+    (return (Vev-Value-Handle nil)))
+  (let [attr-text (text-from-c attr)
+        [entity entity-ok _]
+        (vev.store-db-entity-ident (store-db-ptr db) attr-text)]
+    (delete attr-text)
+    (when (not entity-ok)
+      (return (Vev-Value-Handle nil)))
+    (defer (vev.close-store-entity! (addr entity)))
+    (when (not entity.found)
+      (return (Vev-Value-Handle nil)))
+    (let [ident (vev.store-entity-get (addr entity) ":db/ident")
+          value-type (vev.store-entity-get (addr entity) ":db/valueType")
+          cardinality (vev.store-entity-get (addr entity) ":db/cardinality")
+          indexed-value (vev.store-entity-get (addr entity) ":db/index")
+          unique (vev.store-entity-get (addr entity) ":db/unique")
+          component-value (vev.store-entity-get (addr entity) ":db/isComponent")
+          no-history-value (vev.store-entity-get (addr entity) ":db/noHistory")
+          fulltext-value (vev.store-entity-get (addr entity) ":db/fulltext")]
+      (when (or (= value-type.kind .Nil) (= cardinality.kind .Nil))
+        (vev.delete-owned-value ident)
+        (vev.delete-owned-value value-type)
+        (vev.delete-owned-value cardinality)
+        (vev.delete-owned-value indexed-value)
+        (vev.delete-owned-value unique)
+        (vev.delete-owned-value component-value)
+        (vev.delete-owned-value no-history-value)
+        (vev.delete-owned-value fulltext-value)
+        (return (Vev-Value-Handle nil)))
+      (let [indexed (and (= indexed-value.kind .Bool) indexed-value.bool-value)
+            component (and (= component-value.kind .Bool) component-value.bool-value)
+            no-history (and (= no-history-value.kind .Bool) no-history-value.bool-value)
+            fulltext (and (= fulltext-value.kind .Bool) fulltext-value.bool-value)
+            has-avet (or indexed (not (= unique.kind .Nil)) fulltext)]
+        (vev.delete-owned-value indexed-value)
+        (vev.delete-owned-value component-value)
+        (vev.delete-owned-value no-history-value)
+        (vev.delete-owned-value fulltext-value)
+        (value-handle-from-owned-value
+          (vev.value-map
+            ([]vev.Value
+              [(vev.value-keyword (vev.string-owned ":id"))
+               (vev.value-entity entity.e)
+               (vev.value-keyword (vev.string-owned ":ident"))
+               ident
+               (vev.value-keyword (vev.string-owned ":value-type"))
+               value-type
+               (vev.value-keyword (vev.string-owned ":cardinality"))
+               cardinality
+               (vev.value-keyword (vev.string-owned ":indexed"))
+               (vev.value-bool indexed)
+               (vev.value-keyword (vev.string-owned ":has-avet"))
+               (vev.value-bool has-avet)
+               (vev.value-keyword (vev.string-owned ":unique"))
+               unique
+               (vev.value-keyword (vev.string-owned ":is-component"))
+               (vev.value-bool component)
+               (vev.value-keyword (vev.string-owned ":no-history"))
+               (vev.value-bool no-history)
+               (vev.value-keyword (vev.string-owned ":fulltext"))
+               (vev.value-bool fulltext)])))))))
 
 @export
 (defn vev_db_datoms_value :abi "c" [db: Vev-DB, mode: int, order: cstring, components-edn: cstring] -> Vev-Value-Handle
@@ -4609,42 +4709,153 @@ abi_free_stmt :: proc(stmt: rawptr) {
           (value-handle-from-owned-value value))))))
 
 @export
+(defn vev_db_index_pull_value :abi "c"
+  [db: Vev-DB,
+   order: cstring,
+   selector-edn: cstring,
+   start-edn: cstring,
+   reverse: bool,
+   offset: i64,
+   limit: i64] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr db) nil)
+            (= order nil)
+            (= selector-edn nil)
+            (= start-edn nil))
+    (return (Vev-Value-Handle nil)))
+  (let [order-text (text-from-c order)
+        selector-text (text-from-c selector-edn)
+        start-text (text-from-c start-edn)
+        [start start-ok _] (value-from-edn-text start-text)]
+    (delete start-text)
+    (when (or (not start-ok)
+              (not (= start.kind .Vector))
+              (= (count start.items) 0)
+              (not (= start.items[0].kind .Keyword))
+              (not (or (= order-text ":avet")
+                       (= order-text "avet")
+                       (= order-text ":aevt")
+                       (= order-text "aevt"))))
+      (when start-ok
+        (vev.delete-owned-value start))
+      (delete order-text)
+      (delete selector-text)
+      (return (Vev-Value-Handle nil)))
+    (defer (vev.delete-owned-value start))
+    (let [[args args-ok] (index-args-from-value start)]
+      (when (not args-ok)
+        (delete args)
+        (delete order-text)
+        (delete selector-text)
+        (return (Vev-Value-Handle nil)))
+      (defer (delete args))
+      (let [mode (if reverse 2 1)
+            [datoms datoms-ok _]
+            (vev.store-db-index-datoms
+              (store-db-ptr db) mode order-text (slice args 0))]
+        (when (not datoms-ok)
+          (vev.delete-owned-datoms datoms)
+          (delete order-text)
+          (delete selector-text)
+          (return (Vev-Value-Handle nil)))
+        (defer (vev.delete-owned-datoms datoms))
+        (let [attr start.items[0].text
+              avet (or (= order-text ":avet") (= order-text "avet"))
+              skip (if (> offset 0) offset (i64 0))
+              pulled (make [dynamic]vev.Value)
+              seen: i64 0]
+          (delete order-text)
+          (for [datom datoms]
+            (when (= datom.a attr)
+              (when (>= seen skip)
+                (when (or (< limit 0) (< (i64 (count pulled)) limit))
+                  (let [entity
+                        (if avet
+                          datom.e
+                          (if (= datom.v.kind .Entity)
+                            datom.v.entity
+                            (u64 0)))]
+                    (when (= entity (u64 0))
+                      (for [value pulled]
+                        (vev.delete-owned-value value))
+                      (delete pulled)
+                      (delete selector-text)
+                      (return (Vev-Value-Handle nil)))
+                    (let [[value value-ok _]
+                          (vev.pull-store-db-value-text
+                            (store-db-ptr db) selector-text entity)]
+                      (when (not value-ok)
+                        (for [existing pulled]
+                          (vev.delete-owned-value existing))
+                        (delete pulled)
+                        (delete selector-text)
+                        (return (Vev-Value-Handle nil)))
+                      (arr.push! pulled value)))))
+              (set! seen (+ seen 1))))
+          (delete selector-text)
+          (value-handle-from-owned-value
+            (vev.value-vector-owned pulled)))))))
+
+@export
 (defn vev_db_index_range_value :abi "c" [db: Vev-DB, attr: cstring, start-edn: cstring, end-edn: cstring] -> Vev-Value-Handle
   (odin "context = runtime.default_context()")
   (when (or (= (rawptr db) nil) (= attr nil) (= start-edn nil) (= end-edn nil))
     (return (Vev-Value-Handle nil)))
   (let [attr-text (text-from-c attr)
+        [attr-value attr-ok _] (value-from-edn-text attr-text)
         start-text (text-from-c start-edn)
         end-text (text-from-c end-edn)
         [start start-ok _] (value-from-edn-text start-text)
         [end end-ok _] (value-from-edn-text end-text)]
+    (delete attr-text)
     (delete start-text)
     (delete end-text)
-    (when (not (and start-ok end-ok))
+    (when (not (and attr-ok start-ok end-ok))
+      (when attr-ok
+        (vev.delete-owned-value attr-value))
       (when start-ok
         (vev.delete-owned-value start))
       (when end-ok
         (vev.delete-owned-value end))
-      (delete attr-text)
       (return (Vev-Value-Handle nil)))
+    (defer (vev.delete-owned-value attr-value))
     (defer (vev.delete-owned-value start))
     (defer (vev.delete-owned-value end))
+    (let [[source source-ok _]
+          (vev.store-db-read-source (store-db-ptr db))]
+      (when (not source-ok)
+        (return (Vev-Value-Handle nil)))
+    (let [[resolved-attr resolved-ok _]
+          (vev.db-read-source-resolve-attribute-value source attr-value)]
+      (when (or (not resolved-ok)
+                (not (= resolved-attr.kind .Keyword)))
+        (when (and resolved-ok
+                   (or (= attr-value.kind .Entity)
+                       (= attr-value.kind .Int)))
+          (vev.delete-owned-value resolved-attr))
+        (return (Vev-Value-Handle nil)))
+      (let [resolved-owned (or (= attr-value.kind .Entity)
+                               (= attr-value.kind .Int))
+            resolved-text (vev.string-owned resolved-attr.text)]
+        (defer
+          (when resolved-owned
+            (vev.delete-owned-value resolved-attr)))
+        (defer (delete resolved-text))
     (let [has-start (not (= start.kind .Nil))
           has-end (not (= end.kind .Nil))
           [datoms datoms-ok _] (vev.store-db-index-range-datoms
                                  (store-db-ptr db)
-                                 attr-text
+                                 resolved-text
                                  (index-arg-from-value start)
                                  has-start
                                  (index-arg-from-value end)
                                  has-end)]
-      (delete attr-text)
       (when (not datoms-ok)
         (vev.delete-owned-datoms datoms)
         (return (Vev-Value-Handle nil)))
       (let [value (vev.datoms-value (slice datoms 0))]
         (vev.delete-owned-datoms datoms)
-        (value-handle-from-owned-value value)))))
+        (value-handle-from-owned-value value))))))))
 
 @export
 (defn vev_entity_free :abi "c" [entity: Vev-Entity]
@@ -5103,6 +5314,31 @@ abi_free_stmt :: proc(stmt: rawptr) {
     (return (c-string-owned "nil")))
   (let [ptr (tx-report-value-ptr report)]
     (c-string-owned (vev.value-serializable-text ptr^))))
+
+@export
+(defn vev_tx_report_resolve_tempid_edn :abi "c" [report: Vev-Tx-Report, tempid-edn: cstring] -> u64
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr report) nil) (= tempid-edn nil))
+    (return (u64 0)))
+  (let [tempid-text (text-from-c tempid-edn)
+        [tempid tempid-ok _] (value-from-edn-text tempid-text)]
+    (delete tempid-text)
+    (when (not tempid-ok)
+      (return (u64 0)))
+    (defer (vev.delete-owned-value tempid))
+    (let [report-value (tx-report-value-ptr report)
+          [tempids tempids-ok]
+          (vev.map-get-value report-value^ (vev.value-keyword ":tempids"))]
+      (when (not tempids-ok)
+        (return (u64 0)))
+      (let [[resolved resolved-ok] (vev.map-get-value tempids tempid)]
+        (when (not resolved-ok)
+          (return (u64 0)))
+        (cond
+          (= resolved.kind .Entity) resolved.entity
+          (and (= resolved.kind .Int) (> resolved.int-value 0))
+            (u64 resolved.int-value)
+          :else (u64 0))))))
 
 @export
 (defn vev_tx_report_db_before :abi "c" [report: Vev-Tx-Report] -> Vev-DB
@@ -6072,6 +6308,53 @@ abi_free_stmt :: proc(stmt: rawptr) {
 (defn vev_db_query_value :abi "c" [db: Vev-DB, query-text: cstring] -> Vev-Value-Handle
   (odin "context = runtime.default_context()")
   (vev_db_query_value_with_inputs db query-text (cstring "[]")))
+
+@export
+(defn vev_db_stats_value :abi "c" [db: Vev-DB] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return (Vev-Value-Handle nil)))
+  (let [args (make [dynamic]vev.Index-Arg)
+        [datoms datoms-ok _]
+        (vev.store-db-index-datoms
+          (store-db-ptr db) 0 ":eavt" (slice args 0))]
+    (delete args)
+    (when (not datoms-ok)
+      (vev.delete-owned-datoms datoms)
+      (return (Vev-Value-Handle nil)))
+    (defer (vev.delete-owned-datoms datoms))
+    (let [attr-names (make [dynamic]string)
+          attr-counts (make [dynamic]i64)]
+      (defer (delete attr-names))
+      (defer (delete attr-counts))
+      (for [datom datoms]
+        (let [found false]
+          (for [index (arr.range 0 (count attr-names))]
+            (when (= attr-names[index] datom.a)
+              (set! attr-counts[index] (+ attr-counts[index] 1))
+              (set! found true)
+              (break)))
+          (when (not found)
+            (arr.push! attr-names datom.a)
+            (arr.push! attr-counts (i64 1)))))
+      (let [attrs (make [dynamic]vev.Value)]
+        (for [index (arr.range 0 (count attr-names))]
+          (arr.push! attrs
+                     (vev.value-keyword
+                       (vev.string-owned attr-names[index])))
+          (arr.push!
+            attrs
+            (vev.value-map
+              ([]vev.Value
+                [(vev.value-keyword (vev.string-owned ":count"))
+                 (vev.value-int attr-counts[index])]))))
+      (value-handle-from-owned-value
+        (vev.value-map
+          ([]vev.Value
+            [(vev.value-keyword (vev.string-owned ":datoms"))
+             (vev.value-int (i64 (count datoms)))
+             (vev.value-keyword (vev.string-owned ":attrs"))
+             (vev.value-map-owned attrs)])))))))
 
 @export
 (defn vev_db_query_prepared_value_with_inputs :abi "c" [db: Vev-DB, query: Vev-Prepared-Query, inputs-text: cstring] -> Vev-Value-Handle

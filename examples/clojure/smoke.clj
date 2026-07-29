@@ -27,7 +27,11 @@
                              [{:db/id 1 :user/name "Ada" :user/email "ada@example.com"}
                               {:db/id 2 :user/name "Grace" :user/email "grace@example.com"}])]
         (println "tx:" tx)
-        (when-not (and (:ok tx) (integer? (:tx tx)) (map? (:tempids tx)))
+        (when-not (and (= #{:db-before :db-after :tx-data :tempids}
+                          (set (keys tx)))
+                       (seq (:tx-data tx))
+                       (every? #(instance? vev.core.Datom %) (:tx-data tx))
+                       (map? (:tempids tx)))
           (throw (ex-info "unexpected transaction report" {:report tx}))))
 
       (let [seen (atom [])]
@@ -225,26 +229,24 @@
 
         (let [db (vev/db conn)
               immutable-report (vev/with db [{:db/id 4 :user/name "Barbara"}])
-              immutable-report-with-dbs (vev/with-report db [{:db/id 4 :user/name "Barbara"}])
               immutable-next (vev/db-with db [{:db/id 4 :user/name "Barbara"}])]
           (println "with tx:" immutable-report)
-          (when-not (and (:ok immutable-report)
-                         (= #{} (vev/q db
-                                       '[:find ?e
-                                         :where [?e :user/name "Barbara"]])))
+          (when-not (= #{} (vev/q db
+                                  '[:find ?e
+                                    :where [?e :user/name "Barbara"]]))
             (throw (ex-info "immutable with mutated source DB" {:report immutable-report})))
           (try
-            (when-not (and (= #{} (vev/q (:db-before immutable-report-with-dbs)
+            (when-not (and (= #{} (vev/q (:db-before immutable-report)
                                          '[:find ?e
                                            :where [?e :user/name "Barbara"]]))
-                           (= #{[4]} (vev/q (:db-after immutable-report-with-dbs)
+                           (= #{[4]} (vev/q (:db-after immutable-report)
                                             '[:find ?e
                                               :where [?e :user/name "Barbara"]])))
-              (throw (ex-info "with-report db-before/db-after mismatch"
-                              {:report immutable-report-with-dbs})))
+              (throw (ex-info "with db-before/db-after mismatch"
+                              {:report immutable-report})))
             (finally
-              (.close (:db-before immutable-report-with-dbs))
-              (.close (:db-after immutable-report-with-dbs))))
+              (.close (:db-before immutable-report))
+              (.close (:db-after immutable-report))))
           (when-not (= #{[4]}
                        (vev/q immutable-next
                               '[:find ?e
@@ -288,7 +290,7 @@
                                  [{:db/id 1
                                    :user/name "Durable Ada"
                                    :user/email "durable-ada@example.com"}])]
-            (when-not (:ok tx)
+            (when-not (seq (:tx-data tx))
               (throw (ex-info "unexpected SQLite transaction report" {:report tx}))))
           (reset! first-basis (:basis-t (vev/connection-info durable)))
           (when (zero? @first-basis)
@@ -302,7 +304,7 @@
             (vev/tx-add! bulk-a 2 :user/name "Durable Grace")
             (vev/tx-add! bulk-b 3 :user/name "Durable Hedy")
             (let [tx (vev/transact-bulk durable [bulk-a bulk-b])]
-              (when-not (:ok tx)
+              (when-not (seq (:tx-data tx))
                 (throw (ex-info "unexpected durable bulk builder report"
                                 {:report tx})))))
           (when (not= (inc @first-basis) (:basis-t (vev/connection-info durable)))
@@ -317,7 +319,7 @@
             (vev/tx-add! logical-b 5 :user/name "Durable Dorothy")
             (let [reports (vev/transact-logical-bulk durable [logical-a logical-b])]
               (when-not (and (= 2 (count reports))
-                             (every? :ok reports))
+                             (every? #(seq (:tx-data %)) reports))
                 (throw (ex-info "unexpected durable logical group reports"
                                 {:reports reports})))))
           (let [reports (vev/transact-logical-bulk durable [])]
@@ -329,7 +331,7 @@
                                                  :user/name "Durable Katherine"}]
                                                "[{:db/id 7 :user/name \"Durable Mary\"}]"])]
             (when-not (and (= 2 (count reports))
-                           (every? :ok reports))
+                           (every? #(seq (:tx-data %)) reports))
               (throw (ex-info "unexpected durable logical EDN group reports"
                               {:reports reports}))))
           (when (not= (+ @first-basis 5) (:basis-t (vev/connection-info durable)))

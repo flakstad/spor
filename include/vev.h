@@ -113,6 +113,9 @@ typedef void (*vev_tx_report_listener_callback)(void *user, vev_tx_report_t repo
 
 const char *vev_version(void);
 unsigned int vev_abi_version(void);
+/* Returned strings use vev_string_free. Invalid UUID text returns -1. */
+const char *vev_squuid(void);
+long long vev_squuid_time_millis(const char *uuid_text);
 
 vev_conn_t vev_conn_open_memory(void);
 void vev_conn_close(vev_conn_t conn);
@@ -249,15 +252,32 @@ vev_value_handle_t vev_db_tx_range_value(
     long long start_value,
     int end_kind,
     long long end_value);
+vev_value_handle_t vev_db_stats_value(vev_db_t db);
 const char *vev_with_edn(vev_db_t db, const char *tx_text);
 vev_tx_report_t vev_with_edn_report(vev_db_t db, const char *tx_text);
 vev_db_t vev_db_with_edn(vev_db_t db, const char *tx_text);
 vev_entity_t vev_db_entity(vev_db_t db, unsigned long long entity);
 vev_entity_t vev_db_entity_lookup_ref_string(vev_db_t db, const char *attr, const char *value);
+/* Generic lookup-ref value encoded as one EDN scalar, for example 42,
+   :account/admin, #uuid "...", or "name". */
+vev_entity_t vev_db_entity_lookup_ref_edn(
+    vev_db_t db, const char *attr, const char *value_edn);
 vev_entity_t vev_db_entity_ident(vev_db_t db, const char *ident);
+vev_value_handle_t vev_db_attribute_value(vev_db_t db, const char *attr);
 /* mode: 0 = exact datoms, 1 = forward seek, 2 = reverse seek. */
 vev_value_handle_t vev_db_datoms_value(
     vev_db_t db, int mode, const char *index, const char *components_edn);
+/* Datomic Peer-style eager index-pull. index is :avet or :aevt; start_edn
+   is a non-empty vector; offset is clamped to zero and a negative limit is
+   unbounded. */
+vev_value_handle_t vev_db_index_pull_value(
+    vev_db_t db,
+    const char *index,
+    const char *selector_edn,
+    const char *start_edn,
+    bool reverse,
+    long long offset,
+    long long limit);
 vev_value_handle_t vev_db_index_range_value(
     vev_db_t db, const char *attr, const char *start_edn, const char *end_edn);
 void vev_entity_free(vev_entity_t entity);
@@ -289,6 +309,9 @@ int vev_tx_report_array_count(vev_tx_report_array_t reports);
 vev_tx_report_t vev_tx_report_array_get(vev_tx_report_array_t reports, int index);
 vev_value_t vev_tx_report_value(vev_tx_report_t report);
 const char *vev_tx_report_edn(vev_tx_report_t report);
+/* Resolve an EDN tempid such as "ada" or :db/current-tx; zero means missing. */
+unsigned long long vev_tx_report_resolve_tempid_edn(
+    vev_tx_report_t report, const char *tempid_edn);
 vev_db_t vev_tx_report_db_before(vev_tx_report_t report);
 vev_db_t vev_tx_report_db_after(vev_tx_report_t report);
 vev_tx_builder_t vev_tx_create(int capacity);

@@ -974,13 +974,26 @@ int main(void) {
 
     vev_tx_report_t vector_tx_report =
         vev_transact_edn_report(conn, "[[:db/add 1 :user/tags [1 2]] [:db/add 1 :user/mixed 1] [:db/add 2 :user/mixed [2 3]]]");
-    if (!tx_report_ok_or_error("vector-tx", vector_tx_report) ||
-        !tx_report_first_tx_value_is_int_vector("vector-tx", vector_tx_report, 1, 2)) {
+    if (!tx_report_failed_contains(
+            "vector-tx",
+            vector_tx_report,
+            "unsupported datom value type")) {
         vev_tx_report_free(vector_tx_report);
         vev_conn_close(conn);
         return 1;
     }
     vev_tx_report_free(vector_tx_report);
+
+    vev_tx_report_t mixed_tx_report =
+        vev_transact_edn_report(
+            conn,
+            "[[:db/add 1 :user/mixed 1] [:db/add 2 :user/mixed \"two\"]]");
+    if (!tx_report_ok_or_error("mixed-tx", mixed_tx_report)) {
+        vev_tx_report_free(mixed_tx_report);
+        vev_conn_close(conn);
+        return 1;
+    }
+    vev_tx_report_free(mixed_tx_report);
 
     struct tx_listener_stats listener_stats = {0, 0};
     if (!vev_conn_listen_tx_report(conn, "smoke-listener", count_tx_listener, &listener_stats)) {
@@ -1889,21 +1902,19 @@ int main(void) {
     }
     const vev_value_t *promoted_value_cells = vev_column_batch_column_values_data(promoted_value_batch, 0);
     int saw_promoted_int = 0;
-    int saw_promoted_vector = 0;
+    int saw_promoted_string = 0;
     if (promoted_value_cells != NULL) {
         for (int i = 0; i < vev_column_batch_count(promoted_value_batch); i++) {
             if (vev_value_kind(promoted_value_cells[i]) == VEV_VALUE_INT &&
                 vev_value_int(promoted_value_cells[i]) == 1) {
                 saw_promoted_int = 1;
-            } else if (vev_value_kind(promoted_value_cells[i]) == VEV_VALUE_VECTOR &&
-                       vev_value_item_count(promoted_value_cells[i]) == 2 &&
-                       vev_value_int(vev_value_item(promoted_value_cells[i], 0)) == 2 &&
-                       vev_value_int(vev_value_item(promoted_value_cells[i], 1)) == 3) {
-                saw_promoted_vector = 1;
+            } else if (vev_value_kind(promoted_value_cells[i]) == VEV_VALUE_STRING &&
+                       strcmp(vev_value_text(promoted_value_cells[i]), "two") == 0) {
+                saw_promoted_string = 1;
             }
         }
     }
-    if (!saw_promoted_int || !saw_promoted_vector) {
+    if (!saw_promoted_int || !saw_promoted_string) {
         fprintf(stderr, "unexpected promoted value column batch contents\n");
         vev_column_batch_free(promoted_value_batch);
         vev_prepared_query_free(promoted_value_batch_query);
@@ -2859,6 +2870,22 @@ int main(void) {
         !vev_entity_found(lookup_entity) ||
         vev_entity_id(lookup_entity) != 1) {
         fprintf(stderr, "unexpected lookup-ref entity output\n");
+        if (lookup_entity != NULL) vev_entity_free(lookup_entity);
+        vev_entity_free(ada_entity);
+        vev_db_release(pull_db);
+        vev_stmt_free(stmt);
+        vev_prepared_query_free(query);
+        vev_conn_close(conn);
+        return 1;
+    }
+    vev_entity_free(lookup_entity);
+
+    lookup_entity =
+        vev_db_entity_lookup_ref_edn(pull_db, ":user/email", "\"ada@example.com\"");
+    if (lookup_entity == NULL ||
+        !vev_entity_found(lookup_entity) ||
+        vev_entity_id(lookup_entity) != 1) {
+        fprintf(stderr, "unexpected generic lookup-ref entity output\n");
         if (lookup_entity != NULL) vev_entity_free(lookup_entity);
         vev_entity_free(ada_entity);
         vev_db_release(pull_db);

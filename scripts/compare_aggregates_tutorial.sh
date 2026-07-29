@@ -8,6 +8,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 JAVA_OUT="$ROOT/build/examples/java"
 DATOMIC_VERSION="${DATOMIC_VERSION:-1.0.7277}"
 
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25)}"
+  export PATH="$JAVA_HOME/bin:$PATH"
+fi
+
 if [[ ! -f "$JAVA_OUT/com/vevdb/Vev.class" || "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" -nt "$JAVA_OUT/com/vevdb/Vev.class" ]]; then
   javac \
     --release 25 \

@@ -45,7 +45,7 @@ cat > "$TMP_DIR/java-smoke.clj" <<'EOF'
     (with-open [listener (.listen conn "java-listener"
                                   (reify Vev$TxReportListener
                                     (accept [_ report]
-                                      (when (.contains (str report) ":user/listener")
+                                      (when (.contains (.edn report) ":user/listener")
                                         (swap! seen inc)))))]
       (.transact conn "[[:db/add 1 :user/listener \"heard\"]]")
       (assert (= 1 @seen)))
@@ -129,17 +129,16 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
   (assert (= #{["Ada"] ["Grace"]}
              (d/q '[:find ?name :where [?e :user/name ?name]]
                   (d/db conn))))
-  (with-open [captured @(d/sync conn)]
+  (with-open [captured (d/sync conn)]
     (assert (= (d/basis-t (d/db conn))
                (d/basis-t captured))))
   (let [target (inc (d/basis-t (d/db conn)))
-        coordinated (d/sync conn target)]
-    (assert (not (.isDone coordinated)))
-    (d/transact conn [[:db/add 1 :user/sync-marker true]])
-    (let [synced (deref coordinated 5000 ::timeout)]
-      (assert (not= ::timeout synced))
+        writer (future
+                 (Thread/sleep 50)
+                 (d/transact conn [[:db/add 1 :user/sync-marker true]]))]
+    (with-open [synced (d/sync conn target)]
       (assert (>= (d/basis-t synced) target))
-      (.close ^java.lang.AutoCloseable synced)))
+      @writer))
   (let [snapshot (d/db conn)
         ada (d/entity snapshot 1)
         friend (:user/friend ada)]
@@ -165,7 +164,9 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
                                        :eavt
                                        [:user/email "ada@example.com"]
                                        :user/name))
-          email-range (d/index-range snapshot :user/email "a" "b")]
+          email-range (d/index-range snapshot :user/email "a" "b")
+          numeric-email-datoms (d/datoms snapshot :avet 92)
+          numeric-email-range (d/index-range snapshot 92 "a" "b")]
       (assert (= 1 (:e name-datom)))
       (assert (= :user/name (:a name-datom)))
       (assert (= "Ada" (:v name-datom)))
@@ -173,6 +174,10 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
                  (vec name-datom)))
       (assert (= 1 (:e lookup-name)))
       (assert (= ["ada@example.com"] (mapv :v email-range)))
+      (assert (= ["ada@example.com"] (mapv :v numeric-email-datoms)))
+      (assert (= ["ada@example.com"] (mapv :v numeric-email-range)))
+      (assert (= "ada@example.com"
+                 (:v (first (d/seek-datoms snapshot :avet 92 "a")))))
       (assert (= 2 (:e (first (d/seek-datoms snapshot :eavt 2)))))
       (assert (= 2 (:e (first (d/rseek-datoms snapshot :eavt 2)))))))
   (d/transact conn [[:db/add 2 :user/name "Grace Hopper"]])

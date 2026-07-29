@@ -77,33 +77,36 @@
   (assert-equal! :largest-three-radii (:largest-three-radii datomic) (:largest-three-radii vev)))
 
 (defn -main [& _]
-  (let [vev (vev-summary)
-        datomic (datomic-summary)]
-    (compare-portable! vev datomic)
-    (println (pr-str {:source "aggregates-tutorial"
-                      :portable-status :match
-                      :vev-portable (select-keys vev [:object-count
-                                                       :largest-radius
-                                                       :smallest-radius
-                                                       :average-radius
-                                                       :median-radius
-                                                       :stddev-radius
-                                                       :smallest-three-radii
-                                                       :largest-three-radii])
-                      :datomic-portable (select-keys datomic [:object-count
-                                                              :largest-radius
-                                                              :smallest-radius
-                                                              :average-radius
-                                                              :median-radius
-                                                              :stddev-radius
-                                                              :smallest-three-radii
-                                                              :largest-three-radii])
-                      :schema-status :intentional-datomic-system-schema-difference
-                      :vev-schema (select-keys vev [:schema-name-average-length
-                                                    :schema-name-modes
-                                                    :schema-attribute-value-types])
-                      :datomic-schema (select-keys datomic [:schema-name-average-length
-                                                            :schema-name-modes
-                                                            :schema-attribute-value-types])}))))
+  (try
+    (let [vev (vev-summary)
+          datomic (datomic-summary)]
+      (compare-portable! vev datomic)
+      (println (pr-str {:source "aggregates-tutorial"
+                        :portable-status :match
+                        :vev-portable (select-keys vev [:object-count
+                                                         :largest-radius
+                                                         :smallest-radius
+                                                         :average-radius
+                                                         :median-radius
+                                                         :stddev-radius
+                                                         :smallest-three-radii
+                                                         :largest-three-radii])
+                        :datomic-portable (select-keys datomic [:object-count
+                                                                :largest-radius
+                                                                :smallest-radius
+                                                                :average-radius
+                                                                :median-radius
+                                                                :stddev-radius
+                                                                :smallest-three-radii
+                                                                :largest-three-radii])
+                        :schema-status :intentional-datomic-system-schema-difference
+                        :vev-schema (select-keys vev [:schema-name-average-length
+                                                      :schema-name-modes
+                                                      :schema-attribute-value-types])
+                        :datomic-schema (select-keys datomic [:schema-name-average-length
+                                                              :schema-name-modes
+                                                              :schema-attribute-value-types])})))
+    (finally
+      (datomic/shutdown true))))
 
 (-main)
