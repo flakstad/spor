@@ -129,6 +129,7 @@ javac \
   "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java"
 
 jar --create \
+  --no-manifest \
   --date="$ARCHIVE_DATE" \
   --file "$OUT_DIR/vev-java-$VERSION.jar" \
   -C "$JAVA_CLASSES" .
@@ -147,6 +148,7 @@ write_pom "$OUT_DIR/$NATIVE_ARTIFACT-$VERSION.pom" "$NATIVE_ARTIFACT"
 cp -R "$ROOT/clients/clojure/src/." "$CLOJURE_CLASSES/"
 
 jar --create \
+  --no-manifest \
   --date="$ARCHIVE_DATE" \
   --file "$OUT_DIR/vev-clj-$VERSION.jar" \
   -C "$CLOJURE_CLASSES" .
