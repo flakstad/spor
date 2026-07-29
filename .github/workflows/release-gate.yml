@@ -64,6 +64,7 @@ jobs:
         uses: laytan/setup-odin@v2.12.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          release: dev-2026-05
 
       - name: Install Java
         uses: actions/setup-java@v4
@@ -176,6 +177,7 @@ jobs:
         uses: laytan/setup-odin@v2.12.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          release: dev-2026-05
 
       - name: Build Kvist
         working-directory: kvist
