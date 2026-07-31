@@ -63,8 +63,99 @@
     (os.remove "vev-kvist-resident-smoke.db-wal")
     (os.remove "vev-kvist-resident-smoke.db-shm")))
 
+(defn datomic-report-contract-smoke []
+  (let [path "vev-kvist-report-contract-smoke.db"]
+    (os.remove path)
+    (os.remove "vev-kvist-report-contract-smoke.db-wal")
+    (os.remove "vev-kvist-report-contract-smoke.db-shm")
+    (let [conn (d.connect path)
+          value-query
+            '[:find ?value .
+              :where [?e :entity/id "counter"]
+                     [?e :entity/value ?value]]]
+      (defer (d.close conn))
+      (let [seed
+              (d.transact
+                conn
+                [[:db/add 100 :db/ident :entity/id]
+                 [:db/add 100 :db/valueType :db.type/string]
+                 [:db/add 100 :db/unique :db.unique/identity]
+                 [:db/add 101 :db/ident :entity/value]
+                 [:db/add 101 :db/valueType :db.type/long]
+                 {:db/id "counter-tempid"
+                  :entity/id "counter"
+                  :entity/value 0}])]
+        (defer (d.close (addr seed)))
+        (when (not seed.ok)
+          (panic seed.error))
+        (let [[counter-id counter-ok]
+                (d.resolve-tempid
+                  seed.db-after seed.tempids "counter-tempid")]
+          (when (or (not counter-ok) (= counter-id (u64 0)))
+            (panic "transaction report tempids did not resolve"))))
+      (let [first
+              (d.transact
+                conn
+                [[:db/add [:entity/id "counter"] :entity/value 1]])]
+        (defer (d.close (addr first)))
+        (when (not first.ok)
+          (panic first.error))
+        (let [prospective
+                (d.with
+                  first.db-after
+                  [[:db/add [:entity/id "counter"] :entity/value 9]])]
+          (defer (d.close (addr prospective)))
+          (when (not prospective.ok)
+            (panic prospective.error))
+          (let [before-value (d.q value-query first.db-before)
+                after-value (d.q value-query first.db-after)
+                with-before-value (d.q value-query prospective.db-before)
+                with-after-value (d.q value-query prospective.db-after)
+                live-before-second (d.db conn)
+                live-value (d.q value-query live-before-second)]
+            (defer (d.close live-before-second))
+            (when (or (not (= (data.int before-value) 0))
+                      (not (= (data.int after-value) 1))
+                      (not (= (data.int with-before-value) 1))
+                      (not (= (data.int with-after-value) 9))
+                      (not (= (data.int live-value) 1)))
+              (panic "transact/with database values violated immutable semantics"))))
+        (let [second
+                (d.transact
+                  conn
+                  [[:db/add [:entity/id "counter"] :entity/value 2]])]
+          (defer (d.close (addr second)))
+          (when (not second.ok)
+            (panic second.error))
+          (let [held-first-value (d.q value-query first.db-after)
+                second-before-value (d.q value-query second.db-before)
+                second-after-value (d.q value-query second.db-after)]
+            (when (or
+                    (not (= (d.basis-t first.db-after)
+                            (d.basis-t second.db-before)))
+                    (not (= (data.int held-first-value) 1))
+                    (not (= (data.int second-before-value) 1))
+                    (not (= (data.int second-after-value) 2)))
+              (panic "adjacent transaction reports did not share an exact basis"))))))
+    (let [reopened (d.connect path)
+          db (d.db reopened)
+          value
+            (d.q
+              '[:find ?value .
+                :where [?e :entity/id "counter"]
+                       [?e :entity/value ?value]]
+              db)]
+      (when (not (= (data.int value) 2))
+        (panic "report contract transaction was not durable"))
+      (d.close db)
+      (d.close reopened))
+    (os.remove path)
+    (os.remove "vev-kvist-report-contract-smoke.db-wal")
+    (os.remove "vev-kvist-report-contract-smoke.db-shm")))
+
 (defn main []
   (resident-transaction-smoke)
+  (datomic-report-contract-smoke)
   (let [uuid (d.squuid)]
     (defer (data.release uuid))
     (when (not (= (% (d.squuid-time-millis uuid) 1000) 0))

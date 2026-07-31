@@ -796,10 +796,17 @@
   (let [tx-text (edn.write tx)]
     (defer (delete tx-text))
     (let [state (conn-state conn)
-          [before before-ok] (native.db (addr state^.connection))
           [native-report handle-ok]
           (native.transact-report-durable (addr state^.connection) tx-text)
-          [after after-ok] (native.db (addr state^.connection))]
+          [before before-ok]
+            (native.tx-report-db-before (addr native-report))
+          [after after-ok]
+            (native.tx-report-db-after (addr native-report))]
+      ;; Datomic transaction reports describe this exact transaction. Reading
+      ;; the connection immediately before and after transact is not
+      ;; equivalent: another writer may advance the connection between those
+      ;; operations. Always retain the immutable values carried by the native
+      ;; report itself.
       (tx-report-from-native
         state native-report handle-ok before before-ok after after-ok))))
 

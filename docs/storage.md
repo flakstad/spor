@@ -10,6 +10,27 @@ VevDB supports in-memory databases and durable local stores.
 Both expose the same transaction, database-value, query, pull, entity, index,
 and history model.
 
+## Transaction semantics
+
+VevDB preserves the Datomic-shaped database-value contract independently of
+its storage representation:
+
+- A database value is immutable and identifies one time basis.
+- A successful transaction is atomic and advances the connection once.
+- Its report's `db-before` is the exact value used to plan and validate that
+  transaction, and `db-after` is the exact value produced by it.
+- `tx-data` contains the transaction's assertions and retractions, while
+  `tempids` resolves temporary identities allocated by that transaction.
+- Retaining either report database value keeps that basis even after later
+  transactions or compaction.
+- `with` applies the same transaction semantics to an immutable database value
+  without persisting anything or advancing a connection.
+
+The Kvist API is synchronous rather than returning a future, requires explicit
+`close` at its native resource boundary, and represents transaction rejection
+as a report with `ok = false` rather than a Clojure exception. Those are API
+surface differences, not database-model differences.
+
 ## Durable stores
 
 Durable stores use SQLite internally. The native library includes a pinned
