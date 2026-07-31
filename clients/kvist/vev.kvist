@@ -59,13 +59,6 @@
   native-report: native.Native-Tx-Report
 })
 
-(defstruct Tx-Status {
-  ok: bool
-  error: string
-  error-kind: Tx-Error-Kind
-  tx: u64
-})
-
 (defstruct Value {
   int-value: i64
 })
@@ -343,12 +336,6 @@
   (native.close (addr report.native-report))
   (delete report.error)
   (set! report^ (Tx-Report {})))
-
-(defn close-tx-status [status: ^Tx-Status]
-  (when (= status nil)
-    (return))
-  (delete status^.error)
-  (set! status^ (Tx-Status {})))
 
 (defn history [db-value: DB] -> DB
   (let [state (db-state db-value)
@@ -816,52 +803,8 @@
       (tx-report-from-native
         state native-report handle-ok before before-ok after after-ok))))
 
-(defn transact-status-data [conn: Conn, tx: Data] -> Tx-Status
-  (let [tx-text (edn.write tx)]
-    (defer (delete tx-text))
-    (let [state (conn-state conn)
-          [status-text status-ok]
-            (native.transact-durable (addr state^.connection) tx-text)]
-      (defer (delete status-text))
-      (when (not status-ok)
-        (return (Tx-Status {ok: false
-                            error: (clone-text "Vev transaction returned no status")
-                            error-kind: .Unknown
-                            tx: (u64 0)})))
-      (let [status (edn.read status-text)
-            ok-value (data.get-in status [:ok])
-            error-value (data.get-in status [:error])
-            error-kind-value (data.get-in status [:vev/error])
-            tx-value (data.get-in status [:tx])
-            ok (and (data.bool? ok-value) (data.bool ok-value))
-            error (if (and (not ok) (data.string? error-value))
-                    (clone-text (data.string error-value))
-                    (clone-text (if ok "" "Vev transaction rejected")))
-            error-kind: Tx-Error-Kind
-              (if ok
-                .None
-                (if (and (data.keyword? error-kind-value)
-                         (= (data.keyword error-kind-value)
-                            ":vev.error/transaction-failed"))
-                  .Transaction-Failed
-                  .Unknown))
-            tx-id
-              (if (and ok
-                       (data.vector? tx-value)
-                       (= (data.count tx-value) 2)
-                       (data.int? (data.nth tx-value 1)))
-                (u64 (data.int (data.nth tx-value 1)))
-                (if (and ok (data.int? tx-value))
-                  (u64 (data.int tx-value))
-                  (u64 0)))]
-        (data.release status)
-        (Tx-Status {ok: ok error: error error-kind: error-kind tx: tx-id})))))
-
 (defmacro transact [conn tx]
   `(transact-data ~conn ~tx))
-
-(defmacro transact-status [conn tx]
-  `(transact-status-data ~conn ~tx))
 
 (defn with-data [db-value: DB, tx: Data] -> Tx-Report
   (let [tx-text (edn.write tx)]
@@ -993,4 +936,4 @@
     (defer (data.release payload))
     (data.tagged "inst" payload)))
 
-(def close (overload close-conn close-db close-entity close-log close-tx-report close-tx-status))
+(def close (overload close-conn close-db close-entity close-log close-tx-report))

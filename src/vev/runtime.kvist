@@ -584,7 +584,8 @@
 (defn delete-tx-report-shallow [report: Tx-Report]
   (when report.ok
     (delete-owned-db report.db-before)
-    (delete-owned-db report.db-after))
+    (when report.owns-db-after
+      (delete-owned-db report.db-after)))
   (delete report.error)
   (delete report.tx-data)
   (delete-owned-tx-meta report.tx-meta)
@@ -592,13 +593,10 @@
   (delete-tx-publish-plan report.publish-plan))
 
 (defn delete-live-tx-report-shallow [report: Tx-Report]
-  (when report.ok
-    (delete-owned-db report.db-before))
-  (delete report.error)
-  (delete report.tx-data)
-  (delete-owned-tx-meta report.tx-meta)
-  (delete-owned-tempids report.tempids)
-  (delete-tx-publish-plan report.publish-plan))
+  ;; Kept as a source-compatible name for callers that know they transacted a
+  ;; live connection. Ownership is carried by the report, so both cleanup
+  ;; entry points are now equally safe.
+  (delete-tx-report-shallow report))
 
 (defn clone-datoms [datoms: [dynamic]Datom] -> [dynamic]Datom
   (arr.into [dynamic]Datom (slice datoms 0)))
@@ -628,6 +626,7 @@
                 error: (string-owned report.error)
                 db-before: (clone-db report.db-before)
                 db-after: (clone-db report.db-after)
+                owns-db-after: true
                 tx-data: tx-data
                 tx: report.tx
                 tx-meta: tx-meta
@@ -18233,11 +18232,11 @@
     (let [[value-key value-ok] (row-values-dedupe-key (slice op.v.items 0))]
       (when (not value-ok)
         (return "" false))
-      (return (fmt.tprintf "%d:%s:%d:%s" (count op.a) op.a (count value-key) value-key) true))
+      (return (fmt.aprintf "%d:%s:%d:%s" (count op.a) op.a (count value-key) value-key) true))
     (let [[value-key value-ok] (primitive-value-dedupe-key op.v)]
       (when (not value-ok)
         (return "" false))
-      (return (fmt.tprintf "%d:%s:%d:%s" (count op.a) op.a (count value-key) value-key) true))))
+      (return (fmt.aprintf "%d:%s:%d:%s" (count op.a) op.a (count value-key) value-key) true))))
 
 (defn validate-final-schema-db [scratch: DB] -> [ok: bool, error: string]
   (let [[ok error] (validate-tuple-schema scratch)]
@@ -19073,7 +19072,11 @@
 
 (defn with-tx-data [db: DB, tx-data: []Tx-Data] -> Tx-Report
   (let [conn (conn-from-db db)]
-    (transact-tx-data (addr conn) tx-data)))
+    (let [report (transact-tx-data (addr conn) tx-data)]
+      (when report.ok
+        (set! report.owns-db-after true))
+      (delete conn.listeners)
+      report)))
 
 (defn db-with-tx-data [db: DB, tx-data: []Tx-Data] -> DB
   (let [report (with-tx-data db tx-data)]
@@ -19083,7 +19086,11 @@
 
 (defn with-ops [db: DB, ops: []Tx-Op] -> Tx-Report
   (let [conn (conn-from-db db)]
-    (transact-ops (addr conn) ops)))
+    (let [report (transact-ops (addr conn) ops)]
+      (when report.ok
+        (set! report.owns-db-after true))
+      (delete conn.listeners)
+      report)))
 
 (defn db-with-ops [db: DB, ops: []Tx-Op] -> DB
   (let [report (with-ops db ops)]
@@ -19128,6 +19135,7 @@
                   error: (string-owned "")
                   db-before: before
                   db-after: after
+                  owns-db-after: true
                   tx-data: tx-data
                   tx: (report-tx-for-datoms (next-transaction-id (max-tx (slice db.datoms 0))) datoms)
                   tx-meta: (make [dynamic]Tx-Meta)

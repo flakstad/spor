@@ -21,21 +21,21 @@
         seed (vev.transact-store-text (addr store) "[{:db/id 1 :user/email \"ada@example.com\"} {:db/id 2 :user/email \"grace@example.com\"}]")]
     (vev.close-store store)
     (when (not opened-ok)
-      (vev.delete-tx-report-shallow schema)
-      (vev.delete-tx-report-shallow seed)
+      (vev.delete-live-tx-report-shallow schema)
+      (vev.delete-live-tx-report-shallow seed)
       (return false opened-error))
     (when (not schema.ok)
       (let [error schema.error]
-        (vev.delete-tx-report-shallow schema)
-        (vev.delete-tx-report-shallow seed)
+        (vev.delete-live-tx-report-shallow schema)
+        (vev.delete-live-tx-report-shallow seed)
         (return false error)))
     (when (not seed.ok)
       (let [error seed.error]
-        (vev.delete-tx-report-shallow schema)
-        (vev.delete-tx-report-shallow seed)
+        (vev.delete-live-tx-report-shallow schema)
+        (vev.delete-live-tx-report-shallow seed)
         (return false error)))
-    (vev.delete-tx-report-shallow schema)
-    (vev.delete-tx-report-shallow seed)
+    (vev.delete-live-tx-report-shallow schema)
+    (vev.delete-live-tx-report-shallow seed)
     (return true "")))
 
 (t.deftest sqlite-source-store-initial-schema-tempid-maps
@@ -62,6 +62,91 @@
       (vev.delete-query-result result)
       (vev.close-store-db! (addr snapshot))
       (vev.close-store read-store))))
+
+(t.deftest sqlite-resident-rich-reports-stay-immutable-through-replacements-and-reopen
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.resident-rich-reports.sqlite"]
+    (remove-storage-with-sqlite-files path)
+    (defer (remove-storage-with-sqlite-files path))
+    (let [[store opened-ok opened-error] (vev.open-store path)]
+      (t.is opened-ok opened-error)
+      (let [schema
+              (vev.transact-store-report-text
+                (addr store)
+                "[{:db/id 100 :db/ident :item/name :db/valueType :db.type/string :db/cardinality :db.cardinality/one}]")
+            seed
+              (vev.transact-store-report-text
+                (addr store) "[{:db/id 1 :item/name \"value-0\"}]")]
+        (t.is schema.ok schema.error)
+        (t.is seed.ok seed.error)
+        (vev.delete-store-tx-report schema)
+        (vev.delete-store-tx-report seed))
+      (let [[resident-ok resident-error]
+              (vev.ensure-store-resident! (addr store))]
+        (t.is resident-ok resident-error))
+      (let [first
+              (vev.transact-store-report-text
+                (addr store) "[[:db/add 1 :item/name \"value-1\"]]")
+            held-before (vev.retain-store-db first.db-before)
+            held-after (vev.retain-store-db first.db-after)]
+        (t.is first.ok first.error)
+        (vev.delete-store-tx-report first)
+        (let [index 2]
+          (while (<= index 250)
+            (let [text
+                    (fmt.aprintf
+                      "[[:db/add 1 :item/name \"value-%d\"]]" index)
+                  report
+                    (vev.transact-store-report-text (addr store) text)]
+              (t.is report.ok report.error)
+              (delete text)
+              (vev.delete-store-tx-report report))
+            (inc! index)))
+        ;; Multiple replacements in one logical transaction can emit
+        ;; byte-for-byte identical retraction datoms at the same tx. Every
+        ;; persisted index still needs a deterministic total order so its run
+        ;; cursor matches a canonical rebuild after reopening.
+        (let [multi
+                (vev.transact-store-report-text
+                  (addr store)
+                  "[[:db/add 1 :item/name \"value-251\"] [:db/add 1 :item/name \"value-252\"]]")
+              duplicate-retractions 0]
+          (t.is multi.ok multi.error)
+          (for [datom multi.tx-data]
+            (when (not datom.added)
+              (inc! duplicate-retractions)))
+          (t.is (>= duplicate-retractions 2))
+          (vev.delete-store-tx-report multi))
+        (let [before-result
+                (vev.q-result-store-db-text
+                  (addr held-before)
+                  "[:find ?name :where [1 :item/name ?name]]")
+              after-result
+                (vev.q-result-store-db-text
+                  (addr held-after)
+                  "[:find ?name :where [1 :item/name ?name]]")]
+          (t.is before-result.result.ok before-result.result.error)
+          (t.is after-result.result.ok after-result.result.error)
+          (t.is (= before-result.result.rows[0].values[0].text "value-0"))
+          (t.is (= after-result.result.rows[0].values[0].text "value-1"))
+          (vev.delete-query-result before-result)
+          (vev.delete-query-result after-result))
+        (vev.close-store-db held-before)
+        (vev.close-store-db held-after))
+      (vev.close-store store))
+    (let [[reopened reopened-ok reopened-error] (vev.open-store-read-only path)
+          [snapshot snapshot-ok snapshot-error] (vev.store-db (addr reopened))
+          result
+            (vev.q-result-store-db-text
+              (addr snapshot)
+              "[:find ?name :where [1 :item/name ?name]]")]
+      (t.is reopened-ok reopened-error)
+      (t.is snapshot-ok snapshot-error)
+      (t.is result.result.ok result.result.error)
+      (t.is (= result.result.rows[0].values[0].text "value-252"))
+      (vev.delete-query-result result)
+      (vev.close-store-db snapshot)
+      (vev.close-store reopened))))
 
 (t.deftest sqlite-store-db-with-cas-expected-lookup-ref-uses-same-tx-overlay
   (defer (free_all context.allocator))
@@ -153,8 +238,8 @@
         (t.is (= last-email.kind .String))
         (t.is (= last-email.text "grace@example.com")))
       (vev.delete-owned-value pulled)
-      (for [value lookup-values]
-        (vev.delete-owned-value value))
+      ;; value-string creates borrowed query inputs; the string literals above
+      ;; remain owned by the caller and must not be released as owned Values.
       (vev.close-store-db! (addr snapshot))
       (vev.close-store read-store))))
 

@@ -211,6 +211,10 @@
   error: string
   db-before: DB
   db-after: DB
+  ;; Live transactions transfer db-after to their connection. Pure `with`
+  ;; reports and cloned listener reports retain it themselves. Keeping that
+  ;; distinction on the value makes report cleanup safe and self-describing.
+  owns-db-after: bool
   tx-data: [dynamic]Datom
   tx: u64
   tx-meta: [dynamic]Tx-Meta
@@ -1419,7 +1423,9 @@
         (string-less? left.a right.a)
         (if (not (value-equal? left.v right.v))
           (value-less? left.v right.v)
-          (< left.tx right.tx))))))
+          (if (not (= left.tx right.tx))
+            (< left.tx right.tx)
+            (< left-index right-index)))))))
 
 (defn datom-less-aevt? [datoms: []Datom, left-index: int, right-index: int] -> bool
   (let [left datoms[left-index]
@@ -1430,7 +1436,9 @@
         (< left.e right.e)
         (if (not (value-equal? left.v right.v))
           (value-less? left.v right.v)
-          (< left.tx right.tx))))))
+          (if (not (= left.tx right.tx))
+            (< left.tx right.tx)
+            (< left-index right-index)))))))
 
 (defn datom-less-avet? [datoms: []Datom, left-index: int, right-index: int] -> bool
   (let [left datoms[left-index]
@@ -1441,7 +1449,9 @@
         (value-less? left.v right.v)
         (if (not (= left.e right.e))
           (< left.e right.e)
-          (< left.tx right.tx))))))
+          (if (not (= left.tx right.tx))
+            (< left.tx right.tx)
+            (< left-index right-index)))))))
 
 (defn datom-less-vaet? [datoms: []Datom, left-index: int, right-index: int] -> bool
   (let [left datoms[left-index]
@@ -1452,7 +1462,9 @@
         (string-less? left.a right.a)
         (if (not (= left.e right.e))
           (< left.e right.e)
-          (< left.tx right.tx))))))
+          (if (not (= left.tx right.tx))
+            (< left.tx right.tx)
+            (< left-index right-index)))))))
 
 (defn datom-less-fact-log? [datoms: []Datom, left-index: int, right-index: int] -> bool
   (let [left datoms[left-index]
@@ -1474,7 +1486,9 @@
           (string-less? left.a right.a)
           (if (not (value-equal? left.v right.v))
             (value-less? left.v right.v)
-            (< left.tx right.tx))))
+            (if (not (= left.tx right.tx))
+              (< left.tx right.tx)
+              (< left-index right-index)))))
     (= order "aevt")
       (if (not (= left.a right.a))
         (string-less? left.a right.a)
@@ -1482,7 +1496,9 @@
           (< left.e right.e)
           (if (not (value-equal? left.v right.v))
             (value-less? left.v right.v)
-            (< left.tx right.tx))))
+            (if (not (= left.tx right.tx))
+              (< left.tx right.tx)
+              (< left-index right-index)))))
     (= order "avet")
       (if (not (= left.a right.a))
         (string-less? left.a right.a)
@@ -1490,7 +1506,9 @@
           (value-less? left.v right.v)
           (if (not (= left.e right.e))
             (< left.e right.e)
-            (< left.tx right.tx))))
+            (if (not (= left.tx right.tx))
+              (< left.tx right.tx)
+              (< left-index right-index)))))
     (= order "fact-log")
       (if (not (= left.e right.e))
         (< left.e right.e)
@@ -1506,7 +1524,9 @@
           (string-less? left.a right.a)
           (if (not (= left.e right.e))
             (< left.e right.e)
-            (< left.tx right.tx))))))
+            (if (not (= left.tx right.tx))
+              (< left.tx right.tx)
+              (< left-index right-index)))))))
 
 (defn datom-index-less? [datoms: []Datom, order: string, left: int, right: int] -> bool
   (cond
@@ -2124,6 +2144,12 @@
     low))
 
 (defn create-conn [] -> Conn
-  (Conn {db: (build-db (make [dynamic]Datom))
+  ;; Nil dynamic arrays/maps are the canonical empty DB representation. Odin's
+  ;; zero-capacity `make` may use a process-wide zero-base sentinel; deleting
+  ;; that sentinel is harmless under the default allocator but is correctly
+  ;; reported as an allocator-provenance violation by the tracking allocator.
+  ;; Nil containers support the same reads, iteration, and first append while
+  ;; retaining an unambiguous no-allocation/no-free lifetime.
+  (Conn {db: (DB {})
          next-tx: tx-partition-base
-         listeners: (make [dynamic]Tx-Listener)}))
+         listeners: nil}))

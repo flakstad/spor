@@ -1515,7 +1515,7 @@
     (t.is result.ok)
     (t.is (= (count result.rows) 1))
     (t.is (= result.rows[0].values[0].text "Ada"))
-    (vev.delete-owned-value lookup-value)
+    (vev.delete-value-containers-shallow lookup-value)
     (vev.delete-result-set-owned-values result)
     (vev.delete-live-tx-report-shallow schema)
     (vev.delete-live-tx-report-shallow report)
@@ -1555,7 +1555,7 @@
     (t.is result.ok)
     (t.is (= (count result.rows) 1))
     (t.is (= result.rows[0].values[0].text "Grace"))
-    (vev.delete-owned-value lookup-value)
+    (vev.delete-value-containers-shallow lookup-value)
     (vev.delete-result-set-owned-values result)
     (vev.delete-live-tx-report-shallow schema)
     (vev.delete-live-tx-report-shallow report)
@@ -1730,6 +1730,146 @@
     (vev.delete-shared-tx-report-shallow report)
     (vev.delete-shared-conn conn)))
 
+(t.deftest shared-snapshot-transaction-datoms-replace-current-fact-with-chunk-sharing
+  (defer (free_all context.allocator))
+  (let [base-db
+          (vev.build-db
+            ([dynamic]vev.Datom
+              [(vev.Datom {e: 1 a: ":item/name"
+                           v: (vev.value-string "Before")
+                           tx: 10 added: true})
+               (vev.Datom {e: 2 a: ":item/name"
+                           v: (vev.value-string "Untouched")
+                           tx: 10 added: true})]))
+        base (vev.shared-db-snapshot-from-db base-db 1)
+        appended
+          ([]vev.Datom
+            [(vev.Datom {e: 1 a: ":item/name"
+                         v: (vev.value-string "Before")
+                         tx: 11 added: false})
+             (vev.Datom {e: 1 a: ":item/name"
+                         v: (vev.value-string "After")
+                         tx: 11 added: true})])
+        after (vev.shared-db-snapshot-with-transaction-datoms
+                base appended base.datoms.count)
+        base-source (vev.shared-db-snapshot-read-source (addr base))
+        after-source (vev.shared-db-snapshot-read-source (addr after))
+        before-result
+          (vev.q-text-db-read-source
+            base-source "[:find ?name :where [1 :item/name ?name]]")
+        after-result
+          (vev.q-text-db-read-source
+            after-source "[:find ?name :where [1 :item/name ?name]]")
+        untouched-result
+          (vev.q-text-db-read-source
+            after-source "[:find ?name :where [2 :item/name ?name]]")]
+    (t.is before-result.ok before-result.error)
+    (t.is after-result.ok after-result.error)
+    (t.is untouched-result.ok untouched-result.error)
+    (t.is (= (count before-result.rows) 1))
+    (t.is (= before-result.rows[0].values[0].text "Before"))
+    (t.is (= (count after-result.rows) 1))
+    (t.is (= after-result.rows[0].values[0].text "After"))
+    (t.is (= (count untouched-result.rows) 1))
+    (t.is (= untouched-result.rows[0].values[0].text "Untouched"))
+    (let [[base-refs base-ref-ok]
+            (vev.shared-int-index-ref-count-at base.indexes.current 1)]
+      (t.is base-ref-ok)
+      (t.is (> base-refs 1)))
+    (vev.delete-result-set-owned-values before-result)
+    (vev.delete-result-set-owned-values after-result)
+    (vev.delete-result-set-owned-values untouched-result)
+    (vev.delete-shared-db-snapshot after)
+    (vev.delete-shared-db-snapshot base)
+    (vev.delete-owned-db base-db)))
+
+(t.deftest shared-index-appended-slice-publishes-every-new-position
+  (defer (free_all context.allocator))
+  (let [base (vev.shared-int-index-from-slice ([]int [1 3]) 4)
+        after (vev.shared-int-index-with-appended-slice base ([]int [5 7 9]))]
+    (t.is (= (vev.shared-int-index-count base) 2))
+    (t.is (= (vev.shared-int-index-count after) 5))
+    (for [expected position ([]int [1 3 5 7 9])]
+      (let [[actual ok] (vev.shared-int-index-at after position)]
+        (t.is ok)
+        (t.is (= actual expected))))
+    (vev.delete-shared-int-index after)
+    (vev.delete-shared-int-index base)))
+
+(defn shared-index-equals? [actual: vev.Shared-Int-Index, expected: []int] -> bool
+  (when (not (= (vev.shared-int-index-count actual) (count expected)))
+    (return false))
+  (for [value position expected]
+    (let [[actual-value ok] (vev.shared-int-index-at actual position)]
+      (when (or (not ok) (not (= actual-value value)))
+        (return false))))
+  true)
+
+(t.deftest shared-direct-append-indexes-match-canonical-rebuild
+  (defer (free_all context.allocator))
+  (let [base-datoms (make [dynamic]vev.Datom)]
+    (for [entity (arr.range 1 20)]
+      (arr.push! base-datoms
+        (vev.Datom {e: (u64 entity) a: ":item/name"
+                    v: (vev.value-string (fmt.tprintf "base-%d" entity))
+                    tx: 100 added: true}))
+      (arr.push! base-datoms
+        (vev.Datom {e: (u64 entity) a: ":item/order"
+                    v: (vev.value-int (i64 entity))
+                    tx: 100 added: true})))
+    ;; A realistic EAVT already ends in the high transaction partition.
+    (arr.push! base-datoms
+      (vev.Datom {e: vev.tx-partition-base a: ":db/txInstant"
+                  v: (vev.value-int 100)
+                  tx: vev.tx-partition-base added: true}))
+    (let [base-db (vev.build-db base-datoms)
+          base (vev.shared-db-snapshot-from-db base-db 7)
+          appended (make [dynamic]vev.Datom)]
+      (for [entity (arr.range 20 32)]
+        (arr.push! appended
+          (vev.Datom {e: (u64 entity) a: ":item/name"
+                      v: (vev.value-string (fmt.tprintf "new-%d" entity))
+                      tx: 101 added: true}))
+        (arr.push! appended
+          (vev.Datom {e: (u64 entity) a: ":item/order"
+                      v: (vev.value-int (i64 (- 40 entity)))
+                      tx: 101 added: true}))
+        (arr.push! appended
+          (vev.Datom {e: (u64 entity) a: ":item/workspace"
+                      v: (vev.value-entity 1)
+                      tx: 101 added: true}))
+        (arr.push! appended
+          (vev.Datom {e: (u64 entity) a: ":item/type"
+                      v: (vev.value-keyword ":item.type/example")
+                      tx: 101 added: true}))
+        (arr.push! appended
+          (vev.Datom {e: (u64 entity) a: ":item/builtin"
+                      v: (vev.value-bool false)
+                      tx: 101 added: true})))
+      (let [after (vev.shared-db-snapshot-with-appended-datoms-direct
+                    base (slice appended 0) base.datoms.count true)
+            all (make [dynamic]vev.Datom)]
+        (for [datom base-db.datoms]
+          (arr.push! all (vev.datom-owned datom)))
+        (for [datom appended]
+          (arr.push! all (vev.datom-owned datom)))
+        (let [expected (vev.build-db all)]
+          (t.is (shared-index-equals? after.indexes.current
+                                      (slice expected.current 0)))
+          (t.is (shared-index-equals? after.indexes.eavt
+                                      (slice expected.eavt 0)))
+          (t.is (shared-index-equals? after.indexes.aevt
+                                      (slice expected.aevt 0)))
+          (t.is (shared-index-equals? after.indexes.avet
+                                      (slice expected.avet 0)))
+          (t.is (shared-index-equals? after.indexes.vaet
+                                      (slice expected.vaet 0)))
+          (vev.delete-resident-db expected))
+        (vev.delete-shared-db-snapshot after)
+        (delete appended))
+      (vev.delete-shared-db-snapshot base)
+      (vev.delete-owned-db base-db))))
+
 (t.deftest shared-conn-report-source-append-preserves-cardinality-many-and-lazy-resident-fallback
   (defer (free_all context.allocator))
   (let [conn (vev.create-shared-conn 8)
@@ -1815,7 +1955,7 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow report1)
+    (vev.delete-live-tx-report-shallow report1)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-source-append-uses-log-tx-basis
@@ -1845,8 +1985,8 @@
     (vev.delete-query-result color-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow report1)
-    (vev.delete-tx-report-shallow report2)
+    (vev.delete-live-tx-report-shallow report1)
+    (vev.delete-live-tx-report-shallow report2)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-cardinality-one-replacement-keeps-current-semantics
@@ -1902,7 +2042,7 @@
     (vev.close-store-db! (addr next-snapshot))
     (vev.close-store-db! (addr chained-snapshot))
     (vev.close-store-db! (addr second-chained-snapshot))
-    (vev.delete-tx-report-shallow report1)
+    (vev.delete-live-tx-report-shallow report1)
     (vev.close-store store)))
 
 (t.deftest shared-store-with-report-keeps-store-db-before-after
@@ -1921,7 +2061,7 @@
     (t.is (= snapshot-error ""))
     (t.is report.ok)
     (t.is (= report.db-before.kind .Shared-Snapshot))
-    (t.is (= report.db-after.kind .Shared-Tx-Ops-Overlay))
+    (t.is (= report.db-after.kind .Shared-Snapshot))
     (t.is (= (count report.tx-data) 3))
     (t.is before-result.result.ok)
     (t.is (= (count before-result.result.rows) 1))
@@ -1941,7 +2081,7 @@
     (vev.delete-query-result live-result)
     (vev.delete-store-tx-report report)
     (vev.close-store-db! (addr snapshot))
-    (vev.delete-tx-report-shallow report1)
+    (vev.delete-live-tx-report-shallow report1)
     (vev.close-store store)))
 
 (t.deftest shared-store-with-report-same-tx-reverse-ref-keeps-source-dbs
@@ -1958,7 +2098,7 @@
     (t.is (= snapshot-error ""))
     (t.is report.ok report.error)
     (t.is (= report.db-before.kind .Shared-Snapshot))
-    (t.is (= report.db-after.kind .Shared-Tx-Ops-Overlay))
+    (t.is (= report.db-after.kind .Shared-Snapshot))
     (t.is before-result.result.ok)
     (t.is (= (count before-result.result.rows) 0))
     (t.is after-result.result.ok)
@@ -2004,8 +2144,8 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow schema-report)
-    (vev.delete-tx-report-shallow report1)
+    (vev.delete-live-tx-report-shallow schema-report)
+    (vev.delete-live-tx-report-shallow report1)
     (vev.close-store store)))
 
 (t.deftest shared-store-with-report-nested-map-keeps-source-dbs
@@ -2023,7 +2163,7 @@
     (t.is (= snapshot-error ""))
     (t.is report.ok report.error)
     (t.is (= report.db-before.kind .Shared-Snapshot))
-    (t.is (= report.db-after.kind .Shared-Tx-Ops-Overlay))
+    (t.is (= report.db-after.kind .Shared-Snapshot))
     (t.is before-result.result.ok)
     (t.is (= (count before-result.result.rows) 0))
     (t.is after-result.result.ok)
@@ -2033,8 +2173,8 @@
     (vev.delete-query-result after-result)
     (vev.delete-store-tx-report report)
     (vev.close-store-db! (addr snapshot))
-    (vev.delete-tx-report-shallow schema-report)
-    (vev.delete-tx-report-shallow report1)
+    (vev.delete-live-tx-report-shallow schema-report)
+    (vev.delete-live-tx-report-shallow report1)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-map-collection-keeps-shared-db
@@ -2063,8 +2203,8 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow schema-report)
-    (vev.delete-tx-report-shallow report1)
+    (vev.delete-live-tx-report-shallow schema-report)
+    (vev.delete-live-tx-report-shallow report1)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-same-tx-ref-schema-nested-map-keeps-shared-db
@@ -2088,7 +2228,7 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow report1)
+    (vev.delete-live-tx-report-shallow report1)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-same-tx-reverse-ref-keeps-shared-db
@@ -2150,7 +2290,7 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow seed)
+    (vev.delete-live-tx-report-shallow seed)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-reverse-ref-nested-map-keeps-shared-db
@@ -2181,7 +2321,7 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow schema)
+    (vev.delete-live-tx-report-shallow schema)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-same-tx-cardinality-many-map-collection-keeps-shared-db
@@ -2208,7 +2348,7 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow report1)
+    (vev.delete-live-tx-report-shallow report1)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-same-tx-lookup-refs-keeps-shared-db
@@ -2261,7 +2401,7 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow seed)
+    (vev.delete-live-tx-report-shallow seed)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-retract-attr-keeps-shared-db
@@ -2289,7 +2429,7 @@
     (vev.delete-query-result live-names)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow seed)
+    (vev.delete-live-tx-report-shallow seed)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-retract-entity-keeps-shared-db
@@ -2323,8 +2463,8 @@
     (vev.delete-query-result live-parent)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow schema)
-    (vev.delete-tx-report-shallow seed)
+    (vev.delete-live-tx-report-shallow schema)
+    (vev.delete-live-tx-report-shallow seed)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-cas-keeps-shared-db
@@ -2349,7 +2489,7 @@
     (vev.delete-query-result original)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow seed)
+    (vev.delete-live-tx-report-shallow seed)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-ref-value-tempids-keeps-shared-db
@@ -2375,7 +2515,7 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow schema)
+    (vev.delete-live-tx-report-shallow schema)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-same-tx-ref-schema-tempid-values-keeps-shared-db
@@ -2430,8 +2570,8 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow schema)
-    (vev.delete-tx-report-shallow seed)
+    (vev.delete-live-tx-report-shallow schema)
+    (vev.delete-live-tx-report-shallow seed)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-negative-ref-value-tempids-keeps-shared-db
@@ -2457,7 +2597,7 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow schema)
+    (vev.delete-live-tx-report-shallow schema)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-current-tx-tempids-keeps-shared-db
@@ -2484,7 +2624,7 @@
     (vev.delete-query-result live-result)
     (vev.close-store-db! (addr snapshot))
     (vev.close-store-db! (addr next-snapshot))
-    (vev.delete-tx-report-shallow seed)
+    (vev.delete-live-tx-report-shallow seed)
     (vev.close-store store)))
 
 (t.deftest shared-store-db-with-same-tx-ident-keeps-shared-db

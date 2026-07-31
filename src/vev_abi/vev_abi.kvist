@@ -4615,35 +4615,6 @@ abi_free_stmt :: proc(stmt: rawptr) {
   (vev_sqlite_conn_transact_edn_report (connection-as-sqlite conn) tx-text))
 
 @export
-(defn vev_connection_transact_edn_status :abi "c" [conn: Vev-Connection, tx-text: cstring] -> cstring
-  (odin "context = runtime.default_context()")
-  (when (or (= (rawptr conn) nil) (= tx-text nil)
-            (not (abi-sqlite-conn-ok (rawptr conn))))
-    (return (c-string-owned "{:ok false :error \"invalid durable connection or transaction\"}")))
-  (let [tx (text-from-c tx-text)
-        store (sqlite-conn-ptr (connection-as-sqlite conn))]
-    (when (and store^.resident-loaded store^.resident-reads-enabled)
-      (let [report (vev.transact-sqlite-text store tx)
-            value (vev.tx-report-value report)
-            status-text (vev.value-serializable-text value)
-            out (c-string-owned status-text)]
-        (delete tx)
-        (delete status-text)
-        (vev.delete-owned-value value)
-        (vev.delete-live-tx-report-shallow report)
-        (return out)))
-    (let [report (vev.transact-sqlite-store-report-text store tx)
-        value (vev.store-tx-report-value report)
-        status-text (vev.value-serializable-text value)
-        out (c-string-owned status-text)]
-      (notify-abi-sqlite-tx-listeners! (connection-as-sqlite conn) report)
-      (delete tx)
-      (delete status-text)
-      (vev.delete-owned-value value)
-      (vev.delete-store-tx-report report)
-      out)))
-
-@export
 (defn vev_connection_tx_commit_report :abi "c" [conn: Vev-Connection, builder: Vev-Tx-Builder] -> Vev-Tx-Report
   (odin "context = runtime.default_context()")
   (vev_sqlite_conn_tx_commit_report (connection-as-sqlite conn) builder))

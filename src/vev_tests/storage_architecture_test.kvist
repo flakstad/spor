@@ -11,8 +11,8 @@
 
 (defn remove-sqlite-files [path: string]
   (os.remove path)
-  (let [wal-path (fmt.tprintf "%s-wal" path) :defer
-        shm-path (fmt.tprintf "%s-shm" path) :defer]
+  (let [wal-path (fmt.aprintf "%s-wal" path) :defer
+        shm-path (fmt.aprintf "%s-shm" path) :defer]
     (os.remove wal-path)
     (os.remove shm-path))
   (return))
@@ -1153,7 +1153,7 @@
   (when (not (= value.kind .String))
     (return (vev.native-query-function-none)))
   (vev.native-query-function-result
-    (vev.value-string (fmt.tprintf "tag:%s" value.text))))
+    (vev.value-string (fmt.aprintf "tag:%s" value.text))))
 
 (defn store-source-birthday-by-name [source: vev.DB-Read-Source, name: string] -> vev.Tx-Fn-Source-Result
   (let [[datoms datoms-ok datoms-error] (vev.db-read-source-datoms-by-attr source ":user/name")]
@@ -2293,7 +2293,7 @@
         (t.is (sqlite-durable-store-db? report.db-before))
         (t.is (sqlite-durable-store-db? report.db-after))
         (t.is report.source-append-metadata-known)
-        (t.is report.source-eavt-append-mode)
+        (t.is (not report.source-eavt-append-mode))
         (t.is (not (vev.store-resident-db-available? (addr reopened))))
         (t.is names.result.ok names.result.error)
         (t.is (= (count names.result.rows) 3))
@@ -2491,7 +2491,7 @@
       (t.is (sqlite-durable-store-db? second.db-after))
       (t.is (sqlite-durable-store-db? third.db-after))
       (t.is first.source-append-metadata-known)
-      (t.is first.source-eavt-append-mode)
+      (t.is (not first.source-eavt-append-mode))
         (t.is (not first.source-aevt-append-mode))
         (t.is (not first.source-avet-append-mode))
         (t.is (not first.source-vaet-append-mode))
@@ -2606,7 +2606,7 @@
         (t.is maintenance-before-ok maintenance-before-error)
         (t.is report.ok report.error)
         (t.is report.source-append-metadata-known)
-        (t.is report.source-eavt-append-mode)
+        (t.is (not report.source-eavt-append-mode))
         (t.is (not report.source-aevt-append-mode))
         (t.is (not report.source-avet-append-mode))
         (t.is (not report.source-vaet-append-mode))
@@ -3148,7 +3148,7 @@
         (t.is (sqlite-durable-store-db? second.db-after))
         (t.is (sqlite-durable-store-db? third.db-after))
         (t.is first.source-append-metadata-known)
-        (t.is first.source-eavt-append-mode)
+        (t.is (not first.source-eavt-append-mode))
         (t.is (not first.source-aevt-append-mode))
         (t.is (not first.source-avet-append-mode))
         (t.is (not first.source-vaet-append-mode))
@@ -3773,7 +3773,7 @@
     (vev.delete-store-tx-report created)
     (vev.close-store store)
     (let [[reopened reopened-ok reopened-error] (vev.open-store path)
-          replacement-text (fmt.tprintf "[[:db/add %d :item/name \"Ada Lovelace\"]]" item-id)
+          replacement-text (fmt.aprintf "[[:db/add %d :item/name \"Ada Lovelace\"]]" item-id)
           replaced (vev.transact-store-report-text (addr reopened) replacement-text)]
       (t.is reopened-ok)
       (t.is (= reopened-error ""))

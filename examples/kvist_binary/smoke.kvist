@@ -40,7 +40,7 @@
         (when (not created.ok)
           (panic created.error)))
       (let [dependent
-            (d.transact-status
+            (d.transact
               conn
               [[:db/add [:person/id "resident-new"]
                         :person/nickname

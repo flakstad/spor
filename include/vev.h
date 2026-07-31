@@ -154,10 +154,6 @@ vev_value_handle_t vev_connection_query_value_with_inputs(
 vev_tx_report_t vev_connection_transact_edn_report(
     vev_connection_t conn,
     const char *tx_text);
-/* Lightweight durable acknowledgement: no db-before/db-after snapshots. */
-const char *vev_connection_transact_edn_status(
-    vev_connection_t conn,
-    const char *tx_text);
 vev_tx_report_t vev_connection_transact_edn_report_with_tx_fns(
     vev_connection_t conn,
     const char *tx_text,

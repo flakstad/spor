@@ -33,10 +33,9 @@ smallest memory footprint, select resident execution once after connecting:
 owned by that connection. Successful transactions remain ordinary durable Vev
 transactions and survive closing and reopening the file.
 
-Use `transact-status` for command paths that need only durable success, error,
-and transaction identity. `transact` remains the richer API when the caller
-will actually consume immutable `db-before`, `db-after`, tempids, or tx-data;
-Vev does not eagerly construct those snapshots for a status-only call.
+`transact` always returns the ordinary rich Vev report. Its immutable
+`db-before` and `db-after` values are cheap retained snapshot handles, not
+eager copies of the database.
 
 General SQLite access is a separate package in the same bundle:
 

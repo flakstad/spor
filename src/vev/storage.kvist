@@ -774,18 +774,29 @@ sqlite_open_initialized :: proc(path: string) -> (^SQLite3, bool, string) {
         }
         return nil, false, msg
     }
-    ok, err := sqlite_exec_ok(db, sqlite_schema_sql)
-    if !ok {
-        _ = sqlite3_close(db)
-        return nil, false, err
-    }
+    _ = sqlite3_busy_timeout(db, 5000)
+    // A current store is already initialized. Re-running the complete DDL
+    // program on every connection turns an otherwise read-only open into a
+    // schema writer and can fail with SQLITE_BUSY while another connection is
+    // committing. Connection-local durability policy is sufficient here;
+    // journal mode and schema creation belong to initialization/migration.
     if sqlite_schema_version_current(db) {
+        synchronous_ok, synchronous_error := sqlite_exec_ok(db, \"PRAGMA synchronous = NORMAL\")
+        if !synchronous_ok {
+            _ = sqlite3_close(db)
+            return nil, false, synchronous_error
+        }
         partition_ok, partition_error := sqlite_require_entity_partition_layout(db)
         if !partition_ok {
             _ = sqlite3_close(db)
             return nil, false, partition_error
         }
         return db, true, \"\"
+    }
+    ok, err := sqlite_exec_ok(db, sqlite_schema_sql)
+    if !ok {
+        _ = sqlite3_close(db)
+        return nil, false, err
     }
     log_index_ok, log_index_error := sqlite_ensure_datom_log_index_column(db)
     if !log_index_ok {
@@ -1083,12 +1094,11 @@ sqlite_save_snapshot_text_raw :: proc(path: string, text: string) -> (bool, stri
     return true, \"\"
 }
 
-sqlite_load_snapshot_text_raw :: proc(path: string) -> (string, bool, string) {
-    db, open_ok, open_error := sqlite_open_initialized(path)
-    if !open_ok {
-        return \"\", false, open_error
+sqlite_load_snapshot_text_handle_raw :: proc(handle: rawptr) -> (string, bool, string) {
+    if handle == nil {
+        return \"\", false, \"sqlite handle was nil\"
     }
-    defer _ = sqlite3_close(db)
+    db := (^SQLite3)(handle)
     stmt: ^SQLite3_Stmt
     sql := \"SELECT value FROM vev_snapshots WHERE key = 'current'\"
     sql_c, sql_c_ok := sqlite_cstring(sql)
@@ -1116,6 +1126,15 @@ sqlite_load_snapshot_text_raw :: proc(path: string) -> (string, bool, string) {
         return \"\", false, \"sqlite DB has no current Vev snapshot\"
     }
     return \"\", false, sqlite_error_text(db, \"sqlite read failed\")
+}
+
+sqlite_load_snapshot_text_raw :: proc(path: string) -> (string, bool, string) {
+    db, open_ok, open_error := sqlite_open_initialized(path)
+    if !open_ok {
+        return \"\", false, open_error
+    }
+    defer _ = sqlite3_close(db)
+    return sqlite_load_snapshot_text_handle_raw(rawptr(db))
 }
 
 sqlite_open_replace_datoms_raw :: proc(path: string) -> (rawptr, bool, string) {
@@ -5992,12 +6011,11 @@ sqlite_rows_exist_raw :: proc(db: ^SQLite3) -> (bool, bool, string) {
     return false, false, sqlite_error_text(db, \"sqlite exists failed\")
 }
 
-sqlite_load_datom_rows_text_raw :: proc(path: string) -> (string, bool, string) {
-    db, open_ok, open_error := sqlite_open_initialized(path)
-    if !open_ok {
-        return \"\", false, open_error
+sqlite_load_datom_rows_text_handle_raw :: proc(handle: rawptr) -> (string, bool, string) {
+    if handle == nil {
+        return \"\", false, \"sqlite handle was nil\"
     }
-    defer _ = sqlite3_close(db)
+    db := (^SQLite3)(handle)
     any_rows, exists_ok, exists_error := sqlite_rows_exist_raw(db)
     if !exists_ok {
         return \"\", false, exists_error
@@ -6062,6 +6080,15 @@ sqlite_load_datom_rows_text_raw :: proc(path: string) -> (string, bool, string) 
     out := strings.concatenate(parts[:])
     delete(parts)
     return out, true, \"\"
+}
+
+sqlite_load_datom_rows_text_raw :: proc(path: string) -> (string, bool, string) {
+    db, open_ok, open_error := sqlite_open_initialized(path)
+    if !open_ok {
+        return \"\", false, open_error
+    }
+    defer _ = sqlite3_close(db)
+    return sqlite_load_datom_rows_text_handle_raw(rawptr(db))
 }
 
 sqlite_load_datom_by_log_index_text_raw :: proc(handle: rawptr, log_index: i64) -> (string, bool, string) {
@@ -7818,21 +7845,22 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn persist-run-manifest-index-root-sqlite-handle-for-view-with-stmts [handle: rawptr, stmts: ^SQLite-Index-Write-Stmts, basis-tx: u64, index-name: string, view: DB-Index-View, added: []int] -> [chunk-id: u64, manifest-id: u64, ok: bool, error: string]
   (persist-run-manifest-index-root-sqlite-handle-for-view-and-appended-with-stmts handle stmts basis-tx index-name view added ([]Datom []) 0 false))
 
-(defn persist-run-manifest-index-root-sqlite-handle-for-view-and-appended-with-stmts [handle: rawptr, stmts: ^SQLite-Index-Write-Stmts, basis-tx: u64, index-name: string, view: DB-Index-View, added: []int, appended: []Datom, start-index: int, has-appended?: bool] -> [chunk-id: u64, manifest-id: u64, ok: bool, error: string]
-  (when (not (= view.kind .SQLite-Cursor))
-    (let [[chunk-id chunk-ok chunk-error] (persist-merge-run-index-root-sqlite-handle-for-view-with-stmts handle stmts basis-tx index-name view added)]
-      (return chunk-id 0 chunk-ok chunk-error)))
-  (let [[added-root added-ok added-error] (persist-small-delta-index-root-sqlite-handle-with-stmts handle stmts basis-tx index-name added)]
+(defn persist-run-manifest-index-root-sqlite-handle-known-base-and-appended-with-stmts
+  [handle: rawptr, stmts: ^SQLite-Index-Write-Stmts, basis-tx: u64,
+   index-name: string, old-root: u64, old-row-count: int,
+   old-manifest-id: u64, old-run-count: u64, added: []int,
+   appended: []Datom, start-index: int, has-appended?: bool]
+  -> [chunk-id: u64, manifest-id: u64, ok: bool, error: string]
+  (let [[added-root added-ok added-error]
+          (persist-small-delta-index-root-sqlite-handle-with-stmts
+            handle stmts basis-tx index-name added)]
     (when (not added-ok)
       (return 0 0 false added-error))
-    (let [old-run-count: u64 0
-          parent-manifest-id: u64 0]
-      (when view.sqlite-cursor^.root-is-manifest
-        (set! parent-manifest-id view.sqlite-cursor^.manifest-id)
-        (set! old-run-count view.sqlite-cursor^.manifest-run-count))
-    (let [
-          next-run-count (+ old-run-count 1)
-          [next-manifest-id manifest-ok manifest-error] (sqlite-insert-index-run-manifest-with-parent-with-stmts handle stmts index-name basis-tx parent-manifest-id view.sqlite-cursor^.root-id (u64 (+ view.sqlite-cursor^.row-count (count added))) next-run-count basis-tx)]
+    (let [next-run-count (+ old-run-count 1)
+          [next-manifest-id manifest-ok manifest-error]
+            (sqlite-insert-index-run-manifest-with-parent-with-stmts
+              handle stmts index-name basis-tx old-manifest-id old-root
+              (u64 (+ old-row-count (count added))) next-run-count basis-tx)]
       (when (not manifest-ok)
         (return 0 0 false manifest-error))
       (let [added-run-ok false
@@ -7844,25 +7872,76 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
                       (>= first-local (count appended))
                       (< last-local 0)
                       (>= last-local (count appended)))
-              (return 0 0 false "manifest run bound entry was outside appended datoms"))
-            (let [[bounded-ok bounded-error] (sqlite-insert-index-run-manifest-run-bounds-with-stmts handle stmts next-manifest-id 0 added-root (u64 (count added)) appended[first-local] appended[last-local])]
+              (return 0 0 false
+                      "manifest run bound entry was outside appended datoms"))
+            (let [[bounded-ok bounded-error]
+                    (sqlite-insert-index-run-manifest-run-bounds-with-stmts
+                      handle stmts next-manifest-id 0 added-root
+                      (u64 (count added))
+                      appended[first-local] appended[last-local])]
               (set! added-run-ok bounded-ok)
               (set! added-run-error bounded-error)))
-          (let [[run-ok run-error] (sqlite-insert-index-run-manifest-run-with-stmts handle stmts next-manifest-id 0 added-root (u64 (count added)))]
+          (let [[run-ok run-error]
+                  (sqlite-insert-index-run-manifest-run-with-stmts
+                    handle stmts next-manifest-id 0 added-root
+                    (u64 (count added)))]
             (set! added-run-ok run-ok)
             (set! added-run-error run-error)))
         (when (not added-run-ok)
           (return 0 0 false added-run-error))
-        (let [[entity-range-ok entity-range-error] (sqlite-insert-index-run-manifest-entity-attr-ranges-from-root! handle next-manifest-id 0 index-name added-root)]
+        (let [[entity-range-ok entity-range-error]
+                (sqlite-insert-index-run-manifest-entity-attr-ranges-from-root!
+                  handle next-manifest-id 0 index-name added-root)]
           (when (not entity-range-ok)
             (return 0 0 false entity-range-error)))
         (if (sqlite-index-name-has-contiguous-attrs? index-name)
           (if has-appended?
-            (let [[range-ok range-error] (sqlite-insert-index-run-manifest-attr-ranges-from-appended-entries-with-stmts! handle stmts next-manifest-id 0 added appended start-index)]
-              (return view.sqlite-cursor^.root-id next-manifest-id range-ok range-error))
-            (let [[range-ok range-error] (sqlite-insert-index-run-manifest-attr-ranges-from-entries-with-stmts! handle stmts next-manifest-id 0 added)]
-              (return view.sqlite-cursor^.root-id next-manifest-id range-ok range-error)))
-          (return view.sqlite-cursor^.root-id next-manifest-id true "")))))))
+            (let [[range-ok range-error]
+                    (sqlite-insert-index-run-manifest-attr-ranges-from-appended-entries-with-stmts!
+                      handle stmts next-manifest-id 0 added appended start-index)]
+              (return old-root next-manifest-id range-ok range-error))
+            (let [[range-ok range-error]
+                    (sqlite-insert-index-run-manifest-attr-ranges-from-entries-with-stmts!
+                      handle stmts next-manifest-id 0 added)]
+              (return old-root next-manifest-id range-ok range-error)))
+          (return old-root next-manifest-id true ""))))))
+
+(defn persist-run-manifest-index-root-sqlite-handle-for-view-and-appended-with-stmts [handle: rawptr, stmts: ^SQLite-Index-Write-Stmts, basis-tx: u64, index-name: string, view: DB-Index-View, added: []int, appended: []Datom, start-index: int, has-appended?: bool] -> [chunk-id: u64, manifest-id: u64, ok: bool, error: string]
+  (when (not (= view.kind .SQLite-Cursor))
+    ;; Shared resident snapshots are the transaction-planning representation,
+    ;; but the durable index lineage remains rooted in SQLite. Append a normal
+    ;; sorted run to the latest published root instead of serializing a legacy
+    ;; in-memory merge root whose children are not a globally sorted cursor.
+    (let [[old-rows old-root old-manifest old-runs old-first-key
+           _old-level _old-children old-ok old-error]
+            (sqlite-index-root-chunk-info-at-basis-raw
+              handle index-name (- basis-tx 1))]
+      (discard _old-level)
+      (discard _old-children)
+      (when old-ok
+        (delete old-first-key)
+        (return
+          (persist-run-manifest-index-root-sqlite-handle-known-base-and-appended-with-stmts
+            handle stmts basis-tx index-name old-root (int old-rows)
+            old-manifest old-runs added appended start-index has-appended?)))
+      (delete old-first-key)
+      (when (and (not (= old-error "sqlite DB has no Vev index roots"))
+                 (not (= old-error "sqlite DB has no Vev index root for basis")))
+        (return 0 0 false old-error))
+      (let [[chunk-id chunk-ok chunk-error]
+              (persist-merge-run-index-root-sqlite-handle-for-view-with-stmts
+                handle stmts basis-tx index-name view added)]
+        (return chunk-id 0 chunk-ok chunk-error))))
+  (persist-run-manifest-index-root-sqlite-handle-known-base-and-appended-with-stmts
+    handle stmts basis-tx index-name view.sqlite-cursor^.root-id
+    view.sqlite-cursor^.row-count
+    (if view.sqlite-cursor^.root-is-manifest
+      view.sqlite-cursor^.manifest-id
+      0)
+    (if view.sqlite-cursor^.root-is-manifest
+      view.sqlite-cursor^.manifest-run-count
+      0)
+    added appended start-index has-appended?))
 
 (defn sqlite-republish-latest-index-root-with [handle: rawptr, basis-tx: u64, index-name: string, new-root: u64] -> [ok: bool, error: string]
   (let [[_ eavt-count eavt-root eavt-ok eavt-error] (sqlite-latest-index-root-chunk-info-raw handle ":eavt")]
@@ -8412,8 +8491,8 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (return false)))
   true)
 
-(defn validate-sqlite-index [path: string, db-index: []int, index-name: string] -> [ok: bool, error: string]
-  (let [[loaded loaded-ok loaded-error] (sqlite-latest-index-entries path index-name)]
+(defn validate-sqlite-index-handle [handle: rawptr, db-index: []int, index-name: string] -> [ok: bool, error: string]
+  (let [[loaded loaded-ok loaded-error] (sqlite-latest-index-entries-handle handle index-name)]
     (when (not loaded-ok)
       (return false loaded-error))
     (defer (delete loaded))
@@ -8421,7 +8500,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (return true "")
       (return false (fmt.tprintf "persisted %s index did not match rebuilt DB index" index-name)))))
 
-(defn validate-sqlite-indexes-for-db [path: string, db: DB, expected-basis: u64, has-root: bool] -> [ok: bool, error: string]
+(defn validate-sqlite-indexes-for-db-handle [handle: rawptr, db: DB, expected-basis: u64, has-root: bool] -> [ok: bool, error: string]
   (when (not has-root)
     (return true ""))
   (let [basis (db-basis-tx db)
@@ -8441,16 +8520,16 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (set! owns-validation-db true)))
     (defer (when owns-validation-db
              (delete-resident-db validation-db)))
-    (let [[eavt-ok eavt-error] (validate-sqlite-index path (slice validation-db.eavt 0) ":eavt")]
+    (let [[eavt-ok eavt-error] (validate-sqlite-index-handle handle (slice validation-db.eavt 0) ":eavt")]
       (when (not eavt-ok)
         (return false eavt-error)))
-    (let [[aevt-ok aevt-error] (validate-sqlite-index path (slice validation-db.aevt 0) ":aevt")]
+    (let [[aevt-ok aevt-error] (validate-sqlite-index-handle handle (slice validation-db.aevt 0) ":aevt")]
       (when (not aevt-ok)
         (return false aevt-error)))
-    (let [[avet-ok avet-error] (validate-sqlite-index path (slice validation-db.avet 0) ":avet")]
+    (let [[avet-ok avet-error] (validate-sqlite-index-handle handle (slice validation-db.avet 0) ":avet")]
       (when (not avet-ok)
         (return false avet-error)))
-    (let [[vaet-ok vaet-error] (validate-sqlite-index path (slice validation-db.vaet 0) ":vaet")]
+    (let [[vaet-ok vaet-error] (validate-sqlite-index-handle handle (slice validation-db.vaet 0) ":vaet")]
       (when (not vaet-ok)
         (return false vaet-error)))
     (return true "")))
@@ -8477,32 +8556,54 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (return false root-error)))
     (sqlite-commit-close-raw handle)))
 
+(defn load-db-sqlite-resident-handle [handle: rawptr] -> [db: DB, ok: bool, error: string]
+  (let [[read-ok read-started read-error] (sqlite-begin-query-read-raw handle)]
+    (when (not read-ok)
+      (return (build-db (make [dynamic]Datom)) false read-error))
+      ;; Root basis, durable log, and root manifests must all be observed from
+      ;; one SQLite snapshot. Otherwise a concurrent commit can make an
+      ;; independently opened root and log appear inconsistent even though
+      ;; both database generations are individually valid.
+      (let [[root-basis root-ok root-error] (sqlite-latest-index-root-basis-raw handle)
+            has-root root-ok
+            [row-text row-ok row-error] (sqlite-load-datom-rows-text-handle-raw handle)]
+        (when row-ok
+          (defer (delete row-text))
+          (let [[db parsed-ok parsed-error] (from-serializable-text row-text)]
+            (when (not parsed-ok)
+              (sqlite-end-query-read-raw handle read-started)
+              (return db false parsed-error))
+            (let [[valid-ok valid-error] (validate-sqlite-indexes-for-db-handle handle db root-basis has-root)]
+              (when (not valid-ok)
+                (delete-owned-db db)
+                (sqlite-end-query-read-raw handle read-started)
+                (return (build-db (make [dynamic]Datom)) false valid-error)))
+            (sqlite-end-query-read-raw handle read-started)
+            (return db true "")))
+        (let [[snapshot-text snapshot-ok snapshot-error] (sqlite-load-snapshot-text-handle-raw handle)]
+          (when (not snapshot-ok)
+            (sqlite-end-query-read-raw handle read-started)
+            (return (build-db (make [dynamic]Datom)) false row-error))
+          (defer (delete snapshot-text))
+          (let [[db parsed-ok parsed-error] (from-serializable-text snapshot-text)]
+            (when (not parsed-ok)
+              (sqlite-end-query-read-raw handle read-started)
+              (return db false parsed-error))
+            (let [[valid-ok valid-error] (validate-sqlite-indexes-for-db-handle handle db root-basis has-root)]
+              (when (not valid-ok)
+                (delete-owned-db db)
+                (sqlite-end-query-read-raw handle read-started)
+                (return (build-db (make [dynamic]Datom)) false valid-error)))
+            (sqlite-end-query-read-raw handle read-started)
+            (return db true ""))))))
+
 (defn load-db-sqlite-resident [path: string] -> [db: DB, ok: bool, error: string]
-  (let [[root-basis root-ok root-error] (sqlite-latest-index-root-basis path)
-        has-root root-ok
-        [row-text row-ok row-error] (sqlite-load-datom-rows-text-raw path)]
-    (when row-ok
-      (defer (delete row-text))
-      (let [[db parsed-ok parsed-error] (from-serializable-text row-text)]
-        (when (not parsed-ok)
-          (return db false parsed-error))
-        (let [[valid-ok valid-error] (validate-sqlite-indexes-for-db path db root-basis has-root)]
-          (when (not valid-ok)
-            (delete-owned-db db)
-            (return (build-db (make [dynamic]Datom)) false valid-error)))
-        (return db true "")))
-    (let [[snapshot-text snapshot-ok snapshot-error] (sqlite-load-snapshot-text-raw path)]
-      (when (not snapshot-ok)
-        (return (build-db (make [dynamic]Datom)) false row-error))
-      (defer (delete snapshot-text))
-      (let [[db parsed-ok parsed-error] (from-serializable-text snapshot-text)]
-        (when (not parsed-ok)
-          (return db false parsed-error))
-        (let [[valid-ok valid-error] (validate-sqlite-indexes-for-db path db root-basis has-root)]
-          (when (not valid-ok)
-            (delete-owned-db db)
-            (return (build-db (make [dynamic]Datom)) false valid-error)))
-        (return db true "")))))
+  (let [[handle open-ok open-error] (sqlite-open-live-raw path)]
+    (when (not open-ok)
+      (return (build-db (make [dynamic]Datom)) false open-error))
+    (let [[db loaded-ok loaded-error] (load-db-sqlite-resident-handle handle)]
+      (sqlite-close-live-raw handle)
+      (return db loaded-ok loaded-error))))
 
 (defn load-db-sqlite [path: string] -> [db: DB, ok: bool, error: string]
   (load-db-sqlite-resident path))
@@ -8690,6 +8791,8 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   source-only: bool
   resident-loaded: bool
   resident-reads-enabled: bool
+  shared-resident-loaded: bool
+  shared-resident: Shared-Conn
   direct-write-stmts-valid: bool
   direct-write-stmts: SQLite-Direct-Write-Stmts
   index-write-stmts-valid: bool
@@ -9314,39 +9417,6 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (return false root-error))))
     (sqlite-commit-raw handle)))
 
-(defn append-tx-report-log-sqlite-handle [handle: rawptr, report: Tx-Report] -> [ok: bool, error: string]
-  ;; The transaction log is the durable truth. Index roots are derived state
-  ;; and may be published later without delaying acknowledgement to a resident
-  ;; application that already owns the committed immutable indexes.
-  (let [[begin-ok begin-error] (sqlite-begin-immediate-raw handle)]
-    (when (not begin-ok)
-      (return false begin-error))
-    (let [[write-stmts write-stmts-ok write-stmts-error]
-            (sqlite-direct-write-stmts-open handle)]
-      (when (not write-stmts-ok)
-        (sqlite-rollback-raw handle)
-        (return false write-stmts-error))
-      (defer (sqlite-direct-write-stmts-close write-stmts))
-      (let [[tx-ok tx-error]
-              (insert-sqlite-tx-with-stmts! handle (addr write-stmts) report.tx)]
-        (when (not tx-ok)
-          (sqlite-rollback-raw handle)
-          (return false tx-error)))
-      (let [base-index (count report.db-before.datoms)
-            [datoms-ok datoms-error]
-              (append-sqlite-datoms-with-stmts!
-                handle (addr write-stmts) base-index (slice report.tx-data 0))]
-        (when (not datoms-ok)
-          (sqlite-rollback-raw handle)
-          (return false datoms-error)))
-      (let [[meta-ok meta-error]
-              (insert-sqlite-tx-meta-with-stmts!
-                handle (addr write-stmts) report.tx (slice report.tx-meta 0))]
-        (when (not meta-ok)
-          (sqlite-rollback-raw handle)
-          (return false meta-error))))
-    (sqlite-commit-raw handle)))
-
 (defn db-index-view-entries [view: DB-Index-View] -> [dynamic]int
   (let [out (make [dynamic]int 0 (db-index-view-count view))
         index 0]
@@ -9406,14 +9476,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (return merged true "")))
 
 (defn source-append-eavt-index [source: DB-Read-Source, existing: []int, appended: []Datom, start-index: int, new-entities-after-existing: bool] -> [out: [dynamic]int, ok: bool, error: string]
-  (if new-entities-after-existing
-    (let [added (sorted-appended-datom-slice-indexes appended start-index "eavt")
-          out (arr.into [dynamic]int existing)]
-      (for [entry added]
-        (arr.push! out entry))
-      (delete added)
-      (return out true ""))
-    (source-append-merge-index source existing appended start-index "eavt")))
+  ;; `new-entities-after-existing` refers to the ordinary entity partition.
+  ;; Transaction entities already occupy the high partition and remain at the
+  ;; end of EAVT, so a new ordinary-entity run is not globally appendable.
+  (source-append-merge-index source existing appended start-index "eavt"))
 
 (defn source-append-index-view-last-entry [view: DB-Index-View] -> [entry: int, ok: bool, error: string]
   (when (= (db-index-view-count view) 0)
@@ -9588,6 +9654,27 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 
 (defn persist-source-append-index-root-sqlite-handle-known-mode-with-added-stmts [handle: rawptr, stmts: ^SQLite-Index-Write-Stmts, basis-tx: u64, index-name: string, view: DB-Index-View, added: []int, appended: []Datom, start-index: int, append-mode: bool, profile: ^SQLite-Direct-Write-Profile] -> [publish: SQLite-Index-Root-Publish, ok: bool, error: string]
     (let [persist-start (time.now)]
+      ;; `append-mode` describes whether new entries can extend a concrete
+      ;; source cursor. A shared resident view has no durable root identity to
+      ;; extend, so always append a sorted run to SQLite's published lineage.
+      ;; The run manifest preserves global index ordering across that boundary.
+      (when (not (= view.kind .SQLite-Cursor))
+        (let [[chunk-id manifest-id chunk-ok chunk-error]
+                (persist-run-manifest-index-root-sqlite-handle-for-view-and-appended-with-stmts
+                  handle stmts basis-tx index-name view (slice added 0)
+                  appended start-index true)]
+          (when (not (= profile nil))
+            (set! profile^.append-root-persist-us
+              (+ profile^.append-root-persist-us
+                 (sqlite-profile-elapsed-us persist-start))))
+          (return (SQLite-Index-Root-Publish
+                    {root-id: chunk-id
+                     manifest-id: manifest-id
+                     ;; With no prior durable root the returned chunk is the
+                     ;; complete first root and is genuinely append-only.
+                     ;; Later shared-source publications use a run manifest.
+                     append-mode: (= manifest-id 0)})
+                  chunk-ok chunk-error)))
       (if append-mode
         (let [[chunk-id manifest-id chunk-ok chunk-error] (persist-source-append-index-delta-root-sqlite-handle-with-stmts handle stmts basis-tx index-name view (slice added 0) appended start-index)]
           (when (not (= profile nil))
@@ -9752,7 +9839,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         aevt-view (db-read-source-index-view source .AEVT)
         avet-view (db-read-source-index-view source .AVET)
         vaet-view (db-read-source-index-view source .VAET)]
-      (let [[eavt-mode-value eavt-ok eavt-error] (source-append-index-mode-for-persist-view source eavt-view appended start-index "eavt" new-entities-after-existing)]
+      (let [[eavt-mode-value eavt-ok eavt-error] (source-append-index-mode-for-persist-view source eavt-view appended start-index "eavt" false)]
       (when (not eavt-ok)
         (return (SQLite-Index-Append-Modes {}) false eavt-error))
       (let [[aevt-mode-value aevt-ok aevt-error] (source-append-index-mode-for-persist-view source aevt-view appended start-index "aevt" false)]
@@ -9838,14 +9925,11 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (return eavt-index eavt-appended-only aevt-index aevt-appended-only avet-index avet-appended-only vaet-index vaet-appended-only true ""))))))
 
 (defn source-append-build-indexes-for-persist [source: DB-Read-Source, appended: []Datom, start-index: int, new-entities-after-existing: bool] -> [eavt: [dynamic]int, eavt-append-mode: bool, aevt: [dynamic]int, aevt-append-mode: bool, avet: [dynamic]int, avet-append-mode: bool, vaet: [dynamic]int, vaet-append-mode: bool, ok: bool, error: string]
-  (if new-entities-after-existing
-    (let [eavt-index (sorted-appended-datom-slice-indexes appended start-index "eavt")]
-      (source-append-build-indexes-for-persist-with-eavt source appended start-index eavt-index true))
-    (let [eavt-view (db-read-source-index-view source .EAVT)
-          [eavt-index eavt-appended-only eavt-ok eavt-error] (source-append-index-for-persist-view source eavt-view appended start-index "eavt" false)]
-      (when (not eavt-ok)
-        (return (make [dynamic]int) false (make [dynamic]int) false (make [dynamic]int) false (make [dynamic]int) false false eavt-error))
-      (source-append-build-indexes-for-persist-with-eavt source appended start-index eavt-index eavt-appended-only))))
+  (let [eavt-view (db-read-source-index-view source .EAVT)
+        [eavt-index eavt-appended-only eavt-ok eavt-error] (source-append-index-for-persist-view source eavt-view appended start-index "eavt" false)]
+    (when (not eavt-ok)
+      (return (make [dynamic]int) false (make [dynamic]int) false (make [dynamic]int) false (make [dynamic]int) false false eavt-error))
+    (source-append-build-indexes-for-persist-with-eavt source appended start-index eavt-index eavt-appended-only)))
 
 (defn source-append-build-indexes-for-persist-modes [source: DB-Read-Source, appended: []Datom, start-index: int, modes: SQLite-Index-Append-Modes] -> [eavt: [dynamic]int, aevt: [dynamic]int, avet: [dynamic]int, vaet: [dynamic]int, ok: bool, error: string]
   (let [eavt-view (db-read-source-index-view source .EAVT)
@@ -9925,12 +10009,26 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (return (= latest source.sqlite-snapshot^.basis-tx) true "")
           (return false false latest-error)))
     .Shared-Resident-Datoms-And-Indexes
-      (let [[_ latest-ok latest-error] (sqlite-latest-index-root-basis-raw handle)]
-        (if latest-ok
-          (return false true "")
-          (if (= latest-error "sqlite DB has no Vev index roots")
-            (return true true "")
-            (return false false latest-error))))
+      (let [count source.shared-datoms^.count]
+        (when (= count 0)
+          (let [[_ latest-ok latest-error]
+                  (sqlite-latest-index-root-basis-raw handle)]
+            (if latest-ok
+              (return false true "")
+              (if (= latest-error "sqlite DB has no Vev index roots")
+                (return true true "")
+                (return false false latest-error)))))
+        (let [[last last-ok]
+                (shared-datom-log-at-borrowed
+                  source.shared-datoms^ (- count 1))]
+          (when (not last-ok)
+            (return false false
+                    "shared source did not expose its durable basis"))
+          (let [[latest latest-ok latest-error]
+                  (sqlite-latest-index-root-basis-raw handle)]
+            (if latest-ok
+              (return (= latest last.tx) true "")
+              (return false false latest-error)))))
     .SQLite-Tx-Ops-Overlay
       (sqlite-write-source-current? handle source.overlay-base^)
     .SQLite-Datom-Overlay
@@ -10132,11 +10230,14 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
               (string-owned handle-error)))))
 
 (defn sqlite-conn-ensure-resident! [store: ^SQLite-Conn] -> [ok: bool, error: string]
-  (when store^.resident-loaded
+  (when store^.shared-resident-loaded
     (return true ""))
   (sqlite-conn-invalidate-write-state-cache! store)
   (sqlite-conn-invalidate-direct-attr-cache! store)
-  (let [[conn opened-ok opened-error] (open-conn-sqlite-resident store^.path)]
+  (let [[loaded-db opened-ok opened-error]
+          (load-db-sqlite-resident-handle store^.handle)
+        conn (conn-from-db loaded-db)]
+    (delete-owned-db loaded-db)
     (when (and (not opened-ok)
                (not (= opened-error "sqlite DB has no Vev datom rows")))
       (delete-owned-db conn.db)
@@ -10146,6 +10247,13 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (delete store^.conn.listeners)
     (set! store^.conn conn)
     (set! store^.resident-loaded true)
+    (let [[shared shared-ok shared-error]
+            (create-shared-conn-from-db
+              store^.conn.db sqlite-db-source-default-page-size)]
+      (when (not shared-ok)
+        (return false shared-error))
+      (set! store^.shared-resident shared)
+      (set! store^.shared-resident-loaded true))
     (return true "")))
 
 (defn sqlite-conn-basis-t [store: ^SQLite-Conn] -> [basis-t: u64, ok: bool, error: string]
@@ -10750,13 +10858,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (sqlite-close-live-raw handle)
       (return clear-ok clear-error))))
 
-(defn sqlite-latest-index-entries [path: string, index-name: string] -> [entries: [dynamic]int, ok: bool, error: string]
-  (let [[handle open-ok open-error] (sqlite-open-live-raw path)]
-    (when (not open-ok)
-      (return (make [dynamic]int) false open-error))
+(defn sqlite-latest-index-entries-handle [handle: rawptr, index-name: string] -> [entries: [dynamic]int, ok: bool, error: string]
     (let [[cursor cursor-ok cursor-error] (sqlite-open-index-cursor-handle handle index-name sqlite-index-leaf-chunk-size)]
       (when (not cursor-ok)
-        (sqlite-close-live-raw handle)
         (return (make [dynamic]int) false cursor-error))
       (let [out (make [dynamic]int 0 (sqlite-index-cursor-count cursor))]
         (for [index (arr.range 0 (sqlite-index-cursor-count cursor))]
@@ -10764,16 +10868,21 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
             (when (not entry-ok)
               (when (sqlite-index-cursor-stream-ended? (addr cursor) entry-error)
                 (close-sqlite-index-cursor! (addr cursor))
-                (sqlite-close-live-raw handle)
                 (return out true ""))
               (delete out)
               (close-sqlite-index-cursor! (addr cursor))
-              (sqlite-close-live-raw handle)
               (return (make [dynamic]int) false entry-error))
             (arr.push! out entry)))
         (close-sqlite-index-cursor! (addr cursor))
-        (sqlite-close-live-raw handle)
-        (return out true "")))))
+        (return out true ""))))
+
+(defn sqlite-latest-index-entries [path: string, index-name: string] -> [entries: [dynamic]int, ok: bool, error: string]
+  (let [[handle open-ok open-error] (sqlite-open-live-raw path)]
+    (when (not open-ok)
+      (return (make [dynamic]int) false open-error))
+    (let [[loaded loaded-ok loaded-error] (sqlite-latest-index-entries-handle handle index-name)]
+      (sqlite-close-live-raw handle)
+      (return loaded loaded-ok loaded-error))))
 
 (defn sqlite-latest-index-entry-page [path: string, index-name: string, offset: int, limit: int] -> [entries: [dynamic]int, ok: bool, error: string]
   (when (< offset 0)
@@ -13504,9 +13613,11 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (return (sqlite-root-store-db-with-cache store^.path published cache) true ""))))))
 
 (defn sqlite-store-db [store: ^SQLite-Conn] -> [snapshot: Store-DB, ok: bool, error: string]
-  (when (and store^.resident-loaded store^.resident-reads-enabled)
-    (return (Store-DB {kind: .Resident
-                       resident: (clone-db store^.conn.db)})
+  (when (and store^.shared-resident-loaded store^.resident-reads-enabled)
+    (return (Store-DB {kind: .Shared-Snapshot
+                       shared-snapshot:
+                         (retain-shared-db-snapshot
+                           store^.shared-resident.snapshot)})
             true
             ""))
   (let [[lags lag-ok lag-error] (sqlite-conn-index-root-lags-log? store)]
@@ -13519,10 +13630,32 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (do
             (delete-owned-db db)
             (return (Store-DB {}) false db-error))))))
-  (let [[sqlite-snapshot snapshot-ok snapshot-error] (sqlite-conn-open-db-snapshot store sqlite-db-source-default-page-size)]
-    (if snapshot-ok
-      (return (Store-DB {kind: .SQLite-Snapshot sqlite-snapshot: sqlite-snapshot}) true "")
-      (return (Store-DB {}) false snapshot-error))))
+  ;; A public DB value is a cheap immutable root descriptor. It must not hold
+  ;; statements on the writable connection's live SQLite handle: callers may
+  ;; retain DB values across later transactions and use them on other threads.
+  ;; The first read opens an independent snapshot and preserves this value's
+  ;; exact root row even if maintenance republishes the same transaction basis.
+  (let [[basis basis-ok basis-error] (sqlite-conn-current-root-basis store)]
+    (when (not basis-ok)
+      (return (Store-DB {}) false basis-error))
+    (let [[roots roots-ok roots-error]
+            (sqlite-index-root-set-at-basis store^.handle basis)]
+      (when (not roots-ok)
+        (return (Store-DB {}) false roots-error))
+      (let [[root-row-id row-ok row-error]
+              (sqlite-index-root-row-id-at-basis store^.handle basis)]
+        (when (not row-ok)
+          (return (Store-DB {}) false row-error))
+        (return
+          (sqlite-root-store-db
+            store^.path
+            (SQLite-Durable-Published-Root
+              {root-row-id: root-row-id
+               basis-tx: basis
+               roots: roots
+               modes: (SQLite-Index-Append-Modes {})}))
+          true
+          "")))))
 
 (defn sqlite-store-db-latest [store: ^SQLite-Conn] -> [snapshot: Store-DB, ok: bool, error: string]
   (let [[sqlite-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot store^.path sqlite-db-source-default-page-size)]
@@ -14151,8 +14284,8 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
               (when (and existing-ok (= existing op.e))
                 (for [stored-key seen]
                   (when (= stored-key key)
-                    (delete stored-key)
                     (mmap.dissoc! seen key)
+                    (delete stored-key)
                     (break)))))
             (delete key))
           (when (= op.kind .Add)
@@ -15003,7 +15136,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
                 new-entities-after-existing (source-append-ops-all-new-entities? state^.next-entity-id (slice overlay-ops 0))
                 appended (source-overlay-datoms-from-ops (slice overlay-ops 0) tx)]
             (let [append-start (time.now)
-                  append-modes (SQLite-Index-Append-Modes {eavt: new-entities-after-existing
+                  ;; Ordinary IDs may be above every prior ordinary ID but
+                  ;; still sort before the transaction partition in EAVT.
+                  append-modes (SQLite-Index-Append-Modes {eavt: false
                                                            aevt: false
                                                            avet: false
                                                            vaet: false})
@@ -15186,10 +15321,119 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (delete-shared-write-state-metadata state)
           (return (Store-Tx-Report {}) false false overlay-error))
         (let [out-report (store-tx-report-from-source-overlay snapshot^ (slice overlay-ops 0) state.conn.next-tx resolved state.next-entity-id)]
+          ;; The generic overlay report is ideal for arbitrary source-backed
+          ;; DB values. A resident shared snapshot can do better: publish one
+          ;; consolidated persistent/chunked db-after whose untouched chunks
+          ;; remain shared with db-before.
+          (when out-report.ok
+            (let [next-snapshot
+                    (shared-db-snapshot-with-transaction-datoms
+                      base
+                      (slice out-report.tx-data 0)
+                      base.datoms.count)]
+              (close-store-db out-report.db-after)
+              (set! out-report.db-after
+                (Store-DB {kind: .Shared-Snapshot
+                           shared-snapshot: next-snapshot}))))
           (delete-owned-tx-ops overlay-ops)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
           (return out-report true true ""))))))
+
+(defn transact-shared-source-conn-store-report-tx-data
+  [conn: ^Shared-Conn, tx-data: []Tx-Data]
+  -> Store-Tx-Report
+  ;; The live shared connection already owns the compact allocator/schema
+  ;; metadata needed to resolve a transaction. Do not derive that metadata by
+  ;; rescanning the snapshot for every write.
+  (let [base conn^.snapshot
+        source (shared-db-snapshot-read-source (addr base))
+        resolved
+          (shared-write-state-resolve-tx-data-source-only
+            (addr conn^.write) source tx-data)]
+    (when (not resolved.ok)
+      (let [error resolved.error]
+        (delete-resolved-tx resolved)
+        (return (failed-store-tx-report
+                  (Store-DB {kind: .Shared-Snapshot
+                             shared-snapshot:
+                               (retain-shared-db-snapshot base)})
+                  error))))
+    (let [[instant-ok instant-error]
+            (finalize-source-transaction-instant!
+              source
+              (addr resolved.ops)
+              (addr resolved.tx-meta)
+              conn^.write.conn.next-tx)]
+      (when (not instant-ok)
+        (delete-resolved-tx resolved)
+        (return (failed-store-tx-report
+                  (Store-DB {kind: .Shared-Snapshot
+                             shared-snapshot:
+                               (retain-shared-db-snapshot base)})
+                  instant-error))))
+    (let [[overlay-ops overlay-ok overlay-error]
+            (source-overlay-ops-from-resolved source resolved)]
+      (when (not overlay-ok)
+        (delete-resolved-tx resolved)
+        (return (failed-store-tx-report
+                  (Store-DB {kind: .Shared-Snapshot
+                             shared-snapshot:
+                               (retain-shared-db-snapshot base)})
+                  overlay-error)))
+      (let [before
+              (Store-DB {kind: .Shared-Snapshot
+                         shared-snapshot: (retain-shared-db-snapshot base)})
+            out-report
+              (store-tx-report-from-source-overlay
+                before
+                (slice overlay-ops 0)
+                conn^.write.conn.next-tx
+                resolved
+                conn^.write.next-entity-id)]
+        (close-store-db before)
+        (when out-report.ok
+          (let [append-only true]
+            (for [datom out-report.tx-data]
+              (when (not datom.added)
+                (set! append-only false)))
+          (let [next-snapshot
+                  (if append-only
+                    (shared-db-snapshot-with-appended-datoms-direct
+                      base
+                      (slice out-report.tx-data 0)
+                      base.datoms.count
+                      out-report.source-new-entities-after-existing)
+                    (shared-db-snapshot-with-transaction-datoms
+                      base
+                      (slice out-report.tx-data 0)
+                      base.datoms.count))]
+            (close-store-db out-report.db-after)
+            (set! out-report.db-after
+              (Store-DB {kind: .Shared-Snapshot
+                         shared-snapshot: next-snapshot}))
+            (delete-shared-db-snapshot conn^.snapshot)
+            (set! conn^.snapshot (retain-shared-db-snapshot next-snapshot))
+            (if (shared-write-state-datoms-modify-schema?
+                  (slice out-report.tx-data 0))
+              (let [[next-state state-ok state-error]
+                      (shared-write-state-from-shared-snapshot-metadata
+                        next-snapshot)]
+                (if state-ok
+                  (do
+                    (delete-shared-write-state-metadata conn^.write)
+                    (set! conn^.write next-state))
+                  (do
+                    (delete-shared-write-state-metadata next-state)
+                    (panic state-error))))
+              (do
+                (set! conn^.write.conn.next-tx
+                  (+ conn^.write.conn.next-tx 1))
+                (shared-write-state-advance-next-entity-from-datoms!
+                  (addr conn^.write) (slice out-report.tx-data 0))))))
+        (delete-owned-tx-ops overlay-ops)
+        (delete-resolved-tx resolved)
+        out-report)))))
 
 (defn with-store-db-source-overlay-report-tx-data [snapshot: ^Store-DB, tx-data: []Tx-Data] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
@@ -15778,7 +16022,25 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (set! report.db-after filtered-after)))
       (return report)))
   (when (source-backed-store-db? snapshot)
-    (let [[report used ok error] (with-store-db-source-overlay-report-tx-data snapshot tx-data)]
+    (let [report (Store-Tx-Report {})
+          used false
+          ok false
+          error ""]
+      (if (= snapshot^.kind .Shared-Snapshot)
+        (let [[next-report next-used next-ok next-error]
+                (with-shared-store-db-source-overlay-report-tx-data
+                  snapshot tx-data)]
+          (set! report next-report)
+          (set! used next-used)
+          (set! ok next-ok)
+          (set! error next-error))
+        (let [[next-report next-used next-ok next-error]
+                (with-store-db-source-overlay-report-tx-data
+                  snapshot tx-data)]
+          (set! report next-report)
+          (set! used next-used)
+          (set! ok next-ok)
+          (set! error next-error)))
       (when ok
         (when used
           (return report)))
@@ -15787,10 +16049,12 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (when (source-backed-store-db? snapshot)
     (return (failed-store-tx-report snapshot^ "unsupported source-backed transaction shape")))
   (let [resident-report (with-store-db-tx-data snapshot tx-data)
+        before-datoms (clone-owned-datom-slice (slice resident-report.db-before.datoms 0))
+        after-datoms (clone-owned-datom-slice (slice resident-report.db-after.datoms 0))
         before (Store-DB {kind: .Resident
-                          resident: (build-db (clone-owned-datom-slice (slice resident-report.db-before.datoms 0)))})
+                          resident: (build-db before-datoms)})
         after (Store-DB {kind: .Resident
-                         resident: (build-db (clone-owned-datom-slice (slice resident-report.db-after.datoms 0)))})
+                         resident: (build-db after-datoms)})
         tempids (clone-tempids-owned (slice resident-report.tempids 0))
         report (Store-Tx-Report {ok: resident-report.ok
                                  error: (string-owned resident-report.error)
@@ -16789,6 +17053,8 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (sqlite-conn-close-direct-write-stmts! (addr owned))
     (sqlite-conn-close-index-write-stmts! (addr owned))
     (sqlite-conn-invalidate-current-root-cache! (addr owned)))
+  (when store.shared-resident-loaded
+    (delete-shared-conn store.shared-resident))
   (sqlite-close-live-raw store.handle)
   (delete store.path)
   (when store.write-state-cache-valid
@@ -17054,15 +17320,10 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     (let [append-start (time.now)
           saved-ok false
           save-error ""]
-      (if store^.resident-reads-enabled
-        (let [[ok error]
-                (append-tx-report-log-sqlite-handle store^.handle report)]
-          (set! saved-ok ok)
-          (set! save-error error))
-        (let [[ok error]
-                (append-tx-report-sqlite-handle store^.handle report)]
-          (set! saved-ok ok)
-          (set! save-error error)))
+      (let [[ok error]
+              (append-tx-report-sqlite-handle store^.handle report)]
+        (set! saved-ok ok)
+        (set! save-error error))
       (set! store^.direct-write-profile.append-us
         (+ store^.direct-write-profile.append-us
            (sqlite-profile-elapsed-us append-start)))
@@ -17084,6 +17345,96 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (return (failed-tx-report store^.conn.db prepared.error)))
     (transact-sqlite-tx-data store (slice prepared.tx-data 0))))
 
+(defn transact-sqlite-shared-resident-store-report-tx-data
+  [store: ^SQLite-Conn, tx-data: []Tx-Data]
+  -> Store-Tx-Report
+  ;; Resolve once against the current persistent/chunked snapshot. The rich
+  ;; report already contains cheap immutable before/after handles. Persistence
+  ;; consumes a retained copy of that transition; only a successful SQLite
+  ;; commit advances the connection's current shared snapshot.
+  (let [candidate-start (time.now)
+        append-start (time.now)
+        [candidate candidate-ok candidate-error]
+          (clone-shared-source-conn store^.shared-resident)]
+    (set! store^.direct-write-profile.resolve-us
+      (+ store^.direct-write-profile.resolve-us
+         (sqlite-profile-elapsed-us candidate-start)))
+    (when (not candidate-ok)
+      (return (failed-sqlite-store-tx-report store candidate-error)))
+    (let [report-start (time.now)
+          report
+            (transact-shared-source-conn-store-report-tx-data
+              (addr candidate) tx-data)]
+    (set! store^.direct-write-profile.overlay-us
+      (+ store^.direct-write-profile.overlay-us
+         (sqlite-profile-elapsed-us report-start)))
+    (when (not report.ok)
+      (delete-shared-conn candidate)
+      (return report))
+    (set! append-start (time.now))
+    (let [begin-start (time.now)
+          [begin-ok begin-error] (sqlite-begin-immediate-raw store^.handle)]
+      (set! store^.direct-write-profile.append-begin-us
+        (+ store^.direct-write-profile.append-begin-us
+           (sqlite-profile-elapsed-us begin-start)))
+      (when (not begin-ok)
+        (delete-shared-conn candidate)
+        (delete-store-tx-report report)
+        (return (failed-sqlite-store-tx-report store begin-error))))
+    (let [[source source-ok source-error]
+            (store-db-read-source (addr report.db-before))]
+      (when (not source-ok)
+        (sqlite-rollback-raw store^.handle)
+        (delete-shared-conn candidate)
+        (delete-store-tx-report report)
+        (return (failed-sqlite-store-tx-report store source-error)))
+      (let [modes (store-tx-report-source-append-modes report)
+            start-index report.db-before.shared-snapshot.datoms.count
+            plan
+              (sqlite-durable-append-plan-from-modes
+                (slice report.tx-data 0)
+                start-index
+                modes
+                (addr store^.direct-write-profile))]
+        (defer (delete-sqlite-durable-append-plan plan))
+        (let [[_ append-ok append-error]
+                (append-source-direct-sqlite-conn-from-source-plan-published-mode
+                  store
+                  source
+                  report.tx
+                  (slice report.tx-data 0)
+                  (slice report.tx-meta 0)
+                  plan
+                  (addr store^.direct-write-profile)
+                  false)]
+          (when (not append-ok)
+            (sqlite-rollback-raw store^.handle)
+            (delete-shared-conn candidate)
+            (delete-store-tx-report report)
+            (return (failed-sqlite-store-tx-report store append-error)))))
+    (let [commit-start (time.now)
+          [commit-ok commit-error] (sqlite-commit-raw store^.handle)]
+      (set! store^.direct-write-profile.append-commit-us
+        (+ store^.direct-write-profile.append-commit-us
+           (sqlite-profile-elapsed-us commit-start)))
+      (when (not commit-ok)
+        (sqlite-rollback-raw store^.handle)
+        (delete-shared-conn candidate)
+        (delete-store-tx-report report)
+        (return (failed-sqlite-store-tx-report store commit-error))))
+    (sqlite-conn-advance-write-state-cache-after-datoms!
+      store (slice report.tx-data 0))
+    (set! store^.direct-write-profile.append-us
+      (+ store^.direct-write-profile.append-us
+         (sqlite-profile-elapsed-us append-start)))
+    ;; The candidate has already advanced to report.db-after. Install it only
+    ;; after the durable commit; failures above leave the live connection and
+    ;; its db-before untouched.
+    (delete-shared-conn store^.shared-resident)
+    (set! store^.shared-resident candidate)
+    (sqlite-conn-invalidate-current-root-cache! store)
+    report))))
+
 (defn transact-sqlite-store-report-tx-data [store: ^SQLite-Conn, tx-data: []Tx-Data] -> Store-Tx-Report
   (when store^.source-only
     (return (failed-sqlite-store-tx-report store "SQLite source connection is read-only; open a writable SQLite connection to transact")))
@@ -17097,6 +17448,9 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
             (return (failed-sqlite-store-tx-report store loaded-error)))
           (set! store^.resident-reads-enabled true)))))
   (when store^.resident-loaded
+    (when (and store^.resident-reads-enabled store^.shared-resident-loaded)
+      (return (transact-sqlite-shared-resident-store-report-tx-data
+                store tx-data)))
     (return (store-tx-report-from-temp-resident-report
               (transact-sqlite-tx-data store tx-data))))
   (let [[direct-report direct-used direct-ok direct-error] (transact-sqlite-store-report-direct-tx-data store tx-data)]

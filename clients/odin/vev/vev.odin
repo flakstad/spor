@@ -31,7 +31,6 @@ API :: struct {
 	connection_close: proc "c" (conn: rawptr) `dynlib:"vev_connection_close"`,
 	connection_db: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_db"`,
 	connection_transact_edn_report: proc "c" (conn: rawptr, tx_text: cstring) -> rawptr `dynlib:"vev_connection_transact_edn_report"`,
-	connection_transact_edn_status: proc "c" (conn: rawptr, tx_text: cstring) -> cstring `dynlib:"vev_connection_transact_edn_status"`,
 	connection_query_value_with_inputs: proc "c" (conn: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_connection_query_value_with_inputs"`,
 	connection_compact_indexes: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_compact_indexes"`,
 	connection_maintain_indexes: proc "c" (conn: rawptr, max_steps: int) -> bool `dynlib:"vev_connection_maintain_indexes"`,
@@ -243,7 +242,6 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.connection_close == nil ||
 	   library.api.connection_db == nil ||
 	   library.api.connection_transact_edn_report == nil ||
-	   library.api.connection_transact_edn_status == nil ||
 	   library.api.connection_query_value_with_inputs == nil ||
 	   library.api.connection_compact_indexes == nil ||
 	   library.api.connection_maintain_indexes == nil ||
@@ -1089,10 +1087,15 @@ transact_durable :: proc(
 		return "", false
 	}
 	tx_text := strings.clone_to_cstring(tx, context.temp_allocator)
-	native_result := connection.library.api.connection_transact_edn_status(
+	report := connection.library.api.connection_transact_edn_report(
 		connection.handle,
 		tx_text,
 	)
+	if report == nil {
+		return "", false
+	}
+	defer connection.library.api.tx_report_free(report)
+	native_result := connection.library.api.tx_report_edn(report)
 	if native_result == nil {
 		return "", false
 	}

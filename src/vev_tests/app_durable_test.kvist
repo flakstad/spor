@@ -1,6 +1,7 @@
 (package main)
 
 (import os "core:os")
+(import fmt "core:fmt")
 (import thread "core:thread")
 (import test "kvist:test")
 (import kdata "kvist:data")
@@ -11,6 +12,11 @@
 
 (defstruct Concurrent-Reader {
   conn: d.Conn
+  iterations: int
+  ok: bool
+})
+
+(defstruct Concurrent-Reopener {
   iterations: int
   ok: bool
 })
@@ -28,6 +34,23 @@
         (when (not (kdata.int? value))
           (set! reader^.ok false))
         (d.close db))
+      (dec! remaining))))
+
+(defn concurrent-reopen-loop [reader: ^Concurrent-Reopener]
+  (let [remaining reader^.iterations]
+    (while (> remaining 0)
+      (let [[conn opened-open opened-error]
+              (d.try-connect concurrent-app-test-path)]
+        (if opened-open
+          (do
+            (let [[resident-ok resident-error] (d.ensure-resident! conn)]
+              (when (not resident-ok)
+                (fmt.eprintln "concurrent resident open failed:" resident-error)
+                (set! reader^.ok false)))
+            (d.close conn))
+          (do
+            (fmt.eprintln "concurrent connection open failed:" opened-error)
+            (set! reader^.ok false))))
       (dec! remaining))))
 
 (def ref-join-query
@@ -164,23 +187,27 @@
 
 (test.deftest durable-app-explicit-resident-mode-keeps-durable-reopen-semantics
   (remove-app-test-db)
-  (let [seed (d.connect app-test-path)]
-    (d.transact seed
-      '[[:db/add 10 :db/ident :entity/id]
-        [:db/add 10 :db/valueType :db.type/string]
-        [:db/add 10 :db/unique :db.unique/identity]
-        [:db/add 11 :db/ident :entity/value]
-        [:db/add 11 :db/valueType :db.type/long]
-        [:db/add 12 :db/ident :entity/link]
-        [:db/add 12 :db/valueType :db.type/ref]
-        {:db/id "counter" :entity/id "counter" :entity/value 1}])
+  (let [seed (d.connect app-test-path)
+        seed-report
+          (d.transact seed
+            '[[:db/add 10 :db/ident :entity/id]
+              [:db/add 10 :db/valueType :db.type/string]
+              [:db/add 10 :db/unique :db.unique/identity]
+              [:db/add 11 :db/ident :entity/value]
+              [:db/add 11 :db/valueType :db.type/long]
+              [:db/add 12 :db/ident :entity/link]
+              [:db/add 12 :db/valueType :db.type/ref]
+              {:db/id "counter" :entity/id "counter" :entity/value 1}])]
+    (test.is seed-report.ok seed-report.error)
     (d.close seed))
   (let [resident (d.connect app-test-path)
         [loaded loaded-error] (d.ensure-resident! resident)]
     (test.is loaded loaded-error)
     (let [before (d.db resident)
           before-value (d.q concurrent-value-query before)]
-      (test.is (= (kdata.int before-value) 1))
+      (test.is (kdata.int? before-value))
+      (when (kdata.int? before-value)
+        (test.is (= (kdata.int before-value) 1)))
       (d.close before))
     (let [report
             (d.transact resident
@@ -208,9 +235,21 @@
           dependent-value
             (d.q '[:find ?value .
                    :where [?e :entity/id "first-resident-entity"]
-                          [?e :entity/value ?value]] after)]
-      (test.is (= (kdata.int after-value) 2))
-      (test.is (= (kdata.int dependent-value) 4))
+                          [?e :entity/value ?value]] after)
+          projected
+            (d.q '[:find ?id ?fallback
+                   :where [?e :entity/id ?id]
+                          (not [?e :entity/value 999])
+                          [(get-else $ ?e :entity/value 0) ?fallback]]
+                 after)]
+      (test.is (kdata.int? after-value))
+      (when (kdata.int? after-value)
+        (test.is (= (kdata.int after-value) 2)))
+      (test.is (kdata.int? dependent-value))
+      (when (kdata.int? dependent-value)
+        (test.is (= (kdata.int dependent-value) 4)))
+      (test.is (= (kdata.count projected) 3))
+      (kdata.release projected)
       (d.close after))
     (d.close resident))
   ;; Resident mode changes only this connection's execution representation;
@@ -218,11 +257,13 @@
   (let [reopened (d.connect app-test-path)
         db (d.db reopened)
         value (d.q concurrent-value-query db)]
-    (test.is (= (kdata.int value) 2))
+    (test.is (kdata.int? value))
+    (when (kdata.int? value)
+      (test.is (= (kdata.int value) 2)))
     (d.close db)
-    ;; A normal writer also detects the durable unindexed tail and continues
-    ;; from it; resident mode must not create a file only resident callers can
-    ;; safely advance.
+    ;; A normal writer continues from the same synchronously published root;
+    ;; resident mode must not create a file only resident callers can safely
+    ;; advance.
     (let [continued
             (d.transact reopened
               '[[:db/add [:entity/id "counter"] :entity/value 6]])]
@@ -231,7 +272,9 @@
   (let [final (d.connect app-test-path)
         db (d.db final)
         value (d.q concurrent-value-query db)]
-    (test.is (= (kdata.int value) 6))
+    (test.is (kdata.int? value))
+    (when (kdata.int? value)
+      (test.is (= (kdata.int value) 6)))
     (d.close db)
     (d.close final))
   (remove-app-test-db))
@@ -266,4 +309,42 @@
       (thread.destroy worker)
       (test.is reader.ok))
     (d.close conn))
+  (remove-concurrent-app-test-db))
+
+(test.deftest durable-app-concurrent-reopen-observes-one-storage-generation
+  (remove-concurrent-app-test-db)
+  (let [writer (d.connect concurrent-app-test-path)]
+    (d.transact writer
+      '[[:db/add 10 :db/ident :entity/id]
+        [:db/add 10 :db/valueType :db.type/string]
+        [:db/add 10 :db/unique :db.unique/identity]
+        [:db/add 11 :db/ident :entity/value]
+        [:db/add 11 :db/valueType :db.type/long]
+        {:db/id "counter" :entity/id "counter" :entity/value 0}])
+    ;; Opening resident execution state reconstructs the durable log and
+    ;; validates all published index roots. Repeated opens concurrent with a
+    ;; writer must never mix a root basis from one SQLite generation with a
+    ;; datom log or manifest from another.
+    (let [reopener (Concurrent-Reopener {iterations: 120 ok: true})
+          worker (thread.create-and-start-with-poly-data
+                   (addr reopener) concurrent-reopen-loop)
+          index 1]
+      (while (<= index 120)
+        (let [report
+                (d.transact writer
+                  [[:db/add [:entity/id "counter"] :entity/value index]])]
+          (test.is report.ok report.error))
+        (inc! index))
+      (thread.join worker)
+      (thread.destroy worker)
+      (test.is reopener.ok))
+    (d.close writer))
+  (let [reopened (d.connect concurrent-app-test-path)
+        [resident-ok resident-error] (d.ensure-resident! reopened)
+        db (d.db reopened)
+        value (d.q concurrent-value-query db)]
+    (test.is resident-ok resident-error)
+    (test.is (= (kdata.int value) 120))
+    (d.close db)
+    (d.close reopened))
   (remove-concurrent-app-test-db))

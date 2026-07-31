@@ -27,12 +27,43 @@ to the same durable SQLite store and a newly opened connection observes them.
 The choice is per connection: it is a memory/latency policy, not another store
 format or source of truth.
 
-In resident mode, acknowledgement follows the transaction-log commit. Durable
-index roots are derived state and may temporarily trail that commit; they are
-never part of the truth boundary. Resident reads already own the committed
-indexes, and a newly opened connection detects an unindexed log tail and
-materializes it rather than returning a stale root. Maintenance may publish a
-new root independently.
+Resident execution does not change transaction semantics. `transact` returns
+the ordinary rich report with immutable `db-before` and `db-after` values;
+those values retain persistent/chunked snapshot roots rather than cloning the
+database. Before the call returns, SQLite has durably appended the transaction
+log and published the corresponding EAVT, AEVT, AVET, and VAET roots. A fresh
+connection can therefore read the same transaction immediately.
+
+Index compaction remains derived maintenance and may run independently. It can
+replace a deep run tree with a shallower equivalent root, but it never changes
+the transaction basis or the facts visible at that basis.
+
+Public database values are immutable root descriptors. Creating one does not
+leave statements or a read transaction attached to the writable connection's
+live SQLite handle. Its first storage-backed read opens an independent snapshot
+at the descriptor's exact root row, so callers may retain `db-before`,
+`db-after`, and `db` values across later writes without blocking the writer or
+silently advancing the retained value.
+
+Opening or promoting a connection to resident execution reads its root basis,
+datom log, manifests, and validation metadata through one SQLite read
+transaction on one handle. A concurrent writer therefore cannot make the
+loader combine parts of two storage generations. Existing current-format
+stores also skip schema DDL during open, so an ordinary reader does not become
+a schema writer or spuriously contend with a transaction.
+
+Rich resident reports carry their database-value ownership explicitly. A live
+transaction transfers `db-after` to its connection, while a pure `with` report
+owns both immutable values. Report cleanup follows that recorded mode; callers
+do not have to infer ownership from which transaction entry point produced the
+report.
+
+Persistent indexes use a total order. Entity allocation is monotonic inside
+the ordinary partition, but new ordinary entities still sort before the high
+transaction partition in EAVT and are merged accordingly. Log position is the
+final tie-breaker for otherwise identical datoms, including duplicate
+retractions emitted by one logical transaction. Resident roots, durable run
+roots, and a canonical rebuild therefore have the same order.
 
 Ordinary paths and `sqlite://` paths select the same backend. VevDB does not
 require a file extension. Replace `example.db` above with the path you want.
@@ -46,6 +77,8 @@ Several connections and processes may open one store.
 - Writers refresh the current basis before assigning a transaction ID.
 - Existing database values do not change.
 - Call `db` again to observe newer commits.
+- Concurrent open and resident promotion observe one coherent storage
+  generation, never a root from one commit and a log from another.
 
 SQLite WAL mode provides the file-level reader/writer coordination.
 

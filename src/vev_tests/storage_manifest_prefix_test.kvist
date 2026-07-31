@@ -11,8 +11,8 @@
 
 (defn remove-sqlite-files [path: string]
   (os.remove path)
-  (let [wal-path (fmt.tprintf "%s-wal" path) :defer
-        shm-path (fmt.tprintf "%s-shm" path) :defer]
+  (let [wal-path (fmt.aprintf "%s-wal" path) :defer
+        shm-path (fmt.aprintf "%s-shm" path) :defer]
     (os.remove wal-path)
     (os.remove shm-path))
   (return))

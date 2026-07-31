@@ -426,6 +426,60 @@
             (set! interval-start (time.now))))))
     (vev.close-store store)))
 
+(defn measure-resident-store-report-write
+  [path: string, batch-size: int, total: int, report-every: int]
+  (remove-sqlite-files path)
+  (let [[store open-ok open-error] (vev.open-store path)]
+    (when (not open-ok)
+      (fmt.printf "engine=vev-store workload=resident-store-report ok=false error=%s\n" open-error)
+      (return))
+    (when (not (seed-write-schema-store (addr store)))
+      (vev.close-store store)
+      (return))
+    (let [[resident-ok resident-error] (vev.ensure-store-resident! (addr store))]
+      (when (not resident-ok)
+        (fmt.printf "engine=vev-store workload=resident-store-report ok=false error=%s\n" resident-error)
+        (vev.close-store store)
+        (return)))
+    (fmt.printf "engine=vev-store workload=resident-store-report entities_per_tx=%d total=%d columns=entities,elapsed_s,throughput_entities_per_s,call_latency_ms\n"
+                batch-size total)
+    (let [start (time.now)
+          call-us 0.0
+          commits 0
+          inserted 0
+          written 0]
+      (while (< written total)
+        (let [remaining (- total written)
+              actual-batch (min batch-size remaining)
+              tx (item-batch-tx (+ written 1) actual-batch 0)
+              before (time.now)
+              report (vev.transact-store-report-tx-data
+                       (addr store) (slice tx 0))
+              elapsed (bench.elapsed-us before)]
+          (set! call-us (+ call-us elapsed))
+          (set! commits (+ commits 1))
+          (when (not report.ok)
+            (fmt.printf "engine=vev-store workload=resident-store-report ok=false error=%s\n" report.error)
+            (vev.delete-store-tx-report report)
+            (delete tx)
+            (vev.close-store store)
+            (return))
+          (vev.delete-store-tx-report report)
+          (delete tx)
+          (set! inserted (+ inserted actual-batch))
+          (set! written (+ written actual-batch))
+          (when (or (= written total)
+                    (= (% written report-every) 0))
+            (let [elapsed-us (bench.elapsed-us start)
+                  elapsed-s (/ elapsed-us 1000000.0)
+                  throughput (/ (* (f64 inserted) 1000000.0) elapsed-us)
+                  call-ms (/ call-us (* (f64 commits) 1000.0))]
+              (fmt.printf "%d,%.3f,%.2f,%.3f\n"
+                          written elapsed-s throughput call-ms))
+            (set! call-us 0.0)
+            (set! commits 0)))))
+    (vev.close-store store)))
+
 (defn lcg-next [state: u64] -> u64
   (+ (* state (u64 6364136223846793005)) (u64 1442695040888963407)))
 
@@ -1434,6 +1488,9 @@
         (measure-shared-memory-write memory-chunk-size (max 1 selected-batch) total report-every)
         (if (= workload "memory-legacy")
           (measure-memory-write (max 1 selected-batch) total report-every)
+        (if (= workload "resident-store-report")
+          (measure-resident-store-report-write
+            path (max 1 selected-batch) total report-every)
         (if (= workload "pure-store-report")
           (run-pure-store-report-workload path (max 1 selected-batch) total report-every compact-every maintain-every maintain-steps maintain-target auto-maintain-steps auto-maintain-target auto-maintain-trigger keep?)
         (if (= workload "pure-store-report-deferred")
@@ -1471,4 +1528,4 @@
                         (measure-shared-snapshot-heavy-direct-write chunk-size (max 1 selected-batch) total report-every)
                         (measure-shared-store-db-heavy-write chunk-size (max 1 selected-batch) total report-every)
                         (remove-sqlite-files mixed-path))
-                      (fmt.printf "unknown --workload %s; expected memory, memory-legacy, pure, pure-store-report, pure-store-report-deferred, manifest-chain-read, sqlite-store-db-heavy, sqlite-store-db-heavy-group-commit, mixed, snapshot-heavy, shared-snapshot-heavy, shared-snapshot-heavy-direct, shared-store-db-heavy, or both\n" workload)))))))))))))))))
+                      (fmt.printf "unknown --workload %s; expected memory, memory-legacy, resident-store-report, pure, pure-store-report, pure-store-report-deferred, manifest-chain-read, sqlite-store-db-heavy, sqlite-store-db-heavy-group-commit, mixed, snapshot-heavy, shared-snapshot-heavy, shared-snapshot-heavy-direct, shared-store-db-heavy, or both\n" workload))))))))))))))))))
