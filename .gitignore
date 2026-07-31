@@ -3,6 +3,8 @@
 build/
 /.DS_Store
 /.kvist-cache/
+/.cpcache/
+__pycache__/
 /src/vev_tests/*.sqlite
 /src/vev_tests/*.sqlite-shm
 /src/vev_tests/*.sqlite-wal

@@ -42,7 +42,7 @@
         warmups 30
         sample-count 200
         conn (vev.create-conn)
-        query "[:find ?name ?age :in ?email :where [?e :email ?email] [?e :name ?name] [?e :age ?age]]"
+        query "[:find ?name ?age :in $ ?email :where [?e :email ?email] [?e :name ?name] [?e :age ?age]]"
         prepared (vev.prepare-query-text query)
         inputs "[\"user-150@example.com\"]"
         bound-inputs ([]vev.Query-Input [(vev.query-input-scalar (vev.value-string "user-150@example.com"))])

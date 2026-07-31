@@ -19,6 +19,27 @@ Unpack the platform bundle under `vendor/vev` and import its `kvist` package:
 
 Replace `example.db` with the path you want.
 
+General SQLite access is a separate package in the same bundle:
+
+```clojure
+(import sql "deps:vev/kvist/sqlite")
+
+(let [email (sql.open "email.sqlite")
+      rows (sql.query email "select id, subject from email")]
+  (defer (sql.delete-query-result rows))
+  (defer (sql.close email))
+  ...)
+```
+
+It opens application-owned SQLite files using the SQLite already contained in
+VevDB. It does not expose the VevDB store connection.
+
+The usual shape is `execute-script` for schema setup, `execute` for mutations,
+and `query`, `query-one`, or `scalar` for returned data. Positional and named
+parameters, reusable prepared statements, batches, read-only connections, busy
+timeouts, and row visitors are supported. Kvist values and results have
+explicit ownership; see the SQLite guide for the complete contract.
+
 Build with `-collection:deps=vendor`. The facade finds `libvev` from `VEV_LIB`
 for explicit development/test overrides, beside the executable for command-line
 applications, or under `Contents/Frameworks` in a macOS application bundle.
@@ -49,3 +70,5 @@ and synchronized snapshots—with Kvist-native ownership and result types.
 
 See [Datomic and VevDB](../../docs/datomic-syntax.md) for the shared data model,
 tutorial adaptations, supported Peer operations, and deliberate non-goals.
+See [SQLite](../../docs/sqlite.md) for SQL values, ownership, transactions, and
+the C ABI.

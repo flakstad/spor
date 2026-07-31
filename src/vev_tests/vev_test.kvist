@@ -4142,6 +4142,33 @@
       (t.is (= append-meta[0].a ":request/id"))
       (t.is (= append-meta[0].v.text "req-append")))))
 
+(t.deftest durable-transaction-reports-own-custom-metadata
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.sqlite-owned-tx-meta.sqlite"]
+    (defer (os.remove path))
+    (defer (os.remove "tmp.vev.sqlite-owned-tx-meta.sqlite-wal"))
+    (defer (os.remove "tmp.vev.sqlite-owned-tx-meta.sqlite-shm"))
+    (let [[store opened-ok opened-error] (vev.open-sqlite-conn path)
+          report (vev.transact-sqlite-store-report-text
+                   (addr store)
+                   "[{:db/id \"datomic.tx\" :request/id \"capture-42\" :tx/reason :capture} [:db/add 1 :user/name \"Ada\"]]")
+          rendered (vev.store-tx-report-value report)
+          rendered-text (vev.value-serializable-text rendered)]
+      (t.is opened-ok opened-error)
+      (t.is report.ok report.error)
+      (t.is (= (count report.tx-meta) 3))
+      (t.is (= report.tx-meta[0].a ":request/id"))
+      (t.is (= report.tx-meta[0].v.text "capture-42"))
+      (t.is (= report.tx-meta[1].a ":tx/reason"))
+      (t.is (= report.tx-meta[1].v.text ":capture"))
+      (t.is (strings.contains rendered-text ":request/id"))
+      (t.is (strings.contains rendered-text "\"capture-42\""))
+      (t.is (strings.contains rendered-text ":tx/reason"))
+      (delete rendered-text)
+      (vev.delete-owned-value rendered)
+      (vev.delete-store-tx-report report)
+      (vev.close-sqlite-conn store))))
+
 (t.deftest datascript-reset-conn-subset
   (defer (free_all context.allocator))
   (let [conn (vev.conn-from-datoms

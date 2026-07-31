@@ -82,7 +82,10 @@ if [[ "$IF_NEEDED" == "true" && -f "$LIB_PATH" ]]; then
         "$ROOT/scripts/generate_native_exports.py" -nt "$LIB_PATH" ]]; then
     SOURCES_CURRENT="false"
   fi
-  if [[ ! -f "$INCLUDE_DIR/vev.h" || "$ROOT/include/vev.h" -nt "$INCLUDE_DIR/vev.h" ]]; then
+  if [[ ! -f "$INCLUDE_DIR/vev.h" ||
+        ! -f "$INCLUDE_DIR/vev_sqlite.h" ||
+        "$ROOT/include/vev.h" -nt "$INCLUDE_DIR/vev.h" ||
+        "$ROOT/include/vev_sqlite.h" -nt "$INCLUDE_DIR/vev_sqlite.h" ]]; then
     SOURCES_CURRENT="false"
   fi
   if [[ -n "$KVIST_PATH" && "$KVIST_PATH" -nt "$LIB_PATH" ]]; then
@@ -156,6 +159,7 @@ if [[ -n "$LINK_NAME" && ! -f "$LIB_DIR/$LINK_NAME" ]]; then
   exit 1
 fi
 cp "$ROOT/include/vev.h" "$INCLUDE_DIR/vev.h"
+cp "$ROOT/include/vev_sqlite.h" "$INCLUDE_DIR/vev_sqlite.h"
 printf '%s\n' "$BUILD_CONFIG" > "$BUILD_CONFIG_PATH"
 
 cat > "$PKGCONFIG_DIR/vev.pc" <<EOF

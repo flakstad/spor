@@ -2414,9 +2414,22 @@ abi_free_stmt :: proc(stmt: rawptr) {
 }
 ")
 
+(defstruct ABI-App-SQLite-DB {
+  handle: rawptr
+  open-code: int
+  open-error: string
+})
+
+(defstruct ABI-App-SQLite-Stmt {
+  handle: rawptr
+  database: rawptr
+})
+
 (def Vev-Conn (distinct rawptr))
 (def Vev-Connection (distinct rawptr))
 (def Vev-SQLite-Conn (distinct rawptr))
+(def Vev-SQLite-DB (distinct rawptr))
+(def Vev-SQLite-Stmt (distinct rawptr))
 (def Vev-DB (distinct rawptr))
 (def Vev-Entity (distinct rawptr))
 (def Vev-Prepared-Query (distinct rawptr))
@@ -2436,6 +2449,25 @@ abi_free_stmt :: proc(stmt: rawptr) {
 (def Vev-Tx-Fn-Args (distinct rawptr))
 (def Vev-Value-Handle (distinct rawptr))
 (def Vev-Value (distinct rawptr))
+
+(defn- app-sqlite-db-ptr [db: Vev-SQLite-DB] -> ^ABI-App-SQLite-DB
+  (transmute ^ABI-App-SQLite-DB (rawptr db)))
+
+(defn- app-sqlite-stmt-ptr [statement: Vev-SQLite-Stmt]
+  -> ^ABI-App-SQLite-Stmt
+  (transmute ^ABI-App-SQLite-Stmt (rawptr statement)))
+
+(defn- app-sqlite-db-handle [db: Vev-SQLite-DB] -> rawptr
+  (let [wrapper (app-sqlite-db-ptr db)]
+    wrapper^.handle))
+
+(defn- app-sqlite-stmt-handle [statement: Vev-SQLite-Stmt] -> rawptr
+  (let [wrapper (app-sqlite-stmt-ptr statement)]
+    wrapper^.handle))
+
+(defn- app-sqlite-db-open-code [db: Vev-SQLite-DB] -> int
+  (let [wrapper (app-sqlite-db-ptr db)]
+    wrapper^.open-code))
 
 (defn- conn-ptr [conn: Vev-Conn] -> ^vev.Conn
   (abi-conn-ptr (rawptr conn)))
@@ -3992,6 +4024,383 @@ abi_free_stmt :: proc(stmt: rawptr) {
 (defn vev_abi_version :abi "c" [] -> u32
   (odin "context = runtime.default_context()")
   (u32 1))
+
+@export
+(defn vev_sqlite_open_v2 :abi "c" [path: cstring, flags: int]
+  -> Vev-SQLite-DB
+  (odin "context = runtime.default_context()")
+  (let [wrapper (alloc ABI-App-SQLite-DB)]
+    (if (= path nil)
+      (do
+        (set! wrapper^.handle nil)
+        (set! wrapper^.open-code 21)
+        (set! wrapper^.open-error
+              (string-owned "sqlite path must not be null")))
+      (let [path-text (text-from-c path)
+            [handle code error] (vev.sqlite-api-open-raw path-text flags)]
+        (delete path-text)
+        (set! wrapper^.handle handle)
+        (set! wrapper^.open-code code)
+        (set! wrapper^.open-error error)))
+    (Vev-SQLite-DB (rawptr wrapper))))
+
+@export
+(defn vev_sqlite_open :abi "c" [path: cstring] -> Vev-SQLite-DB
+  (odin "context = runtime.default_context()")
+  (vev_sqlite_open_v2 path (+ 2 4 65536)))
+
+@export
+(defn vev_sqlite_db_ok :abi "c" [db: Vev-SQLite-DB] -> bool
+  (odin "context = runtime.default_context()")
+  (and (not (= (rawptr db) nil))
+       (not (= (app-sqlite-db-handle db) nil))
+       (= (app-sqlite-db-open-code db) 0)))
+
+@export
+(defn vev_sqlite_db_error_code :abi "c" [db: Vev-SQLite-DB] -> int
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return 21))
+  (let [wrapper (app-sqlite-db-ptr db)]
+    (if (not (= wrapper^.open-code 0))
+      wrapper^.open-code
+      (vev.sqlite-api-error-code-raw wrapper^.handle))))
+
+@export
+(defn vev_sqlite_db_extended_error_code :abi "c" [db: Vev-SQLite-DB]
+  -> int
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return 21))
+  (let [wrapper (app-sqlite-db-ptr db)]
+    (if (not (= wrapper^.open-code 0))
+      wrapper^.open-code
+      (vev.sqlite-api-extended-error-code-raw wrapper^.handle))))
+
+@export
+(defn vev_sqlite_db_error :abi "c" [db: Vev-SQLite-DB] -> cstring
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return (c-string-owned "invalid sqlite database handle")))
+  (let [wrapper (app-sqlite-db-ptr db)]
+    (if (not (= wrapper^.open-code 0))
+      (c-string-owned wrapper^.open-error)
+      (let [error (vev.sqlite-api-error-raw wrapper^.handle)
+            out (c-string-owned error)]
+        (delete error)
+        out))))
+
+@export
+(defn vev_sqlite_db_close :abi "c" [db: Vev-SQLite-DB]
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr db) nil)
+    (return))
+  (let [wrapper (app-sqlite-db-ptr db)]
+    (when (not (= wrapper^.handle nil))
+      (discard (vev.sqlite-api-close-raw wrapper^.handle)))
+    (delete wrapper^.open-error)
+    (free wrapper)))
+
+@export
+(defn vev_sqlite_exec :abi "c" [db: Vev-SQLite-DB, sql: cstring] -> int
+  (odin "context = runtime.default_context()")
+  (when (or (not (vev_sqlite_db_ok db)) (= sql nil))
+    (return 21))
+  (let [source (text-from-c sql)
+        code (vev.sqlite-api-exec-raw
+               (app-sqlite-db-handle db) source)]
+    (delete source)
+    code))
+
+@export
+(defn vev_sqlite_prepare :abi "c" [db: Vev-SQLite-DB, sql: cstring]
+  -> Vev-SQLite-Stmt
+  (odin "context = runtime.default_context()")
+  (when (or (not (vev_sqlite_db_ok db)) (= sql nil))
+    (return (Vev-SQLite-Stmt nil)))
+  (let [source (text-from-c sql)
+        [handle code]
+        (vev.sqlite-api-prepare-raw
+          (app-sqlite-db-handle db) source)]
+    (delete source)
+    (when (or (not (= code 0)) (= handle nil))
+      (return (Vev-SQLite-Stmt nil)))
+    (let [wrapper (alloc ABI-App-SQLite-Stmt)]
+      (set! wrapper^.handle handle)
+      (set! wrapper^.database (app-sqlite-db-handle db))
+      (Vev-SQLite-Stmt (rawptr wrapper)))))
+
+@export
+(defn vev_sqlite_stmt_finalize :abi "c" [statement: Vev-SQLite-Stmt]
+  -> int
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr statement) nil)
+    (return 0))
+  (let [wrapper (app-sqlite-stmt-ptr statement)
+        code (vev.sqlite-api-finalize-raw wrapper^.handle)]
+    (free wrapper)
+    code))
+
+@export
+(defn vev_sqlite_stmt_reset :abi "c" [statement: Vev-SQLite-Stmt] -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    21
+    (vev.sqlite-api-reset-raw
+      (app-sqlite-stmt-handle statement))))
+
+@export
+(defn vev_sqlite_stmt_clear_bindings :abi "c"
+  [statement: Vev-SQLite-Stmt] -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    21
+    (vev.sqlite-api-clear-bindings-raw
+      (app-sqlite-stmt-handle statement))))
+
+@export
+(defn vev_sqlite_stmt_step :abi "c" [statement: Vev-SQLite-Stmt] -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    21
+    (vev.sqlite-api-step-raw
+      (app-sqlite-stmt-handle statement))))
+
+@export
+(defn vev_sqlite_bind_null :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int] -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    21
+    (vev.sqlite-api-bind-null-raw
+      (app-sqlite-stmt-handle statement) index)))
+
+@export
+(defn vev_sqlite_bind_int64 :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int, value: i64] -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    21
+    (vev.sqlite-api-bind-int64-raw
+      (app-sqlite-stmt-handle statement) index value)))
+
+@export
+(defn vev_sqlite_bind_double :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int, value: f64] -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    21
+    (vev.sqlite-api-bind-double-raw
+      (app-sqlite-stmt-handle statement) index value)))
+
+@export
+(defn vev_sqlite_bind_text :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int, data: rawptr, length: u64]
+  -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    21
+    (vev.sqlite-api-bind-text-raw
+      (app-sqlite-stmt-handle statement) index data length)))
+
+@export
+(defn vev_sqlite_bind_blob :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int, data: rawptr, length: u64]
+  -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    21
+    (vev.sqlite-api-bind-blob-raw
+      (app-sqlite-stmt-handle statement) index data length)))
+
+@export
+(defn vev_sqlite_bind_parameter_count :abi "c"
+  [statement: Vev-SQLite-Stmt] -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    0
+    (vev.sqlite-api-bind-parameter-count-raw
+      (app-sqlite-stmt-handle statement))))
+
+@export
+(defn vev_sqlite_bind_parameter_index :abi "c"
+  [statement: Vev-SQLite-Stmt, name: cstring] -> int
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr statement) nil) (= name nil))
+    (return 0))
+  (let [name-text (text-from-c name)
+        index (vev.sqlite-api-bind-parameter-index-raw
+                (app-sqlite-stmt-handle statement) name-text)]
+    (delete name-text)
+    index))
+
+@export
+(defn vev_sqlite_bind_parameter_name :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int] -> cstring
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr statement) nil)
+    (return (c-string-owned "")))
+  (let [name (vev.sqlite-api-bind-parameter-name-raw
+               (app-sqlite-stmt-handle statement) index)
+        out (c-string-owned name)]
+    (delete name)
+    out))
+
+@export
+(defn vev_sqlite_column_count :abi "c"
+  [statement: Vev-SQLite-Stmt] -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    0
+    (vev.sqlite-api-column-count-raw
+      (app-sqlite-stmt-handle statement))))
+
+@export
+(defn vev_sqlite_column_name :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int] -> cstring
+  (odin "context = runtime.default_context()")
+  (when (= (rawptr statement) nil)
+    (return (c-string-owned "")))
+  (let [name (vev.sqlite-api-column-name-raw
+               (app-sqlite-stmt-handle statement) index)
+        out (c-string-owned name)]
+    (delete name)
+    out))
+
+@export
+(defn vev_sqlite_column_type :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int] -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    5
+    (vev.sqlite-api-column-type-raw
+      (app-sqlite-stmt-handle statement) index)))
+
+@export
+(defn vev_sqlite_column_int64 :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int] -> i64
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    0
+    (vev.sqlite-api-column-int64-raw
+      (app-sqlite-stmt-handle statement) index)))
+
+@export
+(defn vev_sqlite_column_double :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int] -> f64
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    0.0
+    (vev.sqlite-api-column-double-raw
+      (app-sqlite-stmt-handle statement) index)))
+
+@export
+(defn vev_sqlite_column_text :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int] -> rawptr
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    nil
+    (vev.sqlite-api-column-text-raw
+      (app-sqlite-stmt-handle statement) index)))
+
+@export
+(defn vev_sqlite_column_blob :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int] -> rawptr
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    nil
+    (vev.sqlite-api-column-blob-raw
+      (app-sqlite-stmt-handle statement) index)))
+
+@export
+(defn vev_sqlite_column_bytes :abi "c"
+  [statement: Vev-SQLite-Stmt, index: int] -> int
+  (odin "context = runtime.default_context()")
+  (if (= (rawptr statement) nil)
+    0
+    (vev.sqlite-api-column-bytes-raw
+      (app-sqlite-stmt-handle statement) index)))
+
+@export
+(defn vev_sqlite_changes :abi "c" [db: Vev-SQLite-DB] -> i64
+  (odin "context = runtime.default_context()")
+  (if (not (vev_sqlite_db_ok db))
+    0
+    (vev.sqlite-api-changes-raw
+      (app-sqlite-db-handle db))))
+
+@export
+(defn vev_sqlite_total_changes :abi "c" [db: Vev-SQLite-DB] -> i64
+  (odin "context = runtime.default_context()")
+  (if (not (vev_sqlite_db_ok db))
+    0
+    (vev.sqlite-api-total-changes-raw
+      (app-sqlite-db-handle db))))
+
+@export
+(defn vev_sqlite_last_insert_rowid :abi "c" [db: Vev-SQLite-DB] -> i64
+  (odin "context = runtime.default_context()")
+  (if (not (vev_sqlite_db_ok db))
+    0
+    (vev.sqlite-api-last-insert-rowid-raw
+      (app-sqlite-db-handle db))))
+
+@export
+(defn vev_sqlite_autocommit :abi "c" [db: Vev-SQLite-DB] -> bool
+  (odin "context = runtime.default_context()")
+  (and (vev_sqlite_db_ok db)
+       (vev.sqlite-api-autocommit-raw
+         (app-sqlite-db-handle db))))
+
+@export
+(defn vev_sqlite_busy_timeout :abi "c"
+  [db: Vev-SQLite-DB, milliseconds: int] -> int
+  (odin "context = runtime.default_context()")
+  (if (not (vev_sqlite_db_ok db))
+    21
+    (vev.sqlite-api-busy-timeout-raw
+      (app-sqlite-db-handle db) milliseconds)))
+
+@export
+(defn vev_sqlite_interrupt :abi "c" [db: Vev-SQLite-DB]
+  (odin "context = runtime.default_context()")
+  (when (vev_sqlite_db_ok db)
+    (vev.sqlite-api-interrupt-raw
+      (app-sqlite-db-handle db))))
+
+@export
+(defn vev_sqlite_stmt_readonly :abi "c"
+  [statement: Vev-SQLite-Stmt] -> bool
+  (odin "context = runtime.default_context()")
+  (and (not (= (rawptr statement) nil))
+       (vev.sqlite-api-stmt-readonly-raw
+         (app-sqlite-stmt-handle statement))))
+
+@export
+(defn vev_sqlite_version :abi "c" [] -> cstring
+  (odin "context = runtime.default_context()")
+  (let [version (vev.sqlite-api-version-raw)
+        out (c-string-owned version)]
+    (delete version)
+    out))
+
+@export
+(defn vev_sqlite_source_id :abi "c" [] -> cstring
+  (odin "context = runtime.default_context()")
+  (let [source-id (vev.sqlite-api-source-id-raw)
+        out (c-string-owned source-id)]
+    (delete source-id)
+    out))
+
+@export
+(defn vev_sqlite_compile_option_used :abi "c" [option: cstring] -> bool
+  (odin "context = runtime.default_context()")
+  (when (= option nil)
+    (return false))
+  (let [option-text (text-from-c option)
+        used (vev.sqlite-api-compile-option-used-raw option-text)]
+    (delete option-text)
+    used))
 
 @export
 (defn vev_squuid :abi "c" [] -> cstring

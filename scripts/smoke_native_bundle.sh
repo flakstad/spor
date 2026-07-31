@@ -47,6 +47,20 @@ case "$(uname -s)" in
       "$BUNDLE/lib/vev.lib" \
       -o "$TMP_DIR/basic.exe"
     PATH="$BUNDLE/lib:$PATH" "$TMP_DIR/basic.exe" "$TMP_DIR/basic.vev" >/dev/null
+    clang \
+      -I"$BUNDLE/include" \
+      "$BUNDLE/examples/sqlite.c" \
+      "$BUNDLE/lib/vev.lib" \
+      -o "$TMP_DIR/sqlite.exe"
+    PATH="$BUNDLE/lib:$PATH" \
+      "$TMP_DIR/sqlite.exe" "$TMP_DIR/app.sqlite" "$TMP_DIR/facts.vev" >/dev/null
+    clang \
+      -I"$BUNDLE/include" \
+      "$BUNDLE/examples/sqlite-applications.c" \
+      "$BUNDLE/lib/vev.lib" \
+      -o "$TMP_DIR/sqlite-applications.exe"
+    PATH="$BUNDLE/lib:$PATH" \
+      "$TMP_DIR/sqlite-applications.exe" "$TMP_DIR/applications.sqlite" >/dev/null
     ;;
   *)
     PKG_CONFIG_PATH="$BUNDLE/lib/pkgconfig" \
@@ -55,5 +69,17 @@ case "$(uname -s)" in
       -Wl,-rpath,"$BUNDLE/lib" \
       -o "$TMP_DIR/basic"
     "$TMP_DIR/basic" "$TMP_DIR/basic.vev" >/dev/null
-    ;;
+    PKG_CONFIG_PATH="$BUNDLE/lib/pkgconfig" \
+      clang "$BUNDLE/examples/sqlite.c" \
+      $(PKG_CONFIG_PATH="$BUNDLE/lib/pkgconfig" pkg-config --cflags --libs vev) \
+      -Wl,-rpath,"$BUNDLE/lib" \
+      -o "$TMP_DIR/sqlite"
+    "$TMP_DIR/sqlite" "$TMP_DIR/app.sqlite" "$TMP_DIR/facts.vev" >/dev/null
+    PKG_CONFIG_PATH="$BUNDLE/lib/pkgconfig" \
+      clang "$BUNDLE/examples/sqlite-applications.c" \
+      $(PKG_CONFIG_PATH="$BUNDLE/lib/pkgconfig" pkg-config --cflags --libs vev) \
+      -Wl,-rpath,"$BUNDLE/lib" \
+      -o "$TMP_DIR/sqlite-applications"
+    "$TMP_DIR/sqlite-applications" "$TMP_DIR/applications.sqlite" >/dev/null
+  ;;
 esac

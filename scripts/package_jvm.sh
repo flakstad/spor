@@ -126,7 +126,8 @@ install_artifact() {
 javac \
   --release 25 \
   -d "$JAVA_CLASSES" \
-  "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java"
+  "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" \
+  "$ROOT/clients/java/src/main/java/com/vevdb/VevSQLite.java"
 
 jar --create \
   --no-manifest \

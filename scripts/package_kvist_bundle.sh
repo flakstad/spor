@@ -35,12 +35,16 @@ rm -rf "$STAGE_DIR"
 mkdir -p \
   "$OUT_DIR" \
   "$STAGE_DIR/$BUNDLE_ROOT/kvist" \
+  "$STAGE_DIR/$BUNDLE_ROOT/kvist/sqlite" \
   "$STAGE_DIR/$BUNDLE_ROOT/odin/vev" \
   "$STAGE_DIR/$BUNDLE_ROOT/lib"
 
 cp "$ROOT/clients/kvist/vev.kvist" "$STAGE_DIR/$BUNDLE_ROOT/kvist/vev.kvist"
+cp "$ROOT/clients/kvist/sqlite/sqlite.kvist" \
+  "$STAGE_DIR/$BUNDLE_ROOT/kvist/sqlite/sqlite.kvist"
 cp "$ROOT/clients/odin/vev/doc.odin" "$STAGE_DIR/$BUNDLE_ROOT/odin/vev/doc.odin"
 cp "$ROOT/clients/odin/vev/vev.odin" "$STAGE_DIR/$BUNDLE_ROOT/odin/vev/vev.odin"
+cp "$ROOT/clients/odin/vev/sqlite.odin" "$STAGE_DIR/$BUNDLE_ROOT/odin/vev/sqlite.odin"
 cp "$ROOT/clients/kvist/README.md" "$STAGE_DIR/$BUNDLE_ROOT/README.md"
 cp "$ROOT/LICENSE" "$STAGE_DIR/$BUNDLE_ROOT/LICENSE"
 cp "$ROOT/build/lib/$LIB_NAME" "$STAGE_DIR/$BUNDLE_ROOT/lib/$LIB_NAME"

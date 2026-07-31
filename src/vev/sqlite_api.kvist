@@ -1,0 +1,134 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(import c "core:c")
+
+; These wrappers expose the SQLite functions injected by storage.kvist to
+; other Kvist packages without exposing SQLite's native types.
+
+(defn sqlite-api-open-raw [path: string, flags: int]
+  -> [handle: rawptr, code: int, error: string]
+  (odin "
+raw_handle, raw_code, raw_error := sqlite_app_open_raw(path, c.int(flags))
+return raw_handle, int(raw_code), raw_error
+"))
+
+(defn sqlite-api-close-raw [handle: rawptr] -> int
+  (odin "return int(sqlite_app_close_raw(handle))"))
+
+(defn sqlite-api-error-code-raw [handle: rawptr] -> int
+  (odin "return int(sqlite_app_error_code_raw(handle))"))
+
+(defn sqlite-api-extended-error-code-raw [handle: rawptr] -> int
+  (odin "return int(sqlite_app_extended_error_code_raw(handle))"))
+
+(defn sqlite-api-error-raw [handle: rawptr] -> string
+  (odin "return sqlite_app_error_raw(handle)"))
+
+(defn sqlite-api-exec-raw [handle: rawptr, sql: string] -> int
+  (odin "return int(sqlite_app_exec_raw(handle, sql))"))
+
+(defn sqlite-api-prepare-raw [handle: rawptr, sql: string]
+  -> [statement: rawptr, code: int]
+  (odin "
+raw_statement, raw_code := sqlite_app_prepare_raw(handle, sql)
+return raw_statement, int(raw_code)
+"))
+
+(defn sqlite-api-finalize-raw [statement: rawptr] -> int
+  (odin "return int(sqlite_app_finalize_raw(statement))"))
+
+(defn sqlite-api-reset-raw [statement: rawptr] -> int
+  (odin "return int(sqlite_app_reset_raw(statement))"))
+
+(defn sqlite-api-clear-bindings-raw [statement: rawptr] -> int
+  (odin "return int(sqlite_app_clear_bindings_raw(statement))"))
+
+(defn sqlite-api-step-raw [statement: rawptr] -> int
+  (odin "return int(sqlite_app_step_raw(statement))"))
+
+(defn sqlite-api-bind-null-raw [statement: rawptr, index: int] -> int
+  (odin "return int(sqlite_app_bind_null_raw(statement, c.int(index)))"))
+
+(defn sqlite-api-bind-int64-raw
+  [statement: rawptr, index: int, value: i64] -> int
+  (odin "return int(sqlite_app_bind_int64_raw(statement, c.int(index), value))"))
+
+(defn sqlite-api-bind-double-raw
+  [statement: rawptr, index: int, value: f64] -> int
+  (odin "return int(sqlite_app_bind_double_raw(statement, c.int(index), value))"))
+
+(defn sqlite-api-bind-text-raw
+  [statement: rawptr, index: int, data: rawptr, length: u64] -> int
+  (odin "return int(sqlite_app_bind_text_raw(statement, c.int(index), data, length))"))
+
+(defn sqlite-api-bind-blob-raw
+  [statement: rawptr, index: int, data: rawptr, length: u64] -> int
+  (odin "return int(sqlite_app_bind_blob_raw(statement, c.int(index), data, length))"))
+
+(defn sqlite-api-bind-parameter-count-raw [statement: rawptr] -> int
+  (odin "return int(sqlite_app_bind_parameter_count_raw(statement))"))
+
+(defn sqlite-api-bind-parameter-index-raw
+  [statement: rawptr, name: string] -> int
+  (odin "return int(sqlite_app_bind_parameter_index_raw(statement, name))"))
+
+(defn sqlite-api-bind-parameter-name-raw
+  [statement: rawptr, index: int] -> string
+  (odin "return sqlite_app_bind_parameter_name_raw(statement, c.int(index))"))
+
+(defn sqlite-api-column-count-raw [statement: rawptr] -> int
+  (odin "return int(sqlite_app_column_count_raw(statement))"))
+
+(defn sqlite-api-column-name-raw [statement: rawptr, index: int] -> string
+  (odin "return sqlite_app_column_name_raw(statement, c.int(index))"))
+
+(defn sqlite-api-column-type-raw [statement: rawptr, index: int] -> int
+  (odin "return int(sqlite_app_column_type_raw(statement, c.int(index)))"))
+
+(defn sqlite-api-column-int64-raw [statement: rawptr, index: int] -> i64
+  (odin "return sqlite_app_column_int64_raw(statement, c.int(index))"))
+
+(defn sqlite-api-column-double-raw [statement: rawptr, index: int] -> f64
+  (odin "return sqlite_app_column_double_raw(statement, c.int(index))"))
+
+(defn sqlite-api-column-text-raw [statement: rawptr, index: int] -> rawptr
+  (odin "return sqlite_app_column_text_raw(statement, c.int(index))"))
+
+(defn sqlite-api-column-blob-raw [statement: rawptr, index: int] -> rawptr
+  (odin "return sqlite_app_column_blob_raw(statement, c.int(index))"))
+
+(defn sqlite-api-column-bytes-raw [statement: rawptr, index: int] -> int
+  (odin "return int(sqlite_app_column_bytes_raw(statement, c.int(index)))"))
+
+(defn sqlite-api-changes-raw [handle: rawptr] -> i64
+  (odin "return sqlite_app_changes_raw(handle)"))
+
+(defn sqlite-api-total-changes-raw [handle: rawptr] -> i64
+  (odin "return sqlite_app_total_changes_raw(handle)"))
+
+(defn sqlite-api-last-insert-rowid-raw [handle: rawptr] -> i64
+  (odin "return sqlite_app_last_insert_rowid_raw(handle)"))
+
+(defn sqlite-api-autocommit-raw [handle: rawptr] -> bool
+  (odin "return sqlite_app_autocommit_raw(handle)"))
+
+(defn sqlite-api-busy-timeout-raw [handle: rawptr, milliseconds: int] -> int
+  (odin "return int(sqlite_app_busy_timeout_raw(handle, c.int(milliseconds)))"))
+
+(defn sqlite-api-interrupt-raw [handle: rawptr]
+  (odin "sqlite_app_interrupt_raw(handle)"))
+
+(defn sqlite-api-stmt-readonly-raw [statement: rawptr] -> bool
+  (odin "return sqlite_app_stmt_readonly_raw(statement)"))
+
+(defn sqlite-api-version-raw [] -> string
+  (odin "return sqlite_app_version_raw()"))
+
+(defn sqlite-api-source-id-raw [] -> string
+  (odin "return sqlite_app_source_id_raw()"))
+
+(defn sqlite-api-compile-option-used-raw [option: string] -> bool
+  (odin "return sqlite_app_compile_option_used_raw(option)"))

@@ -108,10 +108,16 @@ diff -u "$expected_native_resources" "$actual_native_resources"
 
 jar --list --file "$DOWNLOAD_DIR/vev-java-$VERSION-sources.jar" |
   grep -qx 'com/vevdb/Vev.java'
+jar --list --file "$DOWNLOAD_DIR/vev-java-$VERSION-sources.jar" |
+  grep -qx 'com/vevdb/VevSQLite.java'
 jar --list --file "$DOWNLOAD_DIR/vev-java-$VERSION-javadoc.jar" |
   grep -qx 'com/vevdb/Vev.html'
+jar --list --file "$DOWNLOAD_DIR/vev-java-$VERSION-javadoc.jar" |
+  grep -qx 'com/vevdb/VevSQLite.html'
 jar --list --file "$DOWNLOAD_DIR/vev-clj-$VERSION-sources.jar" |
   grep -qx 'vev/core.clj'
+jar --list --file "$DOWNLOAD_DIR/vev-clj-$VERSION-sources.jar" |
+  grep -qx 'vev/sqlite.clj'
 jar --list --file "$DOWNLOAD_DIR/vev-clj-$VERSION-javadoc.jar" |
   grep -qx 'README.md'
 

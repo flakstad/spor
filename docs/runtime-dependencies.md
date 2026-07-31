@@ -2,6 +2,10 @@
 
 Release artifacts include the native VevDB engine and SQLite.
 
+The bundled SQLite is also available to applications through Vev's
+`vev_sqlite_*` C ABI and language bindings. It can open separate application
+database files without a system SQLite installation.
+
 | Distribution | Runtime |
 | --- | --- |
 | CLI | none beyond the platform runtime |

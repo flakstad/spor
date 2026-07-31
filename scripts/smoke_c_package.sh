@@ -18,7 +18,9 @@ if [[ "$PREFIX" == "$ROOT/build" &&
       (! -f "$PREFIX/lib/$LIB_NAME" || ! -f "$PREFIX/lib/pkgconfig/vev.pc") ]]; then
   "$ROOT/scripts/build_c_abi.sh"
 fi
-if [[ ! -f "$PREFIX/lib/$LIB_NAME" || ! -f "$PREFIX/include/vev.h" ]]; then
+if [[ ! -f "$PREFIX/lib/$LIB_NAME" ||
+      ! -f "$PREFIX/include/vev.h" ||
+      ! -f "$PREFIX/include/vev_sqlite.h" ]]; then
   echo "missing C package under $PREFIX" >&2
   exit 1
 fi

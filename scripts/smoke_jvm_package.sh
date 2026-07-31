@@ -102,6 +102,7 @@ EOF
 
 cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
 (require '[vev.core :as d])
+(require '[vev.sqlite :as sql])
 (let [conn (d/create-conn)]
   (let [seen (atom [])]
     (with-open [listener (d/listen conn :clj-listener #(swap! seen conj (:tx-data %)))]
@@ -241,6 +242,24 @@ cat > "$TMP_DIR/clojure-smoke.clj" <<'EOF'
           (assert (= [20 30]
                      (mapv :v (d/index-range synced :item/score 15 nil)))))
         @write-result))
+    (finally
+      (doseq [suffix ["" "-wal" "-shm"]]
+        (java.nio.file.Files/deleteIfExists
+         (java.nio.file.Path/of (str path suffix)
+                                (make-array String 0)))))))
+
+(let [file (java.io.File/createTempFile "vev-application-sql-" ".sqlite")
+      path (.getAbsolutePath file)]
+  (.delete file)
+  (try
+    (with-open [db (sql/open path)]
+      (sql/execute-script!
+       db "create table cache(key text primary key,value blob)")
+      (sql/execute! db "insert into cache values(?,?)"
+                    ["session" "{:user/id 42}"])
+      (assert (= {:columns ["key" "value"]
+                  :rows [["session" "{:user/id 42}"]]}
+                 (sql/query db "select key,value from cache"))))
     (finally
       (doseq [suffix ["" "-wal" "-shm"]]
         (java.nio.file.Files/deleteIfExists

@@ -57,6 +57,7 @@ required_artifacts=(
   "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"
   "$ROOT/build/release/kvist/vev-kvist-$PLATFORM-$VERSION.zip"
   "$ROOT/include/vev.h"
+  "$ROOT/include/vev_sqlite.h"
   "$ROOT/build/jvm/vev-java-$VERSION.jar"
   "$ROOT/build/jvm/vev-native-$PLATFORM-$VERSION.jar"
   "$ROOT/build/jvm/vev-clj-$VERSION.jar"
@@ -117,6 +118,7 @@ artifact() {
   artifact "vev-native-$PLATFORM-bundle" "native-bundle" "$ROOT/build/release/native/vev-native-$PLATFORM-$VERSION.zip"; printf ',\n'
   artifact "vev-kvist-$PLATFORM-bundle" "kvist-binary-bundle" "$ROOT/build/release/kvist/vev-kvist-$PLATFORM-$VERSION.zip"; printf ',\n'
   artifact "vev-c-header" "c-header" "$ROOT/include/vev.h"; printf ',\n'
+  artifact "vev-sqlite-c-header" "c-header" "$ROOT/include/vev_sqlite.h"; printf ',\n'
   artifact "vev-java" "jvm-jar" "$ROOT/build/jvm/vev-java-$VERSION.jar"; printf ',\n'
   artifact "vev-native-$PLATFORM-jvm" "jvm-native-jar" "$ROOT/build/jvm/vev-native-$PLATFORM-$VERSION.jar"; printf ',\n'
   artifact "vev-clj" "clojure-jar" "$ROOT/build/jvm/vev-clj-$VERSION.jar"; printf ',\n'

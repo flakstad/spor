@@ -587,7 +587,7 @@
     (delete-owned-db report.db-after))
   (delete report.error)
   (delete report.tx-data)
-  (delete report.tx-meta)
+  (delete-owned-tx-meta report.tx-meta)
   (delete-owned-tempids report.tempids)
   (delete-tx-publish-plan report.publish-plan))
 
@@ -596,7 +596,7 @@
     (delete-owned-db report.db-before))
   (delete report.error)
   (delete report.tx-data)
-  (delete report.tx-meta)
+  (delete-owned-tx-meta report.tx-meta)
   (delete-owned-tempids report.tempids)
   (delete-tx-publish-plan report.publish-plan))
 
@@ -607,7 +607,18 @@
   (clone-db conn^.db))
 
 (defn clone-tx-meta [meta: []Tx-Meta] -> [dynamic]Tx-Meta
-  (arr.into [dynamic]Tx-Meta meta))
+  (let [out (make [dynamic]Tx-Meta 0 (count meta))]
+    (for [item meta]
+      (arr.push! out
+        (Tx-Meta {a: (string-owned item.a)
+                  v: (value-owned item.v)})))
+    out))
+
+(defn delete-owned-tx-meta [meta: [dynamic]Tx-Meta]
+  (for [item meta]
+    (delete item.a)
+    (delete-owned-value item.v))
+  (delete meta))
 
 (defn clone-tx-report [report: Tx-Report] -> Tx-Report
   (let [tx-data (arr.into [dynamic]Datom (slice report.tx-data 0))
@@ -18853,7 +18864,9 @@
         (when (and (= datom.e applied.tx)
                    (= datom.a ":db/txInstant")
                    datom.added)
-          (arr.push! report-meta (Tx-Meta {a: ":db/txInstant" v: datom.v}))
+          (arr.push! report-meta
+            (Tx-Meta {a: (string-owned ":db/txInstant")
+                      v: (value-owned datom.v)}))
           (break))))
     (let [[_ has-current-tx] (tempid-lookup (slice report-tempids 0) ":db/current-tx")]
       (when (not has-current-tx)

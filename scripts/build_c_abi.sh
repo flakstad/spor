@@ -93,6 +93,7 @@ if command -v javac >/dev/null 2>&1 && command -v java >/dev/null 2>&1; then
     --release 25 \
     -d "$JAVA_EXAMPLE_DIR" \
     "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" \
+    "$ROOT/clients/java/src/main/java/com/vevdb/VevSQLite.java" \
     "$ROOT/examples/java/Smoke.java"
 
   java \

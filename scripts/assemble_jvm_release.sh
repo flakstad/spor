@@ -170,6 +170,9 @@ mkdir -p \
 cp \
   "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" \
   "$JAVA_SOURCES/com/vevdb/Vev.java"
+cp \
+  "$ROOT/clients/java/src/main/java/com/vevdb/VevSQLite.java" \
+  "$JAVA_SOURCES/com/vevdb/VevSQLite.java"
 jar --create \
   --date="$ARCHIVE_DATE" \
   --file "$OUT_DIR/vev-java-$VERSION-sources.jar" \
@@ -179,13 +182,15 @@ javadoc \
   -quiet \
   --release 25 \
   -d "$JAVA_JAVADOC" \
-  "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java"
+  "$ROOT/clients/java/src/main/java/com/vevdb/Vev.java" \
+  "$ROOT/clients/java/src/main/java/com/vevdb/VevSQLite.java"
 jar --create \
   --date="$ARCHIVE_DATE" \
   --file "$OUT_DIR/vev-java-$VERSION-javadoc.jar" \
   -C "$JAVA_JAVADOC" .
 
 cp "$ROOT/clients/clojure/src/vev/core.clj" "$CLJ_SOURCES/vev/core.clj"
+cp "$ROOT/clients/clojure/src/vev/sqlite.clj" "$CLJ_SOURCES/vev/sqlite.clj"
 jar --create \
   --date="$ARCHIVE_DATE" \
   --file "$OUT_DIR/vev-clj-$VERSION-sources.jar" \

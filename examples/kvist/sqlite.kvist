@@ -1,0 +1,219 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import arr "kvist:arr")
+(import sql "../../clients/kvist/sqlite")
+
+(defn require-ok [result: sql.Result]
+  (when (not result.ok)
+    (panic result.error)))
+
+(defn main []
+  (let [db (sql.open
+             ":memory:"
+             (sql.Open-Options {busy-timeout-ms: 1000}))]
+    (defer (sql.close db))
+    (let [create (sql.execute-script
+                   db
+                   "pragma foreign_keys = on;
+                    create table email (
+                      id integer primary key,
+                      address text not null,
+                      attempts integer not null,
+                      score real not null,
+                      payload blob,
+                      note text
+                    )")]
+      (defer (sql.delete-result create))
+      (require-ok create))
+
+    (let [payload (make [dynamic]u8)
+          _ (arr.push! payload (u8 0))
+          _ (arr.push! payload (u8 1))
+          _ (arr.push! payload (u8 255))
+          values ([]sql.Value
+                   [(sql.text "ada@example.com")
+                    (sql.integer 9223372036854770000)
+                    (sql.floating 3.25)
+                    (sql.blob (slice payload 0))
+                    (sql.null)])
+          inserted
+          (sql.execute
+            db
+            "insert into email(address, attempts, score, payload, note)
+             values (?, ?, ?, ?, ?)"
+            values)]
+      (defer (delete payload))
+      (defer (sql.delete-values values))
+      (defer (sql.delete-result inserted))
+      (require-ok inserted)
+      (when (not (= inserted.changes 1))
+        (panic "unexpected SQLite change count"))
+      (when (not (= (sql.last-insert-rowid db) 1))
+        (panic "unexpected SQLite row id")))
+
+    ; Reuse one prepared statement for a batch.
+    (let [insert
+          (sql.prepare
+            db
+            "insert into email(address,attempts,score,payload,note)
+             values(?,?,?,?,?)")
+          groups (make [dynamic][dynamic]sql.Value)
+          second
+          ([dynamic]sql.Value
+            [(sql.text "grace@example.com")
+             (sql.integer 1)
+             (sql.floating 2.0)
+             (sql.blob ([]u8 []))
+             (sql.null)])
+          third
+          ([dynamic]sql.Value
+            [(sql.text "barbara@example.com")
+             (sql.integer 2)
+             (sql.floating 4.0)
+             (sql.blob ([]u8 []))
+             (sql.null)])
+          _ (arr.push! groups second)
+          _ (arr.push! groups third)
+          inserted (sql.execute-batch insert groups)]
+      (defer (sql.close-statement insert))
+      (defer
+        (do
+          (for [group groups]
+            (sql.delete-values (slice group 0))
+            (delete group))
+          (delete groups)))
+      (defer (sql.delete-result inserted))
+      (require-ok inserted)
+      (when (not (= inserted.changes 2))
+        (panic "unexpected prepared batch change count")))
+
+    (let [values ([]sql.Value [(sql.integer 1)])
+          result
+          (sql.query
+            db
+            "select address, attempts, score, payload, note
+             from email where id = ?"
+            values)]
+      (defer (sql.delete-values values))
+      (defer (sql.delete-query-result result))
+      (when (not result.ok)
+        (panic result.error))
+      (when (not (= (count result.rows) 1))
+        (panic "expected one SQLite row"))
+      (when (not (= result.columns[0] "address"))
+        (panic "unexpected SQLite column name"))
+      (when (not (= result.rows[0][0].text "ada@example.com"))
+        (panic "SQLite text did not round-trip"))
+      (when (not (= result.rows[0][1].int-value 9223372036854770000))
+        (panic "SQLite integer did not round-trip"))
+      (when (not (= result.rows[0][2].float-value 3.25))
+        (panic "SQLite float did not round-trip"))
+      (when (not (= (count result.rows[0][3].blob) 3))
+        (panic "SQLite blob did not round-trip"))
+      (when (not (= result.rows[0][4].kind .Null))
+        (panic "SQLite null did not round-trip")))
+
+    (let [named-values
+          ([]sql.Named-Value
+            [(sql.named ":address" (sql.text "grace@example.com"))])
+          result
+          (sql.query-one
+            db
+            "select id,address from email where address=:address"
+            named-values)]
+      (defer (sql.delete-named-values named-values))
+      (defer (sql.delete-query-result result))
+      (when (not result.ok)
+        (panic result.error))
+      (when (not (= (count result.rows) 1))
+        (panic "named query-one returned the wrong row count"))
+      (when (not (= result.rows[0][1].text "grace@example.com"))
+        (panic "named parameter did not round-trip")))
+
+    ; A readonly query-one stops after the first row. The second row would
+    ; raise an integer-overflow error if evaluated.
+    (let [first
+          (sql.query-one
+            db
+            "with numbers(value) as (
+               values(1),(-9223372036854775808)
+             )
+             select abs(value) from numbers")]
+      (defer (sql.delete-query-result first))
+      (when (or (not first.ok)
+                (not (= (count first.rows) 1))
+                (not (= first.rows[0][0].int-value 1)))
+        (panic "query-one evaluated rows after the first read row")))
+
+    (let [minimum
+          ([]sql.Named-Value
+            [(sql.named ":minimum" (sql.integer 1))])
+          count-result
+          (sql.scalar
+            db
+            "select count(*) from email where attempts >= :minimum"
+            minimum)]
+      (defer (sql.delete-named-values minimum))
+      (defer (sql.delete-scalar-result count-result))
+      (when (or (not count-result.ok) (not count-result.found))
+        (panic count-result.error))
+      (when (not (= count-result.value.int-value 3))
+        (panic "SQLite scalar returned the wrong value")))
+
+    ; A write with RETURNING retains one row but still runs to completion.
+    (let [updated
+          (sql.query-one
+            db
+            "update email set attempts=attempts+1 returning id")]
+      (defer (sql.delete-query-result updated))
+      (when (or (not updated.ok)
+                (not (= (count updated.rows) 1))
+                (not (= (sql.changes db) 3)))
+        (panic "query-one did not complete a returning write")))
+
+    (let [visited 0
+          visit-result
+          (sql.visit-rows
+            db
+            "select id from email where id > ? order by id"
+            ([]sql.Value [])
+            (fn [ctx: rawptr, row: []sql.Value] -> bool
+              (discard row)
+              (let [count-ptr (transmute ^int ctx)]
+                (set! count-ptr^ (+ count-ptr^ 1)))
+              true)
+            (rawptr (addr visited)))]
+      (when visit-result.ok
+        (panic "row visitor accepted a missing parameter"))
+      (sql.delete-result visit-result)
+      (let [values
+            ([]sql.Named-Value
+              [(sql.named ":minimum" (sql.integer 0))])
+            visited-result
+            (sql.visit-rows
+              db
+              "select id from email where id > :minimum order by id"
+              values
+              (fn [ctx: rawptr, row: []sql.Value] -> bool
+                (discard row)
+                (let [count-ptr (transmute ^int ctx)]
+                  (set! count-ptr^ (+ count-ptr^ 1)))
+              true)
+              (rawptr (addr visited)))]
+        (defer (sql.delete-named-values values))
+        (defer (sql.delete-result visited-result))
+        (require-ok visited-result))
+      (when (not (= visited 3))
+        (panic "SQLite row visitor returned the wrong count"))))
+
+  (when (not (sql.compile-option-used? "ENABLE_FTS5"))
+    (panic "bundled SQLite does not include FTS5"))
+  (let [sqlite-version (sql.version)]
+    (defer (delete sqlite-version))
+    (when (= (count sqlite-version) 0)
+      (panic "missing bundled SQLite version")))
+
+  (println ":vev-sqlite-kvist-ok"))

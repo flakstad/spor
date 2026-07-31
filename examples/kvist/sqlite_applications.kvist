@@ -1,0 +1,298 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import arr "kvist:arr")
+(import sql "../../clients/kvist/sqlite")
+
+(defn require-result [result: sql.Result, ctx: string]
+  (discard ctx)
+  (when (not result.ok)
+    (panic result.error)))
+
+(defn require-query [result: sql.Query-Result, ctx: string]
+  (discard ctx)
+  (when (not result.ok)
+    (panic result.error)))
+
+(defn main []
+  (let [db (sql.open ":memory:")]
+    (defer (sql.close db))
+    (let [schema
+          (sql.execute-script
+            db
+            "pragma foreign_keys=on;
+             create table cache_entries(
+               cache_key text primary key,
+               value blob not null,
+               encoding text not null,
+               expires_at integer,
+               updated_at integer not null
+             );
+             create index cache_expiry on cache_entries(expires_at);
+             create table jobs(
+               id integer primary key,
+               queue text not null,
+               payload text not null,
+               priority integer not null default 0,
+               available_at integer not null,
+               attempts integer not null default 0,
+               locked_by text,
+               locked_at integer,
+               unique_key text unique
+             );
+             create index jobs_ready
+               on jobs(queue,available_at,priority desc,id);
+             create table mailboxes(
+               id integer primary key,
+               address text not null unique
+             );
+             create table emails(
+               id integer primary key,
+               mailbox_id integer not null references mailboxes(id),
+               message_id text not null unique,
+               subject text not null,
+               body text not null,
+               raw_message blob not null,
+               received_at integer not null
+             );
+             create virtual table email_search using
+               fts5(subject,body,content='emails',content_rowid='id');
+             create table outbox(
+               id integer primary key,
+               email_id integer not null references emails(id),
+               state text not null,
+               attempts integer not null default 0
+             );")]
+      (defer (sql.delete-result schema))
+      (require-result schema "schema"))
+
+    ; Cache values can be EDN, arbitrary text, or bytes.
+    (let [cache-values
+          ([]sql.Value
+            [(sql.text "session:1")
+             (sql.text "opaque-session-token")
+             (sql.text "text")
+             (sql.integer 2000)
+             (sql.integer 1000)])
+          cached
+          (sql.execute
+            db
+            "insert into cache_entries values(?,?,?,?,?)
+             on conflict(cache_key) do update set
+               value=excluded.value,
+               encoding=excluded.encoding,
+               expires_at=excluded.expires_at,
+               updated_at=excluded.updated_at"
+            cache-values)]
+      (defer (sql.delete-values cache-values))
+      (defer (sql.delete-result cached))
+      (require-result cached "cache session put"))
+
+    (let [cache-values
+          ([]sql.Value
+            [(sql.text "result:edn")
+             (sql.text "{:answer 42 :tags #{:cached :edn}}")
+             (sql.text "edn")
+             (sql.null)
+             (sql.integer 1001)])
+          cached
+          (sql.execute
+            db
+            "insert into cache_entries values(?,?,?,?,?)"
+            cache-values)]
+      (defer (sql.delete-values cache-values))
+      (defer (sql.delete-result cached))
+      (require-result cached "cache EDN put"))
+
+    (let [bytes (make [dynamic]u8)
+          _ (arr.push! bytes (u8 0))
+          _ (arr.push! bytes (u8 255))
+          _ (arr.push! bytes (u8 7))
+          values
+          ([]sql.Value
+            [(sql.text "result:binary")
+             (sql.blob (slice bytes 0))
+             (sql.text "bytes")
+             (sql.null)
+             (sql.integer 1002)])
+          cached
+          (sql.execute db "insert into cache_entries values(?,?,?,?,?)" values)]
+      (defer (delete bytes))
+      (defer (sql.delete-values values))
+      (defer (sql.delete-result cached))
+      (require-result cached "cache binary put"))
+
+    (let [plain-values
+          ([]sql.Value
+            [(sql.text "plain:string")
+             (sql.text "just a string")
+             (sql.text "text")
+             (sql.integer 900)
+             (sql.integer 1003)])
+          plain
+          (sql.execute db "insert into cache_entries values(?,?,?,?,?)" plain-values)]
+      (defer (sql.delete-values plain-values))
+      (defer (sql.delete-result plain))
+      (require-result plain "cache plain string put"))
+
+    (let [evict-values ([]sql.Value [(sql.integer 1000)])
+          evicted
+          (sql.execute
+            db
+            "delete from cache_entries
+             where expires_at is not null and expires_at <= ?"
+            evict-values)]
+      (defer (sql.delete-values evict-values))
+      (defer (sql.delete-result evicted))
+      (require-result evicted "cache eviction")
+      (when (not (= evicted.changes 1))
+        (panic "cache eviction changed wrong row count")))
+
+    (let [cache-result
+          (sql.query
+            db
+            "select cache_key,value,encoding from cache_entries
+             order by cache_key")]
+      (defer (sql.delete-query-result cache-result))
+      (require-query cache-result "cache query")
+      (when (not (= (count cache-result.rows) 3))
+        (panic "cache query returned wrong row count")))
+
+    ; Queue claims are transactions and can return the claimed job atomically.
+    (let [enqueue
+          (sql.execute-script
+            db
+            "insert into jobs(queue,payload,priority,available_at,unique_key)
+             values
+               ('mail','{:email/id 1}',5,100,'send-1'),
+               ('mail','plain payload',10,100,'send-2'),
+               ('mail','later',100,500,'send-3');")]
+      (defer (sql.delete-result enqueue))
+      (require-result enqueue "queue enqueue"))
+    (let [begun (sql.begin-immediate! db)]
+      (defer (sql.delete-result begun))
+      (require-result begun "queue begin"))
+    (let [claim-values
+          ([]sql.Value
+            [(sql.text "worker-kvist")
+             (sql.integer 101)
+             (sql.text "mail")
+             (sql.integer 101)])
+          claimed
+          (sql.query
+            db
+            "update jobs set
+               locked_by=?,locked_at=?,attempts=attempts+1
+             where id=(
+               select id from jobs
+               where queue=? and available_at<=? and locked_by is null
+               order by priority desc,id limit 1
+             )
+             returning id,payload,attempts"
+            claim-values)]
+      (defer (sql.delete-values claim-values))
+      (defer (sql.delete-query-result claimed))
+      (require-query claimed "queue claim")
+      (when (not (= (count claimed.rows) 1))
+        (panic "queue claim returned wrong row count"))
+      (when (not (= claimed.rows[0][0].int-value 2))
+        (panic "queue claim ignored priority"))
+      (when (not (= claimed.rows[0][1].text "plain payload"))
+        (panic "queue payload did not round-trip"))
+      (when (not (= claimed.rows[0][2].int-value 1))
+        (panic "queue attempts not incremented")))
+    (let [committed (sql.commit! db)]
+      (defer (sql.delete-result committed))
+      (require-result committed "queue commit"))
+    (let [ack-values
+          ([]sql.Value [(sql.integer 2) (sql.text "worker-kvist")])
+          ack
+          (sql.execute
+            db
+            "delete from jobs where id=? and locked_by=?"
+            ack-values)]
+      (defer (sql.delete-values ack-values))
+      (defer (sql.delete-result ack))
+      (require-result ack "queue ack")
+      (when (not (= ack.changes 1))
+        (panic "queue ack changed wrong row count")))
+
+    ; Email data uses foreign keys, transactions, binary MIME, joins, and FTS5.
+    (let [begun (sql.begin! db)]
+      (defer (sql.delete-result begun))
+      (require-result begun "email begin"))
+    (let [mailbox-values
+          ([]sql.Value [(sql.text "ada@example.com")])
+          mailbox
+          (sql.execute
+            db
+            "insert into mailboxes(address) values(?)"
+            mailbox-values)]
+      (defer (sql.delete-values mailbox-values))
+      (defer (sql.delete-result mailbox))
+      (require-result mailbox "mailbox insert"))
+    (let [raw-message (make [dynamic]u8)
+          _ (arr.push! raw-message (u8 70))
+          _ (arr.push! raw-message (u8 114))
+          _ (arr.push! raw-message (u8 111))
+          _ (arr.push! raw-message (u8 109))
+          _ (arr.push! raw-message (u8 0))
+          values
+          ([]sql.Value
+            [(sql.integer 1)
+             (sql.text "<message-1@example.com>")
+             (sql.text "Quarterly cache report")
+             (sql.text "Queue processing completed")
+             (sql.blob (slice raw-message 0))
+             (sql.integer 1234567890)])
+          inserted
+          (sql.execute
+            db
+            "insert into emails(
+               mailbox_id,message_id,subject,body,raw_message,received_at
+             ) values(?,?,?,?,?,?)"
+            values)]
+      (defer (delete raw-message))
+      (defer (sql.delete-values values))
+      (defer (sql.delete-result inserted))
+      (require-result inserted "email insert"))
+    (let [complete
+          (sql.execute-script
+            db
+            "insert into email_search(rowid,subject,body)
+               select id,subject,body from emails where id=1;
+             insert into outbox(email_id,state) values(1,'pending');")]
+      (defer (sql.delete-result complete))
+      (require-result complete "email indexing/outbox"))
+    (let [committed (sql.commit! db)]
+      (defer (sql.delete-result committed))
+      (require-result committed "email commit"))
+    (let [search
+          (sql.query
+            db
+            "select e.message_id,m.address,length(e.raw_message)
+             from email_search s
+             join emails e on e.id=s.rowid
+             join mailboxes m on m.id=e.mailbox_id
+             where email_search match 'queue'")]
+      (defer (sql.delete-query-result search))
+      (require-query search "email search")
+      (when (not (= (count search.rows) 1))
+        (panic "email search returned wrong row count"))
+      (when (not (= search.rows[0][1].text "ada@example.com"))
+        (panic "email join returned wrong mailbox"))
+      (when (not (= search.rows[0][2].int-value 5))
+        (panic "raw email bytes did not round-trip")))
+    (let [bad
+          (sql.execute
+            db
+            "insert into outbox(email_id,state) values(999,'pending')")]
+      (defer (sql.delete-result bad))
+      (when bad.ok
+        (panic "email foreign key violation unexpectedly succeeded"))
+      (when (not (= bad.code 19))
+        (panic "email foreign key violation returned wrong code"))))
+
+  (println ":vev-sqlite-applications-kvist-ok"))

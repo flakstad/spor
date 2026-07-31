@@ -24,6 +24,17 @@ unzip -q "$ARCHIVE" -d "$TMP_DIR"
 cp "$ROOT/examples/kvist_binary/smoke.kvist" "$TMP_DIR/smoke.kvist"
 sed -i.bak 's|"../../clients/kvist"|"./vev/kvist"|' "$TMP_DIR/smoke.kvist"
 rm -f "$TMP_DIR/smoke.kvist.bak"
+cp "$ROOT/examples/kvist/sqlite.kvist" "$TMP_DIR/sqlite-smoke.kvist"
+sed -i.bak \
+  's|"../../clients/kvist/sqlite"|"./vev/kvist/sqlite"|' \
+  "$TMP_DIR/sqlite-smoke.kvist"
+rm -f "$TMP_DIR/sqlite-smoke.kvist.bak"
+cp "$ROOT/examples/kvist/sqlite_applications.kvist" \
+  "$TMP_DIR/sqlite-applications-smoke.kvist"
+sed -i.bak \
+  's|"../../clients/kvist/sqlite"|"./vev/kvist/sqlite"|' \
+  "$TMP_DIR/sqlite-applications-smoke.kvist"
+rm -f "$TMP_DIR/sqlite-applications-smoke.kvist.bak"
 
 (
   cd "$TMP_DIR"
@@ -55,6 +66,49 @@ rm -f "$TMP_DIR/smoke.kvist.bak"
     vev-kvist-binary-smoke.db-wal \
     vev-kvist-binary-smoke.db-shm
   VEV_LIB="$TMP_DIR/vev/lib/$LIB_NAME" "$BINARY"
+
+  kvist compile sqlite-smoke.kvist -o sqlite-smoke.odin
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      SQLITE_BINARY="$TMP_DIR/sqlite-smoke.exe"
+      WINDOWS_SQLITE_GENERATED="$(cygpath -m "$TMP_DIR/sqlite-smoke.odin")"
+      WINDOWS_SQLITE_BINARY="$(cygpath -m "$SQLITE_BINARY")"
+      MSYS2_ARG_CONV_EXCL="*" odin build "$WINDOWS_SQLITE_GENERATED" -file \
+        "${COLLECTION_ARGS[@]}" \
+        "-out:$WINDOWS_SQLITE_BINARY"
+      ;;
+    *)
+      SQLITE_BINARY="$TMP_DIR/sqlite-smoke"
+      odin build sqlite-smoke.odin -file -out:"$SQLITE_BINARY"
+      ;;
+  esac
+  VEV_LIB="$TMP_DIR/vev/lib/$LIB_NAME" "$SQLITE_BINARY"
+
+  kvist compile sqlite-applications-smoke.kvist \
+    -o sqlite-applications-smoke.odin
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      SQLITE_APPLICATIONS_BINARY="$TMP_DIR/sqlite-applications-smoke.exe"
+      WINDOWS_SQLITE_APPLICATIONS_GENERATED="$(
+        cygpath -m "$TMP_DIR/sqlite-applications-smoke.odin"
+      )"
+      WINDOWS_SQLITE_APPLICATIONS_BINARY="$(
+        cygpath -m "$SQLITE_APPLICATIONS_BINARY"
+      )"
+      MSYS2_ARG_CONV_EXCL="*" odin build \
+        "$WINDOWS_SQLITE_APPLICATIONS_GENERATED" \
+        -file \
+        "${COLLECTION_ARGS[@]}" \
+        "-out:$WINDOWS_SQLITE_APPLICATIONS_BINARY"
+      ;;
+    *)
+      SQLITE_APPLICATIONS_BINARY="$TMP_DIR/sqlite-applications-smoke"
+      odin build sqlite-applications-smoke.odin \
+        -file \
+        -out:"$SQLITE_APPLICATIONS_BINARY"
+      ;;
+  esac
+  VEV_LIB="$TMP_DIR/vev/lib/$LIB_NAME" "$SQLITE_APPLICATIONS_BINARY"
 )
 
 echo ":vev-kvist-binary-package-ok"

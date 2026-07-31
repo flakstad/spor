@@ -13,7 +13,12 @@ def main() -> None:
         )
 
     header_name, abi_name, platform, output_name = sys.argv[1:]
-    header = pathlib.Path(header_name).read_text()
+    header_path = pathlib.Path(header_name)
+    header = header_path.read_text()
+    for include_name in re.findall(r'#include\s+"([^"]+)"', header):
+        include_path = header_path.parent / include_name
+        if include_path.is_file():
+            header += "\n" + include_path.read_text()
     symbols = sorted(set(re.findall(r"\b(vev_[A-Za-z0-9_]+)\s*\(", header)))
     if not symbols:
         raise SystemExit("no public vev_* functions found")
@@ -32,12 +37,12 @@ def main() -> None:
         messages = []
         if missing_declarations:
             messages.append(
-                "ABI exports missing from vev.h: "
+                "ABI exports missing from public headers: "
                 + ", ".join(missing_declarations)
             )
         if missing_implementations:
             messages.append(
-                "vev.h declarations missing ABI exports: "
+                "public declarations missing ABI exports: "
                 + ", ".join(missing_implementations)
             )
         raise SystemExit("\n".join(messages))

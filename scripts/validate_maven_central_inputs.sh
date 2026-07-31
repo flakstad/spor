@@ -42,10 +42,16 @@ grep -q "<version>$VERSION</version>" "$JVM_DIR/vev-clj-$VERSION.pom"
 
 jar --list --file "$JVM_DIR/vev-java-$VERSION-sources.jar" |
   grep -qx 'com/vevdb/Vev.java'
+jar --list --file "$JVM_DIR/vev-java-$VERSION-sources.jar" |
+  grep -qx 'com/vevdb/VevSQLite.java'
 jar --list --file "$JVM_DIR/vev-java-$VERSION-javadoc.jar" |
   grep -qx 'com/vevdb/Vev.html'
+jar --list --file "$JVM_DIR/vev-java-$VERSION-javadoc.jar" |
+  grep -qx 'com/vevdb/VevSQLite.html'
 jar --list --file "$JVM_DIR/vev-clj-$VERSION-sources.jar" |
   grep -qx 'vev/core.clj'
+jar --list --file "$JVM_DIR/vev-clj-$VERSION-sources.jar" |
+  grep -qx 'vev/sqlite.clj'
 jar --list --file "$JVM_DIR/vev-clj-$VERSION-javadoc.jar" |
   grep -qx 'README.md'
 

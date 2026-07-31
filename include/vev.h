@@ -6,6 +6,8 @@
 
 #include <stdbool.h>
 
+#include "vev_sqlite.h"
+
 #define VEV_ABI_VERSION 1u
 
 #ifdef __cplusplus

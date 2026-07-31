@@ -1,0 +1,954 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev-sqlite-kvist)
+
+(import arr "kvist:arr")
+(import native "../../odin/vev")
+(import strings "core:strings")
+
+(defenum Kind [
+  Null
+  Integer
+  Float
+  Text
+  Blob
+])
+
+(defenum Open-Mode [
+  Read-Write-Create
+  Read-Write
+  Read-Only
+])
+
+(defstruct Open-Options {
+  mode: Open-Mode
+  busy-timeout-ms: int
+})
+
+(defstruct Value {
+  kind: Kind
+  int-value: i64
+  float-value: f64
+  text: string
+  blob: [dynamic]u8
+})
+
+(defstruct Named-Value {
+  name: string
+  value: Value
+})
+
+(defstruct Result {
+  ok: bool
+  code: int
+  error: string
+  changes: i64
+})
+
+(defstruct Query-Result {
+  ok: bool
+  code: int
+  error: string
+  columns: [dynamic]string
+  rows: [dynamic][dynamic]Value
+})
+
+(defstruct Scalar-Result {
+  ok: bool
+  code: int
+  error: string
+  found: bool
+  value: Value
+})
+
+(defstruct DB-State {
+  library: native.Library
+  database: native.SQLite-DB
+})
+
+(defstruct Statement-State {
+  db: ^DB-State
+  statement: native.SQLite-Statement
+})
+
+(def DB (distinct rawptr))
+(def Statement (distinct rawptr))
+
+(defn- clone-text [value: string] -> string
+  (let [[owned error] (strings.clone value)]
+    (if (= error nil) owned "")))
+
+(defn- db-state [db: DB] -> ^DB-State
+  (transmute ^DB-State (rawptr db)))
+
+(defn- statement-state [statement: Statement] -> ^Statement-State
+  (transmute ^Statement-State (rawptr statement)))
+
+(defn null [] -> Value
+  (Value {kind: .Null}))
+
+(defn integer [value: i64] -> Value
+  (Value {kind: .Integer int-value: value}))
+
+(defn floating [value: f64] -> Value
+  (Value {kind: .Float float-value: value}))
+
+(defn text [value: string] -> Value
+  (Value {kind: .Text text: (clone-text value)}))
+
+(defn blob [value: []u8] -> Value
+  (let [owned (make [dynamic]u8 0 (count value))]
+    (for [item value]
+      (arr.push! owned item))
+    (Value {kind: .Blob blob: owned})))
+
+(defn named [name: string, value: Value] -> Named-Value
+  (Named-Value {name: (clone-text name) value: value}))
+
+(defn- clone-value [value: Value] -> Value
+  (case value.kind
+    .Null (null)
+    .Integer (integer value.int-value)
+    .Float (floating value.float-value)
+    .Text (text value.text)
+    .Blob (blob (slice value.blob 0))
+    (null)))
+
+(defn delete-value [value: Value]
+  (case value.kind
+    .Text (delete value.text)
+    .Blob (delete value.blob)
+    (discard value)))
+
+(defn delete-values [values: []Value]
+  (for [value values]
+    (delete-value value)))
+
+(defn delete-named-value [value: Named-Value]
+  (delete value.name)
+  (delete-value value.value))
+
+(defn delete-named-values [values: []Named-Value]
+  (for [value values]
+    (delete-named-value value)))
+
+(defn delete-result [result: Result]
+  (delete result.error))
+
+(defn delete-query-result [result: Query-Result]
+  (delete result.error)
+  (for [column result.columns]
+    (delete column))
+  (delete result.columns)
+  (for [row result.rows]
+    (for [value row]
+      (delete-value value))
+    (delete row))
+  (delete result.rows))
+
+(defn delete-scalar-result [result: Scalar-Result]
+  (delete result.error)
+  (when result.found
+    (delete-value result.value)))
+
+(defn- database-error [state: ^DB-State] -> string
+  (native.sqlite-error (addr state^.database)))
+
+(defn- open-flags [mode: Open-Mode] -> int
+  (case mode
+    .Read-Only
+      (+ native.SQLITE-OPEN-READONLY native.SQLITE-OPEN-FULLMUTEX)
+    .Read-Write
+      (+ native.SQLITE-OPEN-READWRITE native.SQLITE-OPEN-FULLMUTEX)
+    .Read-Write-Create
+      (+ native.SQLITE-OPEN-READWRITE
+         (+ native.SQLITE-OPEN-CREATE native.SQLITE-OPEN-FULLMUTEX))
+    0))
+
+(defn try-open-with [path: string, options: Open-Options]
+  -> [db: DB, ok: bool, error: string]
+  (let [state (alloc DB-State)
+        [library library-ok] (native.load-default)]
+    (when (not library-ok)
+      (free state)
+      (return (DB nil) false
+              (clone-text "could not load the bundled Vev native library")))
+    (set! state^.library library)
+    (when (not (native.sqlite-available (addr state^.library)))
+      (native.unload (addr state^.library))
+      (free state)
+      (return (DB nil) false
+              (clone-text "the loaded Vev library does not provide SQLite access")))
+    (let [[database database-ok]
+          (native.sqlite-open-v2
+            (addr state^.library) path (open-flags options.mode))]
+      (set! state^.database database)
+      (when (not database-ok)
+        (let [message (database-error state)]
+          (native.sqlite-close (addr state^.database))
+          (native.unload (addr state^.library))
+          (free state)
+          (return (DB nil) false message)))
+      (when (> options.busy-timeout-ms 0)
+        (let [timeout-code
+              (native.sqlite-busy-timeout
+                (addr state^.database) options.busy-timeout-ms)]
+          (when (not (= timeout-code native.SQLITE-OK))
+            (let [message (database-error state)]
+              (native.sqlite-close (addr state^.database))
+              (native.unload (addr state^.library))
+              (free state)
+              (return (DB nil) false message)))))
+      (return (DB (rawptr state)) true (clone-text "")))))
+
+(defn try-open-simple [path: string] -> [db: DB, ok: bool, error: string]
+  (try-open-with path (Open-Options {})))
+
+(def try-open (overload try-open-simple try-open-with))
+
+(defn open-with [path: string, options: Open-Options] -> DB
+  (let [[db ok error] (try-open-with path options)]
+    (when (not ok)
+      (panic error))
+    (delete error)
+    db))
+
+(defn open-simple [path: string] -> DB
+  (open-with path (Open-Options {})))
+
+(def open (overload open-simple open-with))
+
+(defn close [db: DB]
+  (when (= (rawptr db) nil)
+    (return))
+  (let [state (db-state db)]
+    (native.sqlite-close (addr state^.database))
+    (native.unload (addr state^.library))
+    (free state)))
+
+(defn version [] -> string
+  (let [[library library-ok] (native.load-default)]
+    (when (not library-ok)
+      (panic "could not load the bundled Vev native library"))
+    (defer (native.unload (addr library)))
+    (let [[value value-ok] (native.sqlite-version (addr library))]
+      (when (not value-ok)
+        (panic "the loaded Vev library does not provide SQLite access"))
+      value)))
+
+(defn compile-option-used? [option: string] -> bool
+  (let [[library library-ok] (native.load-default)]
+    (when (not library-ok)
+      (return false))
+    (defer (native.unload (addr library)))
+    (native.sqlite-compile-option-used (addr library) option)))
+
+(defn busy-timeout! [db: DB, milliseconds: int] -> Result
+  (let [state (db-state db)
+        code (native.sqlite-busy-timeout
+               (addr state^.database) milliseconds)]
+    (Result {
+      ok: (= code native.SQLITE-OK)
+      code: code
+      error: (if (= code native.SQLITE-OK)
+               (clone-text "")
+               (database-error state))
+    })))
+
+(defn changes [db: DB] -> i64
+  (let [state (db-state db)]
+    (native.sqlite-changes (addr state^.database))))
+
+(defn total-changes [db: DB] -> i64
+  (let [state (db-state db)]
+    (native.sqlite-total-changes (addr state^.database))))
+
+(defn last-insert-rowid [db: DB] -> i64
+  (let [state (db-state db)]
+    (native.sqlite-last-insert-rowid (addr state^.database))))
+
+(defn autocommit? [db: DB] -> bool
+  (let [state (db-state db)]
+    (native.sqlite-autocommit (addr state^.database))))
+
+(defn execute-script [db: DB, sql: string] -> Result
+  (let [state (db-state db)
+        code (native.sqlite-exec (addr state^.database) sql)]
+    (Result {
+      ok: (= code native.SQLITE-OK)
+      code: code
+      error: (if (= code native.SQLITE-OK)
+               (clone-text "")
+               (database-error state))
+      changes: (native.sqlite-changes (addr state^.database))
+    })))
+
+(defn- bind-value! [statement: ^native.SQLite-Statement,
+                    index: int,
+                    value: Value] -> int
+  (case value.kind
+    .Null
+      (native.sqlite-bind-null statement index)
+    .Integer
+      (native.sqlite-bind-int statement index value.int-value)
+    .Float
+      (native.sqlite-bind-float statement index value.float-value)
+    .Text
+      (native.sqlite-bind-text statement index value.text)
+    .Blob
+      (native.sqlite-bind-blob statement index (slice value.blob 0))
+    native.SQLITE-MISUSE))
+
+(defn- bind-all! [statement: ^native.SQLite-Statement,
+                  values: []Value] -> int
+  (when (not (= (native.sqlite-bind-parameter-count statement)
+                (count values)))
+    (return native.SQLITE-RANGE))
+  (for [value index values]
+    (let [code (bind-value! statement (+ index 1) value)]
+      (when (not (= code native.SQLITE-OK))
+        (return code))))
+  native.SQLITE-OK)
+
+(defn- bind-named-all! [statement: ^native.SQLite-Statement,
+                        values: []Named-Value] -> int
+  (let [expected (native.sqlite-bind-parameter-count statement)]
+    (when (not (= expected (count values)))
+      (return native.SQLITE-RANGE))
+    (let [seen (make [dynamic]bool 0 (+ expected 1))]
+      (defer (delete seen))
+      (for [_ (arr.range 0 (+ expected 1))]
+        (arr.push! seen false))
+      (for [value values]
+        (let [index
+              (native.sqlite-bind-parameter-index
+                statement value.name)]
+          (when (or (= index 0) seen[index])
+            (return native.SQLITE-RANGE))
+          (set! seen[index] true)
+          (let [code (bind-value! statement index value.value)]
+            (when (not (= code native.SQLITE-OK))
+              (return code)))))
+      (for [index (arr.range 1 (+ expected 1))]
+        (when (not seen[index])
+          (return native.SQLITE-RANGE))))
+    native.SQLITE-OK))
+
+(defn try-prepare [db: DB, sql: string]
+  -> [statement: Statement, ok: bool, error: string]
+  (let [state (db-state db)
+        statement-state-value (alloc Statement-State)
+        [native-statement prepared?]
+        (native.sqlite-prepare (addr state^.database) sql)]
+    (when (not prepared?)
+      (free statement-state-value)
+      (return (Statement nil) false (database-error state)))
+    (set! statement-state-value^.db state)
+    (set! statement-state-value^.statement native-statement)
+    (return (Statement (rawptr statement-state-value))
+            true
+            (clone-text ""))))
+
+(defn prepare [db: DB, sql: string] -> Statement
+  (let [[statement ok error] (try-prepare db sql)]
+    (when (not ok)
+      (panic error))
+    (delete error)
+    statement))
+
+(defn close-statement [statement: Statement]
+  (when (= (rawptr statement) nil)
+    (return))
+  (let [state (statement-state statement)]
+    (native.sqlite-finalize (addr state^.statement))
+    (free state)))
+
+(defn- reset-and-bind! [state: ^Statement-State,
+                        values: []Value] -> int
+  ; Reset reports the preceding execution's error even though it resets.
+  (native.sqlite-reset (addr state^.statement))
+  (let [clear-code (native.sqlite-clear-bindings (addr state^.statement))]
+    (when (not (= clear-code native.SQLITE-OK))
+      (return clear-code)))
+  (bind-all! (addr state^.statement) values))
+
+(defn- reset-and-bind-named! [state: ^Statement-State,
+                              values: []Named-Value] -> int
+  (native.sqlite-reset (addr state^.statement))
+  (let [clear-code (native.sqlite-clear-bindings (addr state^.statement))]
+    (when (not (= clear-code native.SQLITE-OK))
+      (return clear-code)))
+  (bind-named-all! (addr state^.statement) values))
+
+(defn execute-statement [statement: Statement, values: []Value] -> Result
+  (let [state (statement-state statement)
+        bind-code (reset-and-bind! state values)]
+    (when (not (= bind-code native.SQLITE-OK))
+      (return (Result {
+        ok: false
+        code: bind-code
+        error: (if (= bind-code native.SQLITE-RANGE)
+                 (clone-text "SQL parameter count does not match values")
+                 (database-error state^.db))
+      })))
+    (when (> (native.sqlite-column-count (addr state^.statement)) 0)
+      (return (Result {
+        ok: false
+        code: native.SQLITE-MISUSE
+        error: (clone-text
+                 "execute cannot discard rows; use query or query-one")
+      })))
+    (let [code (native.sqlite-step (addr state^.statement))]
+      (Result {
+        ok: (= code native.SQLITE-DONE)
+        code: code
+        error: (if (= code native.SQLITE-DONE)
+                 (clone-text "")
+                 (database-error state^.db))
+        changes: (native.sqlite-changes (addr state^.db^.database))
+      }))))
+
+(defn execute-named-statement [statement: Statement,
+                               values: []Named-Value] -> Result
+  (let [state (statement-state statement)
+        bind-code (reset-and-bind-named! state values)]
+    (when (not (= bind-code native.SQLITE-OK))
+      (return (Result {
+        ok: false
+        code: bind-code
+        error: (if (= bind-code native.SQLITE-RANGE)
+                 (clone-text
+                   "named SQL parameters do not match placeholders")
+                 (database-error state^.db))
+      })))
+    (when (> (native.sqlite-column-count (addr state^.statement)) 0)
+      (return (Result {
+        ok: false
+        code: native.SQLITE-MISUSE
+        error: (clone-text
+                 "execute cannot discard rows; use query or query-one")
+      })))
+    (let [code (native.sqlite-step (addr state^.statement))]
+      (Result {
+        ok: (= code native.SQLITE-DONE)
+        code: code
+        error: (if (= code native.SQLITE-DONE)
+                 (clone-text "")
+                 (database-error state^.db))
+        changes: (native.sqlite-changes (addr state^.db^.database))
+      }))))
+
+(defn execute-with [db: DB, sql: string, values: []Value] -> Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (execute-statement statement values)))
+
+(defn execute-prepared-simple [statement: Statement] -> Result
+  (execute-statement statement ([]Value [])))
+
+(defn execute-prepared-with [statement: Statement,
+                             values: []Value] -> Result
+  (execute-statement statement values))
+
+(defn execute-named-with [db: DB, sql: string,
+                          values: []Named-Value] -> Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (execute-named-statement statement values)))
+
+(defn execute-simple [db: DB, sql: string] -> Result
+  (execute-with db sql ([]Value [])))
+
+(def execute
+  (overload execute-simple
+            execute-with
+            execute-prepared-simple
+            execute-prepared-with
+            execute-named-with
+            execute-named-statement))
+
+(defn execute-batch-statement [statement: Statement,
+                               groups: [dynamic][dynamic]Value] -> Result
+  (let [total (i64 0)]
+    (for [group groups]
+      (let [result (execute-statement statement (slice group 0))]
+        (when (not result.ok)
+          (return result))
+        (set! total (+ total result.changes))
+        (delete-result result)))
+    (Result {
+      ok: true
+      code: native.SQLITE-DONE
+      error: (clone-text "")
+      changes: total
+    })))
+
+(defn execute-batch-with [db: DB,
+                          sql: string,
+                          groups: [dynamic][dynamic]Value] -> Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (execute-batch-statement statement groups)))
+
+(def execute-batch
+  (overload execute-batch-statement execute-batch-with))
+
+(defn- read-column [statement: ^native.SQLite-Statement,
+                    index: int] -> Value
+  (case (native.sqlite-column-kind statement index)
+    .Null
+      (null)
+    .Integer
+      (integer (native.sqlite-column-int statement index))
+    .Float
+      (floating (native.sqlite-column-float statement index))
+    .Text
+      (Value {
+        kind: .Text
+        text: (native.sqlite-column-text statement index)
+      })
+    .Blob
+      (let [bytes (native.sqlite-column-blob statement index)
+            out (blob bytes)]
+        (delete bytes)
+        out)
+    (null)))
+
+(defn- collect-query [state: ^Statement-State] -> Query-Result
+    (let [column-count
+          (native.sqlite-column-count (addr state^.statement))
+          columns (make [dynamic]string 0 column-count)
+          rows (make [dynamic][dynamic]Value)]
+      (for [index (arr.range 0 column-count)]
+        (arr.push! columns
+                   (native.sqlite-column-name
+                     (addr state^.statement) index)))
+      (let [code (native.sqlite-step (addr state^.statement))]
+        (while (= code native.SQLITE-ROW)
+          (let [row (make [dynamic]Value 0 column-count)]
+            (for [index (arr.range 0 column-count)]
+              (arr.push! row
+                         (read-column (addr state^.statement) index)))
+            (arr.push! rows row))
+          (set! code (native.sqlite-step (addr state^.statement))))
+        (Query-Result {
+          ok: (= code native.SQLITE-DONE)
+          code: code
+          error: (if (= code native.SQLITE-DONE)
+                   (clone-text "")
+                   (database-error state^.db))
+          columns: columns
+          rows: rows
+        }))))
+
+(defn query-statement [statement: Statement,
+                       values: []Value] -> Query-Result
+  (let [state (statement-state statement)
+        bind-code (reset-and-bind! state values)]
+    (when (not (= bind-code native.SQLITE-OK))
+      (return (Query-Result {
+        ok: false
+        code: bind-code
+        error: (if (= bind-code native.SQLITE-RANGE)
+                 (clone-text "SQL parameter count does not match values")
+                 (database-error state^.db))
+        columns: (make [dynamic]string)
+        rows: (make [dynamic][dynamic]Value)
+      })))
+    (collect-query state)))
+
+(defn query-named-statement [statement: Statement,
+                             values: []Named-Value] -> Query-Result
+  (let [state (statement-state statement)
+        bind-code (reset-and-bind-named! state values)]
+    (when (not (= bind-code native.SQLITE-OK))
+      (return (Query-Result {
+        ok: false
+        code: bind-code
+        error: (if (= bind-code native.SQLITE-RANGE)
+                 (clone-text
+                   "named SQL parameters do not match placeholders")
+                 (database-error state^.db))
+        columns: (make [dynamic]string)
+        rows: (make [dynamic][dynamic]Value)
+      })))
+    (collect-query state)))
+
+(defn query-with [db: DB, sql: string, values: []Value] -> Query-Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Query-Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+        columns: (make [dynamic]string)
+        rows: (make [dynamic][dynamic]Value)
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (query-statement statement values)))
+
+(defn query-simple [db: DB, sql: string] -> Query-Result
+  (query-with db sql ([]Value [])))
+
+(defn query-prepared-simple [statement: Statement] -> Query-Result
+  (query-statement statement ([]Value [])))
+
+(defn query-prepared-with [statement: Statement,
+                           values: []Value] -> Query-Result
+  (query-statement statement values))
+
+(defn query-named-with [db: DB, sql: string,
+                        values: []Named-Value] -> Query-Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Query-Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+        columns: (make [dynamic]string)
+        rows: (make [dynamic][dynamic]Value)
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (query-named-statement statement values)))
+
+(def query
+  (overload query-simple
+            query-with
+            query-prepared-simple
+            query-prepared-with
+            query-named-with
+            query-named-statement))
+
+(defn- collect-query-one [state: ^Statement-State] -> Query-Result
+  (let [column-count
+        (native.sqlite-column-count (addr state^.statement))
+        columns (make [dynamic]string 0 column-count)
+        rows (make [dynamic][dynamic]Value)]
+    (for [index (arr.range 0 column-count)]
+      (arr.push! columns
+                 (native.sqlite-column-name
+                   (addr state^.statement) index)))
+    (let [code (native.sqlite-step (addr state^.statement))]
+      (when (= code native.SQLITE-ROW)
+        (let [row (make [dynamic]Value 0 column-count)]
+          (for [index (arr.range 0 column-count)]
+            (arr.push! row
+                       (read-column (addr state^.statement) index)))
+          (arr.push! rows row))
+        ; A read can stop immediately. Complete a write with RETURNING while
+        ; retaining only its first row, so later errors are still reported.
+        (if (native.sqlite-statement-readonly (addr state^.statement))
+          (set! code native.SQLITE-DONE)
+          (do
+            (set! code (native.sqlite-step (addr state^.statement)))
+            (while (= code native.SQLITE-ROW)
+              (set! code
+                    (native.sqlite-step (addr state^.statement)))))))
+      (Query-Result {
+        ok: (= code native.SQLITE-DONE)
+        code: code
+        error: (if (= code native.SQLITE-DONE)
+                 (clone-text "")
+                 (database-error state^.db))
+        columns: columns
+        rows: rows
+      }))))
+
+(defn query-one-statement [statement: Statement,
+                           values: []Value] -> Query-Result
+  (let [state (statement-state statement)
+        bind-code (reset-and-bind! state values)]
+    (when (not (= bind-code native.SQLITE-OK))
+      (return (Query-Result {
+        ok: false
+        code: bind-code
+        error: (if (= bind-code native.SQLITE-RANGE)
+                 (clone-text "SQL parameter count does not match values")
+                 (database-error state^.db))
+        columns: (make [dynamic]string)
+        rows: (make [dynamic][dynamic]Value)
+      })))
+    (collect-query-one state)))
+
+(defn query-one-named-statement [statement: Statement,
+                                 values: []Named-Value] -> Query-Result
+  (let [state (statement-state statement)
+        bind-code (reset-and-bind-named! state values)]
+    (when (not (= bind-code native.SQLITE-OK))
+      (return (Query-Result {
+        ok: false
+        code: bind-code
+        error: (if (= bind-code native.SQLITE-RANGE)
+                 (clone-text
+                   "named SQL parameters do not match placeholders")
+                 (database-error state^.db))
+        columns: (make [dynamic]string)
+        rows: (make [dynamic][dynamic]Value)
+      })))
+    (collect-query-one state)))
+
+(defn query-one-with [db: DB, sql: string,
+                      values: []Value] -> Query-Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Query-Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+        columns: (make [dynamic]string)
+        rows: (make [dynamic][dynamic]Value)
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (query-one-statement statement values)))
+
+(defn query-one-simple [db: DB, sql: string] -> Query-Result
+  (query-one-with db sql ([]Value [])))
+
+(defn query-one-named-with [db: DB, sql: string,
+                            values: []Named-Value] -> Query-Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Query-Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+        columns: (make [dynamic]string)
+        rows: (make [dynamic][dynamic]Value)
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (query-one-named-statement statement values)))
+
+(def query-one
+  (overload query-one-simple
+            query-one-with
+            query-one-statement
+            query-one-named-with
+            query-one-named-statement))
+
+(defn- scalar-from-query [result-value: Query-Result] -> Scalar-Result
+  (let [result result-value]
+    (when (not result.ok)
+      (let [out (Scalar-Result {
+            ok: false
+            code: result.code
+            error: result.error
+          })]
+        (set! result.error (clone-text ""))
+        (delete-query-result result)
+        (return out)))
+    (when (or (= (count result.rows) 0)
+              (= (count result.rows[0]) 0))
+      (delete-query-result result)
+      (return (Scalar-Result {
+        ok: true
+        code: native.SQLITE-DONE
+        error: (clone-text "")
+        found: false
+      })))
+    (let [value (clone-value result.rows[0][0])]
+      (delete-query-result result)
+      (Scalar-Result {
+        ok: true
+        code: native.SQLITE-DONE
+        error: (clone-text "")
+        found: true
+        value: value
+      }))))
+
+(defn scalar-statement [statement: Statement,
+                        values: []Value] -> Scalar-Result
+  (scalar-from-query (query-one-statement statement values)))
+
+(defn scalar-named-statement [statement: Statement,
+                              values: []Named-Value] -> Scalar-Result
+  (scalar-from-query (query-one-named-statement statement values)))
+
+(defn scalar-with [db: DB, sql: string,
+                   values: []Value] -> Scalar-Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Scalar-Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (scalar-statement statement values)))
+
+(defn scalar-simple [db: DB, sql: string] -> Scalar-Result
+  (scalar-with db sql ([]Value [])))
+
+(defn scalar-named-with [db: DB, sql: string,
+                         values: []Named-Value] -> Scalar-Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Scalar-Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (scalar-named-statement statement values)))
+
+(def scalar
+  (overload scalar-simple
+            scalar-with
+            scalar-statement
+            scalar-named-with
+            scalar-named-statement))
+
+(defn- visit-bound-rows
+  [state: ^Statement-State,
+   visitor: fn [ctx: rawptr, row: []Value] -> bool,
+   ctx: rawptr] -> Result
+  (let [column-count
+        (native.sqlite-column-count (addr state^.statement))
+        code (native.sqlite-step (addr state^.statement))]
+      (while (= code native.SQLITE-ROW)
+        (let [row (make [dynamic]Value 0 column-count)]
+          (for [index (arr.range 0 column-count)]
+            (arr.push! row (read-column (addr state^.statement) index)))
+          (let [continue? (visitor ctx (slice row 0))]
+            (for [value row]
+              (delete-value value))
+            (delete row)
+            (when (not continue?)
+              (return (Result {
+                ok: true
+                code: native.SQLITE-DONE
+                error: (clone-text "")
+              })))))
+        (set! code (native.sqlite-step (addr state^.statement))))
+      (Result {
+        ok: (= code native.SQLITE-DONE)
+        code: code
+        error: (if (= code native.SQLITE-DONE)
+                 (clone-text "")
+                 (database-error state^.db))
+      })))
+
+(defn visit-rows-statement
+  [statement: Statement,
+   values: []Value,
+   visitor: fn [ctx: rawptr, row: []Value] -> bool,
+   ctx: rawptr] -> Result
+  (let [state (statement-state statement)
+        bind-code (reset-and-bind! state values)]
+    (when (not (= bind-code native.SQLITE-OK))
+      (return (Result {
+        ok: false
+        code: bind-code
+        error: (if (= bind-code native.SQLITE-RANGE)
+                 (clone-text "SQL parameter count does not match values")
+                 (database-error state^.db))
+      })))
+    (visit-bound-rows state visitor ctx)))
+
+(defn visit-rows-named-statement
+  [statement: Statement,
+   values: []Named-Value,
+   visitor: fn [ctx: rawptr, row: []Value] -> bool,
+   ctx: rawptr] -> Result
+  (let [state (statement-state statement)
+        bind-code (reset-and-bind-named! state values)]
+    (when (not (= bind-code native.SQLITE-OK))
+      (return (Result {
+        ok: false
+        code: bind-code
+        error: (if (= bind-code native.SQLITE-RANGE)
+                 (clone-text
+                   "named SQL parameters do not match placeholders")
+                 (database-error state^.db))
+      })))
+    (visit-bound-rows state visitor ctx)))
+
+(defn visit-rows-with
+  [db: DB,
+   sql: string,
+   values: []Value,
+   visitor: fn [ctx: rawptr, row: []Value] -> bool,
+   ctx: rawptr] -> Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (visit-rows-statement statement values visitor ctx)))
+
+(defn visit-rows-named-with
+  [db: DB,
+   sql: string,
+   values: []Named-Value,
+   visitor: fn [ctx: rawptr, row: []Value] -> bool,
+   ctx: rawptr] -> Result
+  (let [db-state-value (db-state db)
+        [statement prepared? error] (try-prepare db sql)]
+    (when (not prepared?)
+      (return (Result {
+        ok: false
+        code: (native.sqlite-error-code (addr db-state-value^.database))
+        error: error
+      })))
+    (delete error)
+    (defer (close-statement statement))
+    (visit-rows-named-statement statement values visitor ctx)))
+
+(def visit-rows
+  (overload visit-rows-statement
+            visit-rows-named-statement
+            visit-rows-with
+            visit-rows-named-with))
+
+(defn begin! [db: DB] -> Result
+  (execute db "BEGIN"))
+
+(defn begin-immediate! [db: DB] -> Result
+  (execute db "BEGIN IMMEDIATE"))
+
+(defn commit! [db: DB] -> Result
+  (execute db "COMMIT"))
+
+(defn rollback! [db: DB] -> Result
+  (execute db "ROLLBACK"))

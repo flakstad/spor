@@ -84,7 +84,7 @@ int main(void) {
     const int warmups = 30;
     const int sample_count = 200;
     const char *query =
-        "[:find ?name ?age :in ?email :where [?e :email ?email] [?e :name ?name] [?e :age ?age]]";
+        "[:find ?name ?age :in $ ?email :where [?e :email ?email] [?e :name ?name] [?e :age ?age]]";
     const char *inputs = "[\"user-150@example.com\"]";
     const char *many_query =
         "[:find ?e ?name ?age :where [?e :email ?email] [?e :name ?name] [?e :age ?age]]";

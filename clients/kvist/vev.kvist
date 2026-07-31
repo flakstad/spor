@@ -324,8 +324,9 @@
     (return))
   (close-db report.db-before)
   (close-db report.db-after)
-  ; tx-data, tempids, and tx-meta are borrowed from this retained parse tree.
-  (data.release report.internal-owner-data)
+  ; Kvist Data return values are retained, including the projections held in
+  ; tx-data, tempids, and tx-meta. Resetting the managed report below releases
+  ; those fields and the retained parse tree exactly once.
   (native.close (addr report.native-report))
   (delete report.error)
   (set! report^ (Tx-Report {})))
