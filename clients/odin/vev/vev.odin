@@ -8,7 +8,7 @@ import "core:os"
 import "core:strings"
 import "core:time"
 
-ABI_VERSION :: 1
+ABI_VERSION :: 2
 TX_PARTITION_BASE :: u64(4_611_686_018_427_387_904)
 
 @(private)
@@ -26,10 +26,12 @@ API :: struct {
 	connection_error: proc "c" (conn: rawptr) -> cstring `dynlib:"vev_connection_error"`,
 	connection_basis_t: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_basis_t"`,
 	connection_tx_count: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_tx_count"`,
+	connection_ensure_resident: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_ensure_resident"`,
 	connection_tx_ids: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_tx_ids"`,
 	connection_close: proc "c" (conn: rawptr) `dynlib:"vev_connection_close"`,
 	connection_db: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_db"`,
 	connection_transact_edn_report: proc "c" (conn: rawptr, tx_text: cstring) -> rawptr `dynlib:"vev_connection_transact_edn_report"`,
+	connection_transact_edn_status: proc "c" (conn: rawptr, tx_text: cstring) -> cstring `dynlib:"vev_connection_transact_edn_status"`,
 	connection_query_value_with_inputs: proc "c" (conn: rawptr, query_text, inputs_text: cstring) -> rawptr `dynlib:"vev_connection_query_value_with_inputs"`,
 	connection_compact_indexes: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_compact_indexes"`,
 	connection_maintain_indexes: proc "c" (conn: rawptr, max_steps: int) -> bool `dynlib:"vev_connection_maintain_indexes"`,
@@ -236,10 +238,12 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.connection_error == nil ||
 	   library.api.connection_basis_t == nil ||
 	   library.api.connection_tx_count == nil ||
+	   library.api.connection_ensure_resident == nil ||
 	   library.api.connection_tx_ids == nil ||
 	   library.api.connection_close == nil ||
 	   library.api.connection_db == nil ||
 	   library.api.connection_transact_edn_report == nil ||
+	   library.api.connection_transact_edn_status == nil ||
 	   library.api.connection_query_value_with_inputs == nil ||
 	   library.api.connection_compact_indexes == nil ||
 	   library.api.connection_maintain_indexes == nil ||
@@ -505,6 +509,13 @@ compact_indexes :: proc(connection: ^Durable_Connection) -> bool {
 		return false
 	}
 	return connection.library.api.connection_compact_indexes(connection.handle)
+}
+
+ensure_resident :: proc(connection: ^Durable_Connection) -> bool {
+	if connection == nil || connection.handle == nil {
+		return false
+	}
+	return connection.library.api.connection_ensure_resident(connection.handle)
 }
 
 maintain_indexes :: proc(connection: ^Durable_Connection, max_steps: int) -> bool {
@@ -1078,15 +1089,10 @@ transact_durable :: proc(
 		return "", false
 	}
 	tx_text := strings.clone_to_cstring(tx, context.temp_allocator)
-	report := connection.library.api.connection_transact_edn_report(
+	native_result := connection.library.api.connection_transact_edn_status(
 		connection.handle,
 		tx_text,
 	)
-	if report == nil {
-		return "", false
-	}
-	defer connection.library.api.tx_report_free(report)
-	native_result := connection.library.api.tx_report_edn(report)
 	if native_result == nil {
 		return "", false
 	}

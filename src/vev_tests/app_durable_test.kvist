@@ -162,6 +162,80 @@
     (d.close conn))
   (remove-app-test-db))
 
+(test.deftest durable-app-explicit-resident-mode-keeps-durable-reopen-semantics
+  (remove-app-test-db)
+  (let [seed (d.connect app-test-path)]
+    (d.transact seed
+      '[[:db/add 10 :db/ident :entity/id]
+        [:db/add 10 :db/valueType :db.type/string]
+        [:db/add 10 :db/unique :db.unique/identity]
+        [:db/add 11 :db/ident :entity/value]
+        [:db/add 11 :db/valueType :db.type/long]
+        [:db/add 12 :db/ident :entity/link]
+        [:db/add 12 :db/valueType :db.type/ref]
+        {:db/id "counter" :entity/id "counter" :entity/value 1}])
+    (d.close seed))
+  (let [resident (d.connect app-test-path)
+        [loaded loaded-error] (d.ensure-resident! resident)]
+    (test.is loaded loaded-error)
+    (let [before (d.db resident)
+          before-value (d.q concurrent-value-query before)]
+      (test.is (= (kdata.int before-value) 1))
+      (d.close before))
+    (let [report
+            (d.transact resident
+              '[[:db/add [:entity/id "counter"] :entity/value 2]])]
+      (test.is report.ok report.error))
+    ;; A resident connection is a normal connection, not a read cache. Each
+    ;; committed transaction must immediately become the planning basis for
+    ;; the next transaction, including lookup refs to newly allocated entities.
+    (let [create-report
+            (d.transact resident
+              '[{:db/id "first-resident-entity"
+                 :entity/id "first-resident-entity"
+                 :entity/value 3
+                 :entity/link [:entity/id "forward-resident-entity"]}
+                {:db/id "forward-resident-entity"
+                 :entity/id "forward-resident-entity"
+                 :entity/value 5}])]
+      (test.is create-report.ok create-report.error))
+    (let [dependent-report
+            (d.transact resident
+              '[[:db/add [:entity/id "first-resident-entity"] :entity/value 4]])]
+      (test.is dependent-report.ok dependent-report.error))
+    (let [after (d.db resident)
+          after-value (d.q concurrent-value-query after)
+          dependent-value
+            (d.q '[:find ?value .
+                   :where [?e :entity/id "first-resident-entity"]
+                          [?e :entity/value ?value]] after)]
+      (test.is (= (kdata.int after-value) 2))
+      (test.is (= (kdata.int dependent-value) 4))
+      (d.close after))
+    (d.close resident))
+  ;; Resident mode changes only this connection's execution representation;
+  ;; the ordinary durable log remains authoritative across a fresh process.
+  (let [reopened (d.connect app-test-path)
+        db (d.db reopened)
+        value (d.q concurrent-value-query db)]
+    (test.is (= (kdata.int value) 2))
+    (d.close db)
+    ;; A normal writer also detects the durable unindexed tail and continues
+    ;; from it; resident mode must not create a file only resident callers can
+    ;; safely advance.
+    (let [continued
+            (d.transact reopened
+              '[[:db/add [:entity/id "counter"] :entity/value 6]])]
+      (test.is continued.ok continued.error))
+    (d.close reopened))
+  (let [final (d.connect app-test-path)
+        db (d.db final)
+        value (d.q concurrent-value-query db)]
+    (test.is (= (kdata.int value) 6))
+    (d.close db)
+    (d.close final))
+  (remove-app-test-db))
+
 (test.deftest durable-app-connection-serializes-concurrent-reads-and-writes
   (remove-concurrent-app-test-db)
   (let [conn (d.connect concurrent-app-test-path)]

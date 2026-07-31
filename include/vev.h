@@ -8,7 +8,7 @@
 
 #include "vev_sqlite.h"
 
-#define VEV_ABI_VERSION 1u
+#define VEV_ABI_VERSION 2u
 
 #ifdef __cplusplus
 extern "C" {
@@ -128,6 +128,7 @@ const char *vev_connection_backend(vev_connection_t conn);
 const char *vev_connection_path(vev_connection_t conn);
 unsigned long long vev_connection_basis_t(vev_connection_t conn);
 unsigned long long vev_connection_tx_count(vev_connection_t conn);
+bool vev_connection_ensure_resident(vev_connection_t conn);
 vev_u64_array_t vev_connection_tx_ids(vev_connection_t conn);
 const char *vev_connection_tx_data_edn(
     vev_connection_t conn,
@@ -151,6 +152,10 @@ vev_value_handle_t vev_connection_query_value_with_inputs(
     const char *query_text,
     const char *inputs_text);
 vev_tx_report_t vev_connection_transact_edn_report(
+    vev_connection_t conn,
+    const char *tx_text);
+/* Lightweight durable acknowledgement: no db-before/db-after snapshots. */
+const char *vev_connection_transact_edn_status(
     vev_connection_t conn,
     const char *tx_text);
 vev_tx_report_t vev_connection_transact_edn_report_with_tx_fns(

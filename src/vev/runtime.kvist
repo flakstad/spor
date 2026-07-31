@@ -17323,6 +17323,47 @@
         (return existing false false))
       (return entity true false))))
 
+(defn resolve-tx-data-local-lookup-ref!
+  [db: DB, tx-data: []Tx-Data,
+   tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid,
+   next-e: ^u64, attr: string, value: Value]
+  -> [entity: u64, ok: bool, error: string]
+  ;; Lookup refs are transaction-wide. A map may refer to a unique identity
+  ;; asserted by a later map in the same transaction, so resident planning
+  ;; must reserve that later tempid just as it does for a forward tempid value.
+  (let [found: u64 0
+        has-found false]
+    (for [candidate tx-data]
+      (when (and (= candidate.op ":db/add")
+                 (not candidate.has-lookup-ref)
+                 (not candidate.has-ident)
+                 (= candidate.a attr)
+                 (value-equal? candidate.v value))
+        (let [entity candidate.e]
+          (when candidate.has-tempid
+            (let [[resolved resolved-ok]
+                    (resolved-tempid-lookup tempid-index candidate.tempid)]
+              (if resolved-ok
+                (set! entity resolved)
+                (let [[upsert upsert-ok upsert-conflict]
+                        (tempid-upsert-entity db tx-data candidate.tempid)]
+                  (when upsert-conflict
+                    (return 0 false "conflicting upsert"))
+                  (if upsert-ok
+                    (set! entity upsert)
+                    (do
+                      (set! entity next-e^)
+                      (set! next-e^ (+ next-e^ 1))))
+                  (push-resolved-tempid!
+                    tempids tempid-index candidate.tempid entity)))))
+          (when (and has-found (not (= found entity)))
+            (return 0 false "schema unique conflict"))
+          (set! found entity)
+          (set! has-found true))))
+    (if has-found
+      (return found true "")
+      (return 0 false "lookup ref not found"))))
+
 (defn db-with-resolved-ops [db: DB, ops: []Tx-Op] -> DB
   (let [datoms (clone-datoms db.datoms)]
     (for [op ops]
@@ -17895,19 +17936,26 @@
           (let [[lookup-e lookup-ok lookup-error] (resolve-lookup-ref-checked current-db data.lookup-attr data.lookup-value)]
             (if lookup-ok
               (set! e lookup-e)
-              (if (= data.op ":db/add")
+              (if (= lookup-error "lookup ref not found")
+                (let [[local-e local-ok local-error]
+                        (resolve-tx-data-local-lookup-ref!
+                          current-db (slice pending 0)
+                          (addr tempid-index) (addr resolved-tempids)
+                          (addr next-e) data.lookup-attr data.lookup-value)]
+                  (if local-ok
+                    (set! e local-e)
+                    (if (= data.op ":db/add")
+                      (return (Resolved-Tx {ok: false
+                                            error: local-error
+                                            ops: resolved-ops
+                                            tx-meta: resolved-meta
+                                            tempids: resolved-tempids}))
+                      (set! skip-data true))))
                 (return (Resolved-Tx {ok: false
                                       error: lookup-error
                                       ops: resolved-ops
                                       tx-meta: resolved-meta
-                                      tempids: resolved-tempids}))
-                (if (= lookup-error "lookup ref not found")
-                  (set! skip-data true)
-                  (return (Resolved-Tx {ok: false
-                                        error: lookup-error
-                                        ops: resolved-ops
-                                        tx-meta: resolved-meta
-                                        tempids: resolved-tempids})))))))
+                                      tempids: resolved-tempids}))))))
         (when skip-data
           (continue))
         (when (should-split-map-collection? current-db data)
@@ -18035,9 +18083,21 @@
               (let [[lookup-e lookup-ok lookup-error] (resolve-lookup-ref-checked current-db data.value-lookup-attr data.value-lookup-value)]
                 (if lookup-ok
                   (set! v (value-entity lookup-e))
-                  (if (and (= data.op ":db/retract")
-                           (= lookup-error "lookup ref not found"))
-                    (set! skip-data true)
+                  (if (= lookup-error "lookup ref not found")
+                    (let [[local-e local-ok local-error]
+                            (resolve-tx-data-local-lookup-ref!
+                              current-db (slice pending 0)
+                              (addr tempid-index) (addr resolved-tempids)
+                              (addr next-e) data.value-lookup-attr data.value-lookup-value)]
+                      (if local-ok
+                        (set! v (value-entity local-e))
+                        (if (= data.op ":db/retract")
+                          (set! skip-data true)
+                          (return (Resolved-Tx {ok: false
+                                                error: local-error
+                                                ops: resolved-ops
+                                                tx-meta: resolved-meta
+                                                tempids: resolved-tempids})))))
                     (return (Resolved-Tx {ok: false
                                           error: lookup-error
                                           ops: resolved-ops
@@ -19082,7 +19142,10 @@
         out (clone-datoms conn^.db.datoms)
         start-index (count out)]
     (for [datom datoms]
-      (arr.push! out datom))
+      ;; The caller retains its datoms. The resident DB and its report must
+      ;; therefore own independent values, especially strings that disappear
+      ;; when a durable source report is closed after advancing this state.
+      (arr.push! out (datom-owned datom)))
     (let [append-only-ok (append-only-datoms-eligible? before datoms)
           tx-data (arr.into [dynamic]Datom datoms)
           tx (report-tx-for-datoms conn^.next-tx datoms)]

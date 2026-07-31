@@ -1,9 +1,70 @@
 (package main)
 
+(import os "core:os")
 (import d "../../clients/kvist")
 (import data "kvist:data")
 
+(defn resident-transaction-smoke []
+  (let [path "vev-kvist-resident-smoke.db"]
+    (os.remove path)
+    (os.remove "vev-kvist-resident-smoke.db-wal")
+    (os.remove "vev-kvist-resident-smoke.db-shm")
+    (let [seed (d.connect path)]
+      (let [schema
+            (d.transact
+              seed
+              [[:db/add 100 :db/ident :person/id]
+               [:db/add 100 :db/valueType :db.type/string]
+               [:db/add 100 :db/unique :db.unique/identity]
+               [:db/add 101 :db/ident :person/friend]
+               [:db/add 101 :db/valueType :db.type/ref]
+               [:db/add 102 :db/ident :person/nickname]
+               [:db/add 102 :db/valueType :db.type/string]])]
+        (defer (d.close (addr schema)))
+        (when (not schema.ok)
+          (panic schema.error)))
+      (d.close seed))
+    (let [conn (d.connect path)]
+      (defer (d.close conn))
+      (when (not (d.ensure-resident! conn))
+        (panic "binary Kvist client could not enable resident execution"))
+      (let [created
+            (d.transact
+              conn
+              [{:db/id "resident-new"
+                :person/id "resident-new"
+                :person/friend [:person/id "resident-forward"]}
+               {:db/id "resident-forward"
+                :person/id "resident-forward"}])]
+        (defer (d.close (addr created)))
+        (when (not created.ok)
+          (panic created.error)))
+      (let [dependent
+            (d.transact-status
+              conn
+              [[:db/add [:person/id "resident-new"]
+                        :person/nickname
+                        "Visible to the next transaction"]])]
+        (defer (d.close (addr dependent)))
+        (when (not dependent.ok)
+          (panic dependent.error)))
+      (let [resident-db (d.db conn)
+            resident-dependent
+              (d.q '[:find ?nickname .
+                     :where [?e :person/id "resident-new"]
+                            [?e :person/nickname ?nickname]]
+                   resident-db)]
+        (defer (d.close resident-db))
+        (when (or (not (data.string? resident-dependent))
+                  (not (= (data.string resident-dependent)
+                          "Visible to the next transaction")))
+          (panic "binary Kvist resident transaction was not visible to its successor"))))
+    (os.remove path)
+    (os.remove "vev-kvist-resident-smoke.db-wal")
+    (os.remove "vev-kvist-resident-smoke.db-shm")))
+
 (defn main []
+  (resident-transaction-smoke)
   (let [uuid (d.squuid)]
     (defer (data.release uuid))
     (when (not (= (% (d.squuid-time-millis uuid) 1000) 0))
@@ -74,6 +135,18 @@
                   (not (= (data.string after-name) "Ada")))
           (panic "binary Kvist transaction report db-after omitted transaction")))
       (set! data-tx report.tx))
+    (when (not (d.ensure-resident! conn))
+      (panic "binary Kvist client could not enable resident execution"))
+    (let [resident-db (d.db conn)
+          resident-name
+            (d.q '[:find ?name .
+                   :where [?e :person/id "ada"]
+                          [?e :person/name ?name]]
+                 resident-db)]
+      (defer (d.close resident-db))
+      (when (or (not (data.string? resident-name))
+                (not (= (data.string resident-name) "Ada")))
+        (panic "binary Kvist resident connection omitted durable data")))
     (let [[tx-ids ids-ok ids-error] (d.log-tx-ids conn)]
       (defer (delete tx-ids))
       (defer (delete ids-error))

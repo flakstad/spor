@@ -19,6 +19,25 @@ Unpack the platform bundle under `vendor/vev` and import its `kvist` package:
 
 Replace `example.db` with the path you want.
 
+For a long-lived local process that prioritizes predictable latency over the
+smallest memory footprint, select resident execution once after connecting:
+
+```clojure
+(let [conn (d.connect "example.db")]
+  (when (not (d.ensure-resident! conn))
+    (panic "could not load resident Vev state"))
+  ...)
+```
+
+`db`, queries, and transaction planning then use immutable in-memory indexes
+owned by that connection. Successful transactions remain ordinary durable Vev
+transactions and survive closing and reopening the file.
+
+Use `transact-status` for command paths that need only durable success, error,
+and transaction identity. `transact` remains the richer API when the caller
+will actually consume immutable `db-before`, `db-after`, tempids, or tx-data;
+Vev does not eagerly construct those snapshots for a status-only call.
+
 General SQLite access is a separate package in the same bundle:
 
 ```clojure

@@ -52,6 +52,7 @@
 (defstruct Direct-Write-Profile {
   resolve-us: f64
   overlay-us: f64
+  append-us: f64
   append-datoms-us: f64
   append-roots-us: f64
   append-root-sort-us: f64
@@ -85,6 +86,7 @@
     (Direct-Write-Profile
       {resolve-us: profile.resolve-us
        overlay-us: profile.overlay-us
+       append-us: profile.append-us
        append-datoms-us: profile.append-datoms-us
        append-roots-us: profile.append-roots-us
        append-root-sort-us: profile.append-root-sort-us
@@ -94,6 +96,12 @@
 
 (defn reset-direct-write-profile! [conn: Conn]
   (vev.reset-store-direct-write-profile! (conn-ptr conn)))
+
+(defn ensure-resident! [conn: Conn] -> [ok: bool, error: string]
+  (let [state (conn-state conn)]
+    (sync.mutex-lock state^.lock)
+    (defer (sync.mutex-unlock state^.lock))
+    (vev.ensure-store-resident! (addr state^.store))))
 
 (defn- db-ptr [db: DB] -> ^vev.Store-DB
   (let [state (transmute ^DB-State (rawptr db))]

@@ -8424,19 +8424,33 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn validate-sqlite-indexes-for-db [path: string, db: DB, expected-basis: u64, has-root: bool] -> [ok: bool, error: string]
   (when (not has-root)
     (return true ""))
-  (let [basis (db-basis-tx db)]
-    (when (not (= basis expected-basis))
-      (return false (fmt.tprintf "persisted index basis %d did not match rebuilt DB basis %d" expected-basis basis)))
-    (let [[eavt-ok eavt-error] (validate-sqlite-index path (slice db.eavt 0) ":eavt")]
+  (let [basis (db-basis-tx db)
+        validation-db db
+        owns-validation-db false]
+    (when (< basis expected-basis)
+      (return false (fmt.tprintf "persisted index basis %d was newer than rebuilt DB basis %d" expected-basis basis)))
+    ;; A resident writer may durably commit transactions before publishing
+    ;; derived index roots. Validate the persisted root against exactly its
+    ;; recorded basis, while retaining the complete log as the resident DB.
+    (when (> basis expected-basis)
+      (let [datoms (make [dynamic]Datom)]
+        (for [datom db.datoms]
+          (when (<= datom.tx expected-basis)
+            (arr.push! datoms (datom-owned datom))))
+        (set! validation-db (build-db datoms))
+        (set! owns-validation-db true)))
+    (defer (when owns-validation-db
+             (delete-resident-db validation-db)))
+    (let [[eavt-ok eavt-error] (validate-sqlite-index path (slice validation-db.eavt 0) ":eavt")]
       (when (not eavt-ok)
         (return false eavt-error)))
-    (let [[aevt-ok aevt-error] (validate-sqlite-index path (slice db.aevt 0) ":aevt")]
+    (let [[aevt-ok aevt-error] (validate-sqlite-index path (slice validation-db.aevt 0) ":aevt")]
       (when (not aevt-ok)
         (return false aevt-error)))
-    (let [[avet-ok avet-error] (validate-sqlite-index path (slice db.avet 0) ":avet")]
+    (let [[avet-ok avet-error] (validate-sqlite-index path (slice validation-db.avet 0) ":avet")]
       (when (not avet-ok)
         (return false avet-error)))
-    (let [[vaet-ok vaet-error] (validate-sqlite-index path (slice db.vaet 0) ":vaet")]
+    (let [[vaet-ok vaet-error] (validate-sqlite-index path (slice validation-db.vaet 0) ":vaet")]
       (when (not vaet-ok)
         (return false vaet-error)))
     (return true "")))
@@ -8675,6 +8689,7 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   handle: rawptr
   source-only: bool
   resident-loaded: bool
+  resident-reads-enabled: bool
   direct-write-stmts-valid: bool
   direct-write-stmts: SQLite-Direct-Write-Stmts
   index-write-stmts-valid: bool
@@ -9297,6 +9312,39 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
         (when (not root-ok)
           (sqlite-rollback-raw handle)
           (return false root-error))))
+    (sqlite-commit-raw handle)))
+
+(defn append-tx-report-log-sqlite-handle [handle: rawptr, report: Tx-Report] -> [ok: bool, error: string]
+  ;; The transaction log is the durable truth. Index roots are derived state
+  ;; and may be published later without delaying acknowledgement to a resident
+  ;; application that already owns the committed immutable indexes.
+  (let [[begin-ok begin-error] (sqlite-begin-immediate-raw handle)]
+    (when (not begin-ok)
+      (return false begin-error))
+    (let [[write-stmts write-stmts-ok write-stmts-error]
+            (sqlite-direct-write-stmts-open handle)]
+      (when (not write-stmts-ok)
+        (sqlite-rollback-raw handle)
+        (return false write-stmts-error))
+      (defer (sqlite-direct-write-stmts-close write-stmts))
+      (let [[tx-ok tx-error]
+              (insert-sqlite-tx-with-stmts! handle (addr write-stmts) report.tx)]
+        (when (not tx-ok)
+          (sqlite-rollback-raw handle)
+          (return false tx-error)))
+      (let [base-index (count report.db-before.datoms)
+            [datoms-ok datoms-error]
+              (append-sqlite-datoms-with-stmts!
+                handle (addr write-stmts) base-index (slice report.tx-data 0))]
+        (when (not datoms-ok)
+          (sqlite-rollback-raw handle)
+          (return false datoms-error)))
+      (let [[meta-ok meta-error]
+              (insert-sqlite-tx-meta-with-stmts!
+                handle (addr write-stmts) report.tx (slice report.tx-meta 0))]
+        (when (not meta-ok)
+          (sqlite-rollback-raw handle)
+          (return false meta-error))))
     (sqlite-commit-raw handle)))
 
 (defn db-index-view-entries [view: DB-Index-View] -> [dynamic]int
@@ -13403,9 +13451,34 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
       (close-store-db! (addr snapshot))
       result)))
 
+(defn sqlite-conn-index-root-lags-log? [store: ^SQLite-Conn] -> [lags: bool, ok: bool, error: string]
+  (let [[basis basis-ok basis-error]
+          (sqlite-latest-index-root-basis-raw store^.handle)]
+    (when (not basis-ok)
+      (if (= basis-error "sqlite DB has no Vev index roots")
+        (return false true "")
+        (return false false basis-error)))
+    (let [[tx-ids tx-ok tx-error] (sqlite-conn-tx-ids store)]
+      (defer (delete tx-ids))
+      (when (not tx-ok)
+        (return false false tx-error))
+      (return (and (> (count tx-ids) 0)
+                   (> tx-ids[(- (count tx-ids) 1)] basis))
+              true ""))))
+
 (defn sqlite-store-db-current-root-cached [store: ^SQLite-Conn] -> [snapshot: Store-DB, ok: bool, error: string]
   (when store^.resident-loaded
     (return (sqlite-store-db store)))
+  (let [[lags lag-ok lag-error] (sqlite-conn-index-root-lags-log? store)]
+    (when (not lag-ok)
+      (return (Store-DB {}) false lag-error))
+    (when lags
+      (let [[db db-ok db-error] (load-db-sqlite-resident store^.path)]
+        (if db-ok
+          (return (Store-DB {kind: .Resident resident: db}) true "")
+          (do
+            (delete-owned-db db)
+            (return (Store-DB {}) false db-error))))))
   (let [[basis basis-ok basis-error] (sqlite-conn-current-root-basis store)]
     (when (not basis-ok)
       (return (sqlite-store-db store)))
@@ -13431,6 +13504,21 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
           (return (sqlite-root-store-db-with-cache store^.path published cache) true ""))))))
 
 (defn sqlite-store-db [store: ^SQLite-Conn] -> [snapshot: Store-DB, ok: bool, error: string]
+  (when (and store^.resident-loaded store^.resident-reads-enabled)
+    (return (Store-DB {kind: .Resident
+                       resident: (clone-db store^.conn.db)})
+            true
+            ""))
+  (let [[lags lag-ok lag-error] (sqlite-conn-index-root-lags-log? store)]
+    (when (not lag-ok)
+      (return (Store-DB {}) false lag-error))
+    (when lags
+      (let [[db db-ok db-error] (load-db-sqlite-resident store^.path)]
+        (if db-ok
+          (return (Store-DB {kind: .Resident resident: db}) true "")
+          (do
+            (delete-owned-db db)
+            (return (Store-DB {}) false db-error))))))
   (let [[sqlite-snapshot snapshot-ok snapshot-error] (sqlite-conn-open-db-snapshot store sqlite-db-source-default-page-size)]
     (if snapshot-ok
       (return (Store-DB {kind: .SQLite-Snapshot sqlite-snapshot: sqlite-snapshot}) true "")
@@ -16956,14 +17044,37 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   (let [[resident-ok resident-error] (sqlite-conn-ensure-resident! store)]
     (when (not resident-ok)
       (return (failed-tx-report store^.conn.db resident-error))))
-  (let [report (transact-tx-data (addr store^.conn) tx-data)]
+  (let [resident-start (time.now)
+        report (transact-tx-data (addr store^.conn) tx-data)]
+    (set! store^.direct-write-profile.resolve-us
+      (+ store^.direct-write-profile.resolve-us
+         (sqlite-profile-elapsed-us resident-start)))
     (when (not report.ok)
       (return report))
-    (let [[saved-ok save-error] (append-tx-report-sqlite-handle store^.handle report)]
+    (let [append-start (time.now)
+          saved-ok false
+          save-error ""]
+      (if store^.resident-reads-enabled
+        (let [[ok error]
+                (append-tx-report-log-sqlite-handle store^.handle report)]
+          (set! saved-ok ok)
+          (set! save-error error))
+        (let [[ok error]
+                (append-tx-report-sqlite-handle store^.handle report)]
+          (set! saved-ok ok)
+          (set! save-error error)))
+      (set! store^.direct-write-profile.append-us
+        (+ store^.direct-write-profile.append-us
+           (sqlite-profile-elapsed-us append-start)))
       (when (not saved-ok)
         (rollback-sqlite-conn! store report.db-before)
         (delete-live-tx-report-shallow report)
         (return (failed-tx-report store^.conn.db save-error))))
+    (when store^.datom-count-cache-valid
+      (set! store^.datom-count-cache
+        (+ store^.datom-count-cache (u64 (count report.tx-data)))))
+    (set! store^.has-retractions-cache-valid false)
+    (sqlite-conn-invalidate-current-root-cache! store)
     (sqlite-conn-invalidate-log-metadata-cache! store)
     report))
 
@@ -16976,6 +17087,18 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
 (defn transact-sqlite-store-report-tx-data [store: ^SQLite-Conn, tx-data: []Tx-Data] -> Store-Tx-Report
   (when store^.source-only
     (return (failed-sqlite-store-tx-report store "SQLite source connection is read-only; open a writable SQLite connection to transact")))
+  (when (not store^.resident-loaded)
+    (let [[lags lag-ok lag-error] (sqlite-conn-index-root-lags-log? store)]
+      (when (not lag-ok)
+        (return (failed-sqlite-store-tx-report store lag-error)))
+      (when lags
+        (let [[loaded loaded-error] (sqlite-conn-ensure-resident! store)]
+          (when (not loaded)
+            (return (failed-sqlite-store-tx-report store loaded-error)))
+          (set! store^.resident-reads-enabled true)))))
+  (when store^.resident-loaded
+    (return (store-tx-report-from-temp-resident-report
+              (transact-sqlite-tx-data store tx-data))))
   (let [[direct-report direct-used direct-ok direct-error] (transact-sqlite-store-report-direct-tx-data store tx-data)]
     (when direct-ok
       (when direct-used
@@ -17127,9 +17250,26 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
     .Shared true
      false))
 
+(defn ensure-store-resident! [store: ^Store-Conn] -> [ok: bool, error: string]
+  ;; Applications with a long-lived local process may deliberately trade a
+  ;; bounded startup load for resident indexed reads and writes. Persistence
+  ;; remains the ordinary append-only SQLite log; this only selects the read
+  ;; and transaction-planning representation held by this connection.
+  (case store^.kind
+    .SQLite
+      (let [[ok error] (sqlite-conn-ensure-resident! (addr store^.sqlite))]
+        (when ok
+          (set! store^.sqlite.resident-reads-enabled true))
+        (return ok error))
+    .Shared (return true "")
+     (return false "store is not open")))
+
 (defn store-db [store: ^Store-Conn] -> [snapshot: Store-DB, ok: bool, error: string]
   (case store^.kind
-    .SQLite (let [[snapshot snapshot-ok snapshot-error] (sqlite-store-db-current-root-cached (addr store^.sqlite))]
+    ;; Public immutable DB values own an independent SQLite snapshot/cache.
+    ;; Connection-private root caches accelerate planning but must not escape
+    ;; through a DB handle that may be closed on another application thread.
+    .SQLite (let [[snapshot snapshot-ok snapshot-error] (sqlite-store-db (addr store^.sqlite))]
               (when (and (not snapshot-ok)
                          (= snapshot-error "sqlite DB has no Vev index roots"))
                 ;; SQLite root lookup errors are borrowed literals. The fresh
