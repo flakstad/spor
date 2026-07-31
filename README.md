@@ -57,14 +57,6 @@ int main(void) {
 The [C ABI guide](docs/c-abi.md) covers builds, ownership, typed values, and
 prepared operations.
 
-### SQLite: application SQL
-
-Applications often need ordinary SQL data alongside their durable facts—for
-example sessions, caches, jobs, email, or search indexes. VevDB provides direct
-SQLite access for that data, using separate files and the SQLite already
-bundled with VevDB. See
-[Direct SQLite](docs/sqlite.md).
-
 ### Clojure: familiar data API
 
 Add the package:
@@ -160,6 +152,12 @@ manage SQL schemas.
 - EAVT, AEVT, AVET, and VAET indexes
 - Historical views and transaction logs
 - C ABI, CLI, and language packages
+
+## Direct SQLite
+
+VevDB provides direct access to its bundled SQLite for separate application
+databases. This does not expose or modify the VevDB store. See the
+[Direct SQLite guide](docs/sqlite.md).
 
 ## Documentation
 
