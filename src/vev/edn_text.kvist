@@ -2662,12 +2662,19 @@
   true)
 
 (defn query-result-db-read-source-query-result [query-value: Query, result: Result-Set] -> Query-Result
-  (discard query-value)
-  (query-result-owned-values result))
+  (cond
+    (not result.ok) (query-result-owned-values result)
+    (query-source-result-shallow-safe? query-value) (query-result-shallow result)
+    :else (query-result-owned-values result)))
 
 (defn query-result-db-read-source-query-result-owned [query-value: Query, result: Result-Set] -> Query-Result
-  (discard query-value)
-  (query-result-owned-values result))
+  (cond
+    (not result.ok) (query-result-owned-values result)
+    (query-source-result-shallow-safe? query-value)
+      (let [owned (query-result-owned-values (result-set-owned result))]
+        (delete-result-set-shallow result)
+        owned)
+    :else (query-result-owned-values result)))
 
 (defn query-result-db-read-source-result [result: Result-Set] -> Query-Result
   (if result.ok

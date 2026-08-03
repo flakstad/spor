@@ -15463,7 +15463,7 @@
                                typed-rows: builder.typed-rows
                                has-typed-columns: builder.typed-ok}) true))))
 
-(defn db-read-source-query-relation-value-typed-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> [rel: Query-Relation, stats: Query-Stats, used: bool]
+(defn db-read-source-query-relation-value-typed-with-sources-inputs-and-fns-raw [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> [rel: Query-Relation, stats: Query-Stats, used: bool]
   (let [[inlined inlined-ok] (query-source-inline-simple-rules query-value)]
     (when inlined-ok
       (let [[inlined-rel inlined-stats inlined-used] (db-read-source-query-relation-value-typed-with-sources-inputs-and-fns source sources inlined inputs registry)]
@@ -15740,6 +15740,15 @@
               :else (mut! op-index += 1)))))
         (set! out-stats.output-rows (query-relation-row-count current))
         (return current out-stats true)))))
+
+(defn db-read-source-query-relation-value-typed-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> [rel: Query-Relation, stats: Query-Stats, used: bool]
+  (let [[out-rel out-stats typed-used] (db-read-source-query-relation-value-typed-with-sources-inputs-and-fns-raw source sources query-value inputs registry)]
+    (when typed-used
+      ;; Source scans performed by the typed relation engine contribute to both
+      ;; counters: typed-index-scans describes the execution path, while
+      ;; source-index-scans describes the backing index implementation.
+      (set! out-stats.typed-index-scans (max out-stats.typed-index-scans out-stats.source-index-scans)))
+    (return out-rel out-stats typed-used)))
 
 (defn db-read-source-q-query-relation-value-typed-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> [result: Result-Set, stats: Query-Stats, used: bool]
   (when (and (= (count sources) 0)
@@ -25995,8 +26004,10 @@
           (return out false))
         (set! row (+ row 1))))
     (for [group group-row groups]
-      (let [values (arr.into [dynamic]Value (slice group.values 0))
+      (let [values (make [dynamic]Value 0 (+ (count group.values) (count query.aggregates)))
             aggregate-ok true]
+        (for [value group.values]
+          (arr.push! values (value-owned value)))
         (for [aggregate aggregate-index query.aggregates]
           (when aggregate-ok
             (let [state-index (+ (* group-row (count query.aggregates)) aggregate-index)

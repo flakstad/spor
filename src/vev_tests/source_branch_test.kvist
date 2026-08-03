@@ -69,7 +69,11 @@
     (set! column.kind .Mixed)
     (set! column.has-kind true)
     (arr.push! column.values (vev.value-vector ([]vev.Value [(vev.value-int 1) (vev.value-int 2)])))
-    (arr.push! column.values (vev.value-vector ([]vev.Value [(vev.value-keyword ":a") (vev.value-keyword ":b")])))
+    (arr.push! column.values
+      (vev.value-vector
+        ([]vev.Value
+          [(vev.value-keyword (vev.string-owned ":a"))
+           (vev.value-keyword (vev.string-owned ":b"))])))
     (arr.push! columns column)
     (vev.Query-Relation {attrs: attrs
                          attr-sources: sources
@@ -174,6 +178,7 @@
     (t.is (= typed-rel.typed-columns[0].entities[0] 2))
     (t.is (= typed-rel.typed-columns[1].kind .String))
     (t.is (= typed-rel.typed-columns[1].texts[0] "Grace"))
+    (t.is (> typed-stats.typed-index-scans 0))
     (t.is (> typed-stats.source-index-scans 0))
     (t.is (= typed-stats.binding-materializations 0))
     (t.is (= typed-stats.generic-materialization-steps 0))
@@ -271,15 +276,19 @@
             "[[:db/add 1 :name \"Ada\"] [:db/add 1 :age 37] [:db/add 2 :name \"Grace\"] [:db/add 2 :age 41]]")
         source (vev.resident-db-read-source (addr conn.db))
         plain (vev.q-result-text-db-read-source source "[:find ?name :where [?e :name ?name]]")
+        plain-owned (vev.q-result-text-db-read-source-owned source "[:find ?name :where [?e :name ?name]]")
         aggregate (vev.q-result-text-db-read-source source "[:find (count ?e) :where [?e :name ?name]]")
         function-result (vev.q-result-text-db-read-source source "[:find ?label :where [?e :name ?name] [(str ?name \"!\") ?label]]")]
     (t.is plain.result.ok plain.result.error)
     (t.is (not (vev.query-result-owns-values? plain)))
+    (t.is plain-owned.result.ok plain-owned.result.error)
+    (t.is (vev.query-result-owns-values? plain-owned))
     (t.is aggregate.result.ok aggregate.result.error)
     (t.is (vev.query-result-owns-values? aggregate))
     (t.is function-result.result.ok function-result.result.error)
     (t.is (vev.query-result-owns-values? function-result))
     (vev.delete-query-result plain)
+    (vev.delete-query-result plain-owned)
     (vev.delete-query-result aggregate)
     (vev.delete-query-result function-result)))
 
@@ -1001,7 +1010,8 @@
     (t.is function-used)
     (t.is function-rel.has-typed-columns)
     (t.is (= (vev.query-relation-row-count function-rel) 3))
-    (t.is (> function-stats.rule-calls 0))
+    (t.is (= function-stats.rule-calls 0))
+    (t.is (= function-stats.rule-iterations 0))
     (t.is (= function-stats.binding-materializations 0))
     (t.is function-result.ok function-result.error)
     (t.is (source-branch-has-text? function-result "Ada!"))
@@ -2372,6 +2382,9 @@
     (t.is (= profiled-aggregate.stats.binding-materializations 0))
     (t.is profiled-grouped-aggregate.result.ok profiled-grouped-aggregate.result.error)
     (t.is (= (count profiled-grouped-aggregate.result.rows) 3))
+    (t.is (source-branch-has-text-any-column? profiled-grouped-aggregate.result "Ivan"))
+    (t.is (source-branch-has-text-any-column? profiled-grouped-aggregate.result "Petr"))
+    (t.is (source-branch-has-text-any-column? profiled-grouped-aggregate.result "Oleg"))
     (t.is (= profiled-grouped-aggregate.stats.binding-materializations 0))
     (t.is profiled-custom-aggregate.result.ok profiled-custom-aggregate.result.error)
     (t.is (= (count profiled-custom-aggregate.result.rows) 1))
