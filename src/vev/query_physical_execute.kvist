@@ -1,0 +1,561 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn query-relation-apply-physical-project-op [rel: Query-Relation, op: Physical-Op, materialization: Physical-Materialization-Plan] -> [out: Query-Relation, ok: bool]
+  (when (or (not (= op.kind .Project))
+            (not rel.has-typed-columns)
+            (not (physical-materialization-projectable? materialization)))
+    (return (query-relation-empty) false))
+  (let [attrs (make [dynamic]string 0 (count op.output-vars))
+        attr-sources (make [dynamic]string 0 (count op.output-vars))]
+    (for [name op.output-vars]
+      (let [[source source-ok] (relation-attr-source rel name)]
+        (when (not source-ok)
+          (delete attrs)
+          (delete attr-sources)
+          (return (query-relation-empty) false))
+        (append-var-binding-attr! (addr attrs) (addr attr-sources) name source)))
+    (let [builder (query-relation-builder (slice attrs 0))
+          row 0]
+      (while (< row rel.typed-rows)
+        (when (not (query-relation-builder-add-relation-row-by-attrs! (addr builder) (slice attrs 0) rel row))
+          (delete attrs)
+          (delete attr-sources)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false))
+        (set! row (+ row 1)))
+      (return (Query-Relation {attrs: attrs
+                               attr-sources: attr-sources
+                               attr-index: (query-relation-attr-index (slice attrs 0))
+                               tuples: builder.tuples
+                               typed-columns: builder.typed-columns
+                               typed-rows: builder.typed-rows
+                               has-typed-columns: builder.typed-ok})
+              true))))
+
+(defn db-read-source-apply-physical-materialize-op [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, rel: Query-Relation, op: Physical-Op, materialization: Physical-Materialization-Plan, registry: []Native-Query-Fn] -> [batch: Typed-Materialized-Batch, ok: bool, error: string]
+  (when (or (not (= op.kind .Materialize))
+            (not rel.has-typed-columns)
+            (not (physical-materialization-materializable? materialization)))
+    (return (typed-materialized-batch-empty) false "typed materialize op expected"))
+  (case materialization.shape.kind
+    .FlatPrimitiveResult
+      (let [resolved (resolve-typed-flat-materialization rel materialization)]
+        (when (not resolved.ok)
+          (delete-resolved-typed-flat-materialization resolved)
+          (return (typed-materialized-batch-empty) false "flat typed materialization could not be resolved"))
+        (defer (delete-resolved-typed-flat-materialization resolved))
+        (let [batch (materialize-typed-flat-batch rel resolved)]
+          (return batch batch.ok (if batch.ok "" "flat typed materialization failed"))))
+    .PullResult
+      (materialize-source-typed-pull-batch source sources query-value inputs rel registry)
+    .AggregateResult
+      (let [batch (materialize-typed-aggregate-value-batch-with-fns query-value rel registry)]
+        (return batch batch.ok (if batch.ok "" "aggregate typed materialization failed")))
+    .PullAggregateResult
+      (materialize-source-typed-pull-aggregate-batch source sources query-value inputs rel registry)
+
+      (return (typed-materialized-batch-empty) false "unsupported typed materialization shape")))
+
+(defn query-relation-has-physical-op-inputs? [rel: Query-Relation, op: Physical-Op] -> bool
+  (for [name op.input-vars]
+    (when (not (query-relation-has-attr? rel name))
+      (return false)))
+  true)
+
+(defn query-relation-apply-resident-physical-scan-op [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, op: Physical-Op, stats: ^Query-Stats, allow-bound-apply: bool, observe-source-relation: bool] -> Query-Relation
+  (let [clause-value query.clauses[op.item-index]]
+    (set! stats^.clauses (+ stats^.clauses 1))
+    (when (and allow-bound-apply
+               (or (query-relation-should-bind-clause? rel clause-value)
+                   (physical-op-scan-has-bound-pushdown-input? rel op)))
+      (return (query-relation-apply-bound-clause-with-op db query inputs sources rel clause-value op stats)))
+    (let [clause-rel (query-relation-from-clause-with-op db query inputs sources clause-value op)
+          next (query-relation-join db sources rel clause-rel)]
+      (when observe-source-relation
+        (query-stats-observe-clause-relation! stats query sources clause-value clause-rel))
+      (set! stats^.clause-candidates (+ stats^.clause-candidates (query-relation-row-count clause-rel)))
+      (delete-query-relation clause-rel)
+      next)))
+
+(defn query-relation-apply-resident-physical-predicate-op [db: DB, query: Query, rel: Query-Relation, op: Physical-Op, registry: []Native-Query-Fn] -> Query-Relation
+  (when (not (query-relation-has-physical-op-inputs? rel op))
+    (return (query-relation-empty)))
+  (query-relation-filter-predicate db rel query.predicates[op.item-index] registry))
+
+(defn query-relation-apply-resident-physical-function-op [query: Query, rel: Query-Relation, op: Physical-Op, registry: []Native-Query-Fn] -> Query-Relation
+  (when (not (query-relation-has-physical-op-inputs? rel op))
+    (return (query-relation-empty)))
+  (query-relation-extend-function rel query.function-clauses[op.item-index] registry))
+
+(defn query-relation-apply-resident-physical-ground-op [query: Query, rel: Query-Relation, op: Physical-Op] -> Query-Relation
+  (when (not (query-relation-has-physical-op-inputs? rel op))
+    (return (query-relation-empty)))
+  (query-relation-apply-ground rel query.grounds[op.item-index]))
+
+(defn query-relation-apply-resident-physical-get-else-op [db: DB, query: Query, rel: Query-Relation, op: Physical-Op] -> Query-Relation
+  (when (not (query-relation-has-physical-op-inputs? rel op))
+    (return (query-relation-empty)))
+  (query-relation-apply-get-else db rel query.get-elses[op.item-index]))
+
+(defn query-relation-apply-resident-physical-get-some-op [db: DB, query: Query, rel: Query-Relation, op: Physical-Op] -> Query-Relation
+  (when (not (query-relation-has-physical-op-inputs? rel op))
+    (return (query-relation-empty)))
+  (query-relation-apply-get-some db rel query.get-somes[op.item-index]))
+
+(defn query-relation-apply-resident-physical-not-op [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, op: Physical-Op, registry: []Native-Query-Fn] -> Query-Relation
+  (when (not (query-relation-has-physical-op-inputs? rel op))
+    (return (query-relation-empty)))
+  (query-relation-apply-not db query inputs sources rel query.not-groups[op.item-index] registry))
+
+(defn query-relation-apply-resident-physical-or-op [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, op: Physical-Op, registry: []Native-Query-Fn] -> Query-Relation
+  (when (not (query-relation-has-physical-op-inputs? rel op))
+    (return (query-relation-empty)))
+  (query-relation-apply-or db query inputs sources rel query.or-groups[op.item-index] registry))
+
+(defn query-relation-apply-resident-physical-rule-call-op [db: DB, query: Query, sources: []DB-Source, rel: Query-Relation, op: Physical-Op, registry: []Native-Query-Fn, stats: ^Query-Stats, materialized-rule-cache: ^[dynamic]Materialized-Rule-Cache-Entry] -> Query-Relation
+  (when (not (query-relation-has-physical-op-inputs? rel op))
+    (return (query-relation-empty)))
+  (query-relation-apply-rule-call db sources (slice query.rules 0) (slice query.rule-call-plans 0) rel query.rule-calls[op.item-index] op.item-index registry stats materialized-rule-cache))
+
+(defn query-relation-apply-resident-physical-op [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, op: Physical-Op, registry: []Native-Query-Fn, stats: ^Query-Stats, materialized-rule-cache: ^[dynamic]Materialized-Rule-Cache-Entry] -> Query-Relation
+  (case op.kind
+    .PrimaryScan
+      (query-relation-apply-resident-physical-scan-op db query inputs sources rel op stats true true)
+    .NamedSourceScan
+      (query-relation-apply-resident-physical-scan-op db query inputs sources rel op stats true true)
+    .RelationInput
+      (query-relation-apply-resident-physical-scan-op db query inputs sources rel op stats (physical-op-scan-has-bound-pushdown-input? rel op) false)
+    .BindJoinScan
+      (query-relation-apply-resident-physical-scan-op db query inputs sources rel op stats true true)
+    .StarJoin
+      (let [[star-rel star-ok] (query-relation-from-entity-star-plan db query inputs sources registry stats)]
+        (if star-ok
+          star-rel
+          (do
+            (delete-query-relation star-rel)
+            (query-relation-empty))))
+    .Predicate
+      (query-relation-apply-resident-physical-predicate-op db query rel op registry)
+    .Function
+      (query-relation-apply-resident-physical-function-op query rel op registry)
+    .Not
+      (query-relation-apply-resident-physical-not-op db query inputs sources rel op registry)
+    .Or
+      (query-relation-apply-resident-physical-or-op db query inputs sources rel op registry)
+    .RuleCall
+      (query-relation-apply-resident-physical-rule-call-op db query sources rel op registry stats materialized-rule-cache)
+    .Ground
+      (query-relation-apply-resident-physical-ground-op query rel op)
+    .GetElse
+      (query-relation-apply-resident-physical-get-else-op db query rel op)
+    .GetSome
+      (query-relation-apply-resident-physical-get-some-op db query rel op)
+
+      (query-relation-empty)))
+
+(defn query-steps-are-clauses-and-predicates? [query: Query] -> bool
+  (when (= (count query.where-steps) 0)
+    (return false))
+  (for [step query.where-steps]
+    (when (not (or (= step.kind .Clause)
+                   (= step.kind .Predicate)))
+      (return false)))
+  true)
+
+(defn rule-index-has-single-definition? [index: []Rule-Name-Index-Entry, name: string] -> bool
+  (let [[entry-index found] (rule-name-index-entry index name)]
+    (and found (= (count index[entry-index].indexes) 1))))
+
+(defn rule-call-inlinable? [rules: []Rule, index: []Rule-Name-Index-Entry, deps: []Rule-Dependency, call: Rule-Call] -> bool
+  (when (or call.has-source
+            (not (rule-index-has-single-definition? index call.name))
+            (rule-name-recursive-in-deps? deps call.name))
+    (return false))
+  (let [[rule rule-ok] (rule-name-index-first-matching-rule rules index call)]
+    (when (not rule-ok)
+      (return false))
+    (when (not (= (count rule.params) (count call.args)))
+      (return false))
+    (when (or (> (count rule.get-elses) 0)
+              (> (count rule.get-somes) 0)
+              (> (count rule.grounds) 0)
+              (> (count rule.not-groups) 0)
+              (> (count rule.or-groups) 0))
+      (return false))
+    (for [inner-call rule.rule-calls]
+      (when (not (rule-call-inlinable? rules index deps inner-call))
+        (return false)))
+    true))
+
+(defn rule-var-fresh-name [name: string, id: int] -> string
+  (fmt.tprintf "%s__rule_%d" name id))
+
+(defstruct Rule-Inline-Binding {
+  name: string
+  term: Term
+})
+
+(defn rule-inline-binding-lookup [bindings: []Rule-Inline-Binding, name: string] -> [term: Term, ok: bool]
+  (for [binding bindings]
+    (when (= binding.name name)
+      (return binding.term true)))
+  (return (Term {}) false))
+
+(defn rule-inline-binding-add! [bindings: ^[dynamic]Rule-Inline-Binding, name: string, term: Term]
+  (arr.push! bindings^ (Rule-Inline-Binding {name: name term: term})))
+
+(defn rule-inline-term [term: Term, subst: ^[dynamic]Rule-Inline-Binding, locals: ^[dynamic]Rule-Inline-Binding, id: int] -> Term
+  (when (not (= term.kind .Var))
+    (return term))
+  (let [[existing existing-ok] (rule-inline-binding-lookup (slice subst^ 0) term.name)]
+    (when existing-ok
+      (return existing)))
+  (let [[local local-ok] (rule-inline-binding-lookup (slice locals^ 0) term.name)]
+    (when local-ok
+      (return local)))
+  (let [fresh (term-var (rule-var-fresh-name term.name id))]
+    (rule-inline-binding-add! locals term.name fresh)
+    fresh))
+
+(defn rule-inline-clause [clause-value: Clause, subst: ^[dynamic]Rule-Inline-Binding, locals: ^[dynamic]Rule-Inline-Binding, id: int] -> Clause
+  (Clause {e: (rule-inline-term clause-value.e subst locals id)
+           a: (rule-inline-term clause-value.a subst locals id)
+           v: (rule-inline-term clause-value.v subst locals id)
+           tx-term: (rule-inline-term clause-value.tx-term subst locals id)
+           op-term: (rule-inline-term clause-value.op-term subst locals id)
+           source: clause-value.source
+           has-source: clause-value.has-source
+           source-width: clause-value.source-width}))
+
+(defn rule-inline-predicate [predicate: Predicate, subst: ^[dynamic]Rule-Inline-Binding, locals: ^[dynamic]Rule-Inline-Binding, id: int] -> Predicate
+  (let [terms (make [dynamic]Term 0 (count predicate.terms))]
+    (for [term predicate.terms]
+      (arr.push! terms (rule-inline-term term subst locals id)))
+    (Predicate {op: predicate.op terms: terms})))
+
+(defn rule-inline-function-clause [function: Function-Clause, subst: ^[dynamic]Rule-Inline-Binding, locals: ^[dynamic]Rule-Inline-Binding, id: int] -> Function-Clause
+  (let [terms (make [dynamic]Term 0 (count function.terms))]
+    (for [term function.terms]
+      (arr.push! terms (rule-inline-term term subst locals id)))
+    (Function-Clause {op: function.op terms: terms out: function.out out-vars: function.out-vars out-binding: function.out-binding is-tuple: function.is-tuple})))
+
+(defn rule-inline-call [call: Rule-Call, subst: ^[dynamic]Rule-Inline-Binding, locals: ^[dynamic]Rule-Inline-Binding, id: int] -> Rule-Call
+  (let [args (make [dynamic]Term 0 (count call.args))]
+    (for [arg call.args]
+      (arr.push! args (rule-inline-term arg subst locals id)))
+    (Rule-Call {name: call.name source: call.source has-source: call.has-source args: args})))
+
+(defn append-inlined-rule-call-steps! [clauses: ^[dynamic]Clause, predicates: ^[dynamic]Predicate, function-clauses: ^[dynamic]Function-Clause, rule-calls: ^[dynamic]Rule-Call, steps: ^[dynamic]Query-Step, rules: []Rule, index: []Rule-Name-Index-Entry, deps: []Rule-Dependency, call: Rule-Call, next-id: ^int] -> bool
+  (when (not (rule-call-inlinable? rules index deps call))
+    (return false))
+  (let [[rule rule-ok] (rule-name-index-first-matching-rule rules index call)]
+    (when (not rule-ok)
+      (return false))
+    (let [subst (make [dynamic]Rule-Inline-Binding)
+          locals (make [dynamic]Rule-Inline-Binding)
+          id next-id^]
+      (defer (delete subst))
+      (defer (delete locals))
+      (mut! next-id^ += 1)
+      (for [param param-index rule.params]
+        (rule-inline-binding-add! (addr subst) param call.args[param-index]))
+      (for [step rule.body-steps]
+        (if (= step.kind .Clause)
+          (do
+            (arr.push! clauses^ (rule-inline-clause rule.clauses[step.index] (addr subst) (addr locals) id))
+            (arr.push! steps^ (Query-Step {kind: .Clause index: (- (count clauses^) 1)})))
+          (if (= step.kind .Predicate)
+            (do
+              (arr.push! predicates^ (rule-inline-predicate rule.predicates[step.index] (addr subst) (addr locals) id))
+              (arr.push! steps^ (Query-Step {kind: .Predicate index: (- (count predicates^) 1)})))
+            (if (= step.kind .Function)
+              (do
+                (arr.push! function-clauses^ (rule-inline-function-clause rule.function-clauses[step.index] (addr subst) (addr locals) id))
+                (arr.push! steps^ (Query-Step {kind: .Function index: (- (count function-clauses^) 1)})))
+              (if (= step.kind .RuleCall)
+                (let [inner-call (rule-inline-call rule.rule-calls[step.index] (addr subst) (addr locals) id)
+                      inner-ok (append-inlined-rule-call-steps! clauses predicates function-clauses rule-calls steps rules index deps inner-call next-id)]
+                  (delete inner-call.args)
+                  (when (not inner-ok)
+                    (return false)))
+                (return false))))))))
+	  true)
+
+(defn rule-call-correlated-with-vars? [call: Rule-Call, available: []string] -> bool
+  (for [arg call.args]
+    (when (and (= arg.kind .Var)
+               (string-slice-contains? available arg.name))
+      (return true)))
+  false)
+
+(defn query-source-inline-simple-rules [query-value: Query] -> [out: Query, ok: bool]
+  (when (= (count query-value.rule-calls) 0)
+    (return (Query {}) false))
+  (let [index (rule-name-index-build (slice query-value.rules 0))
+        deps (rules-dependency-graph-indexed (slice query-value.rules 0) (slice index 0))
+        clauses (make [dynamic]Clause)
+        predicates (make [dynamic]Predicate)
+        function-clauses (make [dynamic]Function-Clause)
+	        rule-calls (make [dynamic]Rule-Call)
+	        steps (make [dynamic]Query-Step)
+	        available (make [dynamic]string)
+	        next-id 0
+	        changed false]
+	    (defer (delete-rule-name-index index))
+	    (defer (delete-rule-dependency-graph deps))
+	    (defer (delete available))
+	    (for [step query-value.where-steps]
+	      (if (= step.kind .Clause)
+	        (do
+	          (arr.push! clauses query-value.clauses[step.index])
+	          (arr.push! steps (Query-Step {kind: .Clause index: (- (count clauses) 1)}))
+	          (append-clause-vars! (addr available) query-value.clauses[step.index]))
+	        (if (= step.kind .Predicate)
+	          (do
+	            (arr.push! predicates query-value.predicates[step.index])
+	            (arr.push! steps (Query-Step {kind: .Predicate index: (- (count predicates) 1)})))
+	          (if (= step.kind .Function)
+	            (do
+	              (arr.push! function-clauses query-value.function-clauses[step.index])
+	              (arr.push! steps (Query-Step {kind: .Function index: (- (count function-clauses) 1)}))
+	              (append-function-output-vars! (addr available) query-value.function-clauses[step.index]))
+	            (if (= step.kind .RuleCall)
+	              (if (and (not (rule-call-correlated-with-vars? query-value.rule-calls[step.index] (slice available 0)))
+	                       (append-inlined-rule-call-steps! (addr clauses) (addr predicates) (addr function-clauses) (addr rule-calls) (addr steps) (slice query-value.rules 0) (slice index 0) (slice deps 0) query-value.rule-calls[step.index] (addr next-id)))
+	                (do
+	                  (set! changed true)
+	                  (append-rule-call-vars! (addr available) query-value.rule-calls[step.index]))
+	                (do
+	                  (arr.push! rule-calls query-value.rule-calls[step.index])
+	                  (arr.push! steps (Query-Step {kind: .RuleCall index: (- (count rule-calls) 1)}))
+	                  (append-rule-call-vars! (addr available) query-value.rule-calls[step.index])))
+	              (do
+	                (delete clauses)
+	                (delete predicates)
+	                (delete function-clauses)
+	                (delete rule-calls)
+	                (delete steps)
+	                (return (Query {}) false)))))))
+    (when (not changed)
+      (delete clauses)
+      (delete predicates)
+      (delete function-clauses)
+      (delete rule-calls)
+      (delete steps)
+      (return (Query {}) false))
+    (let [out-query (query (slice query-value.find 0)
+                           (slice query-value.with 0)
+                           (slice query-value.inputs 0)
+                           (slice query-value.collection-inputs 0)
+                           (slice query-value.tuple-inputs 0)
+                           (slice query-value.relation-inputs 0)
+                           (slice clauses 0)
+                           (slice predicates 0)
+                           (slice function-clauses 0)
+                           (slice query-value.rules 0)
+                           (slice rule-calls 0)
+                           (slice query-value.get-elses 0)
+                           (slice query-value.get-somes 0)
+                           (slice query-value.grounds 0)
+                           (slice query-value.not-groups 0)
+                           (slice query-value.or-groups 0)
+                           (slice query-value.pulls 0)
+                           (slice query-value.aggregates 0))
+          out-with-steps (query-with-where-steps out-query (slice steps 0))]
+      (delete clauses)
+      (delete predicates)
+      (delete function-clauses)
+      (delete rule-calls)
+      (delete steps)
+      (delete out-with-steps.input-specs)
+      (set! out-with-steps.input-specs (arr.into [dynamic]Query-Input-Spec (slice query-value.input-specs 0)))
+      (set! out-with-steps.has-default-source-input query-value.has-default-source-input)
+      (set! out-with-steps.has-rules-input query-value.has-rules-input)
+      (set! out-with-steps.has-return-map query-value.has-return-map)
+      (set! out-with-steps.return-map-marker query-value.return-map-marker)
+      (delete out-with-steps.return-map-keys)
+      (set! out-with-steps.return-map-keys (arr.into [dynamic]string (slice query-value.return-map-keys 0)))
+      (return out-with-steps true))))
+
+(defn binding-available-vars [binding: Binding] -> [dynamic]string
+  (let [out (make [dynamic]string 0 (count binding.items))]
+    (for [item binding.items]
+      (append-var-once! (addr out) item.name))
+    out))
+
+(defn query-step-ready-for-binding? [query: ^Query, step: Query-Step, binding: Binding, registry: []Native-Query-Fn] -> bool
+  (when (= step.kind .Clause)
+    (return true))
+  (let [available (binding-available-vars binding) :defer
+        [ok _] (validate-query-ordered-step-with-fns (addr available) query^ step registry)]
+    ok))
+
+(defn predicate-ready-with-vars? [predicate: Predicate, available: []string] -> bool
+  (let [vars (make [dynamic]string) :defer
+        seen (set.empty string) :defer]
+    (append-predicate-vars-indexed! (addr vars) (addr seen) predicate)
+    (for [name vars]
+      (when (not (string-slice-contains? available name))
+        (return false)))
+    true))
+
+(defn available-vars-after-clause [binding: Binding, clause-value: Clause] -> [dynamic]string
+  (let [available (binding-available-vars binding)]
+    (append-clause-vars! (addr available) clause-value)
+    available))
+
+(defn best-predicate-score-unlocked-by-clause [query: ^Query, steps: []Query-Step, binding: Binding, clause-value: Clause] -> int
+  (let [available (available-vars-after-clause binding clause-value) :defer
+        best -1]
+    (for [step steps]
+      (when (= step.kind .Predicate)
+        (let [predicate query^.predicates[step.index]]
+          (when (predicate-ready-with-vars? predicate (slice available 0))
+            (let [score (predicate-selectivity-score predicate)]
+              (when (or (= best -1)
+                        (< score best))
+                (set! best score)))))))
+    best))
+
+(defn best-ready-clause-step-index [db: DB, sources: []DB-Source, query: ^Query, steps: []Query-Step, binding: Binding, registry: []Native-Query-Fn] -> [index: int, ok: bool]
+  (let [best -1
+        best-score 0
+        best-unlocked-predicate-score -1
+        best-count -1]
+    (for [step step-index steps]
+      (when (and (= step.kind .Clause)
+                 (query-step-ready-for-binding? query step binding registry))
+        (let [clause query^.clauses[step.index]
+              score (clause-selectivity-score clause binding)
+              unlocked-predicate-score (best-predicate-score-unlocked-by-clause query steps binding clause)]
+          (when (or (= best -1)
+                    (< score best-score)
+                    (and (= score best-score)
+                         (>= unlocked-predicate-score 0)
+                         (or (< best-unlocked-predicate-score 0)
+                             (< unlocked-predicate-score best-unlocked-predicate-score))))
+            (set! best step-index)
+            (set! best-score score)
+            (set! best-unlocked-predicate-score unlocked-predicate-score)
+            (set! best-count -1))
+          (when (and (not (= best -1))
+                     (= score best-score)
+                     (= unlocked-predicate-score best-unlocked-predicate-score)
+                     (not (= step-index best)))
+            (when (< best-count 0)
+              (set! best-count (clause-candidate-count-estimate db sources query^.clauses[steps[best].index] binding)))
+            (let [candidate-count (clause-candidate-count-estimate db sources clause binding)]
+              (when (< candidate-count best-count)
+                (set! best step-index)
+                (set! best-unlocked-predicate-score unlocked-predicate-score)
+                (set! best-count candidate-count)))))))
+    (return best (>= best 0))))
+
+(defn physical-scalar-requirement-selectivity-score [requirement: Physical-Scalar-Requirement] -> int
+  (case requirement.kind
+    .VarValueCompare
+      (cond
+        requirement.is-equality 0
+        requirement.is-range 1
+        :else 4)
+    .VarVarCompare
+      (cond
+        requirement.is-equality 2
+        requirement.is-range 3
+        :else 5)
+    .UnaryPredicate
+      6
+    .UnknownScalarRequirement
+      10
+      10))
+
+(defn predicate-selectivity-score [predicate: Predicate] -> int
+  (physical-scalar-requirement-selectivity-score (physical-predicate-requirement predicate)))
+
+(defn best-ready-predicate-step-index [query: ^Query, steps: []Query-Step, binding: Binding, registry: []Native-Query-Fn] -> [index: int, ok: bool]
+  (let [best -1
+        best-score 0]
+    (for [step step-index steps]
+      (when (and (= step.kind .Predicate)
+                 (query-step-ready-for-binding? query step binding registry))
+        (let [score (predicate-selectivity-score query^.predicates[step.index])]
+          (when (or (= best -1)
+                    (< score best-score))
+            (set! best step-index)
+            (set! best-score score)))))
+    (return best (>= best 0))))
+
+(defn first-ready-predicate-step-index [query: ^Query, steps: []Query-Step, binding: Binding, registry: []Native-Query-Fn] -> [index: int, ok: bool]
+  (for [step step-index steps]
+    (when (and (= step.kind .Predicate)
+               (query-step-ready-for-binding? query step binding registry))
+      (return step-index true)))
+  (return -1 false))
+
+(defn bindings-after-dependency-planned-where-profiled-with-fns [db: DB, sources: []DB-Source, query: ^Query, inputs: []Query-Input, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [dynamic]Binding
+  (let [bindings (bindings-from-inputs db query^ inputs)
+        remaining (arr.into [dynamic]Query-Step (slice query^.where-steps 0))]
+    (defer (delete remaining))
+    (set! stats^.input-bindings (count bindings))
+    (query-stats-observe-bindings! stats (count bindings))
+    (while (and (> (count bindings) 0)
+                (> (count remaining) 0))
+      (let [[predicate-index predicate-ok] (best-ready-predicate-step-index query (slice remaining 0) bindings[0] registry)
+            [clause-index clause-ok] (best-ready-clause-step-index db sources query (slice remaining 0) bindings[0] registry)
+            chosen-index (if (and predicate-ok (> (count bindings) 1))
+                           predicate-index
+                           (if clause-ok clause-index predicate-index))]
+        (when (< chosen-index 0)
+          (delete bindings)
+          (return (make [dynamic]Binding)))
+        (let [step remaining[chosen-index]
+              next-bindings (make [dynamic]Binding)]
+          (if (= step.kind .Clause)
+            (let [clause query^.clauses[step.index]
+                  pushdown-op (physical-pushdown-op-from-clause-and-steps query^ clause (slice remaining 0))]
+              (set! stats^.steps (+ stats^.steps 1))
+              (for [binding bindings]
+                (append-bindings-after-clause-with-sources-profiled-with-op! (addr next-bindings) db sources clause binding pushdown-op stats)))
+            (do
+              (delete next-bindings)
+              (set! next-bindings (bindings-after-query-step-profiled-with-fns db sources query (slice bindings 0) step registry stats))))
+          (delete bindings)
+          (set! bindings next-bindings)
+          (query-stats-observe-bindings! stats (count bindings))
+          (arr.remove-ordered-at! remaining chosen-index))))
+    bindings))
+
+(defn bindings-after-ordered-where-profiled-with-fns [db: DB, sources: []DB-Source, query: ^Query, inputs: []Query-Input, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [dynamic]Binding
+  (when (query-steps-are-clauses-and-predicates? query^)
+    (return (bindings-after-dependency-planned-where-profiled-with-fns db sources query inputs registry stats)))
+  (let [bindings (bindings-from-inputs db query^ inputs)
+        step-index 0]
+    (set! stats^.input-bindings (count bindings))
+    (query-stats-observe-bindings! stats (count bindings))
+    (while (< step-index (count query^.where-steps))
+      (let [step query^.where-steps[step-index]]
+        (if (= step.kind .Clause)
+          (let [clauses (make [dynamic]Clause)]
+            (while (and (< step-index (count query^.where-steps))
+                        (= query^.where-steps[step-index].kind .Clause))
+              (arr.push! clauses query^.clauses[query^.where-steps[step-index].index])
+              (set! step-index (+ step-index 1)))
+            (let [next-bindings (bindings-after-planned-clauses-profiled db sources (slice bindings 0) (slice clauses 0) stats)]
+              (delete clauses)
+              (delete bindings)
+              (set! bindings next-bindings)))
+          (do
+            (let [next-bindings (bindings-after-query-step-profiled-with-fns db sources query (slice bindings 0) step registry stats)]
+              (delete bindings)
+              (set! bindings next-bindings)
+              (query-stats-observe-bindings! stats (count bindings)))
+            (set! step-index (+ step-index 1)))))
+      (when (= (count bindings) 0)
+        (return bindings)))
+    (return bindings)))
+
+(defn profiled-result-set [result: Result-Set, stats: Query-Stats] -> Profiled-Result-Set
+  (Profiled-Result-Set {result: result stats: stats}))
