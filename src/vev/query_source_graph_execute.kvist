@@ -1,0 +1,1442 @@
+; Copyright 2026 Vev Contributors
+; SPDX-License-Identifier: Apache-2.0
+
+(package vev)
+
+(defn db-read-source-multi-hop-ref-chain-anchor-value [source: DB-Read-Source, projection: Source-Multi-Hop-Ref-Chain-Projection, inputs: []Query-Input] -> [value: Value, ok: bool, error: string]
+  (when (not projection.has-anchor-input)
+    (return projection.anchor-value true ""))
+  (when (not (= (count inputs) 1))
+    (return (Value {}) false "wrong number of query inputs for source multi-hop ref-chain projection"))
+  (db-read-source-query-input-scalar-value source inputs[0]))
+
+(defn source-multi-hop-ref-chain-value-for-var [projection: Source-Multi-Hop-Ref-Chain-Projection, name: string, final-value: Value, first-value: Value, filter-value: Value] -> Value
+  (cond
+    (= name projection.final-value-var) final-value
+    (= name projection.first-value-var) first-value
+    :else filter-value))
+
+(defn append-db-read-source-multi-hop-ref-chain-row! [rows: ^[dynamic]Result-Row, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, final-value: Value, first-value: Value, filter-value: Value]
+  (let [out-first (source-multi-hop-ref-chain-value-for-var projection query.find[0] final-value first-value filter-value)
+        out-second (source-multi-hop-ref-chain-value-for-var projection query.find[1] final-value first-value filter-value)
+        out-third (source-multi-hop-ref-chain-value-for-var projection query.find[2] final-value first-value filter-value)
+        dedupe-values ([]Value [out-first out-second out-third])]
+    (when (not (row-values-exist? (slice rows^ 0) dedupe-values))
+      (append-three-value-row! rows (value-owned out-first) (value-owned out-second) (value-owned out-third)))))
+
+(defn append-db-read-source-multi-hop-ref-chain-relation-row! [builder: ^Query-Relation-Builder, seen: (ptr (map string (struct {}))), query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, final-value: Value, first-value: Value, filter-value: Value] -> bool
+  (let [out-first (source-multi-hop-ref-chain-value-for-var projection query.find[0] final-value first-value filter-value)
+        out-second (source-multi-hop-ref-chain-value-for-var projection query.find[1] final-value first-value filter-value)
+        out-third (source-multi-hop-ref-chain-value-for-var projection query.find[2] final-value first-value filter-value)
+        values ([]Value [out-first out-second out-third])
+        [key key-ok] (row-values-dedupe-key values)]
+    (when (and key-ok (set.contains? seen^ key))
+      (delete key)
+      (return true))
+    (when key-ok
+      (set.add! seen^ key))
+    (query-relation-builder-add-column-row-with-values! builder ([]Relation-Column []) 0 values)))
+
+(defn source-query-relation-from-multi-hop-builder [attrs: [dynamic]string, builder: Query-Relation-Builder] -> Query-Relation
+  (let [attr-sources (make [dynamic]string 0 (count attrs))]
+    (for [_ attrs]
+      (arr.push! attr-sources ""))
+    (Query-Relation {attrs: attrs
+                     attr-sources: attr-sources
+                     attr-index: (query-relation-attr-index (slice attrs 0))
+                     tuples: builder.tuples
+                     typed-columns: builder.typed-columns
+                     typed-rows: builder.typed-rows
+                     has-typed-columns: builder.typed-ok})))
+
+(defn append-db-read-source-multi-hop-ref-chain-final-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, hop2-entity: u64, first-value: Value, filter-value: Value] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source hop2-entity projection.final-value-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (append-db-read-source-multi-hop-ref-chain-row! rows query projection stream.current.v first-value filter-value)
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-db-read-source-multi-hop-ref-chain-hop2-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, hop1-entity: u64, first-value: Value, filter-value: Value] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source hop1-entity projection.hop2-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (when (= stream.current.v.kind .Entity)
+        (let [[append-ok append-error] (append-db-read-source-multi-hop-ref-chain-final-rows! rows source query projection stream.current.v.entity first-value filter-value)]
+          (when (not append-ok)
+            (delete-source-index-datom-stream stream)
+            (return false append-error))))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-db-read-source-multi-hop-ref-chain-hop1-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, first-entity: u64, first-value: Value, filter-value: Value] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source first-entity projection.hop1-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (when (= stream.current.v.kind .Entity)
+        (let [[append-ok append-error] (append-db-read-source-multi-hop-ref-chain-hop2-rows! rows source query projection stream.current.v.entity first-value filter-value)]
+          (when (not append-ok)
+            (delete-source-index-datom-stream stream)
+            (return false append-error))))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-db-read-source-multi-hop-ref-chain-first-value-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, first-entity: u64, filter-value: Value] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source first-entity projection.first-value-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (let [[append-ok append-error] (append-db-read-source-multi-hop-ref-chain-hop1-rows! rows source query projection first-entity stream.current.v filter-value)]
+        (when (not append-ok)
+          (delete-source-index-datom-stream stream)
+          (return false append-error)))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-db-read-source-multi-hop-ref-chain-first-entity-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, first-entity: u64] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source first-entity projection.filter-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (when (and (= stream.current.a projection.filter-attr)
+                 (predicate-pair-matches? projection.filter-op stream.current.v projection.filter-value))
+        (let [[append-ok append-error] (append-db-read-source-multi-hop-ref-chain-first-value-rows! rows source query projection first-entity stream.current.v)]
+          (when (not append-ok)
+            (delete-source-index-datom-stream stream)
+            (return false append-error))))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn delete-source-multi-hop-ref-chain-links [links: [dynamic]Source-Multi-Hop-Ref-Chain-Link]
+  (for [link links]
+    (delete-owned-value link.filter-value)
+    (when link.has-first-value
+      (delete-owned-value link.first-value)))
+  (delete links))
+
+(defn append-source-multi-hop-ref-chain-link! [heads: ^map[u64]int, links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link, entity: u64, filter-value: Value, first-value: Value, has-first-value: bool]
+  (let [[head found] (mmap.get heads^ entity)
+        next (if found head -1)
+        index (count links^)]
+    (arr.push! links^ (Source-Multi-Hop-Ref-Chain-Link {filter-value: filter-value
+                                                         first-value: first-value
+                                                         has-first-value: has-first-value
+                                                         next: next}))
+    (mmap.assoc! heads^ entity index)))
+
+(defn append-source-multi-hop-ref-chain-filter-links! [source: DB-Read-Source, projection: Source-Multi-Hop-Ref-Chain-Projection, first-entities: (ptr (map u64 (struct {}))), heads: ^map[u64]int, links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-index-datom-stream source projection.filter-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (when (and (set.contains? first-entities^ stream.current.e)
+                 (predicate-pair-matches? projection.filter-op stream.current.v projection.filter-value))
+        (append-source-multi-hop-ref-chain-link! heads links stream.current.e (value-owned stream.current.v) (value-nil) false))
+      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not advance-ok)
+          (delete-source-index-datom-stream stream)
+          (return false advance-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-source-multi-hop-ref-chain-first-value-links! [source: DB-Read-Source, projection: Source-Multi-Hop-Ref-Chain-Projection, filter-heads: ^map[u64]int, filter-links: []Source-Multi-Hop-Ref-Chain-Link, heads: ^map[u64]int, links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-index-datom-stream source projection.first-value-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (let [[head found] (mmap.get filter-heads^ stream.current.e)]
+        (when found
+          (let [index head]
+            (while (>= index 0)
+              (append-source-multi-hop-ref-chain-link! heads links stream.current.e (value-owned filter-links[index].filter-value) (value-owned stream.current.v) true)
+              (set! index filter-links[index].next)))))
+      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not advance-ok)
+          (delete-source-index-datom-stream stream)
+          (return false advance-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-source-multi-hop-ref-chain-propagated-links! [source: DB-Read-Source, attr: string, parent-heads: ^map[u64]int, parent-links: []Source-Multi-Hop-Ref-Chain-Link, child-heads: ^map[u64]int, child-links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-index-datom-stream source attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (when (= stream.current.v.kind .Entity)
+        (let [[head found] (mmap.get parent-heads^ stream.current.e)]
+          (when found
+            (let [index head]
+              (while (>= index 0)
+                (append-source-multi-hop-ref-chain-link! child-heads child-links stream.current.v.entity (value-owned parent-links[index].filter-value) (value-owned parent-links[index].first-value) true)
+                (set! index parent-links[index].next))))))
+      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not advance-ok)
+          (delete-source-index-datom-stream stream)
+          (return false advance-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-source-multi-hop-ref-chain-reverse-propagated-links! [source: DB-Read-Source, attr: string, parent-heads: ^map[u64]int, parent-links: []Source-Multi-Hop-Ref-Chain-Link, child-heads: ^map[u64]int, child-links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-index-datom-stream source attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (when (= stream.current.v.kind .Entity)
+        (let [[head found] (mmap.get parent-heads^ stream.current.v.entity)]
+          (when found
+            (let [index head]
+              (while (>= index 0)
+                (append-source-multi-hop-ref-chain-link! child-heads child-links stream.current.e (value-owned parent-links[index].filter-value) (value-owned parent-links[index].first-value) true)
+                (set! index parent-links[index].next))))))
+      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not advance-ok)
+          (delete-source-index-datom-stream stream)
+          (return false advance-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-source-multi-hop-ref-chain-first-value-links-from-frontier! [source: DB-Read-Source, attr: string, parent-entities: []u64, heads: ^map[u64]int, links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string, scans: int, candidates: int]
+  (let [scan-count 0
+        candidate-count 0]
+    (let [[frontier-stream frontier-ok frontier-used frontier-candidates frontier-error] (source-eavt-entity-attr-frontier-stream source parent-entities attr)]
+      (when (not frontier-ok)
+        (return false frontier-error scan-count candidate-count))
+      (when frontier-used
+        (when (> (count parent-entities) 0)
+          (mut! scan-count += 1))
+        (when (>= frontier-candidates 0)
+          (mut! candidate-count += frontier-candidates))
+        (while frontier-stream.has-current
+          (when (< frontier-candidates 0)
+            (mut! candidate-count += 1))
+          (append-source-multi-hop-ref-chain-link! heads links frontier-stream.current.e (value-nil) (value-owned frontier-stream.current.v) true)
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr frontier-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream frontier-stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream frontier-stream)
+        (return true "" scan-count candidate-count)))
+    (for [entity parent-entities]
+      (mut! scan-count += 1)
+      (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity attr)]
+        (when (not stream-ok)
+          (return false stream-error scan-count candidate-count))
+        (while stream.has-current
+          (mut! candidate-count += 1)
+          (append-source-multi-hop-ref-chain-link! heads links entity (value-nil) (value-owned stream.current.v) true)
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream stream)))
+    (return true "" scan-count candidate-count)))
+
+(defn append-source-multi-hop-ref-chain-filter-links-for-entities-from-frontier! [source: DB-Read-Source, projection: Source-Multi-Hop-Ref-Chain-Projection, parent-entities: []u64, heads: ^map[u64]int, links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string, scans: int, candidates: int]
+  (let [scan-count 0
+        candidate-count 0]
+    (let [[frontier-stream frontier-ok frontier-used frontier-candidates frontier-error] (source-eavt-entity-attr-frontier-stream source parent-entities projection.filter-attr)]
+      (when (not frontier-ok)
+        (return false frontier-error scan-count candidate-count))
+      (when frontier-used
+        (when (> (count parent-entities) 0)
+          (mut! scan-count += 1))
+        (when (>= frontier-candidates 0)
+          (mut! candidate-count += frontier-candidates))
+        (while frontier-stream.has-current
+          (when (< frontier-candidates 0)
+            (mut! candidate-count += 1))
+          (when (predicate-pair-matches? projection.filter-op frontier-stream.current.v projection.filter-value)
+            (append-source-multi-hop-ref-chain-link! heads links frontier-stream.current.e (value-owned frontier-stream.current.v) (value-nil) false))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr frontier-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream frontier-stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream frontier-stream)
+        (return true "" scan-count candidate-count)))
+    (for [entity parent-entities]
+      (mut! scan-count += 1)
+      (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity projection.filter-attr)]
+        (when (not stream-ok)
+          (return false stream-error scan-count candidate-count))
+        (while stream.has-current
+          (mut! candidate-count += 1)
+          (when (predicate-pair-matches? projection.filter-op stream.current.v projection.filter-value)
+            (append-source-multi-hop-ref-chain-link! heads links entity (value-owned stream.current.v) (value-nil) false))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream stream)))
+    (return true "" scan-count candidate-count)))
+
+(defn append-source-multi-hop-ref-chain-first-value-links-from-parent-frontier! [source: DB-Read-Source, attr: string, parent-entities: []u64, parent-heads: ^map[u64]int, parent-links: []Source-Multi-Hop-Ref-Chain-Link, heads: ^map[u64]int, links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string, scans: int, candidates: int]
+  (let [scan-count 0
+        candidate-count 0]
+    (let [[frontier-stream frontier-ok frontier-used frontier-candidates frontier-error] (source-eavt-entity-attr-frontier-stream source parent-entities attr)]
+      (when (not frontier-ok)
+        (return false frontier-error scan-count candidate-count))
+      (when frontier-used
+        (when (> (count parent-entities) 0)
+          (mut! scan-count += 1))
+        (when (>= frontier-candidates 0)
+          (mut! candidate-count += frontier-candidates))
+        (while frontier-stream.has-current
+          (when (< frontier-candidates 0)
+            (mut! candidate-count += 1))
+          (let [[head found] (mmap.get parent-heads^ frontier-stream.current.e)]
+            (when found
+              (let [index head]
+                (while (>= index 0)
+                  (append-source-multi-hop-ref-chain-link! heads links frontier-stream.current.e (value-owned parent-links[index].filter-value) (value-owned frontier-stream.current.v) true)
+                  (set! index parent-links[index].next)))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr frontier-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream frontier-stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream frontier-stream)
+        (return true "" scan-count candidate-count)))
+    (for [entity parent-entities]
+      (mut! scan-count += 1)
+      (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity attr)]
+        (when (not stream-ok)
+          (return false stream-error scan-count candidate-count))
+        (while stream.has-current
+          (mut! candidate-count += 1)
+          (let [[head found] (mmap.get parent-heads^ stream.current.e)]
+            (when found
+              (let [index head]
+                (while (>= index 0)
+                  (append-source-multi-hop-ref-chain-link! heads links stream.current.e (value-owned parent-links[index].filter-value) (value-owned stream.current.v) true)
+                  (set! index parent-links[index].next)))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream stream)))
+    (return true "" scan-count candidate-count)))
+
+(defn append-source-multi-hop-ref-chain-filter-links-from-frontier! [source: DB-Read-Source, projection: Source-Multi-Hop-Ref-Chain-Projection, parent-entities: []u64, parent-heads: ^map[u64]int, parent-links: []Source-Multi-Hop-Ref-Chain-Link, child-seen: (ptr (map u64 (struct {}))), child-entities: ^[dynamic]u64, child-heads: ^map[u64]int, child-links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string, scans: int, candidates: int]
+  (let [scan-count 0
+        candidate-count 0]
+    (let [[frontier-stream frontier-ok frontier-used frontier-candidates frontier-error] (source-eavt-entity-attr-frontier-stream source parent-entities projection.filter-attr)]
+      (when (not frontier-ok)
+        (return false frontier-error scan-count candidate-count))
+      (when frontier-used
+        (when (> (count parent-entities) 0)
+          (mut! scan-count += 1))
+        (when (>= frontier-candidates 0)
+          (mut! candidate-count += frontier-candidates))
+        (while frontier-stream.has-current
+          (when (< frontier-candidates 0)
+            (mut! candidate-count += 1))
+          (when (predicate-pair-matches? projection.filter-op frontier-stream.current.v projection.filter-value)
+            (let [[head found] (mmap.get parent-heads^ frontier-stream.current.e)]
+              (when found
+                (let [entity frontier-stream.current.e
+                      already-seen (set.contains? child-seen^ entity)]
+                  (when (not already-seen)
+                    (set.add! child-seen^ entity)
+                    (arr.push! child-entities^ entity))
+                  (let [index head]
+                    (while (>= index 0)
+                      (append-source-multi-hop-ref-chain-link! child-heads child-links entity (value-owned frontier-stream.current.v) (value-owned parent-links[index].first-value) true)
+                      (set! index parent-links[index].next)))))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr frontier-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream frontier-stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream frontier-stream)
+        (return true "" scan-count candidate-count)))
+    (for [entity parent-entities]
+      (mut! scan-count += 1)
+      (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity projection.filter-attr)]
+        (when (not stream-ok)
+          (return false stream-error scan-count candidate-count))
+        (while stream.has-current
+          (mut! candidate-count += 1)
+          (when (predicate-pair-matches? projection.filter-op stream.current.v projection.filter-value)
+            (let [[head found] (mmap.get parent-heads^ entity)]
+              (when found
+                (let [already-seen (set.contains? child-seen^ entity)]
+                  (when (not already-seen)
+                    (set.add! child-seen^ entity)
+                    (arr.push! child-entities^ entity))
+                  (let [index head]
+                    (while (>= index 0)
+                      (append-source-multi-hop-ref-chain-link! child-heads child-links entity (value-owned stream.current.v) (value-owned parent-links[index].first-value) true)
+                      (set! index parent-links[index].next)))))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream stream)))
+    (return true "" scan-count candidate-count)))
+
+(defn append-source-multi-hop-ref-chain-value-links-from-frontier! [source: DB-Read-Source, attr: string, parent-entities: []u64, parent-heads: ^map[u64]int, parent-links: []Source-Multi-Hop-Ref-Chain-Link, child-seen: (ptr (map u64 (struct {}))), child-entities: ^[dynamic]u64, child-heads: ^map[u64]int, child-links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string, scans: int, candidates: int]
+  (let [scan-count 0
+        candidate-count 0]
+    (let [[frontier-stream frontier-ok frontier-used frontier-candidates frontier-error] (source-eavt-entity-attr-frontier-stream source parent-entities attr)]
+      (when (not frontier-ok)
+        (return false frontier-error scan-count candidate-count))
+      (when frontier-used
+        (when (> (count parent-entities) 0)
+          (mut! scan-count += 1))
+        (when (>= frontier-candidates 0)
+          (mut! candidate-count += frontier-candidates))
+        (while frontier-stream.has-current
+          (when (< frontier-candidates 0)
+            (mut! candidate-count += 1))
+          (let [[head found] (mmap.get parent-heads^ frontier-stream.current.e)]
+            (when found
+              (let [entity frontier-stream.current.e
+                    already-seen (set.contains? child-seen^ entity)]
+                (when (not already-seen)
+                  (set.add! child-seen^ entity)
+                  (arr.push! child-entities^ entity))
+                (let [index head]
+                  (while (>= index 0)
+                    (append-source-multi-hop-ref-chain-link! child-heads child-links entity (value-owned frontier-stream.current.v) (value-owned parent-links[index].first-value) true)
+                    (set! index parent-links[index].next))))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr frontier-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream frontier-stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream frontier-stream)
+        (return true "" scan-count candidate-count)))
+    (for [entity parent-entities]
+      (mut! scan-count += 1)
+      (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity attr)]
+        (when (not stream-ok)
+          (return false stream-error scan-count candidate-count))
+        (while stream.has-current
+          (mut! candidate-count += 1)
+          (let [[head found] (mmap.get parent-heads^ stream.current.e)]
+            (when found
+              (let [already-seen (set.contains? child-seen^ stream.current.e)]
+                (when (not already-seen)
+                  (set.add! child-seen^ stream.current.e)
+                  (arr.push! child-entities^ stream.current.e))
+                (let [index head]
+                  (while (>= index 0)
+                    (append-source-multi-hop-ref-chain-link! child-heads child-links stream.current.e (value-owned stream.current.v) (value-owned parent-links[index].first-value) true)
+                    (set! index parent-links[index].next))))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream stream)))
+    (return true "" scan-count candidate-count)))
+
+(defn append-source-multi-hop-ref-chain-propagated-links-from-frontier! [source: DB-Read-Source, attr: string, parent-entities: []u64, parent-heads: ^map[u64]int, parent-links: []Source-Multi-Hop-Ref-Chain-Link, child-seen: (ptr (map u64 (struct {}))), child-entities: ^[dynamic]u64, child-heads: ^map[u64]int, child-links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string, scans: int, candidates: int]
+  (let [scan-count 0
+        candidate-count 0]
+    (let [[frontier-stream frontier-ok frontier-used frontier-candidates frontier-error] (source-eavt-entity-attr-frontier-stream source parent-entities attr)]
+      (when (not frontier-ok)
+        (return false frontier-error scan-count candidate-count))
+      (when frontier-used
+        (when (> (count parent-entities) 0)
+          (mut! scan-count += 1))
+        (when (>= frontier-candidates 0)
+          (mut! candidate-count += frontier-candidates))
+        (while frontier-stream.has-current
+          (when (< frontier-candidates 0)
+            (mut! candidate-count += 1))
+          (when (= frontier-stream.current.v.kind .Entity)
+            (let [[head found] (mmap.get parent-heads^ frontier-stream.current.e)]
+              (when found
+                (let [child frontier-stream.current.v.entity
+                      already-seen (set.contains? child-seen^ child)]
+                  (when (not already-seen)
+                    (set.add! child-seen^ child)
+                    (arr.push! child-entities^ child))
+                  (let [index head]
+                    (while (>= index 0)
+                      (append-source-multi-hop-ref-chain-link! child-heads child-links child (value-owned parent-links[index].filter-value) (value-owned parent-links[index].first-value) true)
+                      (set! index parent-links[index].next)))))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr frontier-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream frontier-stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream frontier-stream)
+        (return true "" scan-count candidate-count)))
+    (for [entity parent-entities]
+      (mut! scan-count += 1)
+      (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity attr)]
+        (when (not stream-ok)
+          (return false stream-error scan-count candidate-count))
+        (while stream.has-current
+          (mut! candidate-count += 1)
+          (when (= stream.current.v.kind .Entity)
+            (let [[head found] (mmap.get parent-heads^ stream.current.e)]
+              (when found
+                (let [child stream.current.v.entity
+                      already-seen (set.contains? child-seen^ child)]
+                  (when (not already-seen)
+                    (set.add! child-seen^ child)
+                    (arr.push! child-entities^ child))
+                  (let [index head]
+                    (while (>= index 0)
+                      (append-source-multi-hop-ref-chain-link! child-heads child-links child (value-owned parent-links[index].filter-value) (value-owned parent-links[index].first-value) true)
+                      (set! index parent-links[index].next)))))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream stream)))
+    (return true "" scan-count candidate-count)))
+
+(defn append-source-multi-hop-ref-chain-two-final-value-rows-from-frontier! [source: DB-Read-Source, attr: string, parent-entities: []u64, parent-heads: ^map[u64]int, parent-links: []Source-Multi-Hop-Ref-Chain-Link, builder: ^Query-Relation-Builder, seen: (ptr (map string (struct {}))), query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection] -> [ok: bool, error: string, scans: int, candidates: int]
+  (let [scan-count 0
+        candidate-count 0]
+    (let [[frontier-stream frontier-ok frontier-used frontier-candidates frontier-error] (source-eavt-entity-attr-frontier-stream source parent-entities attr)]
+      (when (not frontier-ok)
+        (return false frontier-error scan-count candidate-count))
+      (when frontier-used
+        (when (> (count parent-entities) 0)
+          (mut! scan-count += 1))
+        (when (>= frontier-candidates 0)
+          (mut! candidate-count += frontier-candidates))
+        (while frontier-stream.has-current
+          (when (< frontier-candidates 0)
+            (mut! candidate-count += 1))
+          (let [[head found] (mmap.get parent-heads^ frontier-stream.current.e)]
+            (when found
+              (let [index head]
+                (while (>= index 0)
+                  (when (not (append-db-read-source-multi-hop-ref-chain-relation-row! builder seen query projection parent-links[index].filter-value parent-links[index].first-value frontier-stream.current.v))
+                    (delete-source-index-datom-stream frontier-stream)
+                    (return false "source multi-hop ref-chain two-final-values relation could not add typed row" scan-count candidate-count))
+                  (set! index parent-links[index].next)))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr frontier-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream frontier-stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream frontier-stream)
+        (return true "" scan-count candidate-count)))
+    (for [entity parent-entities]
+      (mut! scan-count += 1)
+      (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity attr)]
+        (when (not stream-ok)
+          (return false stream-error scan-count candidate-count))
+        (while stream.has-current
+          (mut! candidate-count += 1)
+          (let [[head found] (mmap.get parent-heads^ stream.current.e)]
+            (when found
+              (let [index head]
+                (while (>= index 0)
+                  (when (not (append-db-read-source-multi-hop-ref-chain-relation-row! builder seen query projection parent-links[index].filter-value parent-links[index].first-value stream.current.v))
+                    (delete-source-index-datom-stream stream)
+                    (return false "source multi-hop ref-chain two-final-values relation could not add typed row" scan-count candidate-count))
+                  (set! index parent-links[index].next)))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream stream)))
+    (return true "" scan-count candidate-count)))
+
+(defn append-source-multi-hop-ref-chain-final-value-rows-from-frontier! [source: DB-Read-Source, attr: string, parent-entities: []u64, parent-heads: ^map[u64]int, parent-links: []Source-Multi-Hop-Ref-Chain-Link, builder: ^Query-Relation-Builder, seen: (ptr (map string (struct {}))), query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection] -> [ok: bool, error: string, scans: int, candidates: int]
+  (let [scan-count 0
+        candidate-count 0]
+    (let [[frontier-stream frontier-ok frontier-used frontier-candidates frontier-error] (source-eavt-entity-attr-frontier-stream source parent-entities attr)]
+      (when (not frontier-ok)
+        (return false frontier-error scan-count candidate-count))
+      (when frontier-used
+        (when (> (count parent-entities) 0)
+          (mut! scan-count += 1))
+        (when (>= frontier-candidates 0)
+          (mut! candidate-count += frontier-candidates))
+        (while frontier-stream.has-current
+          (when (< frontier-candidates 0)
+            (mut! candidate-count += 1))
+          (let [[head found] (mmap.get parent-heads^ frontier-stream.current.e)]
+            (when found
+              (let [index head]
+                (while (>= index 0)
+                  (when (not (append-db-read-source-multi-hop-ref-chain-relation-row! builder seen query projection frontier-stream.current.v parent-links[index].first-value parent-links[index].filter-value))
+                    (delete-source-index-datom-stream frontier-stream)
+                    (return false "source multi-hop ref-chain final-value relation could not add typed row" scan-count candidate-count))
+                  (set! index parent-links[index].next)))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr frontier-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream frontier-stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream frontier-stream)
+        (return true "" scan-count candidate-count)))
+    (for [entity parent-entities]
+      (mut! scan-count += 1)
+      (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity attr)]
+        (when (not stream-ok)
+          (return false stream-error scan-count candidate-count))
+        (while stream.has-current
+          (mut! candidate-count += 1)
+          (let [[head found] (mmap.get parent-heads^ stream.current.e)]
+            (when found
+              (let [index head]
+                (while (>= index 0)
+                  (when (not (append-db-read-source-multi-hop-ref-chain-relation-row! builder seen query projection stream.current.v parent-links[index].first-value parent-links[index].filter-value))
+                    (delete-source-index-datom-stream stream)
+                    (return false "source multi-hop ref-chain final-value relation could not add typed row" scan-count candidate-count))
+                  (set! index parent-links[index].next)))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream stream)))
+    (return true "" scan-count candidate-count)))
+
+(defn append-source-multi-hop-ref-chain-reverse-propagated-links-from-frontier! [source: DB-Read-Source, attr: string, parent-entities: []u64, parent-heads: ^map[u64]int, parent-links: []Source-Multi-Hop-Ref-Chain-Link, child-seen: (ptr (map u64 (struct {}))), child-entities: ^[dynamic]u64, child-heads: ^map[u64]int, child-links: ^[dynamic]Source-Multi-Hop-Ref-Chain-Link] -> [ok: bool, error: string, scans: int, candidates: int]
+  (let [scan-count 0
+        candidate-count 0]
+    (let [[frontier-stream frontier-ok frontier-used frontier-candidates frontier-error] (source-vaet-entity-attr-frontier-stream source parent-entities attr)]
+      (when (not frontier-ok)
+        (return false frontier-error scan-count candidate-count))
+      (when frontier-used
+        (when (> (count parent-entities) 0)
+          (mut! scan-count += 1))
+        (when (>= frontier-candidates 0)
+          (mut! candidate-count += frontier-candidates))
+        (while frontier-stream.has-current
+          (when (< frontier-candidates 0)
+            (mut! candidate-count += 1))
+          (when (= frontier-stream.current.v.kind .Entity)
+            (let [parent frontier-stream.current.v.entity
+                  [head found] (mmap.get parent-heads^ parent)]
+              (when found
+                (let [child frontier-stream.current.e
+                      already-seen (set.contains? child-seen^ child)]
+                  (when (not already-seen)
+                    (set.add! child-seen^ child)
+                    (arr.push! child-entities^ child))
+                  (let [index head]
+                    (while (>= index 0)
+                      (append-source-multi-hop-ref-chain-link! child-heads child-links child (value-owned parent-links[index].filter-value) (value-owned parent-links[index].first-value) true)
+                      (set! index parent-links[index].next)))))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr frontier-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream frontier-stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream frontier-stream)
+        (return true "" scan-count candidate-count)))
+    (for [parent parent-entities]
+      (mut! scan-count += 1)
+      (let [[stream stream-ok stream-error] (source-vaet-entity-attr-stream source parent attr)]
+        (when (not stream-ok)
+          (return false stream-error scan-count candidate-count))
+        (while stream.has-current
+          (mut! candidate-count += 1)
+          (let [[head found] (mmap.get parent-heads^ parent)]
+            (when found
+              (let [child stream.current.e
+                    already-seen (set.contains? child-seen^ child)]
+                (when (not already-seen)
+                  (set.add! child-seen^ child)
+                  (arr.push! child-entities^ child))
+                (let [index head]
+                  (while (>= index 0)
+                    (append-source-multi-hop-ref-chain-link! child-heads child-links child (value-owned parent-links[index].filter-value) (value-owned parent-links[index].first-value) true)
+                    (set! index parent-links[index].next))))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream stream)))
+    (return true "" scan-count candidate-count)))
+
+(defn append-source-multi-hop-ref-chain-first-entities-from-frontier! [source: DB-Read-Source, attr: string, parent-entities: []u64, child-seen: (ptr (map u64 (struct {}))), child-entities: ^[dynamic]u64] -> [ok: bool, error: string, scans: int, candidates: int]
+  (let [scan-count 0
+        candidate-count 0]
+    (let [[frontier-stream frontier-ok frontier-used frontier-candidates frontier-error] (source-vaet-entity-attr-frontier-stream source parent-entities attr)]
+      (when (not frontier-ok)
+        (return false frontier-error scan-count candidate-count))
+      (when frontier-used
+        (when (> (count parent-entities) 0)
+          (mut! scan-count += 1))
+        (when (>= frontier-candidates 0)
+          (mut! candidate-count += frontier-candidates))
+        (while frontier-stream.has-current
+          (when (< frontier-candidates 0)
+            (mut! candidate-count += 1))
+          (let [child frontier-stream.current.e
+                already-seen (set.contains? child-seen^ child)]
+            (when (not already-seen)
+              (set.add! child-seen^ child)
+              (arr.push! child-entities^ child)))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr frontier-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream frontier-stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream frontier-stream)
+        (return true "" scan-count candidate-count)))
+    (for [parent parent-entities]
+      (mut! scan-count += 1)
+      (let [[stream stream-ok stream-error] (source-vaet-entity-attr-stream source parent attr)]
+        (when (not stream-ok)
+          (return false stream-error scan-count candidate-count))
+        (while stream.has-current
+          (mut! candidate-count += 1)
+          (let [child stream.current.e
+                already-seen (set.contains? child-seen^ child)]
+            (when (not already-seen)
+              (set.add! child-seen^ child)
+              (arr.push! child-entities^ child)))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (return false advance-error scan-count candidate-count))))
+        (delete-source-index-datom-stream stream)))
+    (return true "" scan-count candidate-count)))
+
+(defn q-db-read-source-multi-hop-ref-chain-projection-batched [source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, inputs: []Query-Input] -> Result-Set
+  (let [rows (make [dynamic]Result-Row)
+        [anchor-value anchor-value-ok anchor-value-error] (db-read-source-multi-hop-ref-chain-anchor-value source projection inputs)]
+    (when (not anchor-value-ok)
+      (return (result-set-error anchor-value-error)))
+      (let [anchor-entities (set.empty u64) :defer
+          anchor-entity-list (make [dynamic]u64) :defer
+          first-entities (set.empty u64) :defer
+          first-entity-list (make [dynamic]u64) :defer
+          filter-heads (make (map u64 int)) :defer
+          filter-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          first-value-heads (make (map u64 int)) :defer
+          first-value-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          hop1-heads (make (map u64 int)) :defer
+          hop1-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          hop2-heads (make (map u64 int)) :defer
+          hop2-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)]
+      (defer (delete-source-multi-hop-ref-chain-links filter-links))
+      (defer (delete-source-multi-hop-ref-chain-links first-value-links))
+      (defer (delete-source-multi-hop-ref-chain-links hop1-links))
+      (defer (delete-source-multi-hop-ref-chain-links hop2-links))
+      (let [[anchor-stream anchor-ok anchor-error] (source-attr-value-match-stream source projection.anchor-attr anchor-value)]
+        (when (not anchor-ok)
+          (return (result-set-error anchor-error)))
+        (while anchor-stream.has-current
+          (let [anchor-datom (source-attr-value-match-current anchor-stream)]
+            (when (not (set.contains? anchor-entities anchor-datom.e))
+              (set.add! anchor-entities anchor-datom.e)
+              (arr.push! anchor-entity-list anchor-datom.e)))
+          (let [[anchor-advance-ok anchor-advance-error] (advance-source-attr-value-match-stream! source (addr anchor-stream))]
+            (when (not anchor-advance-ok)
+              (delete-source-attr-value-match-stream anchor-stream)
+              (return (result-set-error anchor-advance-error)))))
+        (delete-source-attr-value-match-stream anchor-stream))
+      (arr.sort! anchor-entity-list)
+      (let [[reverse-ok reverse-error _ _] (append-source-multi-hop-ref-chain-first-entities-from-frontier! source projection.reverse-ref-attr (slice anchor-entity-list 0) (addr first-entities) (addr first-entity-list))]
+        (when (not reverse-ok)
+          (return (result-set-error reverse-error))))
+      (let [[filter-ok filter-error] (append-source-multi-hop-ref-chain-filter-links! source projection (addr first-entities) (addr filter-heads) (addr filter-links))]
+        (when (not filter-ok)
+          (delete-result-rows-owned-values rows)
+          (return (result-set-error filter-error))))
+      (let [[first-value-ok first-value-error] (append-source-multi-hop-ref-chain-first-value-links! source projection (addr filter-heads) (slice filter-links 0) (addr first-value-heads) (addr first-value-links))]
+        (when (not first-value-ok)
+          (delete-result-rows-owned-values rows)
+          (return (result-set-error first-value-error))))
+      (let [[hop1-ok hop1-error] (append-source-multi-hop-ref-chain-propagated-links! source projection.hop1-attr (addr first-value-heads) (slice first-value-links 0) (addr hop1-heads) (addr hop1-links))]
+        (when (not hop1-ok)
+          (delete-result-rows-owned-values rows)
+          (return (result-set-error hop1-error))))
+      (let [[hop2-ok hop2-error] (append-source-multi-hop-ref-chain-propagated-links! source projection.hop2-attr (addr hop1-heads) (slice hop1-links 0) (addr hop2-heads) (addr hop2-links))]
+        (when (not hop2-ok)
+          (delete-result-rows-owned-values rows)
+          (return (result-set-error hop2-error))))
+      (let [[final-stream final-ok final-error] (source-index-datom-stream source projection.final-value-attr)]
+        (when (not final-ok)
+          (delete-result-rows-owned-values rows)
+          (return (result-set-error final-error)))
+        (while final-stream.has-current
+          (let [[head found] (mmap.get hop2-heads final-stream.current.e)]
+            (when found
+              (let [index head]
+                (while (>= index 0)
+                  (append-db-read-source-multi-hop-ref-chain-row! (addr rows) query projection final-stream.current.v hop2-links[index].first-value hop2-links[index].filter-value)
+                  (set! index hop2-links[index].next)))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr final-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream final-stream)
+              (delete-result-rows-owned-values rows)
+              (return (result-set-error advance-error)))))
+        (delete-source-index-datom-stream final-stream))
+      (result-set-ok rows))))
+
+(defn db-read-source-query-relation-multi-hop-ref-chain-projection-batched [source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
+  (when (db-read-source-has-overlay? source)
+    (return (query-relation-empty) false ""))
+  (let [attrs (arr.into [dynamic]string (slice query.find 0))
+        builder (query-relation-builder (slice attrs 0))
+        seen (set.empty string)
+        [anchor-value anchor-value-ok anchor-value-error] (db-read-source-multi-hop-ref-chain-anchor-value source projection inputs)]
+    (defer (delete-owned-string-set seen))
+    (when (not anchor-value-ok)
+      (delete attrs)
+      (delete-query-relation-builder builder)
+      (return (query-relation-empty) false anchor-value-error))
+    (let [anchor-entities (set.empty u64) :defer
+          anchor-entity-list (make [dynamic]u64) :defer
+          first-entities (set.empty u64) :defer
+          first-entity-list (make [dynamic]u64) :defer
+          hop1-entities (set.empty u64) :defer
+          hop1-entity-list (make [dynamic]u64) :defer
+          hop2-entities (set.empty u64) :defer
+          hop2-entity-list (make [dynamic]u64) :defer
+          filter-heads (make (map u64 int)) :defer
+          filter-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          first-value-heads (make (map u64 int)) :defer
+          first-value-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          hop1-heads (make (map u64 int)) :defer
+          hop1-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          hop2-heads (make (map u64 int)) :defer
+          hop2-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)]
+      (defer (delete-source-multi-hop-ref-chain-links filter-links))
+      (defer (delete-source-multi-hop-ref-chain-links first-value-links))
+      (defer (delete-source-multi-hop-ref-chain-links hop1-links))
+      (defer (delete-source-multi-hop-ref-chain-links hop2-links))
+      (let [[anchor-stream anchor-ok anchor-error] (source-attr-value-match-stream source projection.anchor-attr anchor-value)]
+        (when (not anchor-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false anchor-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += 1)
+        (while anchor-stream.has-current
+          (let [anchor-datom (source-attr-value-match-current anchor-stream)]
+            (when (not (set.contains? anchor-entities anchor-datom.e))
+              (set.add! anchor-entities anchor-datom.e)
+              (arr.push! anchor-entity-list anchor-datom.e))
+            (mut! stats^.clause-candidates += 1))
+          (let [[anchor-advance-ok anchor-advance-error] (advance-source-attr-value-match-stream! source (addr anchor-stream))]
+            (when (not anchor-advance-ok)
+              (delete-source-attr-value-match-stream anchor-stream)
+              (delete attrs)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false anchor-advance-error))))
+        (delete-source-attr-value-match-stream anchor-stream))
+      (query-stats-observe-source-operator! stats)
+      (arr.sort! anchor-entity-list)
+      (let [[reverse-ok reverse-error reverse-scans reverse-candidates] (append-source-multi-hop-ref-chain-first-entities-from-frontier! source projection.reverse-ref-attr (slice anchor-entity-list 0) (addr first-entities) (addr first-entity-list))]
+        (when (not reverse-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false reverse-error))
+        (mut! stats^.source-index-scans += reverse-scans)
+        (mut! stats^.clause-candidates += reverse-candidates))
+      (arr.sort! first-entity-list)
+      (let [[filter-ok filter-error filter-scans filter-candidates] (append-source-multi-hop-ref-chain-filter-links-for-entities-from-frontier! source projection (slice first-entity-list 0) (addr filter-heads) (addr filter-links))]
+        (when (not filter-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false filter-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += filter-scans)
+        (mut! stats^.clause-candidates += filter-candidates))
+      (let [[first-value-ok first-value-error first-value-scans first-value-candidates] (append-source-multi-hop-ref-chain-first-value-links-from-parent-frontier! source projection.first-value-attr (slice first-entity-list 0) (addr filter-heads) (slice filter-links 0) (addr first-value-heads) (addr first-value-links))]
+        (when (not first-value-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false first-value-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += first-value-scans)
+        (mut! stats^.clause-candidates += first-value-candidates))
+      (let [[hop1-ok hop1-error hop1-scans hop1-candidates] (append-source-multi-hop-ref-chain-propagated-links-from-frontier! source projection.hop1-attr (slice first-entity-list 0) (addr first-value-heads) (slice first-value-links 0) (addr hop1-entities) (addr hop1-entity-list) (addr hop1-heads) (addr hop1-links))]
+        (when (not hop1-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false hop1-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += hop1-scans)
+        (mut! stats^.clause-candidates += hop1-candidates))
+      (arr.sort! hop1-entity-list)
+      (let [[hop2-ok hop2-error hop2-scans hop2-candidates] (append-source-multi-hop-ref-chain-propagated-links-from-frontier! source projection.hop2-attr (slice hop1-entity-list 0) (addr hop1-heads) (slice hop1-links 0) (addr hop2-entities) (addr hop2-entity-list) (addr hop2-heads) (addr hop2-links))]
+        (when (not hop2-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false hop2-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += hop2-scans)
+        (mut! stats^.clause-candidates += hop2-candidates))
+      (query-stats-observe-source-operator! stats)
+      (arr.sort! hop2-entity-list)
+      (let [[final-ok final-error final-scans final-candidates] (append-source-multi-hop-ref-chain-final-value-rows-from-frontier! source projection.final-value-attr (slice hop2-entity-list 0) (addr hop2-heads) (slice hop2-links 0) (addr builder) (addr seen) query projection)]
+        (when (not final-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false final-error))
+        (mut! stats^.source-index-scans += final-scans)
+        (mut! stats^.clause-candidates += final-candidates))
+      (mut! stats^.clauses += 7)
+      (return (source-query-relation-from-multi-hop-builder attrs builder) true ""))))
+
+(defn db-read-source-query-relation-multi-hop-ref-chain-final-filter-batched [source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
+  (when (db-read-source-has-overlay? source)
+    (return (query-relation-empty) false ""))
+  (let [attrs (arr.into [dynamic]string (slice query.find 0))
+        builder (query-relation-builder (slice attrs 0))
+        seen (set.empty string)
+        [anchor-value anchor-value-ok anchor-value-error] (db-read-source-multi-hop-ref-chain-anchor-value source projection inputs)]
+    (defer (delete-owned-string-set seen))
+    (when (not anchor-value-ok)
+      (delete attrs)
+      (delete-query-relation-builder builder)
+      (return (query-relation-empty) false anchor-value-error))
+    (let [anchor-entities (set.empty u64) :defer
+          anchor-entity-list (make [dynamic]u64) :defer
+          first-entities (set.empty u64) :defer
+          first-entity-list (make [dynamic]u64) :defer
+          hop1-entities (set.empty u64) :defer
+          hop1-entity-list (make [dynamic]u64) :defer
+          hop2-entities (set.empty u64) :defer
+          hop2-entity-list (make [dynamic]u64) :defer
+          final-entities (set.empty u64) :defer
+          final-entity-list (make [dynamic]u64) :defer
+          first-value-heads (make (map u64 int)) :defer
+          first-value-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          hop1-heads (make (map u64 int)) :defer
+          hop1-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          hop2-heads (make (map u64 int)) :defer
+          hop2-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          final-heads (make (map u64 int)) :defer
+          final-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)]
+      (defer (delete-source-multi-hop-ref-chain-links first-value-links))
+      (defer (delete-source-multi-hop-ref-chain-links hop1-links))
+      (defer (delete-source-multi-hop-ref-chain-links hop2-links))
+      (defer (delete-source-multi-hop-ref-chain-links final-links))
+      (let [[anchor-stream anchor-ok anchor-error] (source-attr-value-match-stream source projection.anchor-attr anchor-value)]
+        (when (not anchor-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false anchor-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += 1)
+        (while anchor-stream.has-current
+          (let [anchor-datom (source-attr-value-match-current anchor-stream)]
+            (when (not (set.contains? anchor-entities anchor-datom.e))
+              (set.add! anchor-entities anchor-datom.e)
+              (arr.push! anchor-entity-list anchor-datom.e))
+            (mut! stats^.clause-candidates += 1))
+          (let [[anchor-advance-ok anchor-advance-error] (advance-source-attr-value-match-stream! source (addr anchor-stream))]
+            (when (not anchor-advance-ok)
+              (delete-source-attr-value-match-stream anchor-stream)
+              (delete attrs)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false anchor-advance-error))))
+        (delete-source-attr-value-match-stream anchor-stream))
+      (query-stats-observe-source-operator! stats)
+      (arr.sort! anchor-entity-list)
+      (let [[reverse-ok reverse-error reverse-scans reverse-candidates] (append-source-multi-hop-ref-chain-first-entities-from-frontier! source projection.reverse-ref-attr (slice anchor-entity-list 0) (addr first-entities) (addr first-entity-list))]
+        (when (not reverse-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false reverse-error))
+        (mut! stats^.source-index-scans += reverse-scans)
+        (mut! stats^.clause-candidates += reverse-candidates))
+      (arr.sort! first-entity-list)
+      (let [[first-value-ok first-value-error first-value-scans first-value-candidates] (append-source-multi-hop-ref-chain-first-value-links-from-frontier! source projection.first-value-attr (slice first-entity-list 0) (addr first-value-heads) (addr first-value-links))]
+        (when (not first-value-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false first-value-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += first-value-scans)
+        (mut! stats^.clause-candidates += first-value-candidates))
+      (let [[hop1-ok hop1-error hop1-scans hop1-candidates] (append-source-multi-hop-ref-chain-reverse-propagated-links-from-frontier! source projection.hop1-attr (slice first-entity-list 0) (addr first-value-heads) (slice first-value-links 0) (addr hop1-entities) (addr hop1-entity-list) (addr hop1-heads) (addr hop1-links))]
+        (when (not hop1-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false hop1-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += hop1-scans)
+        (mut! stats^.clause-candidates += hop1-candidates))
+      (arr.sort! hop1-entity-list)
+      (let [[hop2-ok hop2-error hop2-scans hop2-candidates] (append-source-multi-hop-ref-chain-reverse-propagated-links-from-frontier! source projection.hop2-attr (slice hop1-entity-list 0) (addr hop1-heads) (slice hop1-links 0) (addr hop2-entities) (addr hop2-entity-list) (addr hop2-heads) (addr hop2-links))]
+        (when (not hop2-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false hop2-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += hop2-scans)
+        (mut! stats^.clause-candidates += hop2-candidates))
+      (arr.sort! hop2-entity-list)
+      (let [[filter-ok filter-error filter-scans filter-candidates] (append-source-multi-hop-ref-chain-filter-links-from-frontier! source projection (slice hop2-entity-list 0) (addr hop2-heads) (slice hop2-links 0) (addr final-entities) (addr final-entity-list) (addr final-heads) (addr final-links))]
+        (when (not filter-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false filter-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += filter-scans)
+        (mut! stats^.clause-candidates += filter-candidates))
+      (query-stats-observe-source-operator! stats)
+      (arr.sort! final-entity-list)
+      (let [[final-frontier-stream final-frontier-ok final-frontier-used final-frontier-candidates final-frontier-error] (source-eavt-entity-attr-frontier-stream source (slice final-entity-list 0) projection.final-value-attr)]
+        (when (not final-frontier-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false final-frontier-error))
+        (if final-frontier-used
+          (do
+            (when (> (count final-entity-list) 0)
+              (mut! stats^.source-index-scans += 1))
+            (when (>= final-frontier-candidates 0)
+              (mut! stats^.clause-candidates += final-frontier-candidates))
+            (while final-frontier-stream.has-current
+              (when (< final-frontier-candidates 0)
+                (mut! stats^.clause-candidates += 1))
+              (let [[head found] (mmap.get final-heads final-frontier-stream.current.e)]
+                (when found
+                  (let [index head]
+                    (while (>= index 0)
+                      (when (not (append-db-read-source-multi-hop-ref-chain-relation-row! (addr builder) (addr seen) query projection final-frontier-stream.current.v final-links[index].first-value final-links[index].filter-value))
+                        (delete-source-index-datom-stream final-frontier-stream)
+                        (delete attrs)
+                        (delete-query-relation-builder builder)
+                        (return (query-relation-empty) false "source multi-hop ref-chain final-filter relation could not add typed row"))
+                      (set! index final-links[index].next)))))
+              (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr final-frontier-stream))]
+                (when (not advance-ok)
+                  (delete-source-index-datom-stream final-frontier-stream)
+                  (delete attrs)
+                  (delete-query-relation-builder builder)
+                  (return (query-relation-empty) false advance-error))))
+            (delete-source-index-datom-stream final-frontier-stream))
+          (do
+            (for [final-entity final-entity-list]
+              (mut! stats^.source-index-scans += 1)
+              (let [[final-stream final-ok final-error] (source-eavt-entity-attr-stream source final-entity projection.final-value-attr)]
+                (when (not final-ok)
+                  (delete attrs)
+                  (delete-query-relation-builder builder)
+                  (return (query-relation-empty) false final-error))
+                (while final-stream.has-current
+                  (mut! stats^.clause-candidates += 1)
+                  (let [[head found] (mmap.get final-heads final-stream.current.e)]
+                    (when found
+                      (let [index head]
+                        (while (>= index 0)
+                          (when (not (append-db-read-source-multi-hop-ref-chain-relation-row! (addr builder) (addr seen) query projection final-stream.current.v final-links[index].first-value final-links[index].filter-value))
+                            (delete-source-index-datom-stream final-stream)
+                            (delete attrs)
+                            (delete-query-relation-builder builder)
+                            (return (query-relation-empty) false "source multi-hop ref-chain final-filter relation could not add typed row"))
+                          (set! index final-links[index].next)))))
+                  (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr final-stream))]
+                    (when (not advance-ok)
+                      (delete-source-index-datom-stream final-stream)
+                      (delete attrs)
+                      (delete-query-relation-builder builder)
+                      (return (query-relation-empty) false advance-error))))
+                (delete-source-index-datom-stream final-stream))))))
+      (mut! stats^.clauses += 7)
+      (return (source-query-relation-from-multi-hop-builder attrs builder) true ""))))
+
+(defn db-read-source-query-relation-multi-hop-ref-chain-two-final-values-batched [source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
+  (when (db-read-source-has-overlay? source)
+    (return (query-relation-empty) false ""))
+  (let [attrs (arr.into [dynamic]string (slice query.find 0))
+        builder (query-relation-builder (slice attrs 0))
+        seen (set.empty string)
+        [anchor-value anchor-value-ok anchor-value-error] (db-read-source-multi-hop-ref-chain-anchor-value source projection inputs)]
+    (defer (delete-owned-string-set seen))
+    (when (not anchor-value-ok)
+      (delete attrs)
+      (delete-query-relation-builder builder)
+      (return (query-relation-empty) false anchor-value-error))
+    (let [anchor-entities (set.empty u64) :defer
+          anchor-entity-list (make [dynamic]u64) :defer
+          first-entities (set.empty u64) :defer
+          first-entity-list (make [dynamic]u64) :defer
+          hop1-entities (set.empty u64) :defer
+          hop1-entity-list (make [dynamic]u64) :defer
+          hop2-entities (set.empty u64) :defer
+          hop2-entity-list (make [dynamic]u64) :defer
+          final-entities (set.empty u64) :defer
+          final-entity-list (make [dynamic]u64) :defer
+          first-value-heads (make (map u64 int)) :defer
+          first-value-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          hop1-heads (make (map u64 int)) :defer
+          hop1-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          hop2-heads (make (map u64 int)) :defer
+          hop2-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)
+          final-heads (make (map u64 int)) :defer
+          final-links (make [dynamic]Source-Multi-Hop-Ref-Chain-Link)]
+      (defer (delete-source-multi-hop-ref-chain-links first-value-links))
+      (defer (delete-source-multi-hop-ref-chain-links hop1-links))
+      (defer (delete-source-multi-hop-ref-chain-links hop2-links))
+      (defer (delete-source-multi-hop-ref-chain-links final-links))
+      (let [[anchor-stream anchor-ok anchor-error] (source-attr-value-match-stream source projection.anchor-attr anchor-value)]
+        (when (not anchor-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false anchor-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += 1)
+        (while anchor-stream.has-current
+          (let [anchor-datom (source-attr-value-match-current anchor-stream)]
+            (when (not (set.contains? anchor-entities anchor-datom.e))
+              (set.add! anchor-entities anchor-datom.e)
+              (arr.push! anchor-entity-list anchor-datom.e))
+            (mut! stats^.clause-candidates += 1))
+          (let [[anchor-advance-ok anchor-advance-error] (advance-source-attr-value-match-stream! source (addr anchor-stream))]
+            (when (not anchor-advance-ok)
+              (delete-source-attr-value-match-stream anchor-stream)
+              (delete attrs)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false anchor-advance-error))))
+        (delete-source-attr-value-match-stream anchor-stream))
+      (query-stats-observe-source-operator! stats)
+      (arr.sort! anchor-entity-list)
+      (let [[reverse-ok reverse-error reverse-scans reverse-candidates] (append-source-multi-hop-ref-chain-first-entities-from-frontier! source projection.reverse-ref-attr (slice anchor-entity-list 0) (addr first-entities) (addr first-entity-list))]
+        (when (not reverse-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false reverse-error))
+        (mut! stats^.source-index-scans += reverse-scans)
+        (mut! stats^.clause-candidates += reverse-candidates))
+      (arr.sort! first-entity-list)
+      (let [[first-value-ok first-value-error first-value-scans first-value-candidates] (append-source-multi-hop-ref-chain-first-value-links-from-frontier! source projection.first-value-attr (slice first-entity-list 0) (addr first-value-heads) (addr first-value-links))]
+        (when (not first-value-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false first-value-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += first-value-scans)
+        (mut! stats^.clause-candidates += first-value-candidates))
+      (let [[hop1-ok hop1-error hop1-scans hop1-candidates] (append-source-multi-hop-ref-chain-reverse-propagated-links-from-frontier! source projection.hop1-attr (slice first-entity-list 0) (addr first-value-heads) (slice first-value-links 0) (addr hop1-entities) (addr hop1-entity-list) (addr hop1-heads) (addr hop1-links))]
+        (when (not hop1-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false hop1-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += hop1-scans)
+        (mut! stats^.clause-candidates += hop1-candidates))
+      (arr.sort! hop1-entity-list)
+      (let [[hop2-ok hop2-error hop2-scans hop2-candidates] (append-source-multi-hop-ref-chain-reverse-propagated-links-from-frontier! source projection.hop2-attr (slice hop1-entity-list 0) (addr hop1-heads) (slice hop1-links 0) (addr hop2-entities) (addr hop2-entity-list) (addr hop2-heads) (addr hop2-links))]
+        (when (not hop2-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false hop2-error))
+        (query-stats-observe-source-operator! stats)
+        (mut! stats^.source-index-scans += hop2-scans)
+        (mut! stats^.clause-candidates += hop2-candidates))
+      (query-stats-observe-source-operator! stats)
+      (arr.sort! hop2-entity-list)
+      (let [[final-ok final-error final-scans final-candidates] (append-source-multi-hop-ref-chain-value-links-from-frontier! source projection.final-value-attr (slice hop2-entity-list 0) (addr hop2-heads) (slice hop2-links 0) (addr final-entities) (addr final-entity-list) (addr final-heads) (addr final-links))]
+        (when (not final-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false final-error))
+        (mut! stats^.source-index-scans += final-scans)
+        (mut! stats^.clause-candidates += final-candidates))
+      (query-stats-observe-source-operator! stats)
+      (arr.sort! final-entity-list)
+      (let [[second-ok second-error second-scans second-candidates] (append-source-multi-hop-ref-chain-two-final-value-rows-from-frontier! source projection.filter-attr (slice final-entity-list 0) (addr final-heads) (slice final-links 0) (addr builder) (addr seen) query projection)]
+        (when (not second-ok)
+          (delete attrs)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false second-error))
+        (mut! stats^.source-index-scans += second-scans)
+        (mut! stats^.clause-candidates += second-candidates))
+      (mut! stats^.clauses += 7)
+      (return (source-query-relation-from-multi-hop-builder attrs builder) true ""))))
+
+(defn q-db-read-source-multi-hop-ref-chain-projection [source: DB-Read-Source, query: Query, projection: Source-Multi-Hop-Ref-Chain-Projection, inputs: []Query-Input] -> Result-Set
+  (when (not (db-read-source-has-overlay? source))
+    (return (q-db-read-source-multi-hop-ref-chain-projection-batched source query projection inputs)))
+  (let [rows (make [dynamic]Result-Row)
+        [anchor-value anchor-value-ok anchor-value-error] (db-read-source-multi-hop-ref-chain-anchor-value source projection inputs)]
+    (when (not anchor-value-ok)
+      (return (result-set-error anchor-value-error)))
+    (if (db-read-source-has-overlay? source)
+      (let [anchor-datoms (make [dynamic]Datom)
+            [anchor-ok anchor-error] (db-read-source-append-attr-value-datoms! (addr anchor-datoms) source projection.anchor-attr anchor-value)]
+        (when (not anchor-ok)
+          (delete-owned-datoms anchor-datoms)
+          (return (result-set-error anchor-error)))
+        (defer (delete-owned-datoms anchor-datoms))
+        (for [anchor-datom anchor-datoms]
+          (let [[ref-stream ref-ok ref-error] (source-vaet-entity-attr-stream source anchor-datom.e projection.reverse-ref-attr)]
+            (when (not ref-ok)
+              (delete-result-rows-owned-values rows)
+              (return (result-set-error ref-error)))
+            (while ref-stream.has-current
+              (let [[append-ok append-error] (append-db-read-source-multi-hop-ref-chain-first-entity-rows! (addr rows) source query projection ref-stream.current.e)]
+                (when (not append-ok)
+                  (delete-result-rows-owned-values rows)
+                  (delete-source-index-datom-stream ref-stream)
+                  (return (result-set-error append-error))))
+              (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr ref-stream))]
+                (when (not load-ok)
+                  (delete-result-rows-owned-values rows)
+                  (delete-source-index-datom-stream ref-stream)
+                  (return (result-set-error load-error))))))))
+      (let [[anchor-stream anchor-ok anchor-error] (source-attr-value-match-stream source projection.anchor-attr anchor-value)]
+        (when (not anchor-ok)
+          (return (result-set-error anchor-error)))
+        (while anchor-stream.has-current
+          (let [anchor-datom (source-attr-value-match-current anchor-stream)
+                [ref-stream ref-ok ref-error] (source-vaet-entity-attr-stream source anchor-datom.e projection.reverse-ref-attr)]
+            (when (not ref-ok)
+              (delete-source-attr-value-match-stream anchor-stream)
+              (delete-result-rows-owned-values rows)
+              (return (result-set-error ref-error)))
+            (while ref-stream.has-current
+              (let [[append-ok append-error] (append-db-read-source-multi-hop-ref-chain-first-entity-rows! (addr rows) source query projection ref-stream.current.e)]
+                (when (not append-ok)
+                  (delete-source-index-datom-stream ref-stream)
+                  (delete-source-attr-value-match-stream anchor-stream)
+                  (delete-result-rows-owned-values rows)
+                  (return (result-set-error append-error))))
+              (let [[ref-advance-ok ref-advance-error] (advance-source-index-datom-stream! source (addr ref-stream))]
+                (when (not ref-advance-ok)
+                  (delete-source-index-datom-stream ref-stream)
+                  (delete-source-attr-value-match-stream anchor-stream)
+                  (delete-result-rows-owned-values rows)
+                  (return (result-set-error ref-advance-error)))))
+            (delete-source-index-datom-stream ref-stream))
+          (let [[anchor-advance-ok anchor-advance-error] (advance-source-attr-value-match-stream! source (addr anchor-stream))]
+            (when (not anchor-advance-ok)
+              (delete-source-attr-value-match-stream anchor-stream)
+              (delete-result-rows-owned-values rows)
+              (return (result-set-error anchor-advance-error)))))
+        (delete-source-attr-value-match-stream anchor-stream)))
+    (result-set-ok rows)))
+
+(defstruct Source-Anchor-Direct-Entity-Value {
+  entity: u64
+  value: Value
+  next: int
+})
+
+(defn delete-source-anchor-direct-entity-values [items: [dynamic]Source-Anchor-Direct-Entity-Value]
+  (for [item items]
+    (delete-owned-value item.value))
+  (delete items))
+
+(defn db-read-source-anchor-two-branch-anchor-value [source: DB-Read-Source, projection: Source-Anchor-Two-Branch-Join-Projection, inputs: []Query-Input] -> [value: Value, ok: bool, error: string]
+  (when (not projection.has-anchor-input)
+    (return projection.anchor-value true ""))
+  (when (not (= (count inputs) 1))
+    (return (Value {}) false "wrong number of query inputs for source anchor/two-branch projection"))
+  (db-read-source-query-input-scalar-value source inputs[0]))
+
+(defn source-anchor-two-branch-value-for-var [projection: Source-Anchor-Two-Branch-Join-Projection, name: string, direct-value: Value, first-value: Value, filter-value: Value] -> Value
+  (cond
+    (= name projection.direct-value-var) direct-value
+    (= name projection.first-value-var) first-value
+    :else filter-value))
+
+(defn append-db-read-source-anchor-two-branch-row! [rows: ^[dynamic]Result-Row, query: Query, projection: Source-Anchor-Two-Branch-Join-Projection, direct-value: Value, first-value: Value, filter-value: Value]
+  (let [out-first (source-anchor-two-branch-value-for-var projection query.find[0] direct-value first-value filter-value)
+        out-second (source-anchor-two-branch-value-for-var projection query.find[1] direct-value first-value filter-value)
+        out-third (source-anchor-two-branch-value-for-var projection query.find[2] direct-value first-value filter-value)
+        dedupe-values ([]Value [out-first out-second out-third])]
+    (when (not (row-values-exist? (slice rows^ 0) dedupe-values))
+      (append-three-value-row! rows (value-owned out-first) (value-owned out-second) (value-owned out-third)))))
+
+(defn db-read-source-anchor-two-branch-direct-entities [source: DB-Read-Source, projection: Source-Anchor-Two-Branch-Join-Projection, anchor-entity: u64] -> [items: [dynamic]Source-Anchor-Direct-Entity-Value, ok: bool, error: string]
+  (let [out (make [dynamic]Source-Anchor-Direct-Entity-Value)
+        [direct-stream direct-ok direct-error] (source-vaet-entity-attr-stream source anchor-entity projection.direct-ref-attr)]
+    (when (not direct-ok)
+      (return out false direct-error))
+    (while direct-stream.has-current
+      (let [[value-stream value-ok value-error] (source-eavt-entity-attr-stream source direct-stream.current.e projection.direct-value-attr)]
+        (when (not value-ok)
+          (delete-source-index-datom-stream direct-stream)
+          (delete-source-anchor-direct-entity-values out)
+          (return (make [dynamic]Source-Anchor-Direct-Entity-Value) false value-error))
+        (while value-stream.has-current
+          (arr.push! out (Source-Anchor-Direct-Entity-Value {entity: direct-stream.current.e value: (value-owned value-stream.current.v) next: -1}))
+          (let [[value-load-ok value-load-error] (advance-source-index-datom-stream! source (addr value-stream))]
+            (when (not value-load-ok)
+              (delete-source-index-datom-stream value-stream)
+              (delete-source-index-datom-stream direct-stream)
+              (delete-source-anchor-direct-entity-values out)
+              (return (make [dynamic]Source-Anchor-Direct-Entity-Value) false value-load-error)))))
+      (let [[direct-load-ok direct-load-error] (advance-source-index-datom-stream! source (addr direct-stream))]
+        (when (not direct-load-ok)
+          (delete-source-index-datom-stream direct-stream)
+          (delete-source-anchor-direct-entity-values out)
+          (return (make [dynamic]Source-Anchor-Direct-Entity-Value) false direct-load-error))))
+    (return out true "")))
+
+(defn index-source-anchor-direct-entity-values! [items: ^[dynamic]Source-Anchor-Direct-Entity-Value] -> (map u64 int)
+  (let [bucket-heads (make (map u64 int))]
+    (for [item index items^]
+      (let [[head found] (mmap.get bucket-heads item.entity)]
+        (if found
+          (set! items^[index].next head)
+          (set! items^[index].next -1))
+        (mmap.assoc! bucket-heads item.entity index)))
+    bucket-heads))
+
+(defn append-db-read-source-anchor-two-branch-final-join-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Anchor-Two-Branch-Join-Projection, direct-items: []Source-Anchor-Direct-Entity-Value, direct-entity-heads: (map u64 int), hop1-entity: u64, first-value: Value, filter-value: Value] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source hop1-entity projection.hop2-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (when (= stream.current.v.kind .Entity)
+        (let [[head found] (mmap.get direct-entity-heads stream.current.v.entity)]
+          (when found
+            (let [direct-index head]
+              (while (>= direct-index 0)
+                (append-db-read-source-anchor-two-branch-row! rows query projection direct-items[direct-index].value first-value filter-value)
+                (set! direct-index direct-items[direct-index].next))))))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-db-read-source-anchor-two-branch-hop-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Anchor-Two-Branch-Join-Projection, direct-items: []Source-Anchor-Direct-Entity-Value, direct-entity-heads: (map u64 int), first-entity: u64, first-value: Value, filter-value: Value] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source first-entity projection.hop1-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (when (= stream.current.v.kind .Entity)
+        (let [[append-ok append-error] (append-db-read-source-anchor-two-branch-final-join-rows! rows source query projection direct-items direct-entity-heads stream.current.v.entity first-value filter-value)]
+          (when (not append-ok)
+            (delete-source-index-datom-stream stream)
+            (return false append-error))))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-db-read-source-anchor-two-branch-first-value-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Anchor-Two-Branch-Join-Projection, direct-items: []Source-Anchor-Direct-Entity-Value, direct-entity-heads: (map u64 int), first-entity: u64, filter-value: Value] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source first-entity projection.first-value-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (let [[append-ok append-error] (append-db-read-source-anchor-two-branch-hop-rows! rows source query projection direct-items direct-entity-heads first-entity stream.current.v filter-value)]
+        (when (not append-ok)
+          (delete-source-index-datom-stream stream)
+          (return false append-error)))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-db-read-source-anchor-two-branch-first-entity-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, query: Query, projection: Source-Anchor-Two-Branch-Join-Projection, direct-items: []Source-Anchor-Direct-Entity-Value, direct-entity-heads: (map u64 int), first-entity: u64] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source first-entity projection.filter-attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (when (and (= stream.current.a projection.filter-attr)
+                 (predicate-pair-matches? projection.filter-op stream.current.v projection.filter-value))
+        (let [[append-ok append-error] (append-db-read-source-anchor-two-branch-first-value-rows! rows source query projection direct-items direct-entity-heads first-entity stream.current.v)]
+          (when (not append-ok)
+            (delete-source-index-datom-stream stream)
+            (return false append-error))))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn q-db-read-source-anchor-two-branch-join-projection [source: DB-Read-Source, query: Query, projection: Source-Anchor-Two-Branch-Join-Projection, inputs: []Query-Input] -> Result-Set
+  (let [rows (make [dynamic]Result-Row)
+        [anchor-value anchor-value-ok anchor-value-error] (db-read-source-anchor-two-branch-anchor-value source projection inputs)]
+    (when (not anchor-value-ok)
+      (delete-result-rows-owned-values rows)
+      (return (result-set-error anchor-value-error)))
+    (if (db-read-source-has-overlay? source)
+      (let [anchor-datoms (make [dynamic]Datom)
+            [anchor-ok anchor-error] (db-read-source-append-attr-value-datoms! (addr anchor-datoms) source projection.anchor-attr anchor-value)]
+        (when (not anchor-ok)
+          (delete-owned-datoms anchor-datoms)
+          (return (result-set-error anchor-error)))
+        (defer (delete-owned-datoms anchor-datoms))
+        (for [anchor-datom anchor-datoms]
+          (let [[direct-items direct-ok direct-error] (db-read-source-anchor-two-branch-direct-entities source projection anchor-datom.e)]
+            (when (not direct-ok)
+              (delete-result-rows-owned-values rows)
+              (return (result-set-error direct-error)))
+            (let [direct-entity-heads (index-source-anchor-direct-entity-values! (addr direct-items)) :defer]
+            (let [[first-stream first-ok first-error] (source-vaet-entity-attr-stream source anchor-datom.e projection.first-ref-attr)]
+              (when (not first-ok)
+                (delete-source-anchor-direct-entity-values direct-items)
+                (delete-result-rows-owned-values rows)
+                (return (result-set-error first-error)))
+              (while first-stream.has-current
+                (let [[append-ok append-error] (append-db-read-source-anchor-two-branch-first-entity-rows! (addr rows) source query projection (slice direct-items 0) direct-entity-heads first-stream.current.e)]
+                  (when (not append-ok)
+                    (delete-source-index-datom-stream first-stream)
+                    (delete-source-anchor-direct-entity-values direct-items)
+                    (delete-result-rows-owned-values rows)
+                    (return (result-set-error append-error))))
+                (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr first-stream))]
+                  (when (not load-ok)
+                    (delete-source-index-datom-stream first-stream)
+                    (delete-source-anchor-direct-entity-values direct-items)
+                    (delete-result-rows-owned-values rows)
+                    (return (result-set-error load-error)))))))
+            (delete-source-anchor-direct-entity-values direct-items))))
+      (let [[anchor-stream anchor-ok anchor-error] (source-attr-value-match-stream source projection.anchor-attr anchor-value)]
+        (when (not anchor-ok)
+          (return (result-set-error anchor-error)))
+        (while anchor-stream.has-current
+          (let [anchor-datom (source-attr-value-match-current anchor-stream)
+                [direct-items direct-ok direct-error] (db-read-source-anchor-two-branch-direct-entities source projection anchor-datom.e)]
+            (when (not direct-ok)
+              (delete-source-attr-value-match-stream anchor-stream)
+              (delete-result-rows-owned-values rows)
+              (return (result-set-error direct-error)))
+            (let [direct-entity-heads (index-source-anchor-direct-entity-values! (addr direct-items)) :defer]
+            (let [[first-stream first-ok first-error] (source-vaet-entity-attr-stream source anchor-datom.e projection.first-ref-attr)]
+              (when (not first-ok)
+                (delete-source-anchor-direct-entity-values direct-items)
+                (delete-source-attr-value-match-stream anchor-stream)
+                (delete-result-rows-owned-values rows)
+                (return (result-set-error first-error)))
+              (while first-stream.has-current
+                (let [[append-ok append-error] (append-db-read-source-anchor-two-branch-first-entity-rows! (addr rows) source query projection (slice direct-items 0) direct-entity-heads first-stream.current.e)]
+                  (when (not append-ok)
+                    (delete-source-index-datom-stream first-stream)
+                    (delete-source-anchor-direct-entity-values direct-items)
+                    (delete-source-attr-value-match-stream anchor-stream)
+                    (delete-result-rows-owned-values rows)
+                    (return (result-set-error append-error))))
+                (let [[first-advance-ok first-advance-error] (advance-source-index-datom-stream! source (addr first-stream))]
+                  (when (not first-advance-ok)
+                    (delete-source-index-datom-stream first-stream)
+                    (delete-source-anchor-direct-entity-values direct-items)
+                    (delete-source-attr-value-match-stream anchor-stream)
+                    (delete-result-rows-owned-values rows)
+                    (return (result-set-error first-advance-error)))))
+              (delete-source-index-datom-stream first-stream)))
+            (delete-source-anchor-direct-entity-values direct-items))
+          (let [[anchor-advance-ok anchor-advance-error] (advance-source-attr-value-match-stream! source (addr anchor-stream))]
+            (when (not anchor-advance-ok)
+              (delete-source-attr-value-match-stream anchor-stream)
+              (delete-result-rows-owned-values rows)
+              (return (result-set-error anchor-advance-error)))))
+        (delete-source-attr-value-match-stream anchor-stream)))
+    (result-set-ok rows)))
