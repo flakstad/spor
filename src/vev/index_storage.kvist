@@ -1374,8 +1374,7 @@
     (return false))
   (when (not (tx-data-modifies-validation-schema? data))
     (return false))
-  (when (or data.has-tempid
-            data.has-lookup-ref
+  (when (or data.has-lookup-ref
             data.has-ident
             data.has-expected-lookup-ref
             data.has-value-tempid
@@ -3151,6 +3150,8 @@
       (return out true ""))))
 
 (defn db-read-source-next-entity-id [source: DB-Read-Source] -> [entity: u64, ok: bool, error: string]
+  (when (= source.kind .SQLite-Snapshot)
+    (return (sqlite-db-snapshot-next-entity-id source.sqlite-snapshot)))
   (let [view (db-read-source-index-view source .EAVT)
         position (- (db-index-view-count view) 1)]
     (while (>= position 0)

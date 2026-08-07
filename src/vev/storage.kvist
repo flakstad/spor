@@ -1313,6 +1313,33 @@ sqlite_datom_count_raw :: proc(handle: rawptr) -> (u64, bool, string) {
     return 0, false, sqlite_error_text(db, \"sqlite datom count failed\")
 }
 
+sqlite_next_entity_id_at_basis_raw :: proc(handle: rawptr, tx_partition_base, basis_tx: u64) -> (u64, bool, string) {
+    if handle == nil {
+        return 0, false, \"sqlite handle was nil\"
+    }
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql := \"SELECT COALESCE(MAX(e), 0) FROM vev_datoms WHERE e < ? AND tx <= ?\"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return 0, false, \"failed to allocate sqlite SQL text\"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return 0, false, sqlite_error_text(db, \"sqlite prepare next entity id failed\")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    if sqlite3_bind_int64(stmt, 1, i64(tx_partition_base)) != SQLITE_OK ||
+       sqlite3_bind_int64(stmt, 2, i64(basis_tx)) != SQLITE_OK {
+        return 0, false, sqlite_error_text(db, \"sqlite bind next entity id failed\")
+    }
+    if sqlite3_step(stmt) != SQLITE_ROW {
+        return 0, false, sqlite_error_text(db, \"sqlite next entity id failed\")
+    }
+    max_entity := u64(sqlite3_column_int64(stmt, 0))
+    return max_entity + 1, true, \"\"
+}
+
 sqlite_datom_has_retractions_raw :: proc(handle: rawptr) -> (bool, bool, string) {
     if handle == nil {
         return false, false, \"sqlite handle was nil\"
@@ -9116,6 +9143,13 @@ sqlite_load_tx_meta_rows_text_raw :: proc(path: string) -> (string, bool, string
   has-retractions: bool
   path: string
 })
+
+(defn sqlite-db-snapshot-next-entity-id [snapshot: ^SQLite-DB-Snapshot]
+  -> [entity: u64, ok: bool, error: string]
+  ;; Use the durable log so entities remain allocated after every current fact
+  ;; is retracted. Bound the scan to the snapshot rather than newer roots.
+  (sqlite-next-entity-id-at-basis-raw
+    snapshot^.indexes.handle tx-partition-base snapshot^.basis-tx))
 
 (def sqlite-db-snapshot-datom-cache-capacity 8192)
 

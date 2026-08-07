@@ -49,10 +49,87 @@
       (return true)))
   false)
 
+(defn result-has-entity-keyword-row? [result: vev.Result-Set, entity: u64, ident-text: string] -> bool
+  (for [row result.rows]
+    (when (and (= (count row.values) 2)
+               (= row.values[0].kind .Entity)
+               (= row.values[0].entity entity)
+               (= row.values[1].kind .Keyword)
+               (= row.values[1].text ident-text))
+      (return true)))
+  false)
+
 (defn sqlite-durable-store-db? [snapshot: vev.Store-DB] -> bool
   (or (= snapshot.kind .SQLite-Snapshot)
       (= snapshot.kind .SQLite-Lazy-Snapshot)
       (= snapshot.kind .SQLite-Root-Snapshot)))
+
+(t.deftest sqlite-reopened-store-advances-tempids-past-existing-entities
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.reopened-tempid-allocation.sqlite"]
+    (remove-sqlite-files path)
+    (defer (remove-sqlite-files path))
+    (let [[first-store first-opened first-error] (vev.open-store path)
+          first (vev.transact-store-report-text
+                  (addr first-store)
+                  "[{:db/id \"first\" :item/name \"First\"}]")
+          [first-e first-e-ok]
+          (vev.tempid-lookup (slice first.tempids 0) "first")]
+      (t.is first-opened first-error)
+      (t.is first.ok first.error)
+      (t.is first-e-ok)
+      (vev.delete-store-tx-report first)
+      (vev.close-store first-store)
+      (let [[second-store second-opened second-error] (vev.open-store path)
+            second (vev.transact-store-report-text
+                     (addr second-store)
+                     "[{:db/id \"second\" :item/name \"Second\"}]")
+            [second-e second-e-ok]
+            (vev.tempid-lookup (slice second.tempids 0) "second")
+            result (vev.q-result-store-text
+                     (addr second-store)
+                     "[:find ?name :where [?e :item/name ?name]]")]
+        (t.is second-opened second-error)
+        (t.is second.ok second.error)
+        (t.is second-e-ok)
+        (t.is (> second-e first-e))
+        (t.is result.result.ok result.result.error)
+        (t.is (= (count result.result.rows) 2))
+        (t.is (result-has-string-row? result.result "First"))
+        (t.is (result-has-string-row? result.result "Second"))
+        (vev.delete-query-result result)
+        (vev.delete-store-tx-report second)
+        (vev.close-store second-store)))))
+
+(t.deftest sqlite-reopened-store-composes-schema-maps-with-generated-tempids
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.reopened-schema-map-allocation.sqlite"]
+    (remove-sqlite-files path)
+    (defer (remove-sqlite-files path))
+    (let [[first-store first-opened first-error] (vev.open-store path)
+          first (vev.transact-store-report-text
+                  (addr first-store)
+                  "[{:db/ident :first/name :db/valueType :db.type/string :db/cardinality :db.cardinality/one}]")]
+      (t.is first-opened first-error)
+      (t.is first.ok first.error)
+      (vev.delete-store-tx-report first)
+      (vev.close-store first-store)
+      (let [[second-store second-opened second-error] (vev.open-store path)
+            second (vev.transact-store-report-text
+                     (addr second-store)
+                     "[{:db/ident :second/name :db/valueType :db.type/string :db/cardinality :db.cardinality/one}]")
+            result (vev.q-result-store-text
+                     (addr second-store)
+                     "[:find ?e ?ident :where [?e :db/ident ?ident]]")]
+        (t.is second-opened second-error)
+        (t.is second.ok second.error)
+        (t.is result.result.ok result.result.error)
+        (t.is (= (count result.result.rows) 2))
+        (t.is (result-has-entity-keyword-row? result.result 1 ":first/name"))
+        (t.is (result-has-entity-keyword-row? result.result 2 ":second/name"))
+        (vev.delete-query-result result)
+        (vev.delete-store-tx-report second)
+        (vev.close-store second-store)))))
 
 (t.deftest sqlite-map-db-id-lookup-ref-update-preserves-unrelated-entities
   (defer (free_all context.allocator))
