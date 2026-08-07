@@ -1,0 +1,1385 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn binding-equal? [left: Binding, right: Binding] -> bool
+  (when (not (= (count left.items) (count right.items)))
+    (return false))
+  (for [item left.items]
+    (let [[right-value right-ok] (binding-lookup right item.name)]
+      (when (not (and right-ok (value-equal? item.value right-value)))
+        (return false))))
+  true)
+
+(defn binding-exists? [bindings: []Binding, binding: Binding] -> bool
+  (for [existing bindings]
+    (when (binding-equal? existing binding)
+      (return true)))
+  false)
+
+(defn append-unique-binding! [out: ^[dynamic]Binding, seen: (ptr (map string (struct {}))), binding: Binding] -> bool
+  (let [[key key-ok] (binding-dedupe-key binding)]
+    (when key-ok
+      (let [already-seen (set.contains? seen^ key)]
+        (when already-seen
+          (return false))
+        (set.add! seen key)
+        (arr.push! out^ binding)
+        (return true)))
+    (when (not (binding-exists? (slice out^ 0) binding))
+      (arr.push! out^ binding)
+      (return true))
+    false))
+
+(defn unique-bindings [bindings: []Binding] -> [dynamic]Binding
+  (let [out (make [dynamic]Binding 0 (count bindings))
+        seen (set.empty string)]
+    (defer (delete seen))
+    (for [binding bindings]
+      (discard (append-unique-binding! (addr out) (addr seen) binding)))
+    out))
+
+(defn query-stats-observe-bindings! [stats: ^Query-Stats, count-value: int]
+  (when (> count-value stats^.max-intermediate-bindings)
+    (set! stats^.max-intermediate-bindings count-value)))
+
+(defn query-stats-observe-materialization! [stats: ^Query-Stats, count-value: int]
+  (set! stats^.generic-materialization-steps (+ stats^.generic-materialization-steps 1))
+  (set! stats^.binding-materializations (+ stats^.binding-materializations count-value)))
+
+(defn query-stats-observe-source-operator! [stats: ^Query-Stats]
+  (set! stats^.source-operators (+ stats^.source-operators 1)))
+
+(defn term-var-name? [term: Term, name: string] -> bool
+  (and (= term.kind .Var)
+       (= term.name name)))
+
+(defn term-wildcard? [term: Term] -> bool
+  (= term.kind .Wildcard))
+
+(defn clause-attr-keyword [clause: Clause] -> [attr: string, ok: bool]
+  (when (and (= clause.a.kind .Value)
+             (= clause.a.value.kind .Keyword))
+    (return clause.a.value.text true))
+  (return "" false))
+
+(defn rule-has-only-plain-clauses-and-calls? [rule: Rule] -> bool
+  (and (= (count rule.predicates) 0)
+       (= (count rule.function-clauses) 0)
+       (= (count rule.get-elses) 0)
+       (= (count rule.get-somes) 0)
+       (= (count rule.grounds) 0)
+       (= (count rule.not-groups) 0)
+       (= (count rule.or-groups) 0)))
+
+(defstruct Linear-Transitive-Plan {
+  attr: string
+  derived-edge: bool
+  derived-left-attr: string
+  derived-right-attr: string
+  filters: [dynamic]Clause
+})
+
+(defn delete-linear-transitive-plan [plan: Linear-Transitive-Plan]
+  (delete plan.filters))
+
+(defn linear-transitive-filter-clause? [clause: Clause, node-var: string] -> bool
+  (and (not clause.has-source)
+       (term-wildcard? clause.tx-term)
+       (term-wildcard? clause.op-term)
+       (term-var-name? clause.e node-var)
+       (= clause.a.kind .Value)
+       (= clause.a.value.kind .Keyword)
+       (= clause.v.kind .Value)))
+
+(defn linear-transitive-filter-same? [left: Clause, right: Clause] -> bool
+  (and (= left.a.value.text right.a.value.text)
+       (value-equal? left.v.value right.v.value)))
+
+(defn linear-transitive-filter-exists? [filters: []Clause, filter: Clause] -> bool
+  (for [existing filters]
+    (when (linear-transitive-filter-same? existing filter)
+      (return true)))
+  false)
+
+(defn linear-transitive-filters-same? [left: []Clause, right: []Clause] -> bool
+  (when (not (= (count left) (count right)))
+    (return false))
+  (for [filter left]
+    (when (not (linear-transitive-filter-exists? right filter))
+      (return false)))
+  true)
+
+(defn linear-transitive-edge-and-filters [rule: Rule, from-var: string, to-var: string] -> [attr: string, filters: [dynamic]Clause, ok: bool]
+  (let [out-filters (make [dynamic]Clause)
+        attr ""
+        found-edge false]
+    (for [rule-clause rule.clauses]
+      (let [[clause-attr clause-attr-ok] (clause-attr-keyword rule-clause)]
+        (if (and clause-attr-ok
+                 (term-var-name? rule-clause.e from-var)
+                 (term-var-name? rule-clause.v to-var))
+          (do
+            (when found-edge
+              (delete out-filters)
+              (return "" (make [dynamic]Clause) false))
+            (set! attr clause-attr)
+            (set! found-edge true))
+          (if (linear-transitive-filter-clause? rule-clause to-var)
+            (arr.push! out-filters rule-clause)
+            (do
+              (delete out-filters)
+              (return "" (make [dynamic]Clause) false))))))
+    (return attr out-filters found-edge)))
+
+(defn rule-two-hop-derived-edge [rules: []Rule, name: string] -> [left-attr: string, right-attr: string, ok: bool]
+  (for [rule rules]
+    (when (= rule.name name)
+      (when (and (= (count rule.params) 2)
+                 (= (count rule.rule-calls) 1)
+                 (= (count rule.clauses) 1)
+                 (rule-has-only-plain-clauses-and-calls? rule))
+        (let [rule-clause rule.clauses[0]
+              rule-call rule.rule-calls[0]
+              [clause-attr clause-attr-ok] (clause-attr-keyword rule-clause)]
+          (when (and clause-attr-ok
+                     (not rule-call.has-source)
+                     (= (count rule-call.args) 2)
+                     (term-var-name? rule-clause.e rule.params[0])
+                     (= rule-clause.v.kind .Var)
+                     (term-var-name? rule-call.args[0] rule-clause.v.name)
+                     (term-var-name? rule-call.args[1] rule.params[1]))
+            (for [leaf-rule rules]
+              (when (= leaf-rule.name rule-call.name)
+                (when (= (count leaf-rule.params) 2)
+                  (let [[leaf-attr leaf-filters leaf-ok] (linear-transitive-edge-and-filters leaf-rule leaf-rule.params[0] leaf-rule.params[1])]
+                    (delete leaf-filters)
+                    (when leaf-ok
+                      (return clause-attr leaf-attr true)))))))))
+      (when (not (and (= (count rule.params) 2)
+                      (= (count rule.rule-calls) 0)
+                      (= (count rule.clauses) 2)
+                      (rule-has-only-plain-clauses-and-calls? rule)))
+        (return "" "" false))
+      (let [first rule.clauses[0]
+            second rule.clauses[1]
+            [first-attr first-attr-ok] (clause-attr-keyword first)
+            [second-attr second-attr-ok] (clause-attr-keyword second)]
+        (when (and first-attr-ok
+                   second-attr-ok
+                   (term-var-name? first.e rule.params[0])
+                   (= first.v.kind .Var)
+                   (term-var-name? second.e first.v.name)
+                   (term-var-name? second.v rule.params[1]))
+          (return first-attr second-attr true))
+        (when (and first-attr-ok
+                   second-attr-ok
+                   (term-var-name? second.e rule.params[0])
+                   (= second.v.kind .Var)
+                   (term-var-name? first.e second.v.name)
+                   (term-var-name? first.v rule.params[1]))
+          (return second-attr first-attr true))
+        (return "" "" false))))
+  (return "" "" false))
+
+(defn rule-two-hop-reverse-derived-edge [rules: []Rule, name: string] -> [rule: Rule, left-attr: string, right-attr: string, ok: bool]
+  (for [rule rules]
+    (when (= rule.name name)
+      (when (not (and (= (count rule.params) 2)
+                      (= (count rule.rule-calls) 0)
+                      (= (count rule.clauses) 2)
+                      (rule-has-only-plain-clauses-and-calls? rule)))
+        (return (Rule {}) "" "" false))
+      (let [first rule.clauses[0]
+            second rule.clauses[1]
+            [first-attr first-attr-ok] (clause-attr-keyword first)
+            [second-attr second-attr-ok] (clause-attr-keyword second)]
+        (when (and first-attr-ok
+                   second-attr-ok
+                   (= first.e.kind .Var)
+                   (term-var-name? first.v rule.params[0])
+                   (term-var-name? second.e rule.params[1])
+                   (= second.v.kind .Var)
+                   (= second.v.name first.e.name))
+          (return rule first-attr second-attr true))
+        (when (and first-attr-ok
+                   second-attr-ok
+                   (= second.e.kind .Var)
+                   (term-var-name? second.v rule.params[0])
+                   (term-var-name? first.e rule.params[1])
+                   (= first.v.kind .Var)
+                   (= first.v.name second.e.name))
+          (return rule second-attr first-attr true))
+        (return (Rule {}) "" "" false))))
+  (return (Rule {}) "" "" false))
+
+(defn derived-edge-call? [rules: []Rule, call: Rule-Call, from-var: string, to-var: string] -> [left-attr: string, right-attr: string, ok: bool]
+  (when (not (and (not call.has-source)
+                  (= (count call.args) 2)
+                  (term-var-name? call.args[0] from-var)
+                  (term-var-name? call.args[1] to-var)))
+    (return "" "" false))
+  (rule-two-hop-derived-edge rules call.name))
+
+(defn empty-linear-transitive-plan [] -> Linear-Transitive-Plan
+  (Linear-Transitive-Plan {filters: (make [dynamic]Clause)}))
+
+(defn linear-derived-plan-compatible? [derived-edge: bool, left-attr: string, right-attr: string, next-derived: bool, next-left: string, next-right: string] -> bool
+  (or (= (count left-attr) 0)
+      (and (= derived-edge next-derived)
+           (= left-attr next-left)
+           (= right-attr next-right))))
+
+(defn linear-transitive-rule-plan [rules: []Rule, name: string] -> [plan: Linear-Transitive-Plan, ok: bool]
+  (let [found-base false
+        found-recursive false
+        attr ""
+        derived-edge false
+        derived-left-attr ""
+        derived-right-attr ""
+        filters (make [dynamic]Clause)]
+    (for [rule rules]
+      (when (= rule.name name)
+        (when (not (and (= (count rule.params) 2)
+                        (rule-has-only-plain-clauses-and-calls? rule)))
+          (delete filters)
+          (return (empty-linear-transitive-plan) false))
+        (when (= (count rule.rule-calls) 0)
+          (let [[base-attr base-filters base-ok] (linear-transitive-edge-and-filters rule rule.params[0] rule.params[1])]
+            (when (or (not base-ok)
+                      found-base
+                      (not (linear-derived-plan-compatible? derived-edge derived-left-attr derived-right-attr false base-attr "")))
+              (delete filters)
+              (delete base-filters)
+              (return (empty-linear-transitive-plan) false))
+            (set! attr base-attr)
+            (set! derived-edge false)
+            (set! derived-left-attr base-attr)
+            (set! derived-right-attr "")
+            (delete filters)
+            (set! filters base-filters)
+            (set! found-base true)))
+        (when (and (= (count rule.clauses) 0)
+                   (= (count rule.rule-calls) 1)
+                   (not (= rule.rule-calls[0].name name)))
+          (let [[left-attr right-attr edge-ok] (derived-edge-call? rules rule.rule-calls[0] rule.params[0] rule.params[1])]
+            (when (or (not edge-ok)
+                      found-base
+                      (not (linear-derived-plan-compatible? derived-edge derived-left-attr derived-right-attr true left-attr right-attr)))
+              (delete filters)
+              (return (empty-linear-transitive-plan) false))
+            (set! attr "")
+            (set! derived-edge true)
+            (set! derived-left-attr left-attr)
+            (set! derived-right-attr right-attr)
+            (set! found-base true)))
+        (when (> (count rule.rule-calls) 0)
+          (let [recursive-index -1
+                recursive-mid ""]
+            (for [rule-call index rule.rule-calls]
+              (when (and (= rule-call.name name)
+                         (= (count rule-call.args) 2)
+                         (= rule-call.args[0].kind .Var)
+                         (term-var-name? rule-call.args[1] rule.params[1]))
+                (set! recursive-index index)
+                (set! recursive-mid rule-call.args[0].name)))
+            (when (>= recursive-index 0)
+              (if (= (count rule.rule-calls) 1)
+                (let [[recursive-attr recursive-filters recursive-ok] (linear-transitive-edge-and-filters rule rule.params[0] recursive-mid)]
+                  (when (or (not recursive-ok)
+                            (not (linear-derived-plan-compatible? derived-edge derived-left-attr derived-right-attr false recursive-attr ""))
+                            (and found-base (not (linear-transitive-filters-same? (slice filters 0) (slice recursive-filters 0)))))
+                    (delete filters)
+                    (delete recursive-filters)
+                    (return (empty-linear-transitive-plan) false))
+                  (when (not found-base)
+                    (delete filters)
+                    (let [owned-filters (arr.into [dynamic]Clause (slice recursive-filters 0))]
+                      (set! filters owned-filters)))
+                  (set! attr recursive-attr)
+                  (set! derived-edge false)
+                  (set! derived-left-attr recursive-attr)
+                  (set! derived-right-attr "")
+                  (delete recursive-filters)
+                  (set! found-recursive true))
+                (when (and (= (count rule.clauses) 0)
+                           (= (count rule.rule-calls) 2))
+                  (let [edge-index (if (= recursive-index 0) 1 0)
+                        [left-attr right-attr edge-ok] (derived-edge-call? rules rule.rule-calls[edge-index] rule.params[0] recursive-mid)]
+                    (when (or (not edge-ok)
+                              (not (linear-derived-plan-compatible? derived-edge derived-left-attr derived-right-attr true left-attr right-attr)))
+                      (delete filters)
+                      (return (empty-linear-transitive-plan) false))
+                    (set! attr "")
+                    (set! derived-edge true)
+                    (set! derived-left-attr left-attr)
+                    (set! derived-right-attr right-attr)
+                    (set! found-recursive true)))))))))
+    (return (Linear-Transitive-Plan {attr: attr derived-edge: derived-edge derived-left-attr: derived-left-attr derived-right-attr: derived-right-attr filters: filters}) (and found-base found-recursive))))
+
+(defn linear-transitive-rule-attr [rules: []Rule, name: string] -> [attr: string, ok: bool]
+  (let [[plan plan-ok] (linear-transitive-rule-plan rules name)]
+    (defer (delete-linear-transitive-plan plan))
+    (return plan.attr plan-ok)))
+
+(defstruct Alternating-Transitive-Plan {
+  left-name: string
+  left-attr: string
+  right-name: string
+  right-attr: string
+})
+
+(defn empty-alternating-transitive-plan [] -> Alternating-Transitive-Plan
+  (Alternating-Transitive-Plan {}))
+
+(defn alternating-base-rule-attr [rule: Rule] -> [attr: string, ok: bool]
+  (when (not (and (= (count rule.params) 2)
+                  (rule-has-only-plain-clauses-and-calls? rule)
+                  (= (count rule.rule-calls) 0)
+                  (= (count rule.clauses) 1)))
+    (return "" false))
+  (let [rule-clause rule.clauses[0]
+        [attr attr-ok] (clause-attr-keyword rule-clause)]
+    (return attr
+      (and attr-ok
+           (not rule-clause.has-source)
+           (term-wildcard? rule-clause.tx-term)
+           (term-wildcard? rule-clause.op-term)
+           (term-var-name? rule-clause.e rule.params[0])
+           (term-var-name? rule-clause.v rule.params[1])))))
+
+(defn alternating-recursive-rule-shape [rule: Rule] -> [attr: string, next-name: string, ok: bool]
+  (when (not (and (= (count rule.params) 2)
+                  (rule-has-only-plain-clauses-and-calls? rule)
+                  (= (count rule.rule-calls) 1)
+                  (= (count rule.clauses) 1)))
+    (return "" "" false))
+  (let [call rule.rule-calls[0]]
+    (when (not (and (= (count call.args) 2)
+                    (= call.args[0].kind .Var)
+                    (= call.args[1].kind .Var)
+                    (= call.args[1].name rule.params[1])))
+      (return "" "" false))
+    (let [mid-var call.args[0].name
+          rule-clause rule.clauses[0]
+          [attr attr-ok] (clause-attr-keyword rule-clause)]
+      (return attr call.name
+        (and attr-ok
+             (not call.has-source)
+             (not rule-clause.has-source)
+             (term-wildcard? rule-clause.tx-term)
+             (term-wildcard? rule-clause.op-term)
+             (term-var-name? rule-clause.e rule.params[0])
+             (term-var-name? rule-clause.v mid-var))))))
+
+(defn alternating-rule-shape [rules: []Rule, name: string] -> [attr: string, next-name: string, ok: bool]
+  (let [attr ""
+        next-rule-name ""
+        found-base false
+        found-recursive false]
+    (for [rule rules]
+      (when (= rule.name name)
+        (let [branch-ok false]
+        (let [[base-attr base-ok] (alternating-base-rule-attr rule)]
+          (when base-ok
+            (set! branch-ok true)
+            (when (or found-base
+                      (and (> (count attr) 0) (not (= attr base-attr))))
+              (return "" "" false))
+            (set! attr base-attr)
+            (set! found-base true)))
+        (let [[recursive-attr recursive-next recursive-ok] (alternating-recursive-rule-shape rule)]
+          (when recursive-ok
+            (set! branch-ok true)
+            (when (or found-recursive
+                      (and (> (count attr) 0) (not (= attr recursive-attr))))
+              (return "" "" false))
+            (set! attr recursive-attr)
+            (set! next-rule-name recursive-next)
+            (set! found-recursive true)))
+        (when (not branch-ok)
+          (return "" "" false)))))
+    (return attr next-rule-name (and found-base found-recursive))))
+
+(defn alternating-transitive-rule-plan [rules: []Rule, name: string] -> [plan: Alternating-Transitive-Plan, ok: bool]
+  (let [[left-attr right-name left-ok] (alternating-rule-shape rules name)]
+    (when (not left-ok)
+      (return (empty-alternating-transitive-plan) false))
+    (let [[right-attr next-name right-ok] (alternating-rule-shape rules right-name)]
+      (when (not (and right-ok (= next-name name) (not (= name right-name))))
+        (return (empty-alternating-transitive-plan) false))
+      (return (Alternating-Transitive-Plan {left-name: name
+                                            left-attr: left-attr
+                                            right-name: right-name
+                                            right-attr: right-attr})
+              true))))
+
+(defn first-rule-by-name [rules: []Rule, name: string] -> [rule: Rule, ok: bool]
+  (for [rule rules]
+    (when (= rule.name name)
+      (return rule true)))
+  (return (Rule {}) false))
+
+(defn append-transitive-targets! [out: ^[dynamic]u64, db: DB, attr: string, start: u64]
+  (let [expanded (set.empty u64)
+        emitted (set.empty u64)
+        frontier (make [dynamic]u64)
+        frontier-index 0]
+    (defer (delete expanded))
+    (defer (delete emitted))
+    (defer (delete frontier))
+    (arr.push! frontier start)
+    (while (< frontier-index (count frontier))
+      (let [current frontier[frontier-index]
+            edge-clause (clause (term-value (value-entity current)) attr (term-wildcard))
+            scan (clause-index-scan db edge-clause (Binding {}))]
+        (set! frontier-index (+ frontier-index 1))
+        (let [already-expanded (set.contains? expanded current)]
+          (when (not already-expanded)
+            (set.add! expanded current)
+            (let [scan-index scan.index]
+              (while (< scan-index scan.high)
+                (let [datom-index (clause-index-scan-datom-index scan scan-index)
+                      datom db.datoms[datom-index]]
+                  (when (and (clause-index-scan-candidate? scan datom)
+                             (datom-current-at? db datom-index)
+                             (= datom.v.kind .Entity))
+                    (let [already-emitted (set.contains? emitted datom.v.entity)
+                          target-expanded (set.contains? expanded datom.v.entity)]
+                      (when (not already-emitted)
+                        (set.add! emitted datom.v.entity)
+                        (arr.push! out^ datom.v.entity))
+                      (when (not target-expanded)
+                        (arr.push! frontier datom.v.entity)))))
+                (set! scan-index (+ scan-index 1))))))
+        (delete-clause-index-scan scan)))))
+
+(defn append-transitive-starts! [out: ^[dynamic]u64, db: DB, attr: string]
+  (let [seen (set.empty u64)
+        attr-clause (clause (term-wildcard) attr (term-wildcard))
+        scan (clause-index-scan db attr-clause (Binding {}))]
+    (defer (delete seen))
+    (defer (delete-clause-index-scan scan))
+    (let [scan-index scan.index]
+      (while (< scan-index scan.high)
+        (let [datom-index (clause-index-scan-datom-index scan scan-index)
+              datom db.datoms[datom-index]]
+          (when (and (clause-index-scan-candidate? scan datom)
+                     (datom-current-at? db datom-index))
+            (let [found (set.contains? seen datom.e)]
+              (when (not found)
+                (set.add! seen datom.e)
+                (arr.push! out^ datom.e)))))
+        (set! scan-index (+ scan-index 1))))))
+
+(defn append-transitive-sources! [out: ^[dynamic]u64, db: DB, attr: string, target: u64]
+  (let [expanded (set.empty u64)
+        emitted (set.empty u64)
+        frontier (make [dynamic]u64)
+        frontier-index 0]
+    (defer (delete expanded))
+    (defer (delete emitted))
+    (defer (delete frontier))
+    (arr.push! frontier target)
+    (while (< frontier-index (count frontier))
+      (let [current frontier[frontier-index]
+            edge-clause (clause (term-wildcard) attr (term-value (value-entity current)))
+            scan (clause-index-scan db edge-clause (Binding {}))]
+        (set! frontier-index (+ frontier-index 1))
+        (let [already-expanded (set.contains? expanded current)]
+          (when (not already-expanded)
+            (set.add! expanded current)
+            (let [scan-index scan.index]
+              (while (< scan-index scan.high)
+                (let [datom-index (clause-index-scan-datom-index scan scan-index)
+                      datom db.datoms[datom-index]]
+                  (when (and (clause-index-scan-candidate? scan datom)
+                             (datom-current-at? db datom-index))
+                    (let [already-emitted (set.contains? emitted datom.e)
+                          source-expanded (set.contains? expanded datom.e)]
+                      (when (not already-emitted)
+                        (set.add! emitted datom.e)
+                        (arr.push! out^ datom.e))
+                      (when (not source-expanded)
+                        (arr.push! frontier datom.e)))))
+                (set! scan-index (+ scan-index 1))))))
+        (delete-clause-index-scan scan)))))
+
+(defn u64-slice-contains? [items: []u64, value: u64] -> bool
+  (for [item items]
+    (when (= item value)
+      (return true)))
+  false)
+
+(defn transitive-adjacency-max-entity [adjacency: []Transitive-Adjacency] -> u64
+  (let [max-entity: u64 0]
+    (for [entry adjacency]
+      (when (> entry.entity max-entity)
+        (set! max-entity entry.entity))
+      (for [target entry.targets]
+        (when (> target max-entity)
+          (set! max-entity target))))
+    max-entity))
+
+(defn transitive-adjacency-use-dense-seen? [adjacency: []Transitive-Adjacency] -> [max-entity: u64, ok: bool]
+  (let [max-value (transitive-adjacency-max-entity adjacency)
+        adjacency-count (count adjacency)]
+    (return max-value
+      (and (> adjacency-count 0)
+           (< max-value 1000000)
+           (<= (int max-value) (* adjacency-count 8))))))
+
+(defn make-bool-dense-index [size: int] -> [dynamic]bool
+  (arr.repeat size false))
+
+(defstruct Transitive-Adjacency {
+  entity: u64
+  targets: [dynamic]u64
+})
+
+(defstruct Transitive-Adjacency-Index {
+  items: [dynamic]Transitive-Adjacency
+  index: map[u64]int
+})
+
+(defn transitive-adjacency-index [lookup: map[u64]int, entity: u64] -> [index: int, ok: bool]
+  (mmap.get lookup entity))
+
+(defn append-transitive-adjacency-edge! [out: ^[dynamic]Transitive-Adjacency, index: (ptr (map u64 int)), source: u64, target: u64]
+  (let [[adjacency-index found] (transitive-adjacency-index index^ source)]
+    (if found
+      (arr.push! out^[adjacency-index].targets target)
+      (let [targets (make [dynamic]u64 0 4)]
+        (arr.push! targets target)
+        (mmap.assoc! index^ source (count out^))
+        (arr.push! out^ (Transitive-Adjacency {entity: source targets: targets}))))))
+
+(defn entity-matches-transitive-filter? [db: DB, entity: u64, filter: Clause] -> bool
+  (let [view (db-index-view db .EAVT)
+        attr filter.a.value.text
+        expected filter.v.value
+        low (lower-bound-index-view db view "eavt-ea" entity attr (Value {}))
+        high (upper-bound-index-view db view "eavt-ea" entity attr (Value {}))
+        i low]
+    (while (< i high)
+      (let [datom-index (db-index-view-at view i)
+            datom db.datoms[datom-index]]
+        (when (and (datom-current-at? db datom-index)
+                   (value-equal? datom.v expected))
+          (return true)))
+      (set! i (+ i 1)))
+    false))
+
+(defn entity-matches-transitive-filters? [db: DB, entity: u64, filters: []Clause] -> bool
+  (for [filter filters]
+    (when (not (entity-matches-transitive-filter? db entity filter))
+      (return false)))
+  true)
+
+(defn transitive-adjacency-from-db-with-filters [db: DB, attr: string, filters: []Clause] -> Transitive-Adjacency-Index
+  (let [view (db-index-view db .AEVT)
+        low (lower-bound-index-view db view "aevt" 0 attr (Value {}))
+        high (upper-bound-index-view db view "aevt" 0 attr (Value {}))
+        out (make [dynamic]Transitive-Adjacency 0 (- high low))
+        index (make (map u64 int))
+        i low]
+    (while (< i high)
+      (let [datom-index (db-index-view-at view i)
+            datom db.datoms[datom-index]]
+        (when (and (datom-current-at? db datom-index)
+                   (= datom.v.kind .Entity)
+                   (entity-matches-transitive-filters? db datom.v.entity filters))
+          (append-transitive-adjacency-edge! (addr out) (addr index) datom.e datom.v.entity)))
+      (set! i (+ i 1)))
+    (Transitive-Adjacency-Index {items: out index: index})))
+
+(defn transitive-adjacency-from-db [db: DB, attr: string] -> Transitive-Adjacency-Index
+  (transitive-adjacency-from-db-with-filters db attr ([]Clause [])))
+
+(defn transitive-derived-adjacency-from-db [db: DB, left-attr: string, right-attr: string] -> Transitive-Adjacency-Index
+  (let [view (db-index-view db .AEVT)
+        low (lower-bound-index-view db view "aevt" 0 left-attr (Value {}))
+        high (upper-bound-index-view db view "aevt" 0 left-attr (Value {}))
+        out (make [dynamic]Transitive-Adjacency 0 (- high low))
+        index (make (map u64 int))
+        i low]
+    (while (< i high)
+      (let [datom-index (db-index-view-at view i)
+            datom db.datoms[datom-index]]
+        (when (and (datom-current-at? db datom-index)
+                   (= datom.v.kind .Entity))
+          (let [[target target-ok] (latest-attr-value db datom.v.entity right-attr)]
+            (when target-ok
+              (let [[target-entity target-entity-ok] (value-as-entity db target)]
+                (when target-entity-ok
+                  (append-transitive-adjacency-edge! (addr out) (addr index) datom.e target-entity.entity)))))))
+      (set! i (+ i 1)))
+    (Transitive-Adjacency-Index {items: out index: index})))
+
+(defn transitive-reverse-adjacency-from-db-with-filters [db: DB, attr: string, filters: []Clause] -> Transitive-Adjacency-Index
+  (let [view (db-index-view db .AEVT)
+        low (lower-bound-index-view db view "aevt" 0 attr (Value {}))
+        high (upper-bound-index-view db view "aevt" 0 attr (Value {}))
+        out (make [dynamic]Transitive-Adjacency 0 (- high low))
+        index (make (map u64 int))
+        i low]
+    (while (< i high)
+      (let [datom-index (db-index-view-at view i)
+            datom db.datoms[datom-index]]
+        (when (and (datom-current-at? db datom-index)
+                   (= datom.v.kind .Entity)
+                   (entity-matches-transitive-filters? db datom.v.entity filters))
+          (append-transitive-adjacency-edge! (addr out) (addr index) datom.v.entity datom.e)))
+      (set! i (+ i 1)))
+    (Transitive-Adjacency-Index {items: out index: index})))
+
+(defn transitive-reverse-adjacency-from-db [db: DB, attr: string] -> Transitive-Adjacency-Index
+  (transitive-reverse-adjacency-from-db-with-filters db attr ([]Clause [])))
+
+(defn transitive-derived-reverse-adjacency-from-db [db: DB, left-attr: string, right-attr: string] -> Transitive-Adjacency-Index
+  (let [forward (transitive-derived-adjacency-from-db db left-attr right-attr)
+        out (make [dynamic]Transitive-Adjacency 0 (count forward.items))
+        index (make (map u64 int))]
+    (for [entry forward.items]
+      (for [target entry.targets]
+        (append-transitive-adjacency-edge! (addr out) (addr index) target entry.entity)))
+    (delete-transitive-adjacency forward)
+    (Transitive-Adjacency-Index {items: out index: index})))
+
+(defn delete-transitive-adjacency [adjacency: Transitive-Adjacency-Index]
+  (for [item adjacency.items]
+    (delete item.targets))
+  (delete adjacency.items)
+  (delete adjacency.index))
+
+(defn append-transitive-targets-with-adjacency! [out: ^[dynamic]u64, adjacency: []Transitive-Adjacency, adjacency-index: map[u64]int, start: u64]
+  (let [expanded (make [dynamic]u64 0 (count adjacency))
+        emitted (make [dynamic]u64 0 (count adjacency))
+        frontier (make [dynamic]u64 0 (count adjacency))
+        frontier-index 0]
+    (defer (delete expanded))
+    (defer (delete emitted))
+    (defer (delete frontier))
+    (arr.push! frontier start)
+    (while (< frontier-index (count frontier))
+      (let [current frontier[frontier-index]
+            [adj-index has-edges] (transitive-adjacency-index adjacency-index current)]
+        (set! frontier-index (+ frontier-index 1))
+        (let [already-expanded (u64-slice-contains? (slice expanded 0) current)]
+          (when (and (not already-expanded) has-edges)
+            (arr.push! expanded current)
+            (for [target-entity adjacency[adj-index].targets]
+              (let [already-emitted (u64-slice-contains? (slice emitted 0) target-entity)
+                    target-expanded (u64-slice-contains? (slice expanded 0) target-entity)]
+                (when (not already-emitted)
+                  (arr.push! emitted target-entity)
+                  (arr.push! out^ target-entity))
+                (when (not target-expanded)
+                  (arr.push! frontier target-entity))))))))))
+
+(defn append-transitive-targets-with-dense-adjacency! [out: ^[dynamic]u64, adjacency: []Transitive-Adjacency, adjacency-index: map[u64]int, start: u64, max-entity: u64]
+  (let [dense-size (+ (int max-entity) 1)
+        expanded (make-bool-dense-index dense-size)
+        emitted (make-bool-dense-index dense-size)
+        frontier (make [dynamic]u64 0 (count adjacency))
+        frontier-index 0]
+    (defer (delete expanded))
+    (defer (delete emitted))
+    (defer (delete frontier))
+    (arr.push! frontier start)
+    (while (< frontier-index (count frontier))
+      (let [current frontier[frontier-index]
+            [adj-index has-edges] (transitive-adjacency-index adjacency-index current)
+            current-index (int current)]
+        (set! frontier-index (+ frontier-index 1))
+        (when (and has-edges
+                   (< current-index dense-size)
+                   (not expanded[current-index]))
+          (set! expanded[current-index] true)
+          (for [target-entity adjacency[adj-index].targets]
+            (let [target-index (int target-entity)]
+              (when (< target-index dense-size)
+                (when (not emitted[target-index])
+                  (set! emitted[target-index] true)
+                  (arr.push! out^ target-entity))
+                (when (not expanded[target-index])
+                  (arr.push! frontier target-entity))))))))))
+
+(defn append-transitive-targets-fast! [out: ^[dynamic]u64, adjacency: []Transitive-Adjacency, adjacency-index: map[u64]int, start: u64]
+  (let [[max-entity use-dense] (transitive-adjacency-use-dense-seen? adjacency)]
+    (if use-dense
+      (append-transitive-targets-with-dense-adjacency! out adjacency adjacency-index start max-entity)
+      (append-transitive-targets-with-adjacency! out adjacency adjacency-index start))))
+
+(defstruct Alternating-Frontier-State {
+  entity: u64
+  use-left: bool
+})
+
+(defstruct Rule-Memo-Entry {
+  name: string
+  params: [dynamic]string
+  bindings: [dynamic]Binding
+  delta: [dynamic]Binding
+  seen: (map string (struct {}))
+  bindings-rel: Query-Relation
+  bindings-rel-valid: bool
+  bindings-rel-count: int
+  delta-rel: Query-Relation
+  delta-rel-valid: bool
+  delta-rel-count: int
+})
+
+(defn alternating-state-expanded? [left-expanded: []u64, right-expanded: []u64, entity: u64, use-left: bool] -> bool
+  (if use-left
+    (u64-slice-contains? left-expanded entity)
+    (u64-slice-contains? right-expanded entity)))
+
+(defn mark-alternating-state-expanded! [left-expanded: ^[dynamic]u64, right-expanded: ^[dynamic]u64, entity: u64, use-left: bool]
+  (if use-left
+    (arr.push! left-expanded^ entity)
+    (arr.push! right-expanded^ entity)))
+
+(defn append-alternating-targets! [out: ^[dynamic]u64, left-adjacency: Transitive-Adjacency-Index, right-adjacency: Transitive-Adjacency-Index, start: u64]
+  (let [left-expanded (make [dynamic]u64)
+        right-expanded (make [dynamic]u64)
+        emitted (make [dynamic]u64)
+        frontier (make [dynamic]Alternating-Frontier-State)
+        frontier-index 0]
+    (defer (delete left-expanded))
+    (defer (delete right-expanded))
+    (defer (delete emitted))
+    (defer (delete frontier))
+    (arr.push! frontier (Alternating-Frontier-State {entity: start use-left: true}))
+    (while (< frontier-index (count frontier))
+      (let [state frontier[frontier-index]]
+        (set! frontier-index (+ frontier-index 1))
+        (when (not (alternating-state-expanded? (slice left-expanded 0) (slice right-expanded 0) state.entity state.use-left))
+          (mark-alternating-state-expanded! (addr left-expanded) (addr right-expanded) state.entity state.use-left)
+          (let [adjacency (if state.use-left left-adjacency right-adjacency)
+                [adj-index has-edges] (transitive-adjacency-index adjacency.index state.entity)]
+            (when has-edges
+              (for [target-entity adjacency.items[adj-index].targets]
+                (when (not (u64-slice-contains? (slice emitted 0) target-entity))
+                  (arr.push! emitted target-entity)
+                  (arr.push! out^ target-entity))
+                (when (not (alternating-state-expanded? (slice left-expanded 0) (slice right-expanded 0) target-entity (not state.use-left)))
+                  (arr.push! frontier (Alternating-Frontier-State {entity: target-entity use-left: (not state.use-left)})))))))))))
+
+(defn append-linear-transitive-direct-result! [out: ^[dynamic]Binding, call: Rule-Call, binding: Binding, rule: Rule, start-entity: u64, target-entity: u64]
+  (when (and (= (count binding.items) 0)
+             (= (count rule.params) 2)
+             (= (count call.args) 2)
+             (= call.args[0].kind .Var)
+             (= call.args[1].kind .Var)
+             (not (= call.args[0].name call.args[1].name)))
+    (let [items (make [dynamic]Var-Binding 0 2)]
+      (arr.push! items (Var-Binding {name: call.args[0].name value: (value-entity start-entity)}))
+      (arr.push! items (Var-Binding {name: call.args[1].name value: (value-entity target-entity)}))
+      (arr.push! out^ (Binding {items: items}))
+      (return)))
+  (let [result (clone-binding binding)
+        start-value (value-entity start-entity)
+        target-value (value-entity target-entity)]
+    (for [param index rule.params]
+      (let [arg call.args[index]]
+        (when (= arg.kind .Var)
+          (let [value (if (= param rule.params[0]) start-value target-value)
+                [existing exists] (binding-lookup result arg.name)]
+            (if exists
+              (when (not (value-equal? existing value))
+                (return))
+              (binding-store! (addr result) arg.name value))))))
+    (arr.push! out^ result)))
+
+(defn append-linear-transitive-unbound-from-start-adjacency! [out: ^[dynamic]Binding, adjacency: []Transitive-Adjacency, adjacency-index: map[u64]int, call: Rule-Call, binding: Binding, rule: Rule, start-entity: u64]
+  (let [expanded (make [dynamic]u64 0 (count adjacency))
+        emitted (make [dynamic]u64 0 (count adjacency))
+        frontier (make [dynamic]u64 0 (count adjacency))
+        frontier-index 0]
+    (defer (delete expanded))
+    (defer (delete emitted))
+    (defer (delete frontier))
+    (arr.push! frontier start-entity)
+    (while (< frontier-index (count frontier))
+      (let [current frontier[frontier-index]
+            [adj-index has-edges] (transitive-adjacency-index adjacency-index current)]
+        (set! frontier-index (+ frontier-index 1))
+        (let [already-expanded (u64-slice-contains? (slice expanded 0) current)]
+          (when (and (not already-expanded) has-edges)
+            (arr.push! expanded current)
+            (for [target-entity adjacency[adj-index].targets]
+              (let [already-emitted (u64-slice-contains? (slice emitted 0) target-entity)
+                    target-expanded (u64-slice-contains? (slice expanded 0) target-entity)]
+                (when (not already-emitted)
+                  (arr.push! emitted target-entity)
+                  (append-linear-transitive-direct-result! out call binding rule start-entity target-entity))
+                (when (not target-expanded)
+                  (arr.push! frontier target-entity))))))))))
+
+(defn transitive-target-matches? [db: DB, target: Value, target-ok: bool, entity: u64] -> bool
+  (when (not target-ok)
+    (return true))
+  (let [[target-entity target-entity-ok] (value-as-entity db target)]
+    (and target-entity-ok (= target-entity.entity entity))))
+
+(defn append-linear-transitive-target-result! [out: ^[dynamic]Binding, db: DB, call: Rule-Call, binding: Binding, rule: Rule, initial: Binding, start-entity: u64, target: Value, target-ok: bool, target-entity: u64]
+  (when (not (transitive-target-matches? db target target-ok target-entity))
+    (return))
+  (when (and (= (count rule.params) 2)
+             (= (count call.args) 2)
+             (= call.args[0].kind .Var)
+             (= call.args[1].kind .Var)
+             (not (= call.args[0].name call.args[1].name)))
+    (let [[_ start-bound] (binding-lookup binding call.args[0].name)
+          [_ target-bound] (binding-lookup binding call.args[1].name)]
+      (when (and start-bound (not target-bound))
+        (let [fast-result (clone-binding binding)]
+          (binding-store! (addr fast-result) call.args[1].name (value-entity target-entity))
+          (arr.push! out^ fast-result)
+          (return)))))
+  (let [[_ start-bound] (binding-lookup initial rule.params[0])
+        with-start initial
+        with-start-ok true]
+    (when (not start-bound)
+      (let [[bound bound-ok] (binding-with-value initial rule.params[0] (value-entity start-entity))]
+        (set! with-start bound)
+        (set! with-start-ok bound-ok)))
+    (when (not with-start-ok)
+      (return))
+    (let [[_ target-bound] (binding-lookup with-start rule.params[1])
+          result with-start
+          result-ok true]
+      (when (not target-bound)
+        (let [[bound bound-ok] (binding-with-value with-start rule.params[1] (value-entity target-entity))]
+          (set! result bound)
+          (set! result-ok bound-ok)))
+      (when (not result-ok)
+        (return))
+      (let [[merged merged-ok] (merge-rule-output binding call rule result)]
+        (when merged-ok
+          (arr.push! out^ merged))))))
+
+(defn append-linear-transitive-from-start! [out: ^[dynamic]Binding, db: DB, attr: string, call: Rule-Call, binding: Binding, rule: Rule, initial: Binding, start-entity: u64]
+  (let [[target target-ok] (binding-lookup initial rule.params[1])
+        targets (make [dynamic]u64)]
+    (defer (delete targets))
+    (append-transitive-targets! (addr targets) db attr start-entity)
+    (for [target-entity targets]
+      (append-linear-transitive-target-result! out db call binding rule initial start-entity target target-ok target-entity))))
+
+(defn append-linear-transitive-from-start-adjacency! [out: ^[dynamic]Binding, db: DB, adjacency: Transitive-Adjacency-Index, call: Rule-Call, binding: Binding, rule: Rule, initial: Binding, start-entity: u64]
+  (let [[target target-ok] (binding-lookup initial rule.params[1])
+        targets (make [dynamic]u64)]
+    (defer (delete targets))
+    (append-transitive-targets-fast! (addr targets) (slice adjacency.items 0) adjacency.index start-entity)
+    (for [target-entity targets]
+      (append-linear-transitive-target-result! out db call binding rule initial start-entity target target-ok target-entity))))
+
+(defn append-linear-transitive-from-all-starts! [out: ^[dynamic]Binding, db: DB, plan: Linear-Transitive-Plan, call: Rule-Call, binding: Binding, rule: Rule, initial: Binding]
+  (let [adjacency (if plan.derived-edge
+                    (transitive-derived-adjacency-from-db db plan.derived-left-attr plan.derived-right-attr)
+                    (transitive-adjacency-from-db-with-filters db plan.attr (slice plan.filters 0)))]
+    (defer (delete-transitive-adjacency adjacency))
+    (for [entry adjacency.items]
+      (append-linear-transitive-unbound-from-start-adjacency! out (slice adjacency.items 0) adjacency.index call binding rule entry.entity))))
+
+(defn append-linear-transitive-to-target! [out: ^[dynamic]Binding, db: DB, attr: string, call: Rule-Call, binding: Binding, rule: Rule, initial: Binding, target-entity: u64]
+  (let [starts (make [dynamic]u64)
+        target-value (value-entity target-entity)]
+    (defer (delete starts))
+    (append-transitive-sources! (addr starts) db attr target-entity)
+    (for [start-entity starts]
+      (append-linear-transitive-target-result! out db call binding rule initial start-entity target-value true target-entity))))
+
+(defn append-linear-transitive-to-target-adjacency! [out: ^[dynamic]Binding, db: DB, adjacency: Transitive-Adjacency-Index, call: Rule-Call, binding: Binding, rule: Rule, initial: Binding, target-entity: u64]
+  (let [starts (make [dynamic]u64)
+        target-value (value-entity target-entity)]
+    (defer (delete starts))
+    (append-transitive-targets-fast! (addr starts) (slice adjacency.items 0) adjacency.index target-entity)
+    (for [start-entity starts]
+      (append-linear-transitive-target-result! out db call binding rule initial start-entity target-value true target-entity))))
+
+(defn append-linear-transitive-results! [out: ^[dynamic]Binding, db: DB, plan: Linear-Transitive-Plan, call: Rule-Call, binding: Binding, rule: Rule]
+  (let [[initial initial-ok] (bind-rule-args binding call rule)]
+    (when (not initial-ok)
+      (return))
+    (let [[start start-ok] (binding-lookup initial rule.params[0])]
+      (if start-ok
+        (let [[start-entity start-entity-ok] (value-as-entity db start)]
+          (when (not start-entity-ok)
+            (return))
+          (let [adjacency (if plan.derived-edge
+                            (transitive-derived-adjacency-from-db db plan.derived-left-attr plan.derived-right-attr)
+                            (transitive-adjacency-from-db-with-filters db plan.attr (slice plan.filters 0)))]
+            (defer (delete-transitive-adjacency adjacency))
+            (append-linear-transitive-from-start-adjacency! out db adjacency call binding rule initial start-entity.entity)))
+        (let [[target target-ok] (binding-lookup initial rule.params[1])]
+          (if target-ok
+            (let [[target-entity target-entity-ok] (value-as-entity db target)]
+              (when target-entity-ok
+                (let [adjacency (if plan.derived-edge
+                                  (transitive-derived-reverse-adjacency-from-db db plan.derived-left-attr plan.derived-right-attr)
+                                  (transitive-reverse-adjacency-from-db-with-filters db plan.attr (slice plan.filters 0)))]
+                  (defer (delete-transitive-adjacency adjacency))
+                  (append-linear-transitive-to-target-adjacency! out db adjacency call binding rule initial target-entity.entity))))
+            (append-linear-transitive-from-all-starts! out db plan call binding rule initial)))))))
+
+(defn bindings-after-linear-transitive-rule-call [db: DB, rules: []Rule, call: Rule-Call, binding: Binding] -> [out: [dynamic]Binding, ok: bool]
+  (let [result-bindings (make [dynamic]Binding)
+        [plan plan-ok] (linear-transitive-rule-plan rules call.name)]
+    (defer (delete-linear-transitive-plan plan))
+    (when (not plan-ok)
+      (return result-bindings false))
+    (for [rule rules]
+      (when (= rule.name call.name)
+        (append-linear-transitive-results! (addr result-bindings) db plan call binding rule)
+        (return result-bindings true)))
+    (return result-bindings true)))
+
+(defn append-alternating-transitive-results! [out: ^[dynamic]Binding, db: DB, plan: Alternating-Transitive-Plan, call: Rule-Call, binding: Binding, rule: Rule]
+  (let [[initial initial-ok] (bind-rule-args binding call rule)]
+    (when (not initial-ok)
+      (return))
+    (let [[start start-ok] (binding-lookup initial rule.params[0])]
+      (when (not start-ok)
+        (return))
+      (let [[start-entity start-entity-ok] (value-as-entity db start)]
+        (when (not start-entity-ok)
+          (return))
+        (let [left-adjacency (transitive-adjacency-from-db db plan.left-attr)
+              right-adjacency (transitive-adjacency-from-db db plan.right-attr)
+              targets (make [dynamic]u64)]
+          (defer (delete-transitive-adjacency left-adjacency))
+          (defer (delete-transitive-adjacency right-adjacency))
+          (defer (delete targets))
+          (append-alternating-targets! (addr targets) left-adjacency right-adjacency start-entity.entity)
+          (let [[target target-ok] (binding-lookup initial rule.params[1])]
+            (for [target-entity targets]
+              (append-linear-transitive-target-result! out db call binding rule initial start-entity.entity target target-ok target-entity))))))))
+
+(defn bindings-after-alternating-transitive-rule-call [db: DB, rules: []Rule, call: Rule-Call, binding: Binding] -> [out: [dynamic]Binding, ok: bool]
+  (let [result-bindings (make [dynamic]Binding)
+        [plan plan-ok] (alternating-transitive-rule-plan rules call.name)]
+    (when (not plan-ok)
+      (return result-bindings false))
+    (let [[rule rule-ok] (first-rule-by-name rules call.name)]
+      (when (not rule-ok)
+        (return result-bindings false))
+      (append-alternating-transitive-results! (addr result-bindings) db plan call binding rule)
+      (return result-bindings true))))
+
+(defn bindings-after-rule-step-depth-with-fns [db: DB, rules: []Rule, rule: Rule, bindings: []Binding, step: Query-Step, depth: int, source: string, has-source: bool, registry: []Native-Query-Fn] -> [dynamic]Binding
+  (case step.kind
+    .Clause
+      (let [out (make [dynamic]Binding)
+            clause (rule-clause-with-source rule.clauses[step.index] source has-source)]
+        (for [binding bindings]
+          (append-bindings-after-clause! (addr out) db clause binding))
+        out)
+    .RuleCall
+      (let [out (make [dynamic]Binding)
+            call rule.rule-calls[step.index]]
+        (for [binding bindings]
+          (let [next-source (if call.has-source call.source source)
+                next-has-source (or call.has-source has-source)
+                rule-bindings (bindings-after-rule-call-depth-with-fns db rules call binding (- depth 1) next-source next-has-source registry)]
+            (for [rule-binding rule-bindings]
+              (arr.push! out rule-binding))
+            (delete rule-bindings)))
+        out)
+    .Ground
+      (apply-ground bindings rule.grounds[step.index])
+    .GetElse
+      (bindings-after-get-else-step db bindings rule.get-elses[step.index])
+    .GetSome
+      (bindings-after-get-some-step db bindings rule.get-somes[step.index])
+    .Function
+      (bindings-after-function-with-fns bindings rule.function-clauses[step.index] registry)
+    .Predicate
+      (bindings-after-predicate-with-db-and-fns db bindings rule.predicates[step.index] registry)
+    .Or
+      (let [out (make [dynamic]Binding)
+            group (if has-source (relation-db-or-group rule.or-groups[step.index] source) rule.or-groups[step.index])]
+        (defer (when has-source (delete group.branches)))
+        (for [binding bindings]
+          (for [branch group.branches]
+            (let [branch-bindings (bindings-after-or-branch-with-rules-sources-and-fns db rules ([]DB-Source []) group branch binding registry)]
+              (for [branch-binding branch-bindings]
+                (arr.push! out branch-binding))
+              (delete branch-bindings))))
+        out)
+
+      (let [out (make [dynamic]Binding)
+            group (if has-source (relation-db-not-group rule.not-groups[step.index] source) rule.not-groups[step.index])]
+        (defer (when has-source
+          (delete group.clauses)
+          (delete group.get-elses)
+          (delete group.get-somes)
+          (delete group.grounds)
+          (delete group.rule-calls)
+          (delete group.not-groups)
+          (delete group.join-vars)))
+        (for [binding bindings]
+          (when (not (binding-matches-not-group-with-rules-sources-and-fns? db rules ([]DB-Source []) group binding registry))
+            (arr.push! out binding)))
+        out)))
+
+(defn bindings-after-rule-step-depth [db: DB, rules: []Rule, rule: Rule, bindings: []Binding, step: Query-Step, depth: int, source: string, has-source: bool] -> [dynamic]Binding
+  (bindings-after-rule-step-depth-with-fns db rules rule bindings step depth source has-source ([]Native-Query-Fn [])))
+
+(defn bindings-after-rule-body-ordered-depth-with-fns [db: DB, rules: []Rule, rule: Rule, initial: Binding, depth: int, source: string, has-source: bool, registry: []Native-Query-Fn] -> [dynamic]Binding
+  (let [bindings (make [dynamic]Binding)]
+    (arr.push! bindings initial)
+    (for [step rule.body-steps]
+      (let [next-raw (bindings-after-rule-step-depth-with-fns db rules rule (slice bindings 0) step depth source has-source registry)
+            next (unique-bindings (slice next-raw 0))]
+        (delete next-raw)
+        (delete bindings)
+        (set! bindings next)
+        (when (= (count bindings) 0)
+          (return bindings))))
+    bindings))
+
+(defn bindings-after-rule-body-ordered-depth [db: DB, rules: []Rule, rule: Rule, initial: Binding, depth: int, source: string, has-source: bool] -> [dynamic]Binding
+  (bindings-after-rule-body-ordered-depth-with-fns db rules rule initial depth source has-source ([]Native-Query-Fn [])))
+
+(defn rule-body-pure-clause-call? [rule: Rule] -> bool
+  (when (= (count rule.body-steps) 0)
+    (return false))
+  (for [step rule.body-steps]
+    (when (not (or (= step.kind .Clause)
+                   (= step.kind .RuleCall)))
+      (return false)))
+  true)
+
+(defn rule-body-planned-clause-call-predicate? [rule: Rule] -> bool
+  (when (= (count rule.body-steps) 0)
+    (return false))
+  (for [step rule.body-steps]
+    (when (not (or (= step.kind .Clause)
+                   (= step.kind .RuleCall)))
+      (return false)))
+  true)
+
+(defn rule-call-bound-arg-count [call: Rule-Call, binding: Binding] -> int
+  (let [out 0]
+    (for [arg call.args]
+      (when (= arg.kind .Var)
+        (let [[_ ok] (binding-lookup binding arg.name)]
+          (when ok
+            (set! out (+ out 1)))))
+      (when (or (= arg.kind .Value)
+                (= arg.kind .LookupRef))
+        (set! out (+ out 1))))
+    out))
+
+(defn query-relation-rule-call-bound-arg-count [rel: Query-Relation, call: Rule-Call] -> int
+  (let [out 0]
+    (for [arg call.args]
+      (when (= arg.kind .Var)
+        (when (query-relation-has-attr? rel arg.name)
+          (set! out (+ out 1))))
+      (when (or (= arg.kind .Value)
+                (= arg.kind .LookupRef))
+        (set! out (+ out 1))))
+    out))
+
+(defn rule-call-ready-for-binding-indexed? [rules: []Rule, index: []Rule-Name-Index-Entry, call: Rule-Call, binding: Binding] -> bool
+  (let [available (binding-available-vars binding) :defer
+        [ok _] (validate-rule-call-required-bindings-indexed (slice available 0) rules index call)]
+    ok))
+
+(defn rule-call-ready-for-binding? [rules: []Rule, call: Rule-Call, binding: Binding] -> bool
+  (let [index (rule-name-index-build rules)]
+    (defer (delete-rule-name-index index))
+    (rule-call-ready-for-binding-indexed? rules (slice index 0) call binding)))
+
+(defn rule-call-selectivity-score [call: Rule-Call, binding: Binding] -> int
+  (let [bound-count (rule-call-bound-arg-count call binding)]
+    (cond
+      (>= bound-count 2) 1
+      (= bound-count 1) 2
+      :else 6)))
+
+(defn best-rule-predicate-score-unlocked-by-clause [rule: Rule, steps: []Query-Step, binding: Binding, clause-value: Clause] -> int
+  (let [available (available-vars-after-clause binding clause-value) :defer
+        best -1]
+    (for [step steps]
+      (when (= step.kind .Predicate)
+        (let [predicate rule.predicates[step.index]]
+          (when (predicate-ready-with-vars? predicate (slice available 0))
+            (let [score (predicate-selectivity-score predicate)]
+              (when (or (= best -1)
+                        (< score best))
+                (set! best score)))))))
+    best))
+
+(defn best-ready-rule-body-step-index-indexed [db: DB, rules: []Rule, rule-index: []Rule-Name-Index-Entry, rule: Rule, steps: []Query-Step, binding: Binding, source: string, has-source: bool] -> [index: int, ok: bool]
+  (let [best -1
+        best-score 0
+        best-unlocked-predicate-score -1
+        best-count -1]
+    (for [step step-index steps]
+      (let [ready false
+            score 0
+            unlocked-predicate-score -1
+            candidate-count -1]
+        (when (= step.kind .Clause)
+          (let [clause (rule-clause-with-source rule.clauses[step.index] source has-source)]
+            (set! ready true)
+            (set! score (clause-selectivity-score clause binding))
+            (set! unlocked-predicate-score (best-rule-predicate-score-unlocked-by-clause rule steps binding clause))
+            (when (and (>= best 0)
+                       (= score best-score))
+              (set! candidate-count (clause-candidate-count-estimate db ([]DB-Source []) clause binding)))))
+        (when (= step.kind .Predicate)
+          (let [available (binding-available-vars binding) :defer
+                predicate rule.predicates[step.index]]
+            (when (predicate-ready-with-vars? predicate (slice available 0))
+              (set! ready true)
+              (set! score (predicate-selectivity-score predicate))
+              (set! candidate-count 0))))
+        (when (= step.kind .RuleCall)
+          (let [call rule.rule-calls[step.index]]
+            (when (rule-call-ready-for-binding-indexed? rules rule-index call binding)
+              (set! ready true)
+              (set! score (rule-call-selectivity-score call binding)))))
+        (when ready
+          (when (or (= best -1)
+                    (< score best-score))
+            (set! best step-index)
+            (set! best-score score)
+            (set! best-unlocked-predicate-score unlocked-predicate-score)
+            (set! best-count candidate-count))
+          (when (and (not (= best step-index))
+                     (= score best-score)
+                     (>= unlocked-predicate-score 0)
+                     (or (< best-unlocked-predicate-score 0)
+                         (< unlocked-predicate-score best-unlocked-predicate-score)))
+            (set! best step-index)
+            (set! best-unlocked-predicate-score unlocked-predicate-score)
+            (set! best-count candidate-count))
+          (when (and (not (= best step-index))
+                     (= score best-score)
+                     (= unlocked-predicate-score best-unlocked-predicate-score))
+            (when (< best-count 0)
+              (let [best-step steps[best]]
+                (if (= best-step.kind .Clause)
+                  (let [best-clause (rule-clause-with-source rule.clauses[best-step.index] source has-source)]
+                    (set! best-count (clause-candidate-count-estimate db ([]DB-Source []) best-clause binding)))
+                  (set! best-count 0))))
+            (let [count-estimate (if (>= candidate-count 0) candidate-count 0)]
+              (when (< count-estimate best-count)
+                (set! best step-index)
+                (set! best-unlocked-predicate-score unlocked-predicate-score)
+                (set! best-count count-estimate)))))))
+    (return best (>= best 0))))
+
+(defn best-ready-rule-body-step-index [db: DB, rules: []Rule, rule: Rule, steps: []Query-Step, binding: Binding, source: string, has-source: bool] -> [index: int, ok: bool]
+  (let [rule-index (rule-name-index-build rules)]
+    (defer (delete-rule-name-index rule-index))
+    (best-ready-rule-body-step-index-indexed db rules (slice rule-index 0) rule steps binding source has-source)))
+
+(defn bindings-after-rule-body-planned-clause-call-depth-with-fns [db: DB, rules: []Rule, rule: Rule, initial: Binding, depth: int, source: string, has-source: bool, registry: []Native-Query-Fn] -> [dynamic]Binding
+  (let [bindings (make [dynamic]Binding)
+        remaining (arr.into [dynamic]Query-Step (slice rule.body-steps 0))
+        rule-index (rule-name-index-build rules)]
+    (defer (delete remaining))
+    (defer (delete-rule-name-index rule-index))
+    (arr.push! bindings initial)
+    (while (and (> (count bindings) 0)
+                (> (count remaining) 0))
+      (let [[step-index step-ok] (best-ready-rule-body-step-index-indexed db rules (slice rule-index 0) rule (slice remaining 0) bindings[0] source has-source)]
+        (when (not step-ok)
+          (delete bindings)
+          (return (make [dynamic]Binding)))
+        (let [step remaining[step-index]
+              next-raw (bindings-after-rule-step-depth-with-fns db rules rule (slice bindings 0) step depth source has-source registry)
+              next (unique-bindings (slice next-raw 0))]
+          (delete next-raw)
+          (delete bindings)
+          (set! bindings next)
+          (arr.remove-ordered-at! remaining step-index))))
+    bindings))
+
+(defn bindings-after-rule-body-grouped-depth-with-fns [db: DB, rules: []Rule, rule: Rule, initial: Binding, depth: int, source: string, has-source: bool, registry: []Native-Query-Fn] -> [dynamic]Binding
+  (let [clauses (rule-clauses-with-source rule.clauses source has-source)
+        group (not-group-simple (slice clauses 0))
+        initial-bindings (bindings-after-clause-group-with-sources-and-fns db ([]DB-Source []) group initial registry)
+        bindings (unique-bindings (slice initial-bindings 0))]
+    (delete initial-bindings)
+    (delete clauses)
+    (for [call rule.rule-calls]
+      (let [next-bindings (make [dynamic]Binding)]
+        (for [binding bindings]
+          (let [next-source (if call.has-source call.source source)
+                next-has-source (or call.has-source has-source)
+                rule-bindings (bindings-after-rule-call-depth-with-fns db rules call binding (- depth 1) next-source next-has-source registry)]
+            (for [rule-binding rule-bindings]
+              (arr.push! next-bindings rule-binding))
+            (delete rule-bindings)))
+        (let [next (unique-bindings (slice next-bindings 0))]
+          (delete next-bindings)
+          (delete bindings)
+          (set! bindings next))))
+    (for [ground rule.grounds]
+      (let [next-raw (apply-ground (slice bindings 0) ground)
+            next (unique-bindings (slice next-raw 0))]
+        (delete next-raw)
+        (delete bindings)
+        (set! bindings next)))
+    (for [get-else rule.get-elses]
+      (let [next-raw (bindings-after-get-else-step db (slice bindings 0) get-else)
+            next (unique-bindings (slice next-raw 0))]
+        (delete next-raw)
+        (delete bindings)
+        (set! bindings next)))
+    (for [get-some rule.get-somes]
+      (let [next-raw (bindings-after-get-some-step db (slice bindings 0) get-some)
+            next (unique-bindings (slice next-raw 0))]
+        (delete next-raw)
+        (delete bindings)
+        (set! bindings next)))
+    (for [function rule.function-clauses]
+      (let [next-raw (bindings-after-function-with-fns (slice bindings 0) function registry)
+            next (unique-bindings (slice next-raw 0))]
+        (delete next-raw)
+        (delete bindings)
+        (set! bindings next)))
+    (for [predicate rule.predicates]
+      (let [next-raw (bindings-after-predicate-with-db-and-fns db (slice bindings 0) predicate registry)
+            next (unique-bindings (slice next-raw 0))]
+        (delete next-raw)
+        (delete bindings)
+        (set! bindings next)))
+    bindings))
+
+(defn bindings-after-rule-body-grouped-depth [db: DB, rules: []Rule, rule: Rule, initial: Binding, depth: int, source: string, has-source: bool] -> [dynamic]Binding
+  (bindings-after-rule-body-grouped-depth-with-fns db rules rule initial depth source has-source ([]Native-Query-Fn [])))
+
+(defn bindings-after-rule-body-depth-with-fns [db: DB, rules: []Rule, rule: Rule, initial: Binding, depth: int, source: string, has-source: bool, registry: []Native-Query-Fn] -> [dynamic]Binding
+  (if (rule-body-planned-clause-call-predicate? rule)
+    (bindings-after-rule-body-planned-clause-call-depth-with-fns db rules rule initial depth source has-source registry)
+    (if (> (count rule.body-steps) 0)
+      (bindings-after-rule-body-ordered-depth-with-fns db rules rule initial depth source has-source registry)
+      (bindings-after-rule-body-grouped-depth-with-fns db rules rule initial depth source has-source registry))))
+
+(defn bindings-after-rule-body-depth [db: DB, rules: []Rule, rule: Rule, initial: Binding, depth: int, source: string, has-source: bool] -> [dynamic]Binding
+  (bindings-after-rule-body-depth-with-fns db rules rule initial depth source has-source ([]Native-Query-Fn [])))
+
+(defn bind-rule-args [outer: Binding, call: Rule-Call, rule: Rule] -> [binding: Binding, ok: bool]
+  (let [out (Binding {})]
+    (when (not (= (count call.args) (count rule.params)))
+      (return out false))
+    (for [param index rule.params]
+      (let [arg call.args[index]]
+        (case arg.kind
+          .Var (let [[value value-ok] (binding-lookup outer arg.name)]
+                 (when (and (< index rule.required-param-count)
+                            (not value-ok))
+                   (return out false))
+                 (when value-ok
+                   (let [[next bind-ok] (binding-with-value out param value)]
+                     (when (not bind-ok)
+                       (return next false))
+                     (set! out next))))
+          .Value (let [[next bind-ok] (binding-with-value out param arg.value)]
+                   (when (not bind-ok)
+                     (return next false))
+                   (set! out next))
+          .Wildcard (do)
+           (return out false))))
+    (return out true)))
+
+(defn merge-rule-output [outer: Binding, call: Rule-Call, rule: Rule, result: Binding] -> [binding: Binding, ok: bool]
+  (let [out (clone-binding outer)]
+    (for [param index rule.params]
+      (let [arg call.args[index]]
+        (when (= arg.kind .Var)
+          (let [[value value-ok] (binding-lookup result param)]
+            (when value-ok
+              (let [[existing exists] (binding-lookup out arg.name)]
+                (if exists
+                  (when (not (predicate-value-equal? existing value))
+                    (return out false))
+                  (binding-store! (addr out) arg.name value))))))))
+    (return out true)))
+
+(defn positive-rule-memo-eligible? [rule: Rule] -> bool
+  (when (or (> (count rule.predicates) 0)
+            (> (count rule.function-clauses) 0)
+            (> (count rule.get-elses) 0)
+            (> (count rule.get-somes) 0)
+            (> (count rule.grounds) 0)
+            (> (count rule.not-groups) 0)
+            (> (count rule.or-groups) 0))
+    (return false))
+  (for [rule-clause rule.clauses]
+    (when rule-clause.has-source
+      (return false)))
+  (for [call rule.rule-calls]
+    (when call.has-source
+      (return false)))
+  (for [step rule.body-steps]
+    (when (not (or (= step.kind .Clause)
+                   (= step.kind .RuleCall)))
+      (return false)))
+  true)
+
+(defn positive-rule-memo-plan-eligible? [plan: Rule-Call-Plan, call: Rule-Call] -> bool
+  (when (or call.has-source
+            plan.linear-transitive
+            plan.alternating-transitive
+            (not plan.recursive))
+    (return false))
+  (for [rule plan.rules]
+    (when (not (positive-rule-memo-eligible? rule))
+      (return false)))
+  true)
+
+(defn recursive-component-names-for-rule [rules: []Rule, name: string] -> [dynamic]string
+  (let [deps (rules-dependency-graph rules)
+        components (rule-components-in-deps (slice deps 0))
+        out (make [dynamic]string)]
+    (defer (delete-rule-dependency-graph deps))
+    (defer (delete-rule-components components))
+    (let [[component-index found] (rule-component-index-for-name (slice components 0) name)]
+      (when (and found components[component-index].recursive)
+        (for [component-name components[component-index].names]
+          (arr.push! out component-name))))
+    out))
+
+(defn positive-rule-delta-plan-eligible? [plan: Rule-Call-Plan, call: Rule-Call] -> bool
+  (when (not (positive-rule-memo-plan-eligible? plan call))
+    (return false))
+  (let [recursive-names (recursive-component-names-for-rule (slice plan.rules 0) call.name)]
+    (defer (delete recursive-names))
+    (when (= (count recursive-names) 0)
+      (return false))
+    (for [rule plan.rules]
+      (when (not (string-slice-contains? (slice recursive-names 0) rule.name))
+        (return false))
+      (for [rule-call rule.rule-calls]
+        (when (not (string-slice-contains? (slice recursive-names 0) rule-call.name))
+          (return false)))))
+  true)
+
+(defn string-slices-equal? [left: []string, right: []string] -> bool
+  (when (not (= (count left) (count right)))
+    (return false))
+  (for [item index left]
+    (when (not (= item right[index]))
+      (return false)))
+  true)
+
+(defn delete-rule-memo [memo: [dynamic]Rule-Memo-Entry]
+  (for [entry memo]
+    (delete entry.params)
+    (delete entry.bindings)
+    (delete entry.delta)
+    (delete entry.seen)
+    (delete-query-relation entry.bindings-rel)
+    (delete-query-relation entry.delta-rel))
+  (delete memo))
