@@ -1,0 +1,606 @@
+; Copyright 2026 Vev Contributors
+; SPDX-License-Identifier: Apache-2.0
+
+(package vev)
+
+(defn match-term? [term: Term, actual: Value, binding: ^Binding] -> bool
+  (case term.kind
+    .Value (value-equal? term.value actual)
+    .Wildcard true
+    .Var (let [[existing ok] (binding-lookup binding^ term.name)]
+           (if ok
+             (predicate-value-equal? existing actual)
+             (do
+               (binding-store! binding term.name actual)
+               true)))
+     false))
+
+(defn resolve-term [term: Term, binding: Binding] -> [value: Value, ok: bool]
+  (case term.kind
+    .Value (return term.value true)
+    .Var (return (binding-lookup binding term.name))
+     (return (Value {}) false)))
+
+(defn resolve-entity-term [db: DB, term: Term, binding: Binding] -> [value: Value, ok: bool]
+  (when (= term.kind .LookupRef)
+    (let [[entity lookup-ok] (resolve-lookup-ref db term.lookup-attr term.lookup-value)]
+      (return (value-entity entity) lookup-ok)))
+  (let [[resolved resolved-ok] (resolve-term term binding)]
+    (when (not resolved-ok)
+      (return resolved false))
+    (let [[entity entity-ok] (value-as-entity db resolved)]
+      (when entity-ok
+        (return entity true)))
+    (when (= resolved.kind .Keyword)
+      (let [[entity ident-ok] (schema-entity-for-attr db resolved.text)]
+        (return (value-entity entity) ident-ok)))
+    (when (= resolved.kind .Int)
+      (return (value-entity (u64 resolved.int-value)) true))
+    (return resolved true)))
+
+(defn predicate-pair-matches? [op: string, left: Value, right: Value] -> bool
+  (cond
+    (= op "=") (predicate-value-equal? left right)
+    (or (= op "!=") (= op "not=")) (not (predicate-value-equal? left right))
+    (or (= op "contains?") (= op "clojure.string/includes?"))
+      (and (= left.kind .String)
+           (= right.kind .String)
+           (strings.contains left.text right.text))
+    (= op "clojure.string/starts-with?")
+      (and (= left.kind .String)
+           (= right.kind .String)
+           (strings.has_prefix left.text right.text))
+    (= op "clojure.string/ends-with?")
+      (and (= left.kind .String)
+           (= right.kind .String)
+           (strings.has_suffix left.text right.text))
+    (= op ">") (value-less? right left)
+    (= op "<") (value-less? left right)
+    (= op ">=") (not (value-less? left right))
+    (= op "<=") (not (value-less? right left))
+    :else false))
+
+(defn query-var-name? [name: string] -> bool
+  (strings.has_prefix name "?"))
+
+(defn query-op-value-name [value: Value] -> [name: string, ok: bool]
+  (when (= value.kind .Keyword)
+    (if (strings.has_prefix value.text ":")
+      (return (slice value.text 1) true)
+      (return value.text true)))
+  (when (= value.kind .String)
+    (return value.text true))
+  (return "" false))
+
+(defn query-op-name [op: string, binding: Binding] -> [name: string, ok: bool]
+  (when (not (query-var-name? op))
+    (return op true))
+  (let [[value value-ok] (binding-lookup binding op)]
+    (when (not value-ok)
+      (return "" false))
+    (query-op-value-name value)))
+
+(defn query-fn [name: string, target: string] -> Native-Query-Fn
+  (Native-Query-Fn {name: name target: target}))
+
+(defn query-predicate-fn [name: string, f: fn [args: []Value] -> bool] -> Native-Query-Fn
+  (Native-Query-Fn {name: name has-predicate-callback: true predicate-callback: f}))
+
+(defn query-db-predicate-fn [name: string, f: fn [db: DB, args: []Value] -> bool] -> Native-Query-Fn
+  (Native-Query-Fn {name: name has-db-predicate-callback: true db-predicate-callback: f}))
+
+(defn native-query-function-result [value: Value] -> Native-Query-Function-Result
+  (Native-Query-Function-Result {ok: true value: value}))
+
+(defn native-query-function-none [] -> Native-Query-Function-Result
+  (Native-Query-Function-Result {ok: false}))
+
+(defn query-value-fn [name: string, f: fn [args: []Value] -> Native-Query-Function-Result] -> Native-Query-Fn
+  (Native-Query-Fn {name: name has-function-callback: true function-callback: f}))
+
+(defn query-aggregate-fn [name: string, f: fn [values: []Value] -> Native-Query-Function-Result] -> Native-Query-Fn
+  (Native-Query-Fn {name: name has-aggregate-callback: true aggregate-callback: f}))
+
+(defn pull-xform-fn [name: string, f: fn [value: Value] -> Native-Query-Function-Result] -> Native-Query-Fn
+  (Native-Query-Fn {name: name has-pull-xform-callback: true pull-xform-callback: f}))
+
+(defn query-fn-index [registry: []Native-Query-Fn, name: string] -> [index: int, ok: bool]
+  (for [entry index registry]
+    (when (= entry.name name)
+      (return index true)))
+  (return 0 false))
+
+(defn query-fn-supported? [registry: []Native-Query-Fn, op: string] -> bool
+  (when (query-var-name? op)
+    (return true))
+  (let [[_ ok] (query-fn-index registry op)]
+    ok))
+
+(defn query-fn-target [registry: []Native-Query-Fn, op: string] -> [target: string, ok: bool]
+  (let [[index found] (query-fn-index registry op)]
+    (when (not found)
+      (return "" false))
+    (return registry[index].target true)))
+
+(defn resolve-query-call-args [terms: []Term, binding: Binding] -> [out: [dynamic]Value, ok: bool]
+  (let [args (make [dynamic]Value 0 (count terms))]
+    (for [term terms]
+      (let [[value value-ok] (resolve-term term binding)]
+        (when (not value-ok)
+          (return args false))
+        (arr.push! args value)))
+    (return args true)))
+
+(defn re-find-matches? [pattern: Value, text: Value] -> bool
+  (when (not (and (= pattern.kind .String)
+                  (= text.kind .String)))
+    (return false))
+  (let [[iter err] (regex.create_iterator text.text pattern.text)]
+    (when (!= err nil)
+      (return false))
+    (defer (regex.destroy iter))
+    (let [[_ _ ok] (regex.match (addr iter))]
+      ok)))
+
+(defn re-find-value [pattern: Value, text: Value] -> [value: Value, ok: bool]
+  (when (not (and (= pattern.kind .String)
+                  (= text.kind .String)))
+    (return (Value {}) false))
+  (let [[iter err] (regex.create_iterator text.text pattern.text)]
+    (when (!= err nil)
+      (return (Value {}) false))
+    (defer (regex.destroy iter))
+    (let [[capture _ ok] (regex.match (addr iter))]
+      (when (and ok (> (count capture.groups) 0))
+        (return (value-string capture.groups[0]) true))))
+  (return (Value {}) false))
+
+(defn value-str [value: Value] -> [text: string, ok: bool]
+  (case value.kind
+    .String (return value.text true)
+    .Keyword (return value.text true)
+    .Uuid (return value.text true)
+    .Instant (return (instant-text value.int-value) true)
+    .Int (return (fmt.tprintf "%d" value.int-value) true)
+    .Float (return (fmt.tprintf "%v" value.float-value) true)
+    .Bool (if value.bool-value
+            (return "true" true)
+            (return "false" true))
+    .Entity (return (fmt.tprintf "%d" value.entity) true)
+    .Nil (return "" true)
+     (return "" false)))
+
+(defn primitive-value-dedupe-key [value: Value] -> [key: string, ok: bool]
+  (case value.kind
+    .Entity (return (fmt.tprintf "e:%d" value.entity) true)
+    .String (return (fmt.tprintf "s:%s" value.text) true)
+    .Int (return (fmt.tprintf "i:%d" value.int-value) true)
+    .Float (return (fmt.tprintf "f:%v" value.float-value) true)
+    .Bool (if value.bool-value
+            (return "b:true" true)
+            (return "b:false" true))
+    .Keyword (return (fmt.tprintf "k:%s" value.text) true)
+    .Symbol (return (fmt.tprintf "y:%s" value.text) true)
+    .Uuid (return (fmt.tprintf "u:%s" value.text) true)
+    .Instant (return (fmt.tprintf "t:%d" value.int-value) true)
+    .Nil (return "n:" true)
+    .Vector
+      (let [parts (make [dynamic]string 0 (count value.items))]
+        (defer (delete parts))
+        (for [item value.items]
+          (let [[part part-ok] (primitive-value-dedupe-key item)]
+            (when (not part-ok)
+              (return "" false))
+            (arr.push! parts (fmt.tprintf "%d:%s;" (count part) part))))
+        (return (fmt.tprintf "v:%d:%s" (count value.items) (core-strings.concatenate (slice parts 0))) true))
+    .Map
+      (let [parts (make [dynamic]string 0 (count value.items))]
+        (defer (delete parts))
+        (for [item value.items]
+          (let [[part part-ok] (primitive-value-dedupe-key item)]
+            (when (not part-ok)
+              (return "" false))
+            (arr.push! parts (fmt.tprintf "%d:%s;" (count part) part))))
+        (return (fmt.tprintf "m:%d:%s" (count value.items) (core-strings.concatenate (slice parts 0))) true))
+     (return "" false)))
+
+(defn row-values-dedupe-key [values: []Value] -> [key: string, ok: bool]
+  (when (= (count values) 1)
+    (let [[key key-ok] (primitive-value-dedupe-key values[0])]
+      (if key-ok
+        (return (string-owned key) true)
+        (return "" false))))
+  (let [parts (make [dynamic]string 0 (count values))]
+    (defer (delete parts))
+    (for [value values]
+      (let [[part part-ok] (primitive-value-dedupe-key value)]
+        (when (not part-ok)
+          (return "" false))
+        (arr.push! parts (fmt.tprintf "%d:%s;" (count part) part))))
+    (return (core-strings.concatenate (slice parts 0)) true)))
+
+(defn delete-owned-string-set [values: (map string (struct {}))]
+  (for [value values]
+    (delete value))
+  (delete values))
+
+(defn pull-attrs-dedupe-key [attrs: []Pull-Attr] -> [key: string, ok: bool]
+  (let [parts (make [dynamic]string 0 (count attrs))]
+    (defer (delete parts))
+    (for [pull-attr attrs]
+      (let [[value-key value-ok] (primitive-value-dedupe-key pull-attr.v)]
+        (when (not value-ok)
+          (return "" false))
+        (let [[child-key child-ok] (pull-attrs-dedupe-key (slice pull-attr.attrs 0))]
+          (when (not child-ok)
+            (return "" false))
+          (arr.push! parts (fmt.tprintf "%d:%s:%d:%s:%d:%s;" (count pull-attr.a) pull-attr.a (count value-key) value-key (count child-key) child-key)))))
+    (return (fmt.tprintf "pa:%d:%s" (count attrs) (core-strings.concatenate (slice parts 0))) true)))
+
+(defn pull-result-dedupe-key [pull: Pull-Result] -> [key: string, ok: bool]
+  (let [[attrs-key attrs-ok] (pull-attrs-dedupe-key (slice pull.attrs 0))]
+    (if attrs-ok
+      (return (fmt.tprintf "pr:%s" attrs-key) true)
+      (return "" false))))
+
+(defn result-row-dedupe-key [values: []Value, pulls: []Pull-Result] -> [key: string, ok: bool]
+  (let [[values-key values-ok] (row-values-dedupe-key values)]
+    (when (not values-ok)
+      (return "" false))
+    (let [pull-parts (make [dynamic]string 0 (count pulls))]
+      (defer (delete pull-parts))
+      (for [pull pulls]
+        (let [[pull-key pull-ok] (pull-result-dedupe-key pull)]
+          (when (not pull-ok)
+            (return "" false))
+          (arr.push! pull-parts (fmt.tprintf "%d:%s;" (count pull-key) pull-key))))
+      (return (string-owned (fmt.tprintf "rv:%d:%s:rp:%d:%s" (count values-key) values-key (count pulls) (core-strings.concatenate (slice pull-parts 0)))) true))))
+
+(defn two-primitive-values-dedupe-key [first: Value, second: Value] -> [key: string, ok: bool]
+  (cond
+    (and (= first.kind .String) (= second.kind .Int))
+      (return (fmt.tprintf "si:%d:%s:%d" (count first.text) first.text second.int-value) true)
+    (and (= first.kind .Int) (= second.kind .String))
+      (return (fmt.tprintf "is:%d:%d:%s" first.int-value (count second.text) second.text) true)
+    (and (= first.kind .String) (= second.kind .String))
+      (return (fmt.tprintf "ss:%d:%s:%d:%s" (count first.text) first.text (count second.text) second.text) true)
+    (and (= first.kind .Int) (= second.kind .Int))
+      (return (fmt.tprintf "ii:%d:%d" first.int-value second.int-value) true)
+    :else
+      (let [values ([]Value [first second])]
+        (row-values-dedupe-key values))))
+
+(defstruct Two-Primitive-Seen {
+  generic: (map string (struct {}))
+  string-int: map[string]i64
+  string-int-extra: (map string (struct {}))
+  int-string: map[i64]string
+  int-string-extra: (map string (struct {}))
+})
+
+(defn two-primitive-seen [] -> Two-Primitive-Seen
+  (Two-Primitive-Seen {generic: (set.empty string)
+                       string-int: (make (map string i64))
+                       string-int-extra: (set.empty string)
+                       int-string: (make (map i64 string))
+                       int-string-extra: (set.empty string)}))
+
+(defn delete-two-primitive-seen [seen: Two-Primitive-Seen]
+  (delete seen.generic)
+  (delete seen.string-int)
+  (delete seen.string-int-extra)
+  (delete seen.int-string)
+  (delete seen.int-string-extra))
+
+(defn two-value-seen-add [seen: ^Two-Primitive-Seen, first: Value, second: Value] -> [added: bool, ok: bool]
+  (cond
+    (and (= first.kind .String) (= second.kind .Int))
+      (let [[existing found] (mmap.get seen^.string-int first.text)]
+        (when (not found)
+          (mmap.assoc! seen^.string-int first.text second.int-value)
+          (return true true))
+        (when (= existing second.int-value)
+          (return false true))
+        (let [[key key-ok] (two-primitive-values-dedupe-key first second)]
+          (when (not key-ok)
+            (return false false))
+          (let [already-seen (set.contains? seen^.string-int-extra key)]
+            (when already-seen
+              (return false true))
+            (set.add! seen^.string-int-extra key)
+            (return true true))))
+    (and (= first.kind .Int) (= second.kind .String))
+      (let [[existing found] (mmap.get seen^.int-string first.int-value)]
+        (when (not found)
+          (mmap.assoc! seen^.int-string first.int-value second.text)
+          (return true true))
+        (when (= existing second.text)
+          (return false true))
+        (let [[key key-ok] (two-primitive-values-dedupe-key first second)]
+          (when (not key-ok)
+            (return false false))
+          (let [already-seen (set.contains? seen^.int-string-extra key)]
+            (when already-seen
+              (return false true))
+            (set.add! seen^.int-string-extra key)
+            (return true true))))
+    :else
+      (let [[key key-ok] (two-primitive-values-dedupe-key first second)]
+        (when (not key-ok)
+          (return false false))
+        (let [already-seen (set.contains? seen^.generic key)]
+          (when already-seen
+            (return false true))
+          (set.add! seen^.generic key)
+          (return true true)))))
+
+(defn sort-strings! [values: ^[dynamic]string]
+  (arr.sort! values^))
+
+(defn binding-dedupe-key [binding: Binding] -> [key: string, ok: bool]
+  (let [parts (make [dynamic]string 0 (count binding.items))]
+    (defer (delete parts))
+    (for [item binding.items]
+      (let [[value-key value-ok] (primitive-value-dedupe-key item.value)]
+        (when (not value-ok)
+          (return "" false))
+        (arr.push! parts (fmt.tprintf "%d:%s=%d:%s;" (count item.name) item.name (count value-key) value-key))))
+    (sort-strings! (addr parts))
+    (return (core-strings.concatenate (slice parts 0)) true)))
+
+(defn value-slice-contains? [values: []Value, target: Value] -> bool
+  (for [value values]
+    (when (value-equal? value target)
+      (return true)))
+  false)
+
+(defn predicate-matches? [predicate: Predicate, binding: Binding] -> bool
+  (let [[op op-ok] (query-op-name predicate.op binding)]
+    (when (not op-ok)
+      (return false))
+  (when (and (or (= op "true?")
+                 (= op "false?")
+                 (= op "nil?")
+                 (= op "some?")
+                 (= op "not")
+                 (= op "empty?"))
+             (= (count predicate.terms) 1))
+    (let [[value value-ok] (resolve-term predicate.terms[0] binding)]
+      (when (not value-ok)
+        (return false))
+      (cond
+        (= op "true?") (return (and (= value.kind .Bool) value.bool-value))
+        (= op "false?") (return (and (= value.kind .Bool) (not value.bool-value)))
+        (= op "nil?") (return (= value.kind .Nil))
+        (= op "some?") (return (not (= value.kind .Nil)))
+        (= op "not") (return (or (= value.kind .Nil)
+                                           (and (= value.kind .Bool) (not value.bool-value))))
+        (= op "empty?") (return (and (= value.kind .Vector) (= (count value.items) 0))))))
+  (when (and (or (= op "even?")
+                 (= op "odd?")
+                 (= op "zero?")
+                 (= op "pos?")
+                 (= op "neg?"))
+             (= (count predicate.terms) 1))
+    (let [[value value-ok] (resolve-term predicate.terms[0] binding)]
+      (when (not value-ok)
+        (return false))
+      (when (= value.kind .Int)
+        (cond
+          (= op "even?") (return (= (% value.int-value 2) 0))
+          (= op "odd?") (return (not (= (% value.int-value 2) 0)))
+          (= op "zero?") (return (= value.int-value 0))
+          (= op "pos?") (return (> value.int-value 0))
+          (= op "neg?") (return (< value.int-value 0))))
+      (when (= value.kind .Entity)
+        (cond
+          (= op "even?") (return (= (% value.entity 2) 0))
+          (= op "odd?") (return (not (= (% value.entity 2) 0)))
+          (= op "zero?") (return (= value.entity 0))
+          (= op "pos?") (return (> value.entity 0))
+          (= op "neg?") (return false)))
+      (return false)))
+  (when (and (= op "re-find")
+             (= (count predicate.terms) 2))
+    (let [[pattern pattern-ok] (resolve-term predicate.terms[0] binding)
+          [text text-ok] (resolve-term predicate.terms[1] binding)]
+      (return (and pattern-ok text-ok (re-find-matches? pattern text)))))
+  (when (and (or (= op "contains?")
+                 (= op "clojure.string/includes?")
+                 (= op "clojure.string/starts-with?")
+                 (= op "clojure.string/ends-with?"))
+             (= (count predicate.terms) 2))
+    (let [[left left-ok] (resolve-term predicate.terms[0] binding)
+          [right right-ok] (resolve-term predicate.terms[1] binding)]
+      (when (not (and left-ok right-ok (= left.kind .String) (= right.kind .String)))
+        (return false))
+      (cond
+        (or (= op "contains?") (= op "clojure.string/includes?"))
+          (return (strings.contains left.text right.text))
+        (= op "clojure.string/starts-with?")
+          (return (strings.has_prefix left.text right.text))
+        (= op "clojure.string/ends-with?")
+          (return (strings.has_suffix left.text right.text)))))
+  (when (< (count predicate.terms) 2)
+    (return false))
+  (let [index 0
+        end (- (count predicate.terms) 1)]
+    (while (< index end)
+    (let [[left left-ok] (resolve-term predicate.terms[index] binding)
+          [right right-ok] (resolve-term predicate.terms[(+ index 1)] binding)]
+      (when (not (and left-ok right-ok))
+        (return false))
+      (when (not (predicate-pair-matches? op left right))
+        (return false)))
+    (set! index (+ index 1))))
+  true))
+
+(defn predicate-matches-with-db-and-fns? [db: DB, predicate: Predicate, binding: Binding, registry: []Native-Query-Fn] -> bool
+  (when (predicate-matches? predicate binding)
+    (return true))
+  (let [[op op-ok] (query-op-name predicate.op binding)]
+    (when (not op-ok)
+      (return false))
+    (let [[index found] (query-fn-index registry op)]
+      (when (not found)
+        (return false))
+      (let [entry registry[index]]
+        (when entry.has-predicate-callback
+          (let [[args args-ok] (resolve-query-call-args predicate.terms binding)]
+            (defer (delete args))
+            (when (not args-ok)
+              (return false))
+            (return (entry.predicate-callback (slice args 0)))))
+        (when entry.has-db-predicate-callback
+          (let [[args args-ok] (resolve-query-call-args predicate.terms binding)]
+            (defer (delete args))
+            (when (not args-ok)
+              (return false))
+            (return (entry.db-predicate-callback db (slice args 0)))))
+        (when (> (count entry.target) 0)
+          (return (predicate-matches? (Predicate {op: entry.target terms: predicate.terms}) binding)))
+        (return false)))))
+
+(defn predicate-matches-with-fns? [predicate: Predicate, binding: Binding, registry: []Native-Query-Fn] -> bool
+  (predicate-matches-with-db-and-fns? (DB {}) predicate binding registry))
+
+(defn typed-predicate-op-name [predicate: Predicate, registry: []Native-Query-Fn] -> [op: string, ok: bool]
+  (when (query-var-name? predicate.op)
+    (return "" false))
+  (when (predicate-op-supported? predicate.op)
+    (return predicate.op true))
+  (let [[index found] (query-fn-index registry predicate.op)]
+    (when (not found)
+      (return "" false))
+    (let [entry registry[index]]
+      (when (or entry.has-predicate-callback
+                entry.has-db-predicate-callback
+                (= (count entry.target) 0)
+                (not (predicate-op-supported? entry.target)))
+        (return "" false))
+      (return entry.target true))))
+
+(defn relation-column-row-predicate-equal? [left: Relation-Column, left-row: int, right: Relation-Column, right-row: int] -> [equal: bool, ok: bool]
+  (when (not (and left.has-kind right.has-kind))
+    (return false false))
+  (when (and (or (= left.kind .Entity) (= left.kind .Int))
+             (or (= right.kind .Entity) (= right.kind .Int)))
+    (let [[left-key left-ok] (relation-column-row-number-join-key left left-row)
+          [right-key right-ok] (relation-column-row-number-join-key right right-row)]
+      (return (and left-ok right-ok (= left-key right-key)) (and left-ok right-ok))))
+  (when (not (= left.kind right.kind))
+    (return false true))
+  (case left.kind
+    .Nil (return true true)
+    .Entity (return (= left.entities[left-row] right.entities[right-row]) true)
+    .String (return (= left.texts[left-row] right.texts[right-row]) true)
+    .Int (return (= left.ints[left-row] right.ints[right-row]) true)
+    .Float (return (= left.floats[left-row] right.floats[right-row]) true)
+    .Bool (return (= left.bools[left-row] right.bools[right-row]) true)
+    .Keyword (return (= left.texts[left-row] right.texts[right-row]) true)
+    .Symbol (return (= left.texts[left-row] right.texts[right-row]) true)
+    .Uuid (return (= left.texts[left-row] right.texts[right-row]) true)
+    .Instant (return (= left.ints[left-row] right.ints[right-row]) true)
+    (return false false))
+  (return false false))
+
+(defn typed-var-pair-equality-predicate-matches? [rel: Query-Relation, row: int, op: string, left-name: string, right-name: string] -> [matched: bool, ok: bool]
+  (when (not (or (= op "=") (= op "!=") (= op "not=")))
+    (return false false))
+  (let [[left-index left-ok] (query-relation-attr-index-lookup rel left-name)
+        [right-index right-ok] (query-relation-attr-index-lookup rel right-name)]
+    (when (not (and left-ok right-ok))
+      (return false false))
+    (let [[equal equal-ok] (relation-column-row-predicate-equal? rel.typed-columns[left-index] row rel.typed-columns[right-index] row)]
+      (when (not equal-ok)
+        (return false false))
+      (if (= op "=")
+        (return equal true)
+        (return (not equal) true)))))
+
+(defn typed-predicate-matches? [rel: Query-Relation, row: int, predicate: Predicate, registry: []Native-Query-Fn] -> [matched: bool, ok: bool]
+  (let [[op op-ok] (typed-predicate-op-name predicate registry)]
+    (when (not op-ok)
+      (return false false))
+    (when (and (= (count predicate.terms) 2)
+               (= predicate.terms[0].kind .Var)
+               (= predicate.terms[1].kind .Var))
+      (let [[matched matched-ok] (typed-var-pair-equality-predicate-matches? rel row op predicate.terms[0].name predicate.terms[1].name)]
+        (when matched-ok
+          (return matched true))))
+    (when (and (or (= op "true?")
+                   (= op "false?")
+                   (= op "nil?")
+                   (= op "some?")
+                   (= op "not")
+                   (= op "empty?"))
+               (= (count predicate.terms) 1))
+      (let [[value value-ok] (query-relation-resolve-typed-term rel row predicate.terms[0])]
+        (when (not value-ok)
+          (return false true))
+        (cond
+          (= op "true?") (return (and (= value.kind .Bool) value.bool-value) true)
+          (= op "false?") (return (and (= value.kind .Bool) (not value.bool-value)) true)
+          (= op "nil?") (return (= value.kind .Nil) true)
+          (= op "some?") (return (not (= value.kind .Nil)) true)
+          (= op "not") (return (or (= value.kind .Nil)
+                                    (and (= value.kind .Bool) (not value.bool-value))) true)
+          (= op "empty?") (return (and (= value.kind .Vector) (= (count value.items) 0)) true))))
+    (when (and (or (= op "even?")
+                   (= op "odd?")
+                   (= op "zero?")
+                   (= op "pos?")
+                   (= op "neg?"))
+               (= (count predicate.terms) 1))
+      (let [[value value-ok] (query-relation-resolve-typed-term rel row predicate.terms[0])]
+        (when (not value-ok)
+          (return false true))
+        (when (= value.kind .Int)
+          (cond
+            (= op "even?") (return (= (% value.int-value 2) 0) true)
+            (= op "odd?") (return (not (= (% value.int-value 2) 0)) true)
+            (= op "zero?") (return (= value.int-value 0) true)
+            (= op "pos?") (return (> value.int-value 0) true)
+            (= op "neg?") (return (< value.int-value 0) true)))
+        (when (= value.kind .Entity)
+          (cond
+            (= op "even?") (return (= (% value.entity 2) 0) true)
+            (= op "odd?") (return (not (= (% value.entity 2) 0)) true)
+            (= op "zero?") (return (= value.entity 0) true)
+            (= op "pos?") (return (> value.entity 0) true)
+            (= op "neg?") (return false true)))
+        (return false true)))
+    (when (and (= op "re-find")
+               (= (count predicate.terms) 2))
+      (let [[pattern pattern-ok] (query-relation-resolve-typed-term rel row predicate.terms[0])
+            [text text-ok] (query-relation-resolve-typed-term rel row predicate.terms[1])]
+        (return (and pattern-ok text-ok (re-find-matches? pattern text)) true)))
+    (when (and (or (= op "contains?")
+                   (= op "clojure.string/includes?")
+                   (= op "clojure.string/starts-with?")
+                   (= op "clojure.string/ends-with?"))
+               (= (count predicate.terms) 2))
+      (let [[left left-ok] (query-relation-resolve-typed-term rel row predicate.terms[0])
+            [right right-ok] (query-relation-resolve-typed-term rel row predicate.terms[1])]
+        (when (not (and left-ok right-ok (= left.kind .String) (= right.kind .String)))
+          (return false true))
+        (cond
+          (or (= op "contains?") (= op "clojure.string/includes?"))
+            (return (strings.contains left.text right.text) true)
+          (= op "clojure.string/starts-with?")
+            (return (strings.has_prefix left.text right.text) true)
+          (= op "clojure.string/ends-with?")
+            (return (strings.has_suffix left.text right.text) true))))
+    (when (< (count predicate.terms) 2)
+      (return false true))
+    (let [index 0
+          end (- (count predicate.terms) 1)]
+      (while (< index end)
+        (let [[left left-ok] (query-relation-resolve-typed-term rel row predicate.terms[index])
+              [right right-ok] (query-relation-resolve-typed-term rel row predicate.terms[(+ index 1)])]
+          (when (not (and left-ok right-ok))
+            (return false true))
+          (when (not (predicate-pair-matches? op left right))
+            (return false true)))
+        (set! index (+ index 1))))
+    (return true true)))
