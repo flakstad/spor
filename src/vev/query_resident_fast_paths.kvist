@@ -1,0 +1,857 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn query-single-attr-value-distinct-clause [query: Query] -> [clause-value: Clause, ok: bool]
+  (let [empty-clause (Clause {})]
+    (when (not (and (= (count query.find) 1)
+                    (= (count query.with) 0)
+                    (= (count query.inputs) 0)
+                    (= (count query.collection-inputs) 0)
+                    (= (count query.tuple-inputs) 0)
+                    (= (count query.relation-inputs) 0)
+                    (= (count query.input-specs) 0)
+                    (= (count query.pulls) 0)
+                    (= (count query.aggregates) 0)
+                    (= (count query.rule-calls) 0)
+                    (= (count query.predicates) 0)
+                    (= (count query.function-clauses) 0)
+                    (= (count query.get-elses) 0)
+                    (= (count query.get-somes) 0)
+                    (= (count query.grounds) 0)
+                    (= (count query.not-groups) 0)
+                    (= (count query.or-groups) 0)
+                    (= (count query.clauses) 1)
+                    (= (count query.where-steps) 1)
+                    (= query.where-steps[0].kind .Clause)))
+      (return empty-clause false))
+    (let [candidate-clause query.clauses[0]]
+      (when (or candidate-clause.has-source
+                (not (= candidate-clause.a.kind .Value))
+                (not (= candidate-clause.a.value.kind .Keyword))
+                (not (= candidate-clause.v.kind .Var))
+                (not (= candidate-clause.v.name query.find[0]))
+                (not (or (= candidate-clause.e.kind .Wildcard)
+                         (= candidate-clause.e.kind .Var))))
+        (return empty-clause false))
+      (return candidate-clause true))))
+
+(defn append-distinct-single-value-row! [rows: ^[dynamic]Result-Row, value: Value]
+  (let [values (make [dynamic]Value 0 1)
+        pulls ([dynamic]Pull-Result [])]
+    (arr.push! values value)
+    (arr.push! rows^ (Result-Row {values: values pulls: pulls}))))
+
+(defn append-distinct-single-value-row-if-new! [rows: ^[dynamic]Result-Row, seen: (ptr (map string (struct {}))), value: Value]
+  (let [[key key-ok] (primitive-value-dedupe-key value)]
+    (if key-ok
+      (when (not (set.contains? seen^ key))
+        (set.add! seen^ key)
+        (append-distinct-single-value-row! rows (value-owned value)))
+      (when (not (row-values-exist? (slice rows^ 0) ([]Value [value])))
+        (append-distinct-single-value-row! rows (value-owned value))))))
+
+(defn append-two-value-row! [rows: ^[dynamic]Result-Row, first: Value, second: Value]
+  (let [values (make [dynamic]Value 0 2)
+        pulls ([dynamic]Pull-Result [])]
+    (arr.push! values first)
+    (arr.push! values second)
+    (arr.push! rows^ (Result-Row {values: values pulls: pulls}))))
+
+(defn append-owned-two-value-row! [rows: ^[dynamic]Result-Row, first: Value, second: Value]
+  (append-two-value-row! rows (value-owned first) (value-owned second)))
+
+(defn append-three-value-row! [rows: ^[dynamic]Result-Row, first: Value, second: Value, third: Value]
+  (let [values (make [dynamic]Value 0 3)
+        pulls ([dynamic]Pull-Result [])]
+    (arr.push! values first)
+    (arr.push! values second)
+    (arr.push! values third)
+    (arr.push! rows^ (Result-Row {values: values pulls: pulls}))))
+
+(defn query-single-entity-by-attr-value-clause [db: DB, query: Query] -> [clause-value: Clause, ok: bool]
+  (let [empty-clause (Clause {})]
+    (when (not (and (= (count query.find) 1)
+                    (= (count query.with) 0)
+                    (= (count query.inputs) 0)
+                    (= (count query.collection-inputs) 0)
+                    (= (count query.tuple-inputs) 0)
+                    (= (count query.relation-inputs) 0)
+                    (= (count query.input-specs) 0)
+                    (= (count query.pulls) 0)
+                    (= (count query.aggregates) 0)
+                    (= (count query.rules) 0)
+                    (= (count query.rule-calls) 0)
+                    (= (count query.predicates) 0)
+                    (= (count query.function-clauses) 0)
+                    (= (count query.get-elses) 0)
+                    (= (count query.get-somes) 0)
+                    (= (count query.grounds) 0)
+                    (= (count query.not-groups) 0)
+                    (= (count query.or-groups) 0)
+                    (= (count query.clauses) 1)
+                    (= (count query.where-steps) 1)
+                    (= query.where-steps[0].kind .Clause)))
+      (return empty-clause false))
+    (let [candidate-clause query.clauses[0]]
+      (when (or candidate-clause.has-source
+                (not (= candidate-clause.e.kind .Var))
+                (not (= candidate-clause.e.name query.find[0]))
+                (not (= candidate-clause.a.kind .Value))
+                (not (= candidate-clause.a.value.kind .Keyword))
+                (tx-data-modifies-validation-schema? (Tx-Data {a: candidate-clause.a.value.text}))
+                (schema-ref-target? db candidate-clause.a.value.text)
+                (not (= candidate-clause.v.kind .Value))
+                (not (= candidate-clause.tx-term.kind .Wildcard))
+                (not (= candidate-clause.op-term.kind .Wildcard)))
+        (return empty-clause false))
+      (return candidate-clause true))))
+
+(defn append-entity-row! [rows: ^[dynamic]Result-Row, entity: u64]
+  (append-distinct-single-value-row! rows (value-entity entity)))
+
+(defn q-single-entity-by-attr-value-profiled [db: DB, clause-value: Clause, stats: Query-Stats] -> Profiled-Result-Set
+  (let [out-stats stats
+        attr clause-value.a.value.text
+        value clause-value.v.value
+        view (db-index-view db .AVET)
+        low (lower-bound-index-view db view "avet" 0 attr value)
+        high (upper-bound-index-view db view "avet" 0 attr value)
+        rows (make [dynamic]Result-Row 0 (- high low))
+        all-current (all-datoms-current? db)]
+    (set! out-stats.steps 1)
+    (set! out-stats.clauses 1)
+    (set! out-stats.clause-candidates (- high low))
+    (set! out-stats.max-intermediate-bindings (- high low))
+    (if all-current
+      (let [i low]
+        (while (< i high)
+        (let [datom db.datoms[(db-index-view-at view i)]]
+          (append-entity-row! (addr rows) datom.e))
+        (set! i (+ i 1))))
+      (let [seen (set.empty u64)]
+        (defer (delete seen))
+        (let [i low]
+          (while (< i high)
+          (let [datom-index (db-index-view-at view i)
+                datom db.datoms[datom-index]]
+            (when (datom-current-at? db datom-index)
+              (let [already-seen (set.contains? seen datom.e)]
+                (when (not already-seen)
+                  (set.add! seen datom.e)
+                  (append-entity-row! (addr rows) datom.e)))))
+          (set! i (+ i 1))))))
+    (set! out-stats.output-rows (count rows))
+    (profiled-result-set (result-set-ok rows) out-stats)))
+
+(defn q-query-entity-column [db: DB, query: Query, inputs: []Query-Input] -> [entities: [dynamic]u64, ok: bool]
+  (let [out (make [dynamic]u64)]
+    (when (> (count inputs) 0)
+      (return out false))
+    (let [[clause-value clause-ok] (query-single-entity-by-attr-value-clause db query)]
+      (when (not clause-ok)
+        (return out false))
+      (let [attr clause-value.a.value.text
+            value clause-value.v.value
+            view (db-index-view db .AVET)
+            low (lower-bound-index-view db view "avet" 0 attr value)
+            high (upper-bound-index-view db view "avet" 0 attr value)
+            all-current (all-datoms-current? db)]
+        (if all-current
+          (let [i low]
+            (while (< i high)
+              (arr.push! out db.datoms[(db-index-view-at view i)].e)
+              (set! i (+ i 1))))
+          (let [seen (set.empty u64)]
+            (defer (delete seen))
+            (let [i low]
+              (while (< i high)
+              (let [datom-index (db-index-view-at view i)
+                    datom db.datoms[datom-index]]
+                (when (datom-current-at? db datom-index)
+                  (let [already-seen (set.contains? seen datom.e)]
+                    (when (not already-seen)
+                      (set.add! seen datom.e)
+                      (arr.push! out datom.e)))))
+              (set! i (+ i 1)))))))
+      (return out true))))
+
+(defn q-query-string-column [db: DB, query: Query, inputs: []Query-Input] -> [values: [dynamic]string, ok: bool]
+  (let [out (make [dynamic]string)]
+    (when (not (and (= (count query.find) 1)
+                    (= (count query.pulls) 0)
+                    (= (count query.aggregates) 0)))
+      (return out false))
+    (let [[missing-plan missing-ok] (query-missing-attr-projection-plan db query)]
+      (when missing-ok
+        (delete out)
+        (return (q-missing-attr-string-column db missing-plan))))
+    (let [result (q-query-with-inputs db query inputs)]
+      (defer (delete-result-set-shallow result))
+      (when (not result.ok)
+        (return out false))
+      (for [row result.rows]
+        (when (not (= (count row.values) 1))
+          (return out false))
+        (let [value row.values[0]]
+          (if (or (= value.kind .String)
+                  (= value.kind .Keyword)
+                  (= value.kind .Symbol)
+                  (= value.kind .Uuid))
+            (arr.push! out (string-owned value.text))
+            (return out false))))
+      (return out true))))
+
+(defstruct Distinct-Attr-Value {
+  first-e: u64
+  value: Value
+})
+
+(defn distinct-attr-value-less? [left: Distinct-Attr-Value, right: Distinct-Attr-Value] -> bool
+  (if (not (= left.first-e right.first-e))
+    (< left.first-e right.first-e)
+    (value-less? left.value right.value)))
+
+(defn sort-distinct-attr-values! [values: ^[dynamic]Distinct-Attr-Value]
+  (let [i 1]
+    (while (< i (count values^))
+    (let [item values^[i]
+          j i]
+      (while (and (> j 0)
+                  (distinct-attr-value-less? item values^[(- j 1)]))
+        (set! values^[j] values^[(- j 1)])
+        (set! j (- j 1)))
+      (set! values^[j] item))
+    (set! i (+ i 1)))))
+
+(defn q-single-attr-value-distinct-profiled [db: DB, clause-value: Clause, stats: Query-Stats] -> Profiled-Result-Set
+  (let [out-stats stats
+        attr clause-value.a.value.text
+        view (db-index-view db .AVET)
+        attr-prefix ([]Value [(value-keyword attr)])
+        low (lower-bound-index-view-values db view attr-prefix)
+        high (upper-bound-index-view-values db view attr-prefix)
+        distinct-values (make [dynamic]Distinct-Attr-Value)
+        all-current (all-datoms-current? db)]
+    (defer (delete distinct-values))
+    (set! out-stats.steps 1)
+    (set! out-stats.clauses 1)
+    (set! out-stats.clause-candidates (- high low))
+    (set! out-stats.max-intermediate-bindings (- high low))
+    (let [i low]
+      (while (< i high)
+        (let [first-index (db-index-view-at view i)
+              datom db.datoms[first-index]
+              value datom.v]
+          (if all-current
+            (do
+              (while (and (< i high)
+                          (value-equal? db.datoms[(db-index-view-at view i)].v value))
+                (set! i (+ i 1)))
+              (arr.push! distinct-values (Distinct-Attr-Value {first-e: datom.e value: value})))
+            (let [first-current-e: u64 0
+                  first-current-value (Value {})
+                  has-current false]
+              (while (and (< i high)
+                          (value-equal? db.datoms[(db-index-view-at view i)].v value))
+                (let [candidate-index (db-index-view-at view i)
+                      candidate db.datoms[candidate-index]]
+                  (when (and (datom-current-at? db candidate-index)
+                             (not has-current))
+                    (set! first-current-e candidate.e)
+                    (set! first-current-value candidate.v)
+                    (set! has-current true)))
+                (set! i (+ i 1)))
+              (when has-current
+                (arr.push! distinct-values (Distinct-Attr-Value {first-e: first-current-e value: first-current-value})))))))
+    (sort-distinct-attr-values! (addr distinct-values))
+    (let [rows (make [dynamic]Result-Row 0 (count distinct-values))]
+      (for [item distinct-values]
+        (append-distinct-single-value-row! (addr rows) item.value))
+      (set! out-stats.output-rows (count rows))
+      (profiled-result-set (result-set-ok rows) out-stats)))))
+
+(defn current-entity-attr-values [db: DB, attr: string, stats: ^Query-Stats] -> (map u64 Value)
+  (let [out (make (map u64 Value))
+        view (db-index-view db .AEVT)
+        low (lower-bound-index-view db view "aevt" 0 attr (Value {}))
+        high (upper-bound-index-view db view "aevt" 0 attr (Value {}))]
+    (set! stats^.clause-candidates (+ stats^.clause-candidates (- high low)))
+    (let [i low]
+      (while (< i high)
+      (let [datom-index (db-index-view-at view i)
+            datom db.datoms[datom-index]]
+        (when (datom-current-at? db datom-index)
+          (mmap.assoc! out datom.e datom.v)))
+      (set! i (+ i 1))))
+    out))
+
+(defn append-two-attr-entity-projection-cardinality-one-current-merge! [rows: ^[dynamic]Result-Row, seen: ^Two-Primitive-Seen, db: DB, query: Query, projection: Two-Attr-Entity-Projection, stats: ^Query-Stats]
+  (let [view (db-index-view db .AEVT)
+        first-low (lower-bound-index-view db view "aevt" 0 projection.first-attr (Value {}))
+        first-high (upper-bound-index-view db view "aevt" 0 projection.first-attr (Value {}))
+        second-low (lower-bound-index-view db view "aevt" 0 projection.second-attr (Value {}))
+        second-high (upper-bound-index-view db view "aevt" 0 projection.second-attr (Value {}))
+        first-i first-low
+        second-i second-low]
+    (set! stats^.clause-candidates (+ stats^.clause-candidates (- first-high first-low) (- second-high second-low)))
+    (while (and (< first-i first-high) (< second-i second-high))
+      (let [first-datom db.datoms[(db-index-view-at view first-i)]
+            second-datom db.datoms[(db-index-view-at view second-i)]]
+        (cond
+          (< first-datom.e second-datom.e)
+          (set! first-i (+ first-i 1))
+
+          (> first-datom.e second-datom.e)
+          (set! second-i (+ second-i 1))
+
+          :else
+          (do
+            (append-two-attr-projection-row! rows seen query projection first-datom.v second-datom.v)
+            (set! first-i (+ first-i 1))
+            (set! second-i (+ second-i 1))))))))
+
+(defn append-two-attr-entity-projection-cardinality-one! [rows: ^[dynamic]Result-Row, seen: ^Two-Primitive-Seen, db: DB, query: Query, projection: Two-Attr-Entity-Projection, stats: ^Query-Stats]
+  (let [view (db-index-view db .AEVT)
+        low (lower-bound-index-view db view "aevt" 0 projection.first-attr (Value {}))
+        high (upper-bound-index-view db view "aevt" 0 projection.first-attr (Value {}))
+        all-current (all-datoms-current? db)]
+    (if all-current
+      (append-two-attr-entity-projection-cardinality-one-current-merge! rows seen db query projection stats)
+      (let [second-values (current-entity-attr-values db projection.second-attr stats)]
+        (defer (delete second-values))
+        (set! stats^.clause-candidates (+ stats^.clause-candidates (- high low)))
+        (let [i low]
+          (while (< i high)
+          (let [first-index (db-index-view-at view i)
+                first-datom db.datoms[first-index]]
+            (when (datom-current-at? db first-index)
+              (let [[second-value has-second] (mmap.get second-values first-datom.e)]
+                (when has-second
+                  (append-two-attr-projection-row! rows seen query projection first-datom.v second-value)))))
+          (set! i (+ i 1))))))))
+
+(defn q-two-attr-entity-projection-profiled [db: DB, query: Query, projection: Two-Attr-Entity-Projection, stats: Query-Stats] -> Profiled-Result-Set
+  (let [out-stats stats
+        seen (two-primitive-seen)
+        view (db-index-view db .AEVT)
+        low (lower-bound-index-view db view "aevt" 0 projection.first-attr (Value {}))
+        high (upper-bound-index-view db view "aevt" 0 projection.first-attr (Value {}))
+        rows (make [dynamic]Result-Row 0 (- high low))]
+    (defer (delete-two-primitive-seen seen))
+    (set! out-stats.steps 1)
+    (set! out-stats.clauses 2)
+    (if (schema-cardinality-one? db projection.second-attr)
+      (append-two-attr-entity-projection-cardinality-one! (addr rows) (addr seen) db query projection (addr out-stats))
+      (let [i low]
+        (while (< i high)
+        (let [first-index (db-index-view-at view i)
+              first-datom db.datoms[first-index]]
+          (set! out-stats.clause-candidates (+ out-stats.clause-candidates 1))
+          (when (datom-current-at? db first-index)
+            (let [entity-view (db-index-view db .EAVT)
+                  second-low (lower-bound-index-view db entity-view "eavt-ea" first-datom.e projection.second-attr (Value {}))
+                  second-high (upper-bound-index-view db entity-view "eavt-ea" first-datom.e projection.second-attr (Value {}))
+                  j second-low]
+              (set! out-stats.clause-candidates (+ out-stats.clause-candidates (- second-high second-low)))
+              (while (< j second-high)
+                (let [second-index (db-index-view-at entity-view j)
+                      second-datom db.datoms[second-index]]
+                  (when (datom-current-at? db second-index)
+                    (append-two-attr-projection-row! (addr rows) (addr seen) query projection first-datom.v second-datom.v)))
+                (set! j (+ j 1))))))
+        (set! i (+ i 1)))))
+    (set! out-stats.max-intermediate-bindings (count rows))
+    (set! out-stats.output-rows (count rows))
+    (profiled-result-set (result-set-ok rows) out-stats)))
+
+(defn append-entity-attr-value-projection-row! [rows: ^[dynamic]Result-Row, seen: ^Two-Primitive-Seen, query: Query, projection: Entity-Attr-Value-Projection, entity: u64, value: Value]
+  (let [entity-value (value-entity entity)
+        first-value (if (= query.find[0] projection.entity-var) entity-value value)
+        second-value (if (= query.find[1] projection.value-var) value entity-value)
+        [added added-ok] (two-value-seen-add seen first-value second-value)]
+    (if added-ok
+      (when added
+        (append-two-value-row! rows first-value second-value))
+      (let [dedupe-values ([]Value [first-value second-value])]
+        (when (not (row-values-exist? (slice rows^ 0) dedupe-values))
+          (append-two-value-row! rows first-value second-value))))))
+
+(defn append-entity-attr-value-projection-row-raw! [rows: ^[dynamic]Result-Row, query: Query, projection: Entity-Attr-Value-Projection, entity: u64, value: Value]
+  (let [entity-value (value-entity entity)
+        first-value (if (= query.find[0] projection.entity-var) entity-value value)
+        second-value (if (= query.find[1] projection.value-var) value entity-value)]
+    (append-two-value-row! rows first-value second-value)))
+
+(defn append-entity-attr-value-projection-cardinality-one-current-merge! [rows: ^[dynamic]Result-Row, db: DB, query: Query, projection: Entity-Attr-Value-Projection, stats: ^Query-Stats, filter-low: int, filter-high: int]
+  (let [filter-view (db-index-view db .AVET)
+        value-view (db-index-view db .AEVT)
+        value-low (lower-bound-index-view db value-view "aevt" 0 projection.value-attr (Value {}))
+        value-high (upper-bound-index-view db value-view "aevt" 0 projection.value-attr (Value {}))
+        filter-i filter-low
+        value-i value-low]
+    (set! stats^.clause-candidates (+ stats^.clause-candidates (- value-high value-low)))
+    (while (and (< filter-i filter-high)
+                (< value-i value-high))
+      (let [filter-datom db.datoms[(db-index-view-at filter-view filter-i)]
+            value-datom db.datoms[(db-index-view-at value-view value-i)]]
+        (cond
+          (< filter-datom.e value-datom.e)
+            (set! filter-i (+ filter-i 1))
+          (> filter-datom.e value-datom.e)
+            (set! value-i (+ value-i 1))
+          :else
+            (do
+              (append-entity-attr-value-projection-row-raw! rows query projection filter-datom.e value-datom.v)
+              (set! filter-i (+ filter-i 1))
+              (set! value-i (+ value-i 1))))))))
+
+(defn q-entity-attr-value-projection-profiled [db: DB, query: Query, projection: Entity-Attr-Value-Projection, stats: Query-Stats] -> Profiled-Result-Set
+  (let [out-stats stats
+        rows (make [dynamic]Result-Row)
+        seen (two-primitive-seen)
+        filter-view (db-index-view db .AVET)
+        low (lower-bound-index-view db filter-view "avet" 0 projection.filter-attr projection.filter-value)
+        high (upper-bound-index-view db filter-view "avet" 0 projection.filter-attr projection.filter-value)
+        dedupe-required (not (and (all-datoms-current? db)
+                                  (schema-cardinality-one? db projection.filter-attr)
+                                  (schema-cardinality-one? db projection.value-attr)))]
+    (defer (delete-two-primitive-seen seen))
+    (set! out-stats.steps 1)
+    (set! out-stats.clauses 2)
+    (set! out-stats.clause-candidates (- high low))
+    (when (not dedupe-required)
+      (append-entity-attr-value-projection-cardinality-one-current-merge! (addr rows) db query projection (addr out-stats) low high)
+      (set! out-stats.max-intermediate-bindings (count rows))
+      (set! out-stats.output-rows (count rows))
+      (return (profiled-result-set (result-set-ok rows) out-stats)))
+    (let [i low]
+      (while (< i high)
+      (let [filter-index (db-index-view-at filter-view i)
+            filter-datom db.datoms[filter-index]]
+        (when (datom-current-at? db filter-index)
+          (let [entity-view (db-index-view db .EAVT)
+                value-low (lower-bound-index-view db entity-view "eavt-ea" filter-datom.e projection.value-attr (Value {}))
+                value-high (upper-bound-index-view db entity-view "eavt-ea" filter-datom.e projection.value-attr (Value {}))
+                j value-low]
+            (set! out-stats.clause-candidates (+ out-stats.clause-candidates (- value-high value-low)))
+            (while (< j value-high)
+              (let [value-index (db-index-view-at entity-view j)
+                    value-datom db.datoms[value-index]]
+                (when (datom-current-at? db value-index)
+                  (if dedupe-required
+                    (append-entity-attr-value-projection-row! (addr rows) (addr seen) query projection filter-datom.e value-datom.v)
+                    (append-entity-attr-value-projection-row-raw! (addr rows) query projection filter-datom.e value-datom.v))))
+              (set! j (+ j 1))))))
+      (set! i (+ i 1))))
+    (set! out-stats.max-intermediate-bindings (count rows))
+    (set! out-stats.output-rows (count rows))
+    (profiled-result-set (result-set-ok rows) out-stats)))
+
+(defn q-query-entity-int-pair-columns-one-filter-current [db: DB, plan: Entity-Int-Pair-Plan] -> Entity-Int-Pair-Columns
+  (let [filter plan.filters[0]
+        filter-view (db-index-view db .AVET)
+        value-view (db-index-view db .AEVT)
+        filter-indexes filter-view.indexes
+        value-indexes value-view.indexes
+        datoms db.datoms
+        filter-i (lower-bound-index-view db filter-view "avet" 0 filter.attr filter.value)
+        filter-high (upper-bound-index-view db filter-view "avet" 0 filter.attr filter.value)
+        value-i (lower-bound-index-view db value-view "aevt" 0 plan.value-attr (Value {}))
+        value-high (upper-bound-index-view db value-view "aevt" 0 plan.value-attr (Value {}))
+        out (entity-int-pair-columns-with-capacity (- filter-high filter-i))]
+    (while (and (< filter-i filter-high)
+                (< value-i value-high))
+      (let [filter-datom-index filter-indexes[filter-i]
+            value-datom-index value-indexes[value-i]
+            filter-entity datoms[filter-datom-index].e
+            value-entity datoms[value-datom-index].e]
+        (cond
+          (< filter-entity value-entity)
+            (set! filter-i (+ filter-i 1))
+          (> filter-entity value-entity)
+            (set! value-i (+ value-i 1))
+          :else
+            (do
+              (when (= datoms[value-datom-index].v.kind .Int)
+                (append-entity-int-pair-column! (addr out) filter-entity datoms[value-datom-index].v.int-value))
+              (set! filter-i (+ filter-i 1))
+              (set! value-i (+ value-i 1))))))
+    out))
+
+(defn q-query-entity-int-pair-columns-two-filters-current [db: DB, plan: Entity-Int-Pair-Plan] -> Entity-Int-Pair-Columns
+  (let [filter-view (db-index-view db .AVET)
+        value-view (db-index-view db .AEVT)
+        filter-indexes filter-view.indexes
+        value-indexes value-view.indexes
+        datoms db.datoms
+        first-filter plan.filters[0]
+        second-filter plan.filters[1]
+        first-i (lower-bound-index-view db filter-view "avet" 0 first-filter.attr first-filter.value)
+        first-high (upper-bound-index-view db filter-view "avet" 0 first-filter.attr first-filter.value)
+        second-i (lower-bound-index-view db filter-view "avet" 0 second-filter.attr second-filter.value)
+        second-high (upper-bound-index-view db filter-view "avet" 0 second-filter.attr second-filter.value)
+        value-i (lower-bound-index-view db value-view "aevt" 0 plan.value-attr (Value {}))
+        value-high (upper-bound-index-view db value-view "aevt" 0 plan.value-attr (Value {}))
+        out (entity-int-pair-columns-with-capacity (- first-high first-i))]
+    (while true
+      (when (or (>= first-i first-high)
+                (>= second-i second-high)
+                (>= value-i value-high))
+        (return out))
+      (let [target datoms[filter-indexes[first-i]].e
+            changed true]
+        (while changed
+          (set! changed false)
+          (while (and (< first-i first-high)
+                      (< datoms[filter-indexes[first-i]].e target))
+            (set! first-i (+ first-i 1)))
+          (when (>= first-i first-high)
+            (return out))
+          (when (> datoms[filter-indexes[first-i]].e target)
+            (set! target datoms[filter-indexes[first-i]].e)
+            (set! changed true))
+          (while (and (< second-i second-high)
+                      (< datoms[filter-indexes[second-i]].e target))
+            (set! second-i (+ second-i 1)))
+          (when (>= second-i second-high)
+            (return out))
+          (when (> datoms[filter-indexes[second-i]].e target)
+            (set! target datoms[filter-indexes[second-i]].e)
+            (set! changed true))
+          (while (and (< value-i value-high)
+                      (< datoms[value-indexes[value-i]].e target))
+            (set! value-i (+ value-i 1)))
+          (when (>= value-i value-high)
+            (return out))
+          (when (> datoms[value-indexes[value-i]].e target)
+            (set! target datoms[value-indexes[value-i]].e)
+            (set! changed true)))
+        (let [value-datom-index value-indexes[value-i]]
+          (when (= datoms[value-datom-index].v.kind .Int)
+            (append-entity-int-pair-column! (addr out) target datoms[value-datom-index].v.int-value)))
+        (set! first-i (+ first-i 1))
+        (set! second-i (+ second-i 1))
+        (set! value-i (+ value-i 1))))
+    out))
+
+(defn q-query-entity-int-pair-columns [db: DB, query: Query, inputs: []Query-Input] -> [columns: Entity-Int-Pair-Columns, ok: bool]
+  (let [out (empty-entity-int-pair-columns)]
+    (let [[threshold-plan threshold-ok] (query-entity-int-threshold-plan db query inputs)]
+      (when threshold-ok
+        (delete-entity-int-pair-columns out)
+        (return (q-query-entity-int-threshold-pair-columns db threshold-plan) true)))
+    (when (> (count inputs) 0)
+      (return out false))
+    (let [[plan plan-ok] (query-entity-int-pair-plan db query)]
+      (when (not plan-ok)
+        (delete plan.filters)
+        (return out false))
+      (when (and (all-datoms-current? db)
+                 (= (count plan.filters) 1))
+        (delete-entity-int-pair-columns out)
+        (let [direct (q-query-entity-int-pair-columns-one-filter-current db plan)]
+          (delete plan.filters)
+          (return direct true)))
+      (when (and (all-datoms-current? db)
+                 (= (count plan.filters) 2))
+        (delete-entity-int-pair-columns out)
+        (let [direct (q-query-entity-int-pair-columns-two-filters-current db plan)]
+          (delete plan.filters)
+          (return direct true)))
+      (when (and (all-datoms-current? db)
+                 (> (count plan.filters) 0))
+        (let [output-attrs ([]string [plan.value-attr])
+              streams (entity-star-streams-for-filters-and-outputs db (slice plan.filters 0) output-attrs)]
+          (defer (delete streams))
+          (while true
+            (let [[entity entity-ok] (entity-star-streams-align! db (addr streams))]
+              (when (not entity-ok)
+                (delete plan.filters)
+                (return out true))
+              (let [[value value-ok] (entity-star-output-value db (slice streams 0) 0)]
+                (when (and value-ok (= value.kind .Int))
+                  (append-entity-int-pair-column! (addr out) entity value.int-value)))
+              (entity-star-streams-advance-all! (addr streams))))))
+      (let [filter-view (db-index-view db .AVET)
+            best-filter-index 0
+            best-low 0
+            best-high 0]
+        (let [filter-i 0]
+          (while (< filter-i (count plan.filters))
+          (let [filter plan.filters[filter-i]
+                low (lower-bound-index-view db filter-view "avet" 0 filter.attr filter.value)
+                high (upper-bound-index-view db filter-view "avet" 0 filter.attr filter.value)]
+            (when (or (= filter-i 0)
+                      (< (- high low) (- best-high best-low)))
+              (set! best-filter-index filter-i)
+              (set! best-low low)
+              (set! best-high high)))
+          (set! filter-i (+ filter-i 1))))
+        (when (= (count plan.filters) 0)
+          (delete plan.filters)
+          (return out false))
+        (reset-entity-int-pair-columns-capacity! (addr out) (- best-high best-low))
+        (let [direct-value-lookup (all-datoms-current? db)
+              db-alias db
+              source (resident-db-read-source (addr db-alias))]
+          (let [i best-low]
+            (while (< i best-high)
+            (let [filter-datom-index (db-index-view-at filter-view i)
+                  filter-datom db.datoms[filter-datom-index]]
+              (when (or direct-value-lookup (datom-current-at? db filter-datom-index))
+                (let [filters-match true]
+                  (let [filter-i 0]
+                    (while (< filter-i (count plan.filters))
+                    (when (not (= filter-i best-filter-index))
+                      (let [filter plan.filters[filter-i]]
+                        (if direct-value-lookup
+                          (let [[matches matches-ok _] (db-read-source-cardinality-one-value-matches-fast-all-current? source filter-datom.e filter.attr filter.value)]
+                            (when (not (and matches-ok matches))
+                              (set! filters-match false)))
+                          (let [[filter-value filter-ok] (latest-attr-value db filter-datom.e filter.attr)]
+                            (when (not (and filter-ok (value-equal? filter-value filter.value)))
+                              (set! filters-match false))))))
+                    (set! filter-i (+ filter-i 1))))
+                  (when filters-match
+                    (if direct-value-lookup
+                      (let [[int-value int-ok _] (db-read-source-cardinality-one-int-value-fast-all-current source filter-datom.e plan.value-attr)]
+                        (when int-ok
+                          (append-entity-int-pair-column! (addr out) filter-datom.e int-value)))
+                      (let [[value value-ok] (latest-attr-value db filter-datom.e plan.value-attr)]
+                        (when (and value-ok (= value.kind .Int))
+                          (append-entity-int-pair-column! (addr out) filter-datom.e value.int-value)))))))
+            (set! i (+ i 1)))))
+        (delete plan.filters)
+        (return out true))))))
+
+(defn q-entity-two-value-plan-profiled [db: DB, query: Query, plan: Entity-Two-Value-Plan, stats: Query-Stats] -> Profiled-Result-Set
+  (let [out-stats stats
+        rows (make [dynamic]Result-Row)
+        filter-view (db-index-view db .AVET)
+        best-filter-index 0
+        best-low 0
+        best-high 0
+        all-current (all-datoms-current? db)]
+    (defer (delete plan.filters))
+    (let [filter-i 0]
+      (while (< filter-i (count plan.filters))
+      (let [filter plan.filters[filter-i]
+            low (lower-bound-index-view db filter-view "avet" 0 filter.attr filter.value)
+            high (upper-bound-index-view db filter-view "avet" 0 filter.attr filter.value)]
+        (when (or (= filter-i 0)
+                  (< (- high low) (- best-high best-low)))
+          (set! best-filter-index filter-i)
+          (set! best-low low)
+          (set! best-high high)))
+      (set! filter-i (+ filter-i 1))))
+    (set! out-stats.steps 1)
+    (set! out-stats.clauses (count query.clauses))
+    (set! out-stats.clause-candidates (- best-high best-low))
+    (when (and all-current
+               (> (count plan.filters) 2))
+      (let [output-attrs ([]string [plan.first-attr plan.second-attr])
+            streams (entity-star-streams-for-filters-and-outputs db (slice plan.filters 0) output-attrs)]
+        (defer (delete streams))
+        (while true
+          (let [[entity entity-ok] (entity-star-streams-align! db (addr streams))]
+            (when (not entity-ok)
+              (set! out-stats.max-intermediate-bindings (count rows))
+              (set! out-stats.output-rows (count rows))
+              (return (profiled-result-set (result-set-ok rows) out-stats)))
+            (let [[first-value first-ok] (entity-star-output-value db (slice streams 0) 0)
+                  [second-value second-ok] (entity-star-output-value db (slice streams 0) 1)]
+              (when (and first-ok second-ok)
+                (append-three-value-row! (addr rows) (value-entity entity) first-value second-value)))
+            (entity-star-streams-advance-all! (addr streams))))))
+    (let [i best-low]
+      (while (< i best-high)
+      (let [filter-datom-index (db-index-view-at filter-view i)
+            filter-datom db.datoms[filter-datom-index]]
+        (when (or all-current (datom-current-at? db filter-datom-index))
+          (let [filters-match true]
+            (let [filter-i 0]
+              (while (< filter-i (count plan.filters))
+              (when (not (= filter-i best-filter-index))
+                (let [filter plan.filters[filter-i]]
+                  (set! out-stats.clause-candidates (+ out-stats.clause-candidates 1))
+                  (if all-current
+                    (when (not (cardinality-one-value-matches-fast-all-current? db filter-datom.e filter.attr filter.value))
+                      (set! filters-match false))
+                    (when (not (current-cardinality-one-value-matches-fast? db filter-datom.e filter.attr filter.value))
+                      (set! filters-match false)))))
+              (set! filter-i (+ filter-i 1))))
+            (when filters-match
+              (if all-current
+                (let [[first-value first-ok] (cardinality-one-value-fast-all-current db filter-datom.e plan.first-attr)
+                      [second-value second-ok] (cardinality-one-value-fast-all-current db filter-datom.e plan.second-attr)]
+                  (set! out-stats.clause-candidates (+ out-stats.clause-candidates 2))
+                  (when (and first-ok second-ok)
+                    (append-three-value-row! (addr rows) (value-entity filter-datom.e) first-value second-value)))
+                (let [[first-value first-ok] (current-cardinality-one-value-fast db filter-datom.e plan.first-attr)
+                      [second-value second-ok] (current-cardinality-one-value-fast db filter-datom.e plan.second-attr)]
+                  (set! out-stats.clause-candidates (+ out-stats.clause-candidates 2))
+                  (when (and first-ok second-ok)
+                    (append-three-value-row! (addr rows) (value-entity filter-datom.e) first-value second-value)))))))
+      (set! i (+ i 1))))
+    (set! out-stats.max-intermediate-bindings (count rows))
+    (set! out-stats.output-rows (count rows))
+    (profiled-result-set (result-set-ok rows) out-stats))))
+
+(defn q-query-entity-string-int-triples-two-filters-current [db: DB, plan: Entity-Two-Value-Plan] -> Entity-String-Int-Triples
+  (let [filter-view (db-index-view db .AVET)
+        value-view (db-index-view db .AEVT)
+        filter-indexes filter-view.indexes
+        value-indexes value-view.indexes
+        datoms db.datoms
+        first-filter plan.filters[0]
+        second-filter plan.filters[1]
+        first-filter-i (lower-bound-index-view db filter-view "avet" 0 first-filter.attr first-filter.value)
+        first-filter-high (upper-bound-index-view db filter-view "avet" 0 first-filter.attr first-filter.value)
+        second-filter-i (lower-bound-index-view db filter-view "avet" 0 second-filter.attr second-filter.value)
+        second-filter-high (upper-bound-index-view db filter-view "avet" 0 second-filter.attr second-filter.value)
+        first-value-i (lower-bound-index-view db value-view "aevt" 0 plan.first-attr (Value {}))
+        first-value-high (upper-bound-index-view db value-view "aevt" 0 plan.first-attr (Value {}))
+        second-value-i (lower-bound-index-view db value-view "aevt" 0 plan.second-attr (Value {}))
+        second-value-high (upper-bound-index-view db value-view "aevt" 0 plan.second-attr (Value {}))
+        out (empty-entity-string-int-triples)]
+    (reset-entity-string-int-triples-capacity! (addr out) (- first-filter-high first-filter-i))
+    (while true
+      (when (or (>= first-filter-i first-filter-high)
+                (>= second-filter-i second-filter-high)
+                (>= first-value-i first-value-high)
+                (>= second-value-i second-value-high))
+        (return out))
+      (let [target datoms[filter-indexes[first-filter-i]].e
+            changed true]
+        (while changed
+          (set! changed false)
+          (while (and (< first-filter-i first-filter-high)
+                      (< datoms[filter-indexes[first-filter-i]].e target))
+            (set! first-filter-i (+ first-filter-i 1)))
+          (when (>= first-filter-i first-filter-high)
+            (return out))
+          (when (> datoms[filter-indexes[first-filter-i]].e target)
+            (set! target datoms[filter-indexes[first-filter-i]].e)
+            (set! changed true))
+          (while (and (< second-filter-i second-filter-high)
+                      (< datoms[filter-indexes[second-filter-i]].e target))
+            (set! second-filter-i (+ second-filter-i 1)))
+          (when (>= second-filter-i second-filter-high)
+            (return out))
+          (when (> datoms[filter-indexes[second-filter-i]].e target)
+            (set! target datoms[filter-indexes[second-filter-i]].e)
+            (set! changed true))
+          (while (and (< first-value-i first-value-high)
+                      (< datoms[value-indexes[first-value-i]].e target))
+            (set! first-value-i (+ first-value-i 1)))
+          (when (>= first-value-i first-value-high)
+            (return out))
+          (when (> datoms[value-indexes[first-value-i]].e target)
+            (set! target datoms[value-indexes[first-value-i]].e)
+            (set! changed true))
+          (while (and (< second-value-i second-value-high)
+                      (< datoms[value-indexes[second-value-i]].e target))
+            (set! second-value-i (+ second-value-i 1)))
+          (when (>= second-value-i second-value-high)
+            (return out))
+          (when (> datoms[value-indexes[second-value-i]].e target)
+            (set! target datoms[value-indexes[second-value-i]].e)
+            (set! changed true)))
+        (let [first-value-datom-index value-indexes[first-value-i]
+              second-value-datom-index value-indexes[second-value-i]]
+          (when (and (= datoms[first-value-datom-index].v.kind .String)
+                     (= datoms[second-value-datom-index].v.kind .Int))
+            (append-entity-string-int-triple! (addr out)
+                                              target
+                                              datoms[first-value-datom-index].v.text
+                                              datoms[second-value-datom-index].v.int-value)))
+        (set! first-filter-i (+ first-filter-i 1))
+        (set! second-filter-i (+ second-filter-i 1))
+        (set! first-value-i (+ first-value-i 1))
+        (set! second-value-i (+ second-value-i 1))))
+    out))
+
+(defn q-query-entity-string-int-triples [db: DB, query: Query, inputs: []Query-Input] -> [columns: Entity-String-Int-Triples, ok: bool]
+  (let [out (empty-entity-string-int-triples)]
+    (when (> (count inputs) 0)
+      (return out false))
+    (let [[self-join-plan self-join-ok] (query-entity-value-self-join-plan db query)]
+      (when self-join-ok
+        (delete-entity-string-int-triples out)
+        (return (q-entity-value-self-join-triples db self-join-plan) true)))
+    (let [[plan plan-ok] (query-entity-two-value-plan db query)]
+      (when (not plan-ok)
+        (delete plan.filters)
+        (return out false))
+      (when (and (all-datoms-current? db)
+                 (= (count plan.filters) 2))
+        (delete-entity-string-int-triples out)
+        (let [direct (q-query-entity-string-int-triples-two-filters-current db plan)]
+          (delete plan.filters)
+          (return direct true)))
+      (when (and (all-datoms-current? db)
+                 (> (count plan.filters) 1))
+        (let [output-attrs ([]string [plan.first-attr plan.second-attr])
+              streams (entity-star-streams-for-filters-and-outputs db (slice plan.filters 0) output-attrs)]
+          (defer (delete streams))
+          (while true
+            (let [[entity entity-ok] (entity-star-streams-align! db (addr streams))]
+              (when (not entity-ok)
+                (delete plan.filters)
+                (return out true))
+              (let [[first-value first-ok] (entity-star-output-value db (slice streams 0) 0)
+                    [second-value second-ok] (entity-star-output-value db (slice streams 0) 1)]
+                (when (and first-ok
+                           second-ok
+                           (= first-value.kind .String)
+                           (= second-value.kind .Int))
+                  (append-entity-string-int-triple! (addr out) entity first-value.text second-value.int-value)))
+              (entity-star-streams-advance-all! (addr streams))))))
+      (let [filter-view (db-index-view db .AVET)
+            best-filter-index 0
+            best-low 0
+            best-high 0]
+        (let [filter-i 0]
+          (while (< filter-i (count plan.filters))
+          (let [filter plan.filters[filter-i]
+                low (lower-bound-index-view db filter-view "avet" 0 filter.attr filter.value)
+                high (upper-bound-index-view db filter-view "avet" 0 filter.attr filter.value)]
+            (when (or (= filter-i 0)
+                      (< (- high low) (- best-high best-low)))
+              (set! best-filter-index filter-i)
+              (set! best-low low)
+              (set! best-high high)))
+          (set! filter-i (+ filter-i 1))))
+        (reset-entity-string-int-triples-capacity! (addr out) (- best-high best-low))
+        (let [db-alias db
+              source (resident-db-read-source (addr db-alias))
+              i best-low]
+          (while (< i best-high)
+          (let [filter-datom-index (db-index-view-at filter-view i)
+                filter-datom db.datoms[filter-datom-index]]
+            (let [filters-match true]
+              (let [filter-i 0]
+                (while (< filter-i (count plan.filters))
+                (when (not (= filter-i best-filter-index))
+                  (let [filter plan.filters[filter-i]]
+                    (let [[matches matches-ok _] (db-read-source-cardinality-one-value-matches-fast-all-current? source filter-datom.e filter.attr filter.value)]
+                      (when (not (and matches-ok matches))
+                        (set! filters-match false)))))
+                (set! filter-i (+ filter-i 1))))
+              (when filters-match
+                (let [[first-value first-ok _] (db-read-source-cardinality-one-value-fast-all-current source filter-datom.e plan.first-attr)
+                      [second-value second-ok _] (db-read-source-cardinality-one-value-fast-all-current source filter-datom.e plan.second-attr)]
+                  (when (and first-ok
+                             second-ok
+                             (= first-value.kind .String)
+                             (= second-value.kind .Int))
+                    (append-owned-entity-string-int-triple! (addr out) filter-datom.e first-value.text second-value.int-value))
+                  (when first-ok
+                    (delete-owned-value first-value))
+                  (when second-ok
+                    (delete-owned-value second-value))))))
+          (set! i (+ i 1))))
+        (delete plan.filters)
+        (return out true)))))
