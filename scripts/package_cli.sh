@@ -24,7 +24,7 @@ case "$(uname -m)" in
 esac
 
 PLATFORM="$OS-$ARCH"
-BINARY="$("$ROOT/scripts/build_cli.sh" --if-needed)"
+BINARY="$(VEV_CLI_VERSION="$VERSION" "$ROOT/scripts/build_cli.sh" --if-needed)"
 ARCHIVE="$OUT_DIR/vevdb-cli-$PLATFORM-$VERSION.$FORMAT"
 
 mkdir -p "$OUT_DIR"

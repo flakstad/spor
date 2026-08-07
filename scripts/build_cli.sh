@@ -6,7 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/version.sh"
-VERSION="$(vev_version "$ROOT")"
+VERSION="${VEV_CLI_VERSION:-$(vev_cli_version "$ROOT")}"
 KVIST_BIN="${KVIST_BIN:-kvist}"
 GENERATED_DIR="$ROOT/build/generated/vev_cli"
 
@@ -51,7 +51,7 @@ case "$SQLITE_MODE" in
     exit 1
     ;;
 esac
-BUILD_CONFIG="sqlite-mode=$SQLITE_MODE;sqlite-lib-dir=$SQLITE_LIB_DIR"
+BUILD_CONFIG="sqlite-mode=$SQLITE_MODE;sqlite-lib-dir=$SQLITE_LIB_DIR;version=$VERSION"
 
 mkdir -p "$GENERATED_DIR" "$(dirname "$OUTPUT")"
 
@@ -64,7 +64,7 @@ if [[ "$IF_NEEDED" == "true" && -x "$OUTPUT" ]]; then
   if find "$ROOT/src/vev" "$ROOT/src/vev_cli" -type f -newer "$OUTPUT" -print -quit | grep -q .; then
     CURRENT="false"
   fi
-  for input in "$ROOT/VERSION" "$ROOT/scripts/build_cli.sh" "$ROOT/scripts/build_sqlite.sh"; do
+  for input in "$ROOT/VERSION" "$ROOT/scripts/version.sh" "$ROOT/scripts/build_cli.sh" "$ROOT/scripts/build_sqlite.sh"; do
     if [[ "$input" -nt "$OUTPUT" ]]; then
       CURRENT="false"
     fi

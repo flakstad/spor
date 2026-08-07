@@ -65,6 +65,9 @@ scripts/build_cli.sh
 build/vevdb --version
 ```
 
+On a release tag, the command prints the release version. A local build from
+another commit also prints the abbreviated commit and its date.
+
 ## Checks
 
 Run the core client and CLI checks:

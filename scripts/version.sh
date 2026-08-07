@@ -18,6 +18,27 @@ vev_version() {
   printf '%s\n' "$version"
 }
 
+vev_cli_version() {
+  local root="${1:-$(vev_repo_root)}"
+  local version head tag_commit commit date
+
+  version="$(vev_version "$root")" || return 1
+  if ! head="$(git -C "$root" rev-parse --verify HEAD 2>/dev/null)"; then
+    printf '%s\n' "$version"
+    return
+  fi
+
+  tag_commit="$(git -C "$root" rev-parse --verify "refs/tags/v$version^{commit}" 2>/dev/null || true)"
+  if [[ "$head" == "$tag_commit" ]]; then
+    printf '%s\n' "$version"
+    return
+  fi
+
+  commit="$(git -C "$root" rev-parse --short=8 HEAD)"
+  date="$(git -C "$root" show -s --format=%cs HEAD)"
+  printf '%s (%s %s)\n' "$version" "$commit" "$date"
+}
+
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   vev_version
 fi
