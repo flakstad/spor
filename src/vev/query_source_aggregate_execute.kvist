@@ -1,0 +1,474 @@
+; Copyright 2026 Vev Contributors
+; SPDX-License-Identifier: Apache-2.0
+
+(package vev)
+
+(defn fixed-keyword-attr-clause [clause-value: Clause] -> [attr: string, ok: bool]
+  (when (and (not clause-value.has-source)
+             (= clause-value.a.kind .Value)
+             (= clause-value.a.value.kind .Keyword)
+             (= clause-value.e.kind .Var)
+             (= clause-value.v.kind .Var))
+    (return clause-value.a.value.text true))
+  (return "" false))
+
+(defn aggregate-uses-var? [aggregate: Aggregate-Find, name: string] -> bool
+  (when (= aggregate.var name)
+    (return true))
+  (when (= (count aggregate.args) 1)
+    (return (and (= aggregate.args[0].kind .Var)
+                 (= aggregate.args[0].name name))))
+  false)
+
+(defn query-ref-chain-string-length-aggregate-projection [query: Query] -> [projection: Source-Ref-Chain-String-Length-Aggregate-Projection, ok: bool]
+  (when (not (and (= (count query.find) 1)
+                  (= (count query.with) 1)
+                  (= (count query.clauses) 4)
+                  (= (count query.function-clauses) 1)
+                  (> (count query.aggregates) 0)
+                  (= (count query.predicates) 0)
+                  (= (count query.rules) 0)
+                  (= (count query.rule-calls) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.pulls) 0)))
+    (return (Source-Ref-Chain-String-Length-Aggregate-Projection {}) false))
+  (let [function query.function-clauses[0]]
+    (when (not (and (= function.op "count")
+                    (= (count function.terms) 1)
+                    (= function.terms[0].kind .Var)
+                    (= function.out-binding.kind .None)
+                    (not function.is-tuple)
+                    (not (= function.out ""))))
+      (return (Source-Ref-Chain-String-Length-Aggregate-Projection {}) false))
+    (for [aggregate query.aggregates]
+      (when (not (aggregate-uses-var? aggregate function.out))
+        (return (Source-Ref-Chain-String-Length-Aggregate-Projection {}) false)))
+    (let [group-var query.find[0]
+          leaf-var query.with[0]
+          text-var function.terms[0].name
+          length-var function.out
+          leaf-value-attr ""
+          middle-var ""
+          middle-ref-attr ""
+          root-var ""
+          root-ref-attr ""
+          group-attr ""
+          leaf-ok false
+          middle-ok false
+          root-ok false
+          group-ok false]
+      (for [clause-value query.clauses]
+        (let [[attr attr-ok] (fixed-keyword-attr-clause clause-value)]
+          (when (not attr-ok)
+            (return (Source-Ref-Chain-String-Length-Aggregate-Projection {}) false))
+          (when (= clause-value.v.name text-var)
+            (set! leaf-ok true)
+            (set! leaf-value-attr attr)
+            (when (not (= clause-value.e.name leaf-var))
+              (return (Source-Ref-Chain-String-Length-Aggregate-Projection {}) false)))))
+      (when (not leaf-ok)
+        (return (Source-Ref-Chain-String-Length-Aggregate-Projection {}) false))
+      (for [clause-value query.clauses]
+        (let [[attr _] (fixed-keyword-attr-clause clause-value)]
+          (when (= clause-value.v.name leaf-var)
+            (set! middle-ok true)
+            (set! middle-var clause-value.e.name)
+            (set! middle-ref-attr attr))))
+      (when (not middle-ok)
+        (return (Source-Ref-Chain-String-Length-Aggregate-Projection {}) false))
+      (for [clause-value query.clauses]
+        (let [[attr _] (fixed-keyword-attr-clause clause-value)]
+          (when (= clause-value.v.name middle-var)
+            (set! root-ok true)
+            (set! root-var clause-value.e.name)
+            (set! root-ref-attr attr))))
+      (when (not root-ok)
+        (return (Source-Ref-Chain-String-Length-Aggregate-Projection {}) false))
+      (for [clause-value query.clauses]
+        (let [[attr _] (fixed-keyword-attr-clause clause-value)]
+          (when (and (= clause-value.e.name root-var)
+                     (= clause-value.v.name group-var))
+            (set! group-ok true)
+            (set! group-attr attr))))
+      (when (not group-ok)
+        (return (Source-Ref-Chain-String-Length-Aggregate-Projection {}) false))
+      (return (Source-Ref-Chain-String-Length-Aggregate-Projection {root-var: root-var
+                                                                    middle-var: middle-var
+                                                                    leaf-var: leaf-var
+                                                                    text-var: text-var
+                                                                    length-var: length-var
+                                                                    group-var: group-var
+                                                                    root-ref-attr: root-ref-attr
+                                                                    middle-ref-attr: middle-ref-attr
+                                                                    leaf-value-attr: leaf-value-attr
+                                                                    group-attr: group-attr})
+              true))))
+
+(defn append-entity-int-link! [heads: ^map[u64]int, values: ^[dynamic]i64, nexts: ^[dynamic]int, entity: u64, value: i64]
+  (let [[head found] (mmap.get heads^ entity)
+        next (if found head -1)
+        index (count values^)]
+    (arr.push! values^ value)
+    (arr.push! nexts^ next)
+    (mmap.assoc! heads^ entity index)))
+
+(defn add-source-ref-chain-int-links-from-parent! [source: DB-Read-Source, attr: string, parent-heads: ^map[u64]int, parent-values: ^[dynamic]i64, parent-nexts: ^[dynamic]int, child-heads: ^map[u64]int, child-values: ^[dynamic]i64, child-nexts: ^[dynamic]int, stats: ^Query-Stats] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-index-datom-stream source attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (set! stats^.clause-candidates (+ stats^.clause-candidates 1))
+      (when (= stream.current.v.kind .Entity)
+        (let [[head found] (mmap.get parent-heads^ stream.current.e)]
+          (when found
+            (let [index head]
+              (while (>= index 0)
+                (append-entity-int-link! child-heads child-values child-nexts stream.current.v.entity parent-values^[index])
+                (set! index parent-nexts^[index]))))))
+      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not advance-ok)
+          (delete-source-index-datom-stream stream)
+          (return false advance-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn db-read-source-query-relation-ref-chain-string-length-aggregate [source: DB-Read-Source, query: Query, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
+  (let [[projection projection-ok] (query-ref-chain-string-length-aggregate-projection query)]
+    (when (not projection-ok)
+      (return (query-relation-empty) false ""))
+    (when (db-read-source-has-overlay? source)
+      (return (query-relation-empty) false ""))
+    (let [root-year-heads (make (map u64 int)) :defer
+          root-years (make [dynamic]i64) :defer
+          root-year-nexts (make [dynamic]int) :defer
+          middle-year-heads (make (map u64 int)) :defer
+          middle-years (make [dynamic]i64) :defer
+          middle-year-nexts (make [dynamic]int) :defer
+          leaf-year-heads (make (map u64 int)) :defer
+          leaf-years (make [dynamic]i64) :defer
+          leaf-year-nexts (make [dynamic]int) :defer]
+      (set! stats^.clauses (+ stats^.clauses (count query.clauses)))
+      (set! stats^.source-index-scans (+ stats^.source-index-scans 4))
+      (query-stats-observe-source-operator! stats)
+      (let [[group-stream group-ok group-error] (source-index-datom-stream source projection.group-attr)]
+        (when (not group-ok)
+          (return (query-relation-empty) false group-error))
+        (while group-stream.has-current
+          (set! stats^.clause-candidates (+ stats^.clause-candidates 1))
+          (when (= group-stream.current.v.kind .Int)
+            (append-entity-int-link! (addr root-year-heads) (addr root-years) (addr root-year-nexts) group-stream.current.e group-stream.current.v.int-value))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr group-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream group-stream)
+              (return (query-relation-empty) false advance-error))))
+        (delete-source-index-datom-stream group-stream))
+      (let [[root-ok root-error] (add-source-ref-chain-int-links-from-parent! source projection.root-ref-attr (addr root-year-heads) (addr root-years) (addr root-year-nexts) (addr middle-year-heads) (addr middle-years) (addr middle-year-nexts) stats)]
+        (when (not root-ok)
+          (return (query-relation-empty) false root-error)))
+      (let [[middle-ok middle-error] (add-source-ref-chain-int-links-from-parent! source projection.middle-ref-attr (addr middle-year-heads) (addr middle-years) (addr middle-year-nexts) (addr leaf-year-heads) (addr leaf-years) (addr leaf-year-nexts) stats)]
+        (when (not middle-ok)
+          (return (query-relation-empty) false middle-error)))
+      (let [attrs ([dynamic]string [projection.group-var projection.leaf-var projection.length-var])
+            attr-sources ([dynamic]string ["" "" ""])
+            builder (query-relation-builder (slice attrs 0))
+            [leaf-stream leaf-ok leaf-error] (source-index-datom-stream source projection.leaf-value-attr)]
+        (when (not leaf-ok)
+          (delete attrs)
+          (delete attr-sources)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false leaf-error))
+        (while leaf-stream.has-current
+          (set! stats^.clause-candidates (+ stats^.clause-candidates 1))
+          (when (= leaf-stream.current.v.kind .String)
+            (let [[head found] (mmap.get leaf-year-heads leaf-stream.current.e)]
+              (when found
+                (let [index head]
+                  (while (>= index 0)
+                    (let [values ([]Value [(value-int leaf-years[index])
+                                            (value-entity leaf-stream.current.e)
+                                            (value-int (i64 (string-clojure-count leaf-stream.current.v.text)))])]
+                      (when (not (query-relation-builder-add-column-row-with-values! (addr builder) ([]Relation-Column []) 0 values))
+                        (delete-source-index-datom-stream leaf-stream)
+                        (delete attrs)
+                        (delete attr-sources)
+                        (delete-query-relation-builder builder)
+                        (return (query-relation-empty) false "ref-chain string-length aggregate produced unsupported typed relation values")))
+                      (set! index leaf-year-nexts[index]))))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr leaf-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream leaf-stream)
+              (delete attrs)
+              (delete attr-sources)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false advance-error))))
+        (delete-source-index-datom-stream leaf-stream)
+        (set! stats^.max-intermediate-bindings (max stats^.max-intermediate-bindings builder.typed-rows))
+        (return (Query-Relation {attrs: attrs
+                                 attr-sources: attr-sources
+                                 attr-index: (query-relation-attr-index (slice attrs 0))
+                                 tuples: builder.tuples
+                                 typed-columns: builder.typed-columns
+                                 typed-rows: builder.typed-rows
+                                 has-typed-columns: builder.typed-ok})
+                true
+                "")))))
+
+(defn source-ref-chain-string-length-var-value [projection: Source-Ref-Chain-String-Length-Aggregate-Projection, name: string, year: i64, leaf: u64, length: i64] -> [value: Value, ok: bool]
+  (cond
+    (= name projection.group-var) (return (value-int year) true)
+    (= name projection.leaf-var) (return (value-entity leaf) true)
+    (= name projection.length-var) (return (value-int length) true)
+    :else (return (Value {}) false)))
+
+(defn source-ref-chain-string-length-term-value [projection: Source-Ref-Chain-String-Length-Aggregate-Projection, term: Term, year: i64, leaf: u64, length: i64] -> [value: Value, ok: bool]
+  (case term.kind
+    .Value (return term.value true)
+    .Var (return (source-ref-chain-string-length-var-value projection term.name year leaf length))
+     (return (Value {}) false)))
+
+(defn source-ref-chain-string-length-key-values [query: Query, projection: Source-Ref-Chain-String-Length-Aggregate-Projection, aggregate: Aggregate-Find, year: i64, leaf: u64, length: i64] -> [values: [dynamic]Value, ok: bool]
+  (let [out (make [dynamic]Value)]
+    (for [name query.find]
+      (let [[value value-ok] (source-ref-chain-string-length-var-value projection name year leaf length)]
+        (if value-ok
+          (arr.push! out value)
+          (return out false))))
+    (for [name query.with]
+      (let [[value value-ok] (source-ref-chain-string-length-var-value projection name year leaf length)]
+        (if value-ok
+          (arr.push! out value)
+          (return out false))))
+    (if (> (count aggregate.args) 0)
+      (for [arg aggregate.args]
+        (let [[value value-ok] (source-ref-chain-string-length-term-value projection arg year leaf length)]
+          (if value-ok
+            (arr.push! out value)
+            (return out false))))
+      (let [[value value-ok] (source-ref-chain-string-length-var-value projection aggregate.var year leaf length)]
+        (if value-ok
+          (arr.push! out value)
+          (return out false))))
+    (return out true)))
+
+(defn source-ref-chain-string-length-aggregate-supported? [query: Query, registry: []Native-Query-Fn] -> bool
+  (for [aggregate query.aggregates]
+    (when (not (aggregate-supported-from-typed-relation-with-fns? aggregate registry))
+      (return false)))
+  true)
+
+(defn accumulate-source-ref-chain-string-length-row! [query: Query, projection: Source-Ref-Chain-String-Length-Aggregate-Projection, registry: []Native-Query-Fn, groups: ^[dynamic]Result-Row, group-index: ^map[string]int, states: ^[dynamic]Typed-Aggregate-Accumulator, year: i64, leaf: u64, length: i64] -> bool
+  (let [group-values ([]Value [(value-int year)])
+        [existing-index existing-ok _] (typed-aggregate-group-index (slice groups^ 0) group-index group-values)
+        group-row (if existing-ok existing-index (append-typed-aggregate-group! groups group-index states query group-values))]
+    (for [aggregate aggregate-index query.aggregates]
+      (let [state-index (+ (* group-row (count query.aggregates)) aggregate-index)
+            [key key-ok] (source-ref-chain-string-length-key-values query projection aggregate year leaf length)]
+        (when (not key-ok)
+          (delete key)
+          (return false))
+        (when (not (typed-aggregate-key-seen-or-add! (addr states^[state-index]) (slice key 0)))
+          (let [[input-value input-ok] (source-ref-chain-string-length-var-value projection aggregate.var year leaf length)]
+            (when input-ok
+              (typed-aggregate-accumulate-value! (addr states^[state-index]) aggregate input-value))))
+        (delete key)))
+    true))
+
+(defn accumulate-ref-chain-string-length-typed-tuple! [query: Query, groups: ^[dynamic]Result-Row, year-group-index: ^map[i64]int, states: ^[dynamic]Typed-Aggregate-Accumulator, seen-tuples: (ptr (map string (struct {}))), year: i64, leaf: u64, length: i64]
+  (let [[existing-group existing-ok] (mmap.get year-group-index^ year)
+        group-row (if existing-ok existing-group (count groups^))]
+    (when (not existing-ok)
+      (mmap.assoc! year-group-index^ year group-row)
+      (arr.push! groups^ (aggregate-owned-key-row ([]Value [(value-int year)])))
+      (for [aggregate query.aggregates]
+        (arr.push! states^ (typed-aggregate-accumulator aggregate))))
+    (let [seen-key (fmt.tprintf "%d/%d/%d" year leaf length)]
+      (when (not (set.contains? seen-tuples^ seen-key))
+        (set.add! seen-tuples^ seen-key)
+        (for [aggregate aggregate-index query.aggregates]
+          (let [state-index (+ (* group-row (count query.aggregates)) aggregate-index)]
+            (typed-aggregate-accumulate-value! (addr states^[state-index]) aggregate (value-int length))))))))
+
+(defn source-ref-chain-string-length-aggregate-result-rows [query: Query, registry: []Native-Query-Fn, groups: []Result-Row, states: []Typed-Aggregate-Accumulator] -> [rows: [dynamic]Result-Row, ok: bool]
+  (let [out (make [dynamic]Result-Row)]
+    (for [group group-row groups]
+      (let [values (arr.into [dynamic]Value (slice group.values 0))
+            aggregate-ok true]
+        (for [aggregate aggregate-index query.aggregates]
+          (when aggregate-ok
+            (let [state-index (+ (* group-row (count query.aggregates)) aggregate-index)
+                  [aggregate-value one-ok] (typed-aggregate-accumulator-value states[state-index] aggregate registry)]
+              (if one-ok
+                (arr.push! values aggregate-value)
+                (set! aggregate-ok false)))))
+        (if aggregate-ok
+          (arr.push! out (Result-Row {values: values pulls: (make [dynamic]Pull-Result)}))
+          (do
+            (delete values)
+            (return out false)))))
+    (return out true)))
+
+(defn add-db-ref-chain-int-links-from-parent! [db: DB, attr: string, parent-heads: ^map[u64]int, parent-values: ^[dynamic]i64, parent-nexts: ^[dynamic]int, child-heads: ^map[u64]int, child-values: ^[dynamic]i64, child-nexts: ^[dynamic]int, stats: ^Query-Stats]
+  (let [view (db-index-view db .AEVT)
+        low (lower-bound-index-view db view "aevt" 0 attr (Value {}))
+        high (upper-bound-index-view db view "aevt" 0 attr (Value {}))
+        i low]
+    (set! stats^.clause-candidates (+ stats^.clause-candidates (- high low)))
+    (while (< i high)
+      (let [datom-index (db-index-view-at view i)
+            datom db.datoms[datom-index]]
+        (when (and (datom-current-at? db datom-index)
+                   (= datom.v.kind .Entity))
+          (let [[head found] (mmap.get parent-heads^ datom.e)]
+            (when found
+              (let [index head]
+                (while (>= index 0)
+                  (append-entity-int-link! child-heads child-values child-nexts datom.v.entity parent-values^[index])
+                  (set! index parent-nexts^[index])))))))
+      (set! i (+ i 1)))))
+
+(defn q-resident-db-ref-chain-string-length-aggregate [db: DB, query: Query, registry: []Native-Query-Fn] -> [result: Result-Set, stats: Query-Stats, used: bool]
+  (let [out-stats (query-stats-empty)
+        [projection projection-ok] (query-ref-chain-string-length-aggregate-projection query)]
+    (when (not projection-ok)
+      (return (result-set-error "") out-stats false))
+    (when (not (source-ref-chain-string-length-aggregate-supported? query registry))
+      (return (result-set-error "") out-stats false))
+    (let [root-year-heads (make (map u64 int)) :defer
+          root-years (make [dynamic]i64) :defer
+          root-year-nexts (make [dynamic]int) :defer
+          middle-year-heads (make (map u64 int)) :defer
+          middle-years (make [dynamic]i64) :defer
+          middle-year-nexts (make [dynamic]int) :defer
+          leaf-year-heads (make (map u64 int)) :defer
+          leaf-years (make [dynamic]i64) :defer
+          leaf-year-nexts (make [dynamic]int) :defer
+          groups (make [dynamic]Result-Row)
+          year-group-index (mmap.empty i64 int) :defer
+          states (make [dynamic]Typed-Aggregate-Accumulator)
+          seen-tuples (set.empty string) :defer]
+      (defer (delete-result-rows-owned-values groups))
+      (defer (delete-typed-aggregate-accumulators states))
+      (set! out-stats.steps (count query.where-steps))
+      (set! out-stats.clauses (count query.clauses))
+      (set! out-stats.source-index-scans 4)
+      (query-stats-observe-source-operator! (addr out-stats))
+      (let [view (db-index-view db .AEVT)
+            low (lower-bound-index-view db view "aevt" 0 projection.group-attr (Value {}))
+            high (upper-bound-index-view db view "aevt" 0 projection.group-attr (Value {}))
+            i low]
+        (set! out-stats.clause-candidates (+ out-stats.clause-candidates (- high low)))
+        (while (< i high)
+          (let [datom-index (db-index-view-at view i)
+                datom db.datoms[datom-index]]
+            (when (and (datom-current-at? db datom-index)
+                       (= datom.v.kind .Int))
+              (append-entity-int-link! (addr root-year-heads) (addr root-years) (addr root-year-nexts) datom.e datom.v.int-value)))
+          (set! i (+ i 1))))
+      (add-db-ref-chain-int-links-from-parent! db projection.root-ref-attr (addr root-year-heads) (addr root-years) (addr root-year-nexts) (addr middle-year-heads) (addr middle-years) (addr middle-year-nexts) (addr out-stats))
+      (add-db-ref-chain-int-links-from-parent! db projection.middle-ref-attr (addr middle-year-heads) (addr middle-years) (addr middle-year-nexts) (addr leaf-year-heads) (addr leaf-years) (addr leaf-year-nexts) (addr out-stats))
+      (let [view (db-index-view db .AEVT)
+            low (lower-bound-index-view db view "aevt" 0 projection.leaf-value-attr (Value {}))
+            high (upper-bound-index-view db view "aevt" 0 projection.leaf-value-attr (Value {}))
+            i low
+            logical-rows 0]
+        (set! out-stats.clause-candidates (+ out-stats.clause-candidates (- high low)))
+        (while (< i high)
+          (let [datom-index (db-index-view-at view i)
+                datom db.datoms[datom-index]]
+            (when (and (datom-current-at? db datom-index)
+                       (= datom.v.kind .String))
+              (let [[head found] (mmap.get leaf-year-heads datom.e)]
+                (when found
+                  (let [index head
+                        name-length (i64 (string-clojure-count datom.v.text))]
+                    (while (>= index 0)
+                      (set! logical-rows (+ logical-rows 1))
+                      (accumulate-ref-chain-string-length-typed-tuple! query (addr groups) (addr year-group-index) (addr states) (addr seen-tuples) leaf-years[index] datom.e name-length)
+                      (set! index leaf-year-nexts[index]))))))
+          (set! i (+ i 1)))
+        (set! out-stats.max-intermediate-bindings logical-rows))
+      (let [[rows rows-ok] (source-ref-chain-string-length-aggregate-result-rows query registry (slice groups 0) (slice states 0))]
+        (when (not rows-ok)
+          (delete-result-rows-owned-values rows)
+          (return (result-set-error "resident ref-chain string-length aggregate could not produce aggregate rows") out-stats true))
+        (set! out-stats.output-rows (count rows))
+        (return (result-set-ok rows) out-stats true))))))
+
+(defn db-read-source-q-ref-chain-string-length-aggregate [source: DB-Read-Source, query: Query, registry: []Native-Query-Fn] -> [result: Result-Set, stats: Query-Stats, used: bool]
+  (let [out-stats (query-stats-empty)
+        [projection projection-ok] (query-ref-chain-string-length-aggregate-projection query)]
+    (when (not projection-ok)
+      (return (result-set-error "") out-stats false))
+    (when (= source.kind .Resident)
+      (return (q-resident-db-ref-chain-string-length-aggregate source.db^ query registry)))
+    (when (or (db-read-source-has-overlay? source)
+              (not (source-ref-chain-string-length-aggregate-supported? query registry)))
+      (return (result-set-error "") out-stats false))
+    (let [root-year-heads (make (map u64 int)) :defer
+          root-years (make [dynamic]i64) :defer
+          root-year-nexts (make [dynamic]int) :defer
+          middle-year-heads (make (map u64 int)) :defer
+          middle-years (make [dynamic]i64) :defer
+          middle-year-nexts (make [dynamic]int) :defer
+          leaf-year-heads (make (map u64 int)) :defer
+          leaf-years (make [dynamic]i64) :defer
+          leaf-year-nexts (make [dynamic]int) :defer
+          groups (make [dynamic]Result-Row)
+          year-group-index (mmap.empty i64 int) :defer
+          states (make [dynamic]Typed-Aggregate-Accumulator)
+          seen-tuples (set.empty string) :defer]
+      (defer (delete-result-rows-owned-values groups))
+      (defer (delete-typed-aggregate-accumulators states))
+      (set! out-stats.steps (count query.where-steps))
+      (set! out-stats.clauses (+ out-stats.clauses (count query.clauses)))
+      (set! out-stats.source-index-scans (+ out-stats.source-index-scans 4))
+      (query-stats-observe-source-operator! (addr out-stats))
+      (let [[group-stream group-ok group-error] (source-index-datom-stream source projection.group-attr)]
+        (when (not group-ok)
+          (return (result-set-error group-error) out-stats true))
+        (while group-stream.has-current
+          (set! out-stats.clause-candidates (+ out-stats.clause-candidates 1))
+          (when (= group-stream.current.v.kind .Int)
+            (append-entity-int-link! (addr root-year-heads) (addr root-years) (addr root-year-nexts) group-stream.current.e group-stream.current.v.int-value))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr group-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream group-stream)
+              (return (result-set-error advance-error) out-stats true))))
+        (delete-source-index-datom-stream group-stream))
+      (let [[root-ok root-error] (add-source-ref-chain-int-links-from-parent! source projection.root-ref-attr (addr root-year-heads) (addr root-years) (addr root-year-nexts) (addr middle-year-heads) (addr middle-years) (addr middle-year-nexts) (addr out-stats))]
+        (when (not root-ok)
+          (return (result-set-error root-error) out-stats true)))
+      (let [[middle-ok middle-error] (add-source-ref-chain-int-links-from-parent! source projection.middle-ref-attr (addr middle-year-heads) (addr middle-years) (addr middle-year-nexts) (addr leaf-year-heads) (addr leaf-years) (addr leaf-year-nexts) (addr out-stats))]
+        (when (not middle-ok)
+          (return (result-set-error middle-error) out-stats true)))
+      (let [[leaf-stream leaf-ok leaf-error] (source-index-datom-stream source projection.leaf-value-attr)
+            logical-rows 0]
+        (when (not leaf-ok)
+          (return (result-set-error leaf-error) out-stats true))
+        (while leaf-stream.has-current
+          (set! out-stats.clause-candidates (+ out-stats.clause-candidates 1))
+          (when (= leaf-stream.current.v.kind .String)
+            (let [[head found] (mmap.get leaf-year-heads leaf-stream.current.e)]
+              (when found
+                  (let [index head
+                        name-length (i64 (string-clojure-count leaf-stream.current.v.text))]
+                  (while (>= index 0)
+                    (set! logical-rows (+ logical-rows 1))
+                    (accumulate-ref-chain-string-length-typed-tuple! query (addr groups) (addr year-group-index) (addr states) (addr seen-tuples) leaf-years[index] leaf-stream.current.e name-length)
+                    (set! index leaf-year-nexts[index]))))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr leaf-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream leaf-stream)
+              (return (result-set-error advance-error) out-stats true))))
+        (delete-source-index-datom-stream leaf-stream)
+        (set! out-stats.max-intermediate-bindings logical-rows))
+      (let [[rows rows-ok] (source-ref-chain-string-length-aggregate-result-rows query registry (slice groups 0) (slice states 0))]
+        (when (not rows-ok)
+          (delete-result-rows-owned-values rows)
+          (return (result-set-error "ref-chain string-length aggregate could not produce aggregate rows") out-stats true))
+        (set! out-stats.output-rows (count rows))
+        (return (result-set-ok rows) out-stats true)))))
