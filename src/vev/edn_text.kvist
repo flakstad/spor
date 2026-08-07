@@ -2536,7 +2536,14 @@
   (prepare-query-text-with-sources text ([]DB-Source [])))
 
 (defn prepare-query-text-with-rules [query-text: string, rules-text: string] -> Prepared-Query
-  (let [prepared-query (prepare-query-text query-text)]
+  (prepare-query-text-with-rules-and-sources
+    query-text rules-text ([]DB-Source [])))
+
+(defn prepare-query-text-with-rules-and-sources [query-text: string,
+                                                  rules-text: string,
+                                                  sources: []DB-Source]
+  -> Prepared-Query
+  (let [prepared-query (prepare-query-text-with-sources query-text sources)]
     (when (not prepared-query.ok)
       (return prepared-query))
     (let [prepared-rules (parse-rules-text rules-text)]

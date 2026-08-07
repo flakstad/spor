@@ -2850,17 +2850,19 @@
     (let [parts (make [dynamic]string)]
       (for [datom datoms]
         (arr.push! parts (value-debug-str datom.v)))
-      (delete-owned-datoms datoms)
       (when (= (count parts) 0)
         (delete parts)
+        (delete-owned-datoms datoms)
         (return "nil" true ""))
       (when (= (count parts) 1)
         (let [out (string-owned parts[0])]
           (delete parts)
+          (delete-owned-datoms datoms)
           (return out true "")))
       (let [[joined _] (core-strings.join (slice parts 0) " ")
             out (core-strings.concatenate ([]string ["(" joined ")"]))]
         (delete parts)
+        (delete-owned-datoms datoms)
         (return out true "")))))
 
 (defn shared-write-state-source-cas-failed-error [source: DB-Read-Source, entity: u64, attr: string, expected: Value] -> [error-text: string, ok: bool, error: string]

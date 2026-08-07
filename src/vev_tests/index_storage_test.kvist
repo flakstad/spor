@@ -1657,6 +1657,27 @@
     (vev.delete-live-tx-report-shallow failed)
     (vev.delete-shared-conn conn)))
 
+(t.deftest shared-conn-cas-failure-preserves-string-value-in-error
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-shared-conn 2)
+        seed (vev.shared-conn-transact
+               (addr conn)
+               ([]vev.Tx-Data
+                 [(vev.add 1 ":item/name" (vev.value-string "Ada"))]))
+        failed (vev.shared-conn-transact
+                 (addr conn)
+                 ([]vev.Tx-Data
+                   [(vev.cas 1 ":item/name"
+                             (vev.value-string "Wrong")
+                             (vev.value-string "Changed"))]))]
+    (t.is seed.ok)
+    (t.is (not failed.ok))
+    (t.is (= failed.error
+             ":db.fn/cas failed on datom [1 :item/name Ada], expected Wrong"))
+    (vev.delete-live-tx-report-shallow seed)
+    (vev.delete-live-tx-report-shallow failed)
+    (vev.delete-shared-conn conn)))
+
 (t.deftest shared-conn-resolves-cas-lookup-refs-through-write-state
   (defer (free_all context.allocator))
   (let [conn (vev.create-shared-conn 2)

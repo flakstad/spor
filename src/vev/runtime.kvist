@@ -21,12 +21,16 @@
   (let [seconds (u64 (/ (time.to-unix-nanoseconds (time.now)) 1000000000))
         random-most (rand.uint64)
         least (rand.uint64)]
-    (fmt.tprintf "%08x-%04x-%04x-%04x-%012x"
-                 (% seconds (u64 4294967296))
-                 (% (/ random-most (u64 65536)) (u64 65536))
-                 (% random-most (u64 65536))
-                 (% (/ least (u64 281474976710656)) (u64 65536))
-                 (% least (u64 281474976710656)))))
+    (string-owned
+      (fmt.tprintf "%08x-%04x-%04x-%04x-%012x"
+                   (% seconds (u64 4294967296))
+                   (% (/ random-most (u64 65536)) (u64 65536))
+                   (% random-most (u64 65536))
+                   (% (/ least (u64 281474976710656)) (u64 65536))
+                   (% least (u64 281474976710656))))))
+
+(defn squuid-value [] -> Value
+  (value-uuid (squuid-text)))
 
 (defn- hex-nibble [value: u8] -> [nibble: u64, ok: bool]
   (cond
@@ -6521,7 +6525,10 @@
       (return true "")))
   (let [view (db-read-source-index-view source order)
         order-text (public-index-order-text order)]
-    (when (and (not (db-read-source-has-inline-overlay? source))
+    (when (and (not source.filter-has-as-of)
+               (not source.filter-has-since)
+               (not source.filter-history)
+               (not (db-read-source-has-inline-overlay? source))
                (sqlite-merge-index-view? view))
       (let [[stream stream-ok stream-error] (source-index-datom-stream-for-sqlite-sequential-values source order values view)]
         (when (not stream-ok)
@@ -7791,7 +7798,10 @@
     (return (db-read-source-bindings-after-relation-value-clause source.relation-value^ input-bindings clause-value) true ""))
   (let [out (make [dynamic]Binding)]
     (for [binding input-bindings]
-      (if (db-read-source-has-overlay? source)
+      (if (or (db-read-source-has-overlay? source)
+              source.filter-has-as-of
+              source.filter-has-since
+              source.filter-history)
         (let [[datoms datoms-ok datoms-error] (db-read-source-clause-candidates-for-binding source clause-value binding)]
           (when (not datoms-ok)
             (db-read-source-delete-bindings-owned out)
@@ -16364,6 +16374,21 @@
     (when (not read-ok)
       (return (result-set-error read-error)))
     (defer (db-read-source-end-query-read source read-started)))
+  ;; Filtered immutable DB values must not enter source fast paths which read
+  ;; the underlying durable indexes without applying the temporal predicate.
+  (let [has-filtered-source
+        (or source.filter-has-as-of
+            source.filter-has-since
+            source.filter-history)]
+    (for [candidate sources]
+      (when (or candidate.source.filter-has-as-of
+                candidate.source.filter-has-since
+                candidate.source.filter-history)
+        (set! has-filtered-source true)))
+  (when has-filtered-source
+    (return
+      (db-read-source-q-query-generic-with-sources-inputs-and-fns
+        source sources query-value inputs registry))))
   (when (and (= (count sources) 0)
              (= (count inputs) 0))
     (let [[direct-result _ direct-used] (db-read-source-q-ref-chain-string-length-aggregate source query-value registry)]

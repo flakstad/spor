@@ -4405,7 +4405,9 @@ abi_free_stmt :: proc(stmt: rawptr) {
 @export
 (defn vev_squuid :abi "c" [] -> cstring
   (odin "context = runtime.default_context()")
-  (c-string-owned (vev.squuid-text)))
+  (let [uuid (vev.squuid-text)]
+    (defer (delete uuid))
+    (c-string-owned uuid)))
 
 @export
 (defn vev_squuid_time_millis :abi "c" [uuid-text: cstring] -> i64

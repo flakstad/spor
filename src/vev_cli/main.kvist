@@ -4,20 +4,59 @@
 (package main)
 
 (import cli "../../deps/cli")
+(import arr "kvist:arr")
+(import libc "core:c/libc")
 (import fmt "core:fmt")
 (import os "core:os")
 (import strconv "core:strconv")
 (import strings "core:strings")
+(import time "core:time")
 (import vev "../vev")
+
+(odin "
+watch_interrupted: libc.sig_atomic_t
+
+watch_signal_handler :: proc \"c\" (_sig: i32) {
+    watch_interrupted = libc.sig_atomic_t(1)
+}
+")
 
 (def usage
   "usage:
   vevdb --version
   vevdb info <uri>
+  vevdb sync <uri> [target-t]
   vevdb confirm-entity-partitions <uri>
   vevdb transact <uri> <tx-edn | file.edn>
+  vevdb transact-many <uri> <txs-edn | file.edn> --mode logical|flatten
+  vevdb with <uri> <tx-edn | file.edn> [--db <pipeline-edn>]
   vevdb query <uri> <query-edn | file.edn> [inputs-edn | file.edn]
-  vevdb pull <uri> <pattern-edn | file.edn> <entity-id>
+  vevdb pull <uri> <pattern-edn | file.edn> <entity-edn> [--db <pipeline-edn>]
+  vevdb pull-many <uri> <pattern-edn | file.edn> <entities-edn> [--db <pipeline-edn>]
+  vevdb db-info <uri> [--db <pipeline-edn>]
+  vevdb tx-range <uri> [start-edn [end-edn]]
+  vevdb entity <uri> <entity-edn> [--db <pipeline-edn>]
+  vevdb entity-get <uri> <entity-edn> <attr> [--db <pipeline-edn>]
+  vevdb entity-contains <uri> <entity-edn> <attr> [--db <pipeline-edn>]
+  vevdb entid <uri> <entity-edn> [--db <pipeline-edn>]
+  vevdb ident <uri> <entity-edn> [--db <pipeline-edn>]
+  vevdb attribute <uri> <attr> [--db <pipeline-edn>]
+  vevdb datoms <uri> <index> [components-edn] [--db <pipeline-edn>]
+  vevdb seek-datoms <uri> <index> [components-edn] [--db <pipeline-edn>]
+  vevdb rseek-datoms <uri> <index> [components-edn] [--db <pipeline-edn>]
+  vevdb index-range <uri> <attr> <start-edn> <end-edn> [--db <pipeline-edn>]
+  vevdb index-pull <uri> <options-edn> [--db <pipeline-edn>]
+  vevdb ensure-resident <uri>
+  vevdb compact-indexes <uri>
+  vevdb maintain-indexes <uri> [--max-steps <n>]
+  vevdb index-info <uri> [index]
+  vevdb watch <uri> [--after <time-point>]
+  vevdb exec <uri> <request-edn>
+  vevdb exec --memory <request-edn>
+  vevdb t-to-tx <t>
+  vevdb tx-to-t <tx>
+  vevdb squuid
+  vevdb squuid-time-millis <uuid-edn>
 
 examples:
   vevdb transact example.db '[{:db/id 1 :user/name \"Ada\"}]'
@@ -28,43 +67,391 @@ examples:
 (defn version [] -> string
   (odin "return #config(VEV_VERSION, \"dev\")"))
 
+(defn begin-watch-signals []
+  (odin "
+watch_interrupted = libc.sig_atomic_t(0)
+_ = libc.signal(libc.SIGINT, watch_signal_handler)
+_ = libc.signal(libc.SIGTERM, watch_signal_handler)
+"))
+
+(defn watch-interrupted? [] -> bool
+  (odin "return watch_interrupted != libc.sig_atomic_t(0)"))
+
 (defn delete-store! [store: vev.Store-Conn]
   (vev.close-store store))
 
+(defn text-arg-owned? [arg: string] -> bool
+  (or (= arg "-")
+      (strings.has_prefix arg "@")
+      (strings.has_suffix arg ".edn")))
+
 (defn read-text-arg [arg: string] -> [text: string, ok: bool, error: string]
-  (if (strings.has_suffix arg ".edn")
-    (let [[data read-err] (os.read_entire_file arg context.allocator)]
+  (if (= arg "-")
+    (let [[data read-err] (os.read_entire_file os.stdin context.allocator)]
       (when (!= read-err nil)
-        (return "" false (fmt.tprintf "failed to read %s" arg)))
+        (return "" false "failed to read standard input"))
       (return (string data) true ""))
-    (return arg true "")))
+    (if (or (strings.has_prefix arg "@")
+            (strings.has_suffix arg ".edn"))
+    (let [path (if (strings.has_prefix arg "@") (slice arg 1) arg)
+          [data read-err] (os.read_entire_file path context.allocator)]
+      (when (!= read-err nil)
+        (return "" false (fmt.tprintf "failed to read %s" path)))
+      (return (string data) true ""))
+    (return arg true ""))))
 
 (defn print-value [value: vev.Value]
   (let [text (vev.value-serializable-text value)]
     (defer (delete text))
     (fmt.println text)))
 
+(defn print-owned-value [value: vev.Value]
+  (print-value value)
+  (vev.delete-owned-value value))
+
+(defn print-cli-error [message: string]
+  (let [operation (if (> (len os.args) 1) os.args[1] "cli")
+        value
+        (vev.value-map
+          ([]vev.Value
+            [(vev.value-keyword (vev.string-owned ":ok"))
+             (vev.value-bool false)
+             (vev.value-keyword (vev.string-owned ":vev/error"))
+             (vev.value-keyword
+               (vev.string-owned ":vev.error/invalid-input"))
+             (vev.value-keyword (vev.string-owned ":message"))
+             (vev.value-string (vev.string-owned message))
+             (vev.value-keyword (vev.string-owned ":operation"))
+             (vev.value-keyword
+               (strings.concatenate ([]string [":" operation])))]))
+        text (vev.value-serializable-text value)]
+    (cli.eprintln text)
+    (delete text)
+    (vev.delete-owned-value value)))
+
+(defn cli-datoms-value [datoms: []vev.Datom] -> vev.Value
+  (let [items (make [dynamic]vev.Value 0 (count datoms))]
+    (for [datom datoms]
+      (arr.push! items
+        (vev.value-vector5
+          (vev.value-entity datom.e)
+          (vev.value-keyword (vev.string-owned datom.a))
+          (vev.value-owned datom.v)
+          (vev.value-entity datom.tx)
+          (vev.value-bool datom.added))))
+    (vev.value-vector-owned items)))
+
+(defn read-value-arg [arg: string] -> [value: vev.Value, ok: bool, error: string]
+  (let [[text text-ok text-error] (read-text-arg arg)]
+    (when (not text-ok)
+      (return (vev.Value {}) false text-error))
+    (defer (when (text-arg-owned? arg) (delete text)))
+    (vev.value-from-owned-serial-text text)))
+
+(defn index-arg-from-value [value: vev.Value] -> vev.Index-Arg
+  (when (and (= value.kind .Vector)
+             (= (count value.items) 2)
+             (= value.items[0].kind .Keyword))
+    (return (vev.Index-Arg {has-lookup-ref: true
+                            lookup-attr: value.items[0].text
+                            lookup-value: value.items[1]})))
+  (vev.Index-Arg {value: value}))
+
+(defn index-args-from-value [value: vev.Value] -> [args: [dynamic]vev.Index-Arg, ok: bool]
+  (when (not (= value.kind .Vector))
+    (return (make [dynamic]vev.Index-Arg) false))
+  (let [out (make [dynamic]vev.Index-Arg 0 (count value.items))]
+    (for [item value.items]
+      (arr.push! out (index-arg-from-value item)))
+    (return out true)))
+
+(defn time-coordinate [value: vev.Value] -> [coordinate: u64, ok: bool]
+  (case value.kind
+    .Int
+      (if (>= value.int-value 0)
+        (return (u64 value.int-value) true)
+        (return 0 false))
+    .Entity (return value.entity true)
+     (return 0 false)))
+
+(defn apply-db-pipeline [source: vev.Store-DB, pipeline-arg: string]
+  -> [db: vev.Store-DB, ok: bool, error: string]
+  (when (= pipeline-arg "")
+    (return (vev.retain-store-db source) true ""))
+  (let [[pipeline pipeline-ok pipeline-error] (read-value-arg pipeline-arg)]
+    (when (not pipeline-ok)
+      (return (vev.Store-DB {}) false pipeline-error))
+    (defer (vev.delete-owned-value pipeline))
+    (when (not (= pipeline.kind .Vector))
+      (return (vev.Store-DB {}) false "database pipeline must be an EDN vector"))
+    (let [current (vev.retain-store-db source)]
+      (for [form pipeline.items]
+        (when (or (not (= form.kind .Vector))
+                  (= (count form.items) 0)
+                  (not (= form.items[0].kind .Keyword)))
+          (vev.close-store-db! (addr current))
+          (return (vev.Store-DB {}) false "database pipeline operation must be a non-empty vector beginning with a keyword"))
+        (let [operation form.items[0].text
+              next (vev.Store-DB {})
+              next-ok true
+              next-error ""]
+          (cond
+            (= operation ":history")
+              (if (= (count form.items) 1)
+                (set! next (vev.history-store-db (addr current)))
+                (do
+                  (set! next-ok false)
+                  (set! next-error ":history takes no arguments")))
+            (or (= operation ":as-of") (= operation ":since"))
+              (if (= (count form.items) 2)
+                (let [point form.items[1]]
+                  (if (= point.kind .Instant)
+                    (if (= operation ":as-of")
+                      (let [[filtered filtered-ok filtered-error]
+                            (vev.as-of-store-db-instant (addr current) point.int-value)]
+                        (set! next filtered)
+                        (set! next-ok filtered-ok)
+                        (set! next-error filtered-error))
+                      (let [[filtered filtered-ok filtered-error]
+                            (vev.since-store-db-instant (addr current) point.int-value)]
+                        (set! next filtered)
+                        (set! next-ok filtered-ok)
+                        (set! next-error filtered-error)))
+                    (let [[coordinate coordinate-ok] (time-coordinate point)]
+                      (if coordinate-ok
+                        (set! next
+                              (if (= operation ":as-of")
+                                (vev.as-of-store-db (addr current) coordinate)
+                                (vev.since-store-db (addr current) coordinate)))
+                        (do
+                          (set! next-ok false)
+                          (set! next-error "time point must be a non-negative t, transaction id, or instant"))))))
+                (do
+                  (set! next-ok false)
+                  (set! next-error (fmt.tprintf "%s takes one argument" operation))))
+            (= operation ":with")
+              (if (= (count form.items) 2)
+                (let [tx-text (vev.value-serializable-text form.items[1])]
+                  (defer (delete tx-text))
+                  (let [report (vev.with-store-db-report-text (addr current) tx-text)]
+                    (if report.ok
+                      (set! next (vev.retain-store-db report.db-after))
+                      (do
+                        (set! next-ok false)
+                        (set! next-error (fmt.tprintf "%s" report.error))))
+                    (vev.delete-store-tx-report report)))
+                (do
+                  (set! next-ok false)
+                  (set! next-error ":with takes one transaction argument")))
+            :else
+              (do
+                (set! next-ok false)
+                (set! next-error (fmt.tprintf "unknown database pipeline operation %s" operation))))
+          (vev.close-store-db! (addr current))
+          (when (not next-ok)
+            (return (vev.Store-DB {}) false next-error))
+          (set! current next)))
+      (return current true ""))))
+
+(defstruct Open-DB {
+  store: vev.Store-Conn
+  db: vev.Store-DB
+  ok: bool
+  error: string
+})
+
+(defn open-command-db [uri: string, pipeline-arg: string] -> Open-DB
+  (let [[store store-ok store-error] (vev.open-store-read-only uri)]
+    (when (not store-ok)
+      (delete-store! store)
+      (return (Open-DB {ok: false error: store-error})))
+    (let [[source source-ok source-error] (vev.store-db (addr store))]
+      (when (not source-ok)
+        (delete-store! store)
+        (return (Open-DB {ok: false error: source-error})))
+      (let [[selected selected-ok selected-error]
+            (apply-db-pipeline source pipeline-arg)]
+        (vev.close-store-db! (addr source))
+        (if selected-ok
+          (Open-DB {store: store db: selected ok: true})
+          (do
+            (delete-store! store)
+            (Open-DB {ok: false error: selected-error})))))))
+
+(defn close-open-db! [opened: ^Open-DB]
+  (when opened^.ok
+    (vev.close-store-db! (addr opened^.db))
+    (delete-store! opened^.store)
+    (set! opened^.ok false)))
+
+(defn db-descriptor-value [db: ^vev.Store-DB, include-stats: bool]
+  -> [value: vev.Value, ok: bool, error: string]
+  (let [[basis basis-ok basis-error] (vev.store-db-basis-t db)]
+    (when (not basis-ok)
+      (return (vev.Value {}) false basis-error))
+    (let [[next next-ok next-error] (vev.store-db-next-t db)]
+      (when (not next-ok)
+        (return (vev.Value {}) false next-error))
+      (let [[as-of as-of?] (vev.store-db-as-of-t db)
+            [since since?] (vev.store-db-since-t db)
+            items (make [dynamic]vev.Value)]
+        (arr.push! items (vev.value-keyword (vev.string-owned ":basis-t")))
+        (arr.push! items (vev.value-int (i64 basis)))
+        (arr.push! items (vev.value-keyword (vev.string-owned ":next-t")))
+        (arr.push! items (vev.value-int (i64 next)))
+        (arr.push! items (vev.value-keyword (vev.string-owned ":as-of-t")))
+        (arr.push! items (if as-of? (vev.value-int (i64 as-of)) (vev.value-nil)))
+        (arr.push! items (vev.value-keyword (vev.string-owned ":since-t")))
+        (arr.push! items (if since? (vev.value-int (i64 since)) (vev.value-nil)))
+        (arr.push! items (vev.value-keyword (vev.string-owned ":history?")))
+        (arr.push! items (vev.value-bool (vev.store-db-history? db)))
+        (when include-stats
+          (let [args (make [dynamic]vev.Index-Arg)
+                [datoms datoms-ok datoms-error]
+                (vev.store-db-index-datoms db 0 ":eavt" (slice args 0))]
+            (delete args)
+            (when (not datoms-ok)
+              (delete items)
+              (return (vev.Value {}) false datoms-error))
+            (let [attr-names (make [dynamic]string)
+                  attr-counts (make [dynamic]i64)]
+              (defer (delete attr-names))
+              (defer (delete attr-counts))
+              (for [datom datoms]
+                (let [found false]
+                  (for [name index attr-names]
+                    (when (= name datom.a)
+                      (set! attr-counts[index] (+ attr-counts[index] 1))
+                      (set! found true)
+                      (break)))
+                  (when (not found)
+                    (arr.push! attr-names datom.a)
+                    (arr.push! attr-counts (i64 1)))))
+              (let [attrs (make [dynamic]vev.Value)]
+                (for [name index attr-names]
+                  (arr.push! attrs (vev.value-keyword (vev.string-owned name)))
+                  (arr.push! attrs
+                    (vev.value-map
+                      ([]vev.Value
+                        [(vev.value-keyword (vev.string-owned ":count"))
+                         (vev.value-int attr-counts[index])]))))
+            (let [stats (vev.value-map
+                          ([]vev.Value [(vev.value-keyword (vev.string-owned ":datoms"))
+                                        (vev.value-int (i64 (count datoms)))
+                                        (vev.value-keyword (vev.string-owned ":attrs"))
+                                        (vev.value-map-owned attrs)]))]
+              (vev.delete-owned-datoms datoms)
+              (arr.push! items (vev.value-keyword (vev.string-owned ":stats")))
+              (arr.push! items stats))))))
+        (return (vev.value-map-owned items) true "")))))
+
+(defn entity-from-selector [db: ^vev.Store-DB, selector: vev.Value]
+  -> [entity: vev.Store-Entity, ok: bool, error: string]
+  (case selector.kind
+    .Int
+      (if (>= selector.int-value 0)
+        (vev.store-db-entity db (u64 selector.int-value))
+        (return (vev.Store-Entity {}) false "entity id must be non-negative"))
+    .Entity (vev.store-db-entity db selector.entity)
+    .Keyword (vev.store-db-entity-ident db selector.text)
+    .Vector
+      (if (and (= (count selector.items) 2)
+               (= selector.items[0].kind .Keyword))
+        (vev.store-db-entity-lookup-ref db selector.items[0].text selector.items[1])
+        (return (vev.Store-Entity {}) false "entity vector must be a lookup ref [attribute value]"))
+     (return (vev.Store-Entity {}) false "entity must be an id, ident, or lookup ref")))
+
+(defn cli-tx-report-value [report: vev.Store-Tx-Report] -> vev.Value
+  (let [base (vev.store-tx-report-value report)
+        db-before (vev.retain-store-db report.db-before)
+        db-after (vev.retain-store-db report.db-after)
+        [before before-ok _] (db-descriptor-value (addr db-before) false)
+        [after after-ok _] (db-descriptor-value (addr db-after) false)
+        items (make [dynamic]vev.Value 0 (+ (count base.items) 4))]
+    (vev.close-store-db! (addr db-before))
+    (vev.close-store-db! (addr db-after))
+    (for [item base.items]
+      (arr.push! items item))
+    (delete base.items)
+    (when before-ok
+      (arr.push! items (vev.value-keyword (vev.string-owned ":db-before")))
+      (arr.push! items before))
+    (when after-ok
+      (arr.push! items (vev.value-keyword (vev.string-owned ":db-after")))
+      (arr.push! items after))
+    (vev.value-map-owned items)))
+
 (defn command-info [uri: string] -> int
-  (let [[store ok error] (vev.open-store uri)]
+  (let [[store ok error] (vev.open-store-read-only uri)]
     (when (not ok)
-      (cli.eprintln error)
+      (print-cli-error error)
       (delete-store! store)
       (return 1))
     (defer (delete-store! store))
     (let [[basis basis-ok basis-error] (vev.store-basis-t (addr store))]
       (when (not basis-ok)
-        (cli.eprintln basis-error)
+        (print-cli-error basis-error)
         (return 1))
     (let [[tx-count tx-ok tx-error] (vev.store-tx-count (addr store))]
       (when (not tx-ok)
-        (cli.eprintln tx-error)
+        (print-cli-error tx-error)
         (return 1))
-      (fmt.print "{:basis-t ")
-      (fmt.print basis)
-      (fmt.print " :tx-count ")
-      (fmt.print tx-count)
-      (fmt.println "}")
-      0))))
+      (let [[tx-ids ids-ok ids-error]
+            (vev.sqlite-conn-tx-ids (addr store.sqlite))]
+        (when (not ids-ok)
+          (delete tx-ids)
+          (print-cli-error ids-error)
+          (return 1))
+        (let [ids (make [dynamic]vev.Value)]
+          (for [tx tx-ids]
+            (arr.push! ids (vev.value-entity tx)))
+          (delete tx-ids)
+          (print-owned-value
+            (vev.value-map
+              ([]vev.Value
+                [(vev.value-keyword (vev.string-owned ":backend"))
+                 (vev.value-keyword (vev.string-owned ":sqlite"))
+                 (vev.value-keyword (vev.string-owned ":path"))
+                 (vev.value-string (vev.string-owned store.sqlite.path))
+                 (vev.value-keyword (vev.string-owned ":basis-t"))
+                 (vev.value-int (i64 basis))
+                 (vev.value-keyword (vev.string-owned ":tx-count"))
+                 (vev.value-int (i64 tx-count))
+                 (vev.value-keyword (vev.string-owned ":tx-ids"))
+                 (vev.value-vector-owned ids)])))
+          0))))))
+
+(defn command-sync [uri: string, target-text: string] -> int
+  (let [target: u64 0]
+    (when (!= target-text "")
+      (let [[parsed parsed-ok] (strconv.parse_int target-text)]
+        (when (or (not parsed-ok) (< parsed 0))
+          (print-cli-error "sync target must be a non-negative basis t")
+          (return 1))
+        (set! target (u64 parsed))))
+    (while true
+      (let [opened (open-command-db uri "")]
+        (when (not opened.ok)
+          (print-cli-error opened.error)
+          (return 1))
+        (let [[basis basis-ok basis-error]
+              (vev.store-db-basis-t (addr opened.db))]
+          (when (not basis-ok)
+            (close-open-db! (addr opened))
+            (print-cli-error basis-error)
+            (return 1))
+          (when (or (= target-text "") (>= basis target))
+            (let [[value value-ok value-error]
+                  (db-descriptor-value (addr opened.db) false)]
+              (close-open-db! (addr opened))
+              (when (not value-ok)
+                (print-cli-error value-error)
+                (return 1))
+              (print-owned-value value)
+              (return 0)))
+          (close-open-db! (addr opened))))
+      (time.sleep (* 50 time.Millisecond)))
+    0))
 
 (defn command-confirm-entity-partitions [uri: string] -> int
   (let [[ok error] (vev.confirm-sqlite-entity-partition-layout! uri)]
@@ -73,92 +460,2300 @@ examples:
         (fmt.println "confirmed separated entity and transaction partitions")
         0)
       (do
-        (cli.eprintln error)
+        (print-cli-error error)
         1))))
 
 (defn command-transact [uri: string, tx-arg: string] -> int
   (let [[tx-text text-ok text-error] (read-text-arg tx-arg)]
     (when (not text-ok)
-      (cli.eprintln text-error)
+      (print-cli-error text-error)
       (return 1))
-    (defer (when (strings.has_suffix tx-arg ".edn") (delete tx-text)))
+    (defer (when (text-arg-owned? tx-arg) (delete tx-text)))
     (let [[store ok error] (vev.open-store uri)]
       (when (not ok)
-        (cli.eprintln error)
+        (print-cli-error error)
         (delete-store! store)
         (return 1))
       (defer (delete-store! store))
       (let [report (vev.transact-store-report-text (addr store) tx-text)
-            value (vev.store-tx-report-value report)]
+            value (cli-tx-report-value report)]
         (if report.ok
           (do
             (print-value value)
             (vev.delete-store-tx-report report)
+            (vev.delete-owned-value value)
             0)
           (do
             (print-value value)
             (vev.delete-store-tx-report report)
+            (vev.delete-owned-value value)
             1))))))
 
-(defn command-query [uri: string, query-arg: string, inputs-text: string] -> int
-  (let [[query-text text-ok text-error] (read-text-arg query-arg)]
+(defn query-selected-value [db: ^vev.Store-DB,
+                            prepared: vev.Prepared-Query,
+                            result: vev.Result-Set,
+                            mode: string]
+  -> [value: vev.Value, ok: bool, error: string]
+  (when (= mode "envelope")
+    (return (vev.store-db-result-value db result)))
+  (let [[source source-ok source-error] (vev.store-db-read-source db)]
+    (when (not source-ok)
+      (return (vev.Value {}) false source-error))
+    (when (= mode "q")
+      (return (vev.query-result-shaped-value
+                source prepared.source-owner prepared.query result)))
+    (when (= mode "rows")
+      (let [rows (make [dynamic]vev.Value)]
+        (for [row result.rows]
+          (let [[row-value row-ok row-error]
+                (vev.query-result-row-shaped-value source row)]
+            (when (not row-ok)
+              (for [existing rows]
+                (vev.delete-owned-value existing))
+              (delete rows)
+              (return (vev.Value {}) false row-error))
+            (arr.push! rows row-value)))
+        (return (vev.value-vector-owned rows) true "")))
+    (when (= mode "scalar")
+      (if (> (count result.rows) 0)
+        (let [[row-value row-ok row-error]
+              (vev.query-result-row-shaped-value source result.rows[0])]
+          (when (not row-ok)
+            (return (vev.Value {}) false row-error))
+          (let [out (if (> (count row-value.items) 0)
+                      (vev.value-owned row-value.items[0])
+                      (vev.value-nil))]
+            (vev.delete-owned-value row-value)
+            (return out true "")))
+        (return (vev.value-nil) true "")))
+    (return (vev.Value {}) false "query result mode must be envelope, q, rows, or scalar")))
+
+(defn command-query [uri: string,
+                     query-arg: string,
+                     inputs-text: string,
+                     pipeline-arg: string,
+                     result-mode: string,
+                     rules-arg: string,
+                     profile: bool,
+                     timeout-ms: int] -> int
+  (let [started (time.now)
+        [query-text text-ok text-error] (read-text-arg query-arg)]
     (when (not text-ok)
-      (cli.eprintln text-error)
+      (print-cli-error text-error)
       (return 1))
-    (defer (when (strings.has_suffix query-arg ".edn") (delete query-text)))
+    (defer (when (text-arg-owned? query-arg) (delete query-text)))
     (let [[inputs inputs-ok inputs-error] (read-text-arg inputs-text)]
       (when (not inputs-ok)
-        (cli.eprintln inputs-error)
+        (print-cli-error inputs-error)
         (return 1))
-      (defer (when (strings.has_suffix inputs-text ".edn") (delete inputs)))
-      (let [[store ok error] (vev.open-store-read-only uri)]
-        (when (not ok)
-          (cli.eprintln error)
-          (delete-store! store)
+      (defer (when (text-arg-owned? inputs-text) (delete inputs)))
+      (let [opened (open-command-db uri pipeline-arg)]
+        (when (not opened.ok)
+          (print-cli-error opened.error)
           (return 1))
-        (defer (delete-store! store))
-        (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))]
-          (when (not snapshot-ok)
-            (cli.eprintln snapshot-error)
-            (return 1))
-          (defer (vev.close-store-db! (addr snapshot)))
-        (let [[value value-ok value-error] (vev.q-store-db-value-text-with-input-text (addr snapshot) query-text inputs)]
-          (when (not value-ok)
-            (cli.eprintln value-error)
-            (return 1))
-          (print-value value)
-          0))))))
+        (defer (close-open-db! (addr opened)))
+        (let [rules-text ""
+              rules-owned false]
+          (when (!= rules-arg "")
+            (let [[loaded loaded-ok loaded-error] (read-text-arg rules-arg)]
+              (when (not loaded-ok)
+                (print-cli-error loaded-error)
+                (return 1))
+              (set! rules-text loaded)
+              (set! rules-owned (text-arg-owned? rules-arg))))
+          (defer (when rules-owned (delete rules-text)))
+          (let [prepared (if (= rules-arg "")
+                           (vev.prepare-query-text query-text)
+                           (vev.prepare-query-text-with-rules query-text rules-text))]
+            (defer (vev.delete-prepared-query-shallow prepared))
+            (when (not prepared.ok)
+              (print-cli-error prepared.error)
+              (return 1))
+            (let [[query-inputs query-inputs-ok query-inputs-error]
+                  (vev.parse-query-inputs-text-for-query prepared.query inputs)]
+              (defer (vev.delete-owned-query-inputs query-inputs))
+              (when (not query-inputs-ok)
+                (print-cli-error query-inputs-error)
+                (return 1))
+              (if profile
+                (let [profiled
+                      (vev.q-profiled-store-db-prepared-with-input-text
+                        (addr opened.db) prepared inputs)]
+                  (defer (vev.delete-profiled-result-set-owned-values profiled))
+                  (when (not profiled.result.ok)
+                    (print-cli-error profiled.result.error)
+                    (return 1))
+                  (let [[selected selected-ok selected-error]
+                        (query-selected-value
+                          (addr opened.db) prepared profiled.result result-mode)]
+                    (when (not selected-ok)
+                      (print-cli-error selected-error)
+                      (return 1))
+                    (when (and (>= timeout-ms 0)
+                               (> (time.duration-milliseconds
+                                    (time.since started))
+                                  (f64 timeout-ms)))
+                      (vev.delete-owned-value selected)
+                      (print-cli-error "query exceeded timeout")
+                      (return 1))
+                    (let [raw-stats (vev.query-stats-value profiled.stats)
+                          owned-stats (vev.value-owned raw-stats)]
+                      (vev.delete-value-containers-shallow raw-stats)
+                    (let [out
+                          (vev.value-map
+                            ([]vev.Value
+                              [(vev.value-keyword (vev.string-owned ":ret"))
+                               selected
+                               (vev.value-keyword (vev.string-owned ":query-stats"))
+                               owned-stats]))]
+                      (print-owned-value out)
+                      0))))
+                (let [result
+                      (vev.q-result-store-db-prepared-with-inputs
+                        (addr opened.db) prepared (slice query-inputs 0))]
+                  (defer (vev.delete-query-result result))
+                  (when (not result.result.ok)
+                    (print-cli-error result.result.error)
+                    (return 1))
+                  (let [[value value-ok value-error]
+                        (query-selected-value
+                          (addr opened.db) prepared result.result result-mode)]
+                    (when (not value-ok)
+                      (print-cli-error value-error)
+                      (return 1))
+                    (when (and (>= timeout-ms 0)
+                               (> (time.duration-milliseconds
+                                    (time.since started))
+                                  (f64 timeout-ms)))
+                      (vev.delete-owned-value value)
+                      (print-cli-error "query exceeded timeout")
+                      (return 1))
+                    (print-owned-value value)
+                    0))))))))))
 
-(defn command-pull [uri: string, pattern-arg: string, entity-text: string] -> int
-  (let [[entity parsed] (strconv.parse_int entity-text)]
-    (when (not parsed)
-      (cli.eprintf "invalid entity id: %s\n" entity-text)
+(defn pull-selector [db: ^vev.Store-DB, pattern-text: string, selector: vev.Value]
+  -> [value: vev.Value, ok: bool, error: string]
+  (when (= selector.kind .Int)
+    (if (>= selector.int-value 0)
+      (return (vev.pull-store-db-value-text
+                db pattern-text (u64 selector.int-value)))
+      (return (vev.Value {}) false "entity id must be non-negative")))
+  (when (= selector.kind .Entity)
+    (return (vev.pull-store-db-value-text db pattern-text selector.entity)))
+  (let [[entity entity-ok entity-error] (entity-from-selector db selector)]
+    (when (not entity-ok)
+      (return (vev.Value {}) false entity-error))
+    (defer (vev.close-store-entity! (addr entity)))
+    (if (vev.store-entity-found? entity)
+      (vev.pull-store-db-value-text db pattern-text (vev.store-entity-id entity))
+      (return (vev.value-nil) true ""))))
+
+(defn command-pull [uri: string, pattern-arg: string, entity-arg: string, pipeline-arg: string] -> int
+  (let [[pattern-text text-ok text-error] (read-text-arg pattern-arg)]
+    (when (not text-ok)
+      (print-cli-error text-error)
       (return 1))
-    (let [[pattern-text text-ok text-error] (read-text-arg pattern-arg)]
-      (when (not text-ok)
-        (cli.eprintln text-error)
+    (defer (when (text-arg-owned? pattern-arg) (delete pattern-text)))
+    (let [[selector selector-ok selector-error] (read-value-arg entity-arg)]
+      (when (not selector-ok)
+        (print-cli-error selector-error)
         (return 1))
-      (defer (when (strings.has_suffix pattern-arg ".edn") (delete pattern-text)))
-      (let [[store ok error] (vev.open-store-read-only uri)]
-        (when (not ok)
-          (cli.eprintln error)
-          (delete-store! store)
+      (defer (vev.delete-owned-value selector))
+      (let [opened (open-command-db uri pipeline-arg)]
+        (when (not opened.ok)
+          (print-cli-error opened.error)
           (return 1))
-        (defer (delete-store! store))
-        (let [[snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))]
-          (when (not snapshot-ok)
-            (cli.eprintln snapshot-error)
-            (return 1))
-          (defer (vev.close-store-db! (addr snapshot)))
-        (let [[value value-ok value-error] (vev.pull-store-db-value-text (addr snapshot) pattern-text (u64 entity))]
+        (defer (close-open-db! (addr opened)))
+        (let [[value value-ok value-error]
+              (pull-selector (addr opened.db) pattern-text selector)]
           (when (not value-ok)
-            (cli.eprintln value-error)
+            (print-cli-error value-error)
             (return 1))
-          (print-value value)
-          0))))))
+          (print-owned-value value)
+          0)))))
+
+(defn command-pull-many [uri: string, pattern-arg: string, entities-arg: string, pipeline-arg: string] -> int
+  (let [[pattern-text text-ok text-error] (read-text-arg pattern-arg)]
+    (when (not text-ok)
+      (print-cli-error text-error)
+      (return 1))
+    (defer (when (text-arg-owned? pattern-arg) (delete pattern-text)))
+    (let [[selectors selectors-ok selectors-error] (read-value-arg entities-arg)]
+      (when (not selectors-ok)
+        (print-cli-error selectors-error)
+        (return 1))
+      (defer (vev.delete-owned-value selectors))
+      (when (not (= selectors.kind .Vector))
+        (print-cli-error "pull-many entities must be an EDN vector")
+        (return 1))
+      (let [opened (open-command-db uri pipeline-arg)]
+        (when (not opened.ok)
+          (print-cli-error opened.error)
+          (return 1))
+        (defer (close-open-db! (addr opened)))
+        (let [values (make [dynamic]vev.Value)]
+          (for [selector selectors.items]
+            (let [[value value-ok value-error]
+                  (pull-selector (addr opened.db) pattern-text selector)]
+              (when (not value-ok)
+                (for [existing values]
+                  (vev.delete-owned-value existing))
+                (delete values)
+                (print-cli-error value-error)
+                (return 1))
+              (arr.push! values value)))
+          (print-owned-value (vev.value-vector-owned values))
+          0)))))
+
+(defn value-map-field [value: vev.Value, key: string]
+  -> [field: vev.Value, found: bool]
+  (when (= value.kind .Map)
+    (let [index 0]
+      (while (< (+ index 1) (count value.items))
+        (let [candidate value.items[index]]
+          (when (and (= candidate.kind .Keyword)
+                     (= candidate.text key))
+            (return value.items[(+ index 1)] true)))
+        (set! index (+ index 2)))))
+  (return (vev.Value {}) false))
+
+(defn exec-form-text [value: vev.Value] -> string
+  (if (= value.kind .String)
+    (vev.string-owned value.text)
+    (vev.value-serializable-text value)))
+
+(defstruct Exec-Resource {
+  id: string
+  value: vev.Value
+  has-value: bool
+  db: vev.Store-DB
+  has-db: bool
+  db-pointer: ^vev.Store-DB
+  has-db-pointer: bool
+  db-before: vev.Store-DB
+  has-db-before: bool
+  db-before-pointer: ^vev.Store-DB
+  has-db-before-pointer: bool
+  prepared-query: ^vev.Prepared-Query
+  has-prepared-query: bool
+  prepared-pull: ^vev.Prepared-Pull-Pattern
+  has-prepared-pull: bool
+  store: ^vev.Store-Conn
+  has-store: bool
+})
+
+(defn delete-exec-resource! [resource: ^Exec-Resource]
+  (when resource^.has-value
+    (vev.delete-owned-value resource^.value))
+  (when resource^.has-db
+    (vev.close-store-db! (addr resource^.db)))
+  (when resource^.has-db-pointer
+    (vev.close-store-db! resource^.db-pointer)
+    (free resource^.db-pointer))
+  (when resource^.has-db-before
+    (vev.close-store-db! (addr resource^.db-before)))
+  (when resource^.has-db-before-pointer
+    (vev.close-store-db! resource^.db-before-pointer)
+    (free resource^.db-before-pointer))
+  (when resource^.has-prepared-query
+    (vev.delete-prepared-query-shallow resource^.prepared-query^)
+    (free resource^.prepared-query))
+  (when resource^.has-prepared-pull
+    (vev.delete-prepared-pull-pattern-shallow resource^.prepared-pull^)
+    (free resource^.prepared-pull))
+  (when resource^.has-store
+    (delete-store! resource^.store^)
+    (free resource^.store)))
+
+(defn delete-exec-resources! [resources: [dynamic]Exec-Resource]
+  (let [index (- (count resources) 1)]
+    (while (>= index 0)
+      (delete-exec-resource! (addr resources[index]))
+      (set! index (- index 1))))
+  (delete resources))
+
+(defn exec-step-store [default-store: ^vev.Store-Conn,
+                       has-default-store: bool,
+                       step: vev.Value,
+                       writable: bool]
+  -> [store: ^vev.Store-Conn, owned: bool, ok: bool, error: string]
+  (let [[store-form store?] (value-map-field step ":store")]
+    (when (not store?)
+      (if has-default-store
+        (return default-store false true "")
+        (return nil false false "operation requires a store")))
+    (when (not (= store-form.kind .String))
+      (return nil false false ":store must be a string path"))
+    (let [opened (vev.Store-Conn {})
+          opened-ok false
+          opened-error ""]
+      (if writable
+        (let [store-path (vev.string-owned store-form.text)
+              [candidate candidate-ok candidate-error]
+              (vev.open-store store-path)]
+          (delete store-path)
+          (set! opened candidate)
+          (set! opened-ok candidate-ok)
+          (set! opened-error candidate-error))
+        (let [store-path (vev.string-owned store-form.text)
+              [candidate candidate-ok candidate-error]
+              (vev.open-store-read-only store-path)]
+          (delete store-path)
+          (set! opened candidate)
+          (set! opened-ok candidate-ok)
+          (set! opened-error candidate-error)))
+      (when (not opened-ok)
+        (delete-store! opened)
+        (return nil false false opened-error))
+      (let [pointer (alloc vev.Store-Conn)]
+        (set! pointer^ opened)
+        (return pointer true true "")))))
+
+(defn close-exec-step-store! [store: ^vev.Store-Conn, owned: bool]
+  (when owned
+    (delete-store! store^)
+    (free store)))
+
+(defn exec-ref? [value: vev.Value] -> bool
+  (and (= value.kind .Vector)
+       (>= (count value.items) 2)
+       (= value.items[0].kind .Keyword)
+       (= value.items[0].text ":ref")
+       (= value.items[1].kind .Keyword)))
+
+(defn exec-resource-index [resources: [dynamic]Exec-Resource, id: string] -> int
+  (for [resource index resources]
+    (when (= resource.id id)
+      (return index)))
+  -1)
+
+(defn exec-resource-has-db? [resource: Exec-Resource] -> bool
+  (or resource.has-db resource.has-db-pointer))
+
+(defn exec-resource-db [resource: ^Exec-Resource] -> ^vev.Store-DB
+  (if resource^.has-db-pointer
+    resource^.db-pointer
+    (addr resource^.db)))
+
+(defn exec-resource-has-db-before? [resource: Exec-Resource] -> bool
+  (or resource.has-db-before resource.has-db-before-pointer))
+
+(defn exec-resource-db-before [resource: ^Exec-Resource] -> ^vev.Store-DB
+  (if resource^.has-db-before-pointer
+    resource^.db-before-pointer
+    (addr resource^.db-before)))
+
+(defn exec-db-descriptor-value [db: ^vev.Store-DB]
+  -> [value: vev.Value, ok: bool, error: string]
+  (let [retained (vev.retain-store-db db^)
+        [descriptor descriptor-ok descriptor-error]
+        (db-descriptor-value (addr retained) false)]
+    (vev.close-store-db! (addr retained))
+    (return descriptor descriptor-ok descriptor-error)))
+
+(defn exec-sqlite-lazy-db-pointer [path: string, db: ^vev.Store-DB]
+  -> [pointer: ^vev.Store-DB, ok: bool, error: string]
+  (let [[basis basis-ok basis-error] (vev.store-db-basis-t db)]
+    (when (not basis-ok)
+      (return nil false basis-error))
+    (let [allocated (alloc vev.Store-DB)]
+      (set! allocated^
+            (vev.sqlite-lazy-store-db-at-basis
+              path (vev.store-db-time-point-tx basis)))
+      (return allocated true ""))))
+
+(defn exec-db-from-value [resources: [dynamic]Exec-Resource,
+                          default-db: ^vev.Store-DB,
+                          value: vev.Value,
+                          has-value: bool]
+  -> [db: vev.Store-DB, ok: bool, error: string]
+  (when (not has-value)
+    (return (vev.retain-store-db default-db^) true ""))
+  (when (not (exec-ref? value))
+    (return (vev.Store-DB {}) false "database must be a reference"))
+  (let [index (exec-resource-index resources value.items[1].text)]
+    (when (< index 0)
+      (return (vev.Store-DB {}) false "reference names an unknown or later step"))
+    (let [resource resources[index]
+          path (if (> (count value.items) 2) value.items[2].text "")]
+      (cond
+        (or (= path "") (= path ":db-after"))
+          (if (exec-resource-has-db? resource)
+            (let [db-pointer (exec-resource-db (addr resources[index]))]
+              (return (vev.retain-store-db db-pointer^) true ""))
+            (return (vev.Store-DB {}) false "referenced step does not produce a database"))
+        (= path ":db-before")
+          (if (exec-resource-has-db-before? resource)
+            (let [db-pointer
+                  (exec-resource-db-before (addr resources[index]))]
+              (return (vev.retain-store-db db-pointer^) true ""))
+            (return (vev.Store-DB {}) false "referenced step does not produce db-before"))
+        :else
+          (return (vev.Store-DB {}) false "reference path does not name a database")))))
+
+(defn exec-value-at-path [value: vev.Value, path: []vev.Value]
+  -> [result: vev.Value, ok: bool, error: string]
+  (let [current value]
+    (for [part path]
+      (if (= part.kind .Keyword)
+        (let [[next found] (value-map-field current part.text)]
+          (when (not found)
+            (return (vev.Value {}) false "reference path was not found"))
+          (set! current next))
+        (if (and (= part.kind .Int)
+                 (or (= current.kind .Vector) (= current.kind .Set))
+                 (>= part.int-value 0)
+                 (< part.int-value (i64 (count current.items))))
+          (set! current current.items[(int part.int-value)])
+          (return (vev.Value {}) false
+                  "reference paths require map keywords or vector indexes"))))
+    (return (vev.value-owned current) true "")))
+
+(defn exec-resolve-value [resources: [dynamic]Exec-Resource, form: vev.Value]
+  -> [value: vev.Value, ok: bool, error: string]
+  (when (exec-ref? form)
+    (let [index (exec-resource-index resources form.items[1].text)]
+      (when (< index 0)
+        (return (vev.Value {}) false "reference names an unknown or later step"))
+      (let [resource resources[index]]
+        (when (> (count form.items) 2)
+          (let [path-first form.items[2]]
+            (when (and (= path-first.kind .Keyword)
+                       (or (= path-first.text ":db-after")
+                           (= path-first.text ":db-before")))
+              (let [db-pointer (exec-resource-db (addr resources[index]))
+                    db-before-pointer
+                    (exec-resource-db-before (addr resources[index]))
+                    db (if (= path-first.text ":db-before")
+                         db-before-pointer^
+                         db-pointer^)
+                    has-db (if (= path-first.text ":db-before")
+                             (exec-resource-has-db-before? resource)
+                             (exec-resource-has-db? resource))]
+                (when (not has-db)
+                  (return (vev.Value {}) false "reference path does not name a database"))
+                (when (= (count form.items) 3)
+                  (return (exec-db-descriptor-value (addr db))))
+                (return (vev.Value {}) false "database descriptors do not support nested reference paths")))))
+        (when resource.has-value
+          (return (exec-value-at-path resource.value
+                                      (if (> (count form.items) 2)
+                                        (slice form.items 2)
+                                        ([]vev.Value [])))))
+        (when (exec-resource-has-db? resource)
+          (return (exec-db-descriptor-value
+                    (exec-resource-db (addr resources[index])))))
+        (return (vev.Value {}) false "opaque prepared values cannot be returned"))))
+  (case form.kind
+    .Vector
+      (let [items (make [dynamic]vev.Value)]
+        (for [item form.items]
+          (let [[resolved resolved-ok resolved-error]
+                (exec-resolve-value resources item)]
+            (when (not resolved-ok)
+              (for [existing items] (vev.delete-owned-value existing))
+              (delete items)
+              (return (vev.Value {}) false resolved-error))
+            (arr.push! items resolved)))
+        (return (vev.value-vector-owned items) true ""))
+    .Set
+      (let [items (make [dynamic]vev.Value)]
+        (for [item form.items]
+          (let [[resolved resolved-ok resolved-error]
+                (exec-resolve-value resources item)]
+            (when (not resolved-ok)
+              (for [existing items] (vev.delete-owned-value existing))
+              (delete items)
+              (return (vev.Value {}) false resolved-error))
+            (arr.push! items resolved)))
+        (return (vev.value-set-owned items) true ""))
+    .Map
+      (let [items (make [dynamic]vev.Value)]
+        (for [item form.items]
+          (let [[resolved resolved-ok resolved-error]
+                (exec-resolve-value resources item)]
+            (when (not resolved-ok)
+              (for [existing items] (vev.delete-owned-value existing))
+              (delete items)
+              (return (vev.Value {}) false resolved-error))
+            (arr.push! items resolved)))
+        (return (vev.value-map-owned items) true ""))
+     (return (vev.value-owned form) true "")))
+
+(defn exec-query-value [resources: [dynamic]Exec-Resource,
+                        db: ^vev.Store-DB,
+                        step: vev.Value]
+  -> [value: vev.Value, ok: bool, error: string]
+  (let [[query-form query?] (value-map-field step ":query")
+        [inputs-form inputs?] (value-map-field step ":inputs")
+        [sources-form sources?] (value-map-field step ":sources")
+        [rules-form rules?] (value-map-field step ":rules")
+        [result-form result?] (value-map-field step ":result")]
+    (when (not query?)
+      (return (vev.Value {}) false "query step requires :query"))
+    (when (and sources? (not (= sources-form.kind .Map)))
+      (return (vev.Value {}) false "query :sources must be a map"))
+    (let [source-dbs (make [dynamic]vev.Store-DB)
+          source-names (make [dynamic]string)
+          source-defs (make [dynamic]vev.DB-Source)]
+      (defer
+        (do
+          (for [source-db index source-dbs]
+            (vev.close-store-db! (addr source-dbs[index])))
+          (delete source-dbs)
+          (delete source-names)
+          (delete source-defs)))
+      (when sources?
+        (let [index 0]
+          (while (< (+ index 1) (count sources-form.items))
+            (let [name sources-form.items[index]
+                  ref sources-form.items[(+ index 1)]]
+              (when (not (or (= name.kind .Symbol) (= name.kind .Keyword)))
+                (return (vev.Value {}) false "query source names must be symbols or keywords"))
+              (let [[source-db source-ok source-error]
+                    (exec-db-from-value resources db ref true)]
+                (when (not source-ok)
+                  (return (vev.Value {}) false source-error))
+                (arr.push! source-names name.text)
+                (arr.push! source-dbs source-db)
+                (arr.push! source-defs (vev.DB-Source {name: name.text}))))
+            (set! index (+ index 2)))))
+      (let [prepared (vev.Prepared-Query {})
+            owns-prepared false]
+        (if (exec-ref? query-form)
+          (let [prepared-index
+                (exec-resource-index resources query-form.items[1].text)]
+            (when (or (< prepared-index 0)
+                      (not resources[prepared-index].has-prepared-query))
+              (return (vev.Value {}) false "query reference does not name a prepared query"))
+            (set! prepared resources[prepared-index].prepared-query^))
+          (let [query-text (exec-form-text query-form)]
+            (defer (delete query-text))
+            (if rules?
+              (let [rules-text (exec-form-text rules-form)]
+                (defer (delete rules-text))
+                (set! prepared
+                      (vev.prepare-query-text-with-rules-and-sources
+                        query-text rules-text (slice source-defs 0))))
+              (set! prepared
+                    (vev.prepare-query-text-with-sources
+                      query-text (slice source-defs 0))))
+            (set! owns-prepared true)))
+        (defer (when owns-prepared (vev.delete-prepared-query-shallow prepared)))
+        (when (not prepared.ok)
+          (return (vev.Value {}) false prepared.error))
+        (let [resolved-inputs (vev.value-vector-owned (make [dynamic]vev.Value))]
+          (if inputs?
+            (let [[resolved resolved-ok resolved-error]
+                  (exec-resolve-value resources inputs-form)]
+              (when (not resolved-ok)
+                (vev.delete-owned-value resolved-inputs)
+                (return (vev.Value {}) false resolved-error))
+              (vev.delete-owned-value resolved-inputs)
+              (set! resolved-inputs resolved)))
+          (defer (vev.delete-owned-value resolved-inputs))
+          (let [inputs-text (vev.value-serializable-text resolved-inputs)]
+            (defer (delete inputs-text))
+            (let [[query-inputs query-inputs-ok query-inputs-error]
+                  (vev.parse-query-inputs-text-for-query
+                    prepared.query inputs-text)]
+              (defer (vev.delete-owned-query-inputs query-inputs))
+              (when (not query-inputs-ok)
+                (return (vev.Value {}) false query-inputs-error))
+              (let [[default-source default-ok default-error]
+                    (vev.store-db-read-source db)]
+                (when (not default-ok)
+                  (return (vev.Value {}) false default-error))
+                (let [named-sources (make [dynamic]vev.DB-Read-Named-Source)]
+                  (defer (delete named-sources))
+                  (for [source-db index source-dbs]
+                    (let [[read-source read-ok read-error]
+                          (vev.store-db-read-source (addr source-dbs[index]))]
+                      (when (not read-ok)
+                        (return (vev.Value {}) false read-error))
+                      (arr.push! named-sources
+                        (vev.db-read-named-source
+                          source-names[index] read-source))))
+                  (let [[step-op step-op?] (value-map-field step ":op")
+                        mode
+                        (if result?
+                          (if (or (= result-form.kind .Keyword)
+                                  (= result-form.kind .String))
+                            (if (strings.has_prefix result-form.text ":")
+                              (slice result-form.text 1)
+                              result-form.text)
+                            "q")
+                          (if (and step-op?
+                                   (= step-op.kind .Keyword)
+                                   (= step-op.text ":rows"))
+                            "rows"
+                            (if (and step-op?
+                                     (= step-op.kind .Keyword)
+                                     (= step-op.text ":scalar"))
+                              "scalar"
+                              "q")))]
+                    (if (and step-op?
+                             (= step-op.kind .Keyword)
+                             (= step-op.text ":profile"))
+                      (let [profiled
+                            (vev.q-prepared-db-read-source-profiled-with-sources-inputs-and-fns
+                              default-source
+                              (slice named-sources 0)
+                              prepared
+                              (slice query-inputs 0)
+                              ([]vev.Native-Query-Fn []))]
+                        (defer
+                          (vev.delete-profiled-result-set-owned-values profiled))
+                        (when (not profiled.result.ok)
+                          (return (vev.Value {}) false profiled.result.error))
+                        (let [[selected selected-ok selected-error]
+                              (query-selected-value
+                                db prepared profiled.result mode)]
+                          (when (not selected-ok)
+                            (return selected false selected-error))
+                          (let [raw-stats
+                                (vev.query-stats-value profiled.stats)
+                                stats (vev.value-owned raw-stats)]
+                            (vev.delete-value-containers-shallow raw-stats)
+                            (return
+                              (vev.value-map
+                                ([]vev.Value
+                                  [(vev.value-keyword
+                                     (vev.string-owned ":ret"))
+                                   selected
+                                   (vev.value-keyword
+                                     (vev.string-owned ":query-stats"))
+                                   stats]))
+                              true ""))))
+                      (let [result
+                            (vev.q-result-prepared-db-read-source-with-sources-inputs-and-fns
+                              default-source
+                              (slice named-sources 0)
+                              prepared
+                              (slice query-inputs 0)
+                              ([]vev.Native-Query-Fn []))]
+                        (defer (vev.delete-query-result result))
+                        (when (not result.result.ok)
+                          (return (vev.Value {}) false result.result.error))
+                        (query-selected-value
+                          db prepared result.result mode)))))))))))))
+
+(defn exec-pull-value [resources: [dynamic]Exec-Resource,
+                       db: ^vev.Store-DB,
+                       step: vev.Value]
+  -> [value: vev.Value, ok: bool, error: string]
+  (let [[pattern pattern?] (value-map-field step ":pattern")
+        [entity-form entity?] (value-map-field step ":entity")]
+    (when (or (not pattern?) (not entity?))
+      (return (vev.Value {}) false "pull step requires :pattern and :entity"))
+    (let [[resolved-entity entity-ok entity-error]
+          (exec-resolve-value resources entity-form)]
+      (when (not entity-ok)
+        (return resolved-entity false entity-error))
+      (defer (vev.delete-owned-value resolved-entity))
+      (if (exec-ref? pattern)
+        (let [index (exec-resource-index resources pattern.items[1].text)]
+          (when (or (< index 0) (not resources[index].has-prepared-pull))
+            (return (vev.Value {}) false "pull reference does not name a prepared pull pattern"))
+          (let [[entity selector-ok selector-error]
+                (entity-from-selector db resolved-entity)]
+            (when (not selector-ok)
+              (return (vev.Value {}) false selector-error))
+            (defer (vev.close-store-entity! (addr entity)))
+            (if (vev.store-entity-found? entity)
+              (vev.pull-store-db-value-prepared
+                db resources[index].prepared-pull^ (vev.store-entity-id entity))
+              (return (vev.value-nil) true ""))))
+        (let [pattern-text (exec-form-text pattern)]
+          (defer (delete pattern-text))
+          (pull-selector db pattern-text resolved-entity))))))
+
+(defn exec-index-pull-value [db: ^vev.Store-DB, step: vev.Value]
+  -> [value: vev.Value, ok: bool, error: string]
+  (let [[index index?] (value-map-field step ":index")
+        [selector selector?] (value-map-field step ":selector")
+        [start start?] (value-map-field step ":start")
+        [reverse reverse?] (value-map-field step ":reverse")
+        [offset offset?] (value-map-field step ":offset")
+        [limit limit?] (value-map-field step ":limit")]
+    (when (or (not index?) (not selector?) (not start?)
+              (not (= index.kind .Keyword))
+              (not (= start.kind .Vector))
+              (= (count start.items) 0)
+              (not (= start.items[0].kind .Keyword))
+              (not (or (= index.text ":avet") (= index.text ":aevt"))))
+      (return (vev.Value {}) false
+              "index-pull requires :index (:avet or :aevt), :selector, and non-empty :start"))
+    (let [[args args-ok] (index-args-from-value start)]
+      (when (not args-ok)
+        (return (vev.Value {}) false "invalid index-pull :start"))
+      (defer (delete args))
+      (let [walk-reverse (and reverse? (= reverse.kind .Bool) reverse.bool-value)
+            [datoms datoms-ok datoms-error]
+            (vev.store-db-index-datoms
+              db (if walk-reverse 2 1) index.text (slice args 0))]
+        (when (not datoms-ok)
+          (vev.delete-owned-datoms datoms)
+          (return (vev.Value {}) false datoms-error))
+        (defer (vev.delete-owned-datoms datoms))
+        (let [pattern-text (vev.value-serializable-text selector)
+              skip (if (and offset? (= offset.kind .Int) (> offset.int-value 0))
+                     offset.int-value (i64 0))
+              take (if (and limit? (= limit.kind .Int)) limit.int-value (i64 -1))
+              values (make [dynamic]vev.Value)
+              seen: i64 0]
+          (defer (delete pattern-text))
+          (for [datom datoms]
+            (when (= datom.a start.items[0].text)
+              (when (and (>= seen skip)
+                         (or (< take 0) (< (i64 (count values)) take)))
+                (let [entity-id
+                      (if (= index.text ":avet") datom.e
+                        (if (= datom.v.kind .Entity) datom.v.entity (u64 0)))]
+                  (when (!= entity-id (u64 0))
+                    (let [[pulled pulled-ok pulled-error]
+                          (vev.pull-store-db-value-text db pattern-text entity-id)]
+                      (when (not pulled-ok)
+                        (for [existing values]
+                          (vev.delete-owned-value existing))
+                        (delete values)
+                        (return (vev.Value {}) false pulled-error))
+                      (arr.push! values pulled))))
+              (set! seen (+ seen 1)))))
+          (return (vev.value-vector-owned values) true ""))))))
+
+(defn exec-entity-value [db: ^vev.Store-DB, step: vev.Value, operation: string]
+  -> [value: vev.Value, ok: bool, error: string]
+  (let [[selector selector?] (value-map-field step ":entity")
+        [attr attr?] (value-map-field step ":attribute")]
+    (when (not selector?)
+      (return (vev.Value {}) false "entity operation requires :entity"))
+    (when (and (or (= operation ":entity-get")
+                   (= operation ":entity-contains?"))
+               (or (not attr?) (not (= attr.kind .Keyword))))
+      (return (vev.Value {}) false "entity attribute operation requires keyword :attribute"))
+    (if (or (= operation ":entity") (= operation ":touch"))
+      (pull-selector db "[*]" selector)
+      (if (or (= operation ":entity-get")
+              (= operation ":entity-contains?")
+              (= operation ":ident"))
+        (let [effective-attr (if (= operation ":ident")
+                              (vev.value-keyword ":db/ident") attr)
+              pattern
+              (vev.value-vector2
+                (vev.value-owned effective-attr)
+                (vev.value-keyword (vev.string-owned ":db/id")))
+              pattern-text (vev.value-serializable-text pattern)]
+          (defer (vev.delete-owned-value pattern))
+          (defer (delete pattern-text))
+          (let [[pulled pulled-ok pulled-error]
+                (pull-selector db pattern-text selector)]
+            (when (not pulled-ok)
+              (return pulled false pulled-error))
+            (when (= pulled.kind .Nil)
+              (if (= operation ":entity-contains?")
+                (return (vev.value-bool false) true "")
+                (return pulled true "")))
+            (let [[field field?] (value-map-field pulled effective-attr.text)]
+              (if (= operation ":entity-contains?")
+                (do
+                  (vev.delete-owned-value pulled)
+                  (return (vev.value-bool field?) true ""))
+                (let [out (if field? (vev.value-owned field) (vev.value-nil))
+                      schema-entity (vev.Store-Entity {})
+                      schema-open false]
+                  (when (and field? (= operation ":entity-get"))
+                    (let [[candidate candidate-ok _]
+                          (vev.store-db-entity-ident db effective-attr.text)]
+                      (when candidate-ok
+                        (set! schema-entity candidate)
+                        (set! schema-open true)
+                        (when (vev.store-entity-found? schema-entity)
+                          (let [[flags flags-ok _]
+                                (vev.store-entity-attr-flags
+                                  (addr schema-entity) effective-attr.text)]
+                            (when (and flags-ok (= (% (/ flags 2) 2) 1)
+                                       (= out.kind .Vector))
+                              (let [set-items (make [dynamic]vev.Value)]
+                                (for [item out.items]
+                                  (arr.push! set-items (vev.value-owned item)))
+                                (vev.delete-owned-value out)
+                                (set! out (vev.value-set-owned set-items)))))))))
+                  (when schema-open
+                    (vev.close-store-entity! (addr schema-entity)))
+                  (vev.delete-owned-value pulled)
+                  (return out true ""))))))
+        (if (= operation ":entid")
+          (let [[pulled pulled-ok pulled-error]
+                (pull-selector db "[:db/id]" selector)]
+            (when (not pulled-ok)
+              (return pulled false pulled-error))
+            (when (= pulled.kind .Nil)
+              (return pulled true ""))
+            (let [[id id?] (value-map-field pulled ":db/id")
+                  out (if id? (vev.value-owned id) (vev.value-nil))]
+              (vev.delete-owned-value pulled)
+              (return out true "")))
+          (return (vev.Value {}) false "unsupported entity operation"))))))
+
+(defn exec-attribute-value [db: ^vev.Store-DB, step: vev.Value]
+  -> [value: vev.Value, ok: bool, error: string]
+  (let [[attr attr?] (value-map-field step ":attribute")]
+    (when (or (not attr?) (not (= attr.kind .Keyword)))
+      (return (vev.Value {}) false "attribute requires keyword :attribute"))
+    (let [[entity entity-ok entity-error]
+          (vev.store-db-entity-ident db attr.text)]
+      (when (not entity-ok)
+        (return (vev.Value {}) false entity-error))
+      (defer (vev.close-store-entity! (addr entity)))
+      (when (not (vev.store-entity-found? entity))
+        (return (vev.value-nil) true ""))
+      (let [ident (vev.store-entity-get (addr entity) ":db/ident")
+            value-type (vev.store-entity-get (addr entity) ":db/valueType")
+            cardinality (vev.store-entity-get (addr entity) ":db/cardinality")
+            indexed-value (vev.store-entity-get (addr entity) ":db/index")
+            unique (vev.store-entity-get (addr entity) ":db/unique")
+            component-value (vev.store-entity-get (addr entity) ":db/isComponent")
+            no-history-value (vev.store-entity-get (addr entity) ":db/noHistory")
+            fulltext-value (vev.store-entity-get (addr entity) ":db/fulltext")]
+        (when (or (= value-type.kind .Nil) (= cardinality.kind .Nil))
+          (vev.delete-owned-value ident)
+          (vev.delete-owned-value value-type)
+          (vev.delete-owned-value cardinality)
+          (vev.delete-owned-value indexed-value)
+          (vev.delete-owned-value unique)
+          (vev.delete-owned-value component-value)
+          (vev.delete-owned-value no-history-value)
+          (vev.delete-owned-value fulltext-value)
+          (return (vev.value-nil) true ""))
+        (let [indexed (and (= indexed-value.kind .Bool) indexed-value.bool-value)
+              component (and (= component-value.kind .Bool) component-value.bool-value)
+              no-history (and (= no-history-value.kind .Bool) no-history-value.bool-value)
+              fulltext (and (= fulltext-value.kind .Bool) fulltext-value.bool-value)
+              has-avet (or indexed (not (= unique.kind .Nil)) fulltext)]
+          (vev.delete-owned-value indexed-value)
+          (vev.delete-owned-value component-value)
+          (vev.delete-owned-value no-history-value)
+          (vev.delete-owned-value fulltext-value)
+          (return
+            (vev.value-map
+              ([]vev.Value
+                [(vev.value-keyword (vev.string-owned ":id"))
+                 (vev.value-entity (vev.store-entity-id entity))
+                 (vev.value-keyword (vev.string-owned ":ident")) ident
+                 (vev.value-keyword (vev.string-owned ":value-type")) value-type
+                 (vev.value-keyword (vev.string-owned ":cardinality")) cardinality
+                 (vev.value-keyword (vev.string-owned ":indexed")) (vev.value-bool indexed)
+                 (vev.value-keyword (vev.string-owned ":has-avet")) (vev.value-bool has-avet)
+                 (vev.value-keyword (vev.string-owned ":unique")) unique
+                 (vev.value-keyword (vev.string-owned ":is-component")) (vev.value-bool component)
+                 (vev.value-keyword (vev.string-owned ":no-history")) (vev.value-bool no-history)
+                 (vev.value-keyword (vev.string-owned ":fulltext")) (vev.value-bool fulltext)]))
+            true ""))))))
+
+(defn exec-db-metadata-value [db: ^vev.Store-DB, operation: string]
+  -> [value: vev.Value, ok: bool, error: string]
+  (cond
+    (= operation ":db-info") (db-descriptor-value db true)
+    (= operation ":basis-t")
+      (let [[n ok error] (vev.store-db-basis-t db)]
+        (return (vev.value-int (i64 n)) ok error))
+    (= operation ":next-t")
+      (let [[n ok error] (vev.store-db-next-t db)]
+        (return (vev.value-int (i64 n)) ok error))
+    (= operation ":as-of-t")
+      (let [[n found] (vev.store-db-as-of-t db)]
+        (return (if found (vev.value-int (i64 n)) (vev.value-nil)) true ""))
+    (= operation ":since-t")
+      (let [[n found] (vev.store-db-since-t db)]
+        (return (if found (vev.value-int (i64 n)) (vev.value-nil)) true ""))
+    (= operation ":history?")
+      (return (vev.value-bool (vev.store-db-history? db)) true "")
+    (= operation ":db-stats")
+      (let [[descriptor descriptor-ok descriptor-error]
+            (db-descriptor-value db true)]
+        (when (not descriptor-ok)
+          (return descriptor false descriptor-error))
+        (let [[stats stats?] (value-map-field descriptor ":stats")
+              out (if stats? (vev.value-owned stats) (vev.value-nil))]
+          (vev.delete-owned-value descriptor)
+          (return out true "")))
+    :else (return (vev.Value {}) false "unsupported database metadata operation")))
+
+(defn exec-index-value [db: ^vev.Store-DB, step: vev.Value, operation: string]
+  -> [value: vev.Value, ok: bool, error: string]
+  (if (= operation ":index-range")
+    (let [[attr attr?] (value-map-field step ":attribute")
+          [start start?] (value-map-field step ":start")
+          [end end?] (value-map-field step ":end")]
+      (when (or (not attr?) (not (= attr.kind .Keyword)))
+        (return (vev.Value {}) false "index-range requires keyword :attribute"))
+      (let [[datoms datoms-ok datoms-error]
+            (vev.store-db-index-range-datoms
+              db attr.text
+              (index-arg-from-value (if start? start (vev.value-nil))) start?
+              (index-arg-from-value (if end? end (vev.value-nil))) end?)]
+        (when (not datoms-ok)
+          (vev.delete-owned-datoms datoms)
+          (return (vev.Value {}) false datoms-error))
+        (let [out (cli-datoms-value (slice datoms 0))]
+          (vev.delete-owned-datoms datoms)
+          (return out true ""))))
+    (let [[index index?] (value-map-field step ":index")
+          [components components?] (value-map-field step ":components")
+          empty (vev.value-vector-owned (make [dynamic]vev.Value))
+          effective (if components? components empty)]
+      (defer (vev.delete-owned-value empty))
+      (when (or (not index?) (not (= index.kind .Keyword)))
+        (return (vev.Value {}) false "index operation requires keyword :index"))
+      (let [[args args-ok] (index-args-from-value effective)]
+        (when (not args-ok)
+          (return (vev.Value {}) false "index :components must be a vector"))
+        (defer (delete args))
+        (let [[datoms datoms-ok datoms-error]
+              (vev.store-db-index-datoms
+                db
+                (if (= operation ":datoms") 0
+                  (if (= operation ":seek-datoms") 1 2))
+                index.text (slice args 0))]
+          (when (not datoms-ok)
+            (vev.delete-owned-datoms datoms)
+            (return (vev.Value {}) false datoms-error))
+          (let [out (cli-datoms-value (slice datoms 0))]
+            (vev.delete-owned-datoms datoms)
+            (return out true "")))))))
+
+(defn exec-maintenance-value [store: ^vev.Store-Conn,
+                              step: vev.Value,
+                              operation: string]
+  -> [value: vev.Value, ok: bool, error: string]
+  (cond
+    (= operation ":ensure-resident")
+      (let [[ok error] (vev.ensure-store-resident! store)]
+        (if ok
+          (return
+            (vev.value-map
+              ([]vev.Value
+                [(vev.value-keyword (vev.string-owned ":ok"))
+                 (vev.value-bool true)
+                 (vev.value-keyword (vev.string-owned ":resident?"))
+                 (vev.value-bool true)]))
+            true "")
+          (return (vev.Value {}) false error)))
+    (= operation ":compact-indexes")
+      (let [[compacted ok error] (vev.compact-store-indexes! store)]
+        (if ok
+          (return
+            (vev.value-map
+              ([]vev.Value
+                [(vev.value-keyword (vev.string-owned ":ok"))
+                 (vev.value-bool true)
+                 (vev.value-keyword (vev.string-owned ":compacted?"))
+                 (vev.value-bool compacted)]))
+            true "")
+          (return (vev.Value {}) false error)))
+    (= operation ":maintain-indexes")
+      (let [[max-steps max-steps?] (value-map-field step ":max-steps")
+            [steps-run compacted ok error]
+            (vev.maintain-store-indexes!
+              store
+              (if (and max-steps? (= max-steps.kind .Int))
+                (int max-steps.int-value)
+                -1))]
+        (if ok
+          (return
+            (vev.value-map
+              ([]vev.Value
+                [(vev.value-keyword (vev.string-owned ":ok"))
+                 (vev.value-bool true)
+                 (vev.value-keyword (vev.string-owned ":steps"))
+                 (vev.value-int (i64 steps-run))
+                 (vev.value-keyword (vev.string-owned ":compacted?"))
+                 (vev.value-bool compacted)]))
+            true "")
+          (return (vev.Value {}) false error)))
+    (= operation ":index-info")
+      (let [[index index?] (value-map-field step ":index")
+            index-text (if (and index? (= index.kind .Keyword))
+                         index.text ":eavt")
+            [runs merge? ok error]
+            (vev.store-latest-index-merge-run-count store index-text)]
+        (if ok
+          (return
+            (vev.value-map
+              ([]vev.Value
+                [(vev.value-keyword (vev.string-owned ":index"))
+                 (vev.value-keyword (vev.string-owned index-text))
+                 (vev.value-keyword (vev.string-owned ":run-count"))
+                 (vev.value-int (i64 runs))
+                 (vev.value-keyword (vev.string-owned ":merge?"))
+                 (vev.value-bool merge?)]))
+            true "")
+          (return (vev.Value {}) false error)))
+    :else (return (vev.Value {}) false "unsupported maintenance operation")))
+
+(defn exec-transact-many-value [store: ^vev.Store-Conn,
+                                transactions: vev.Value,
+                                mode: string]
+  -> [value: vev.Value, ok: bool, error: string]
+  (when (not (= transactions.kind .Vector))
+    (return (vev.Value {}) false "transact-many requires vector :transactions"))
+  (when (not (or (= mode "logical") (= mode "flatten")))
+    (return (vev.Value {}) false "transact-many :mode must be :logical or :flatten"))
+  (let [texts (make [dynamic]string)]
+    (defer (delete-texts! texts))
+    (for [tx transactions.items]
+      (arr.push! texts (vev.value-serializable-text tx)))
+    (if (= mode "logical")
+      (let [[reports reports-ok reports-error]
+            (vev.transact-store-report-logical-text-groups
+              store (slice texts 0))]
+        (when (not reports-ok)
+          (vev.delete-store-tx-reports reports)
+          (return (vev.Value {}) false reports-error))
+        (let [values (make [dynamic]vev.Value)
+              all-ok true]
+          (for [report reports]
+            (when (not report.ok) (set! all-ok false))
+            (arr.push! values (cli-tx-report-value report)))
+          (vev.delete-store-tx-reports reports)
+          (if all-ok
+            (return (vev.value-vector-owned values) true "")
+            (return (vev.value-vector-owned values) false "transaction rejected"))))
+      (let [[groups groups-ok groups-error]
+            (vev.store-tx-data-groups-from-texts (slice texts 0))]
+        (when (not groups-ok)
+          (return (vev.Value {}) false groups-error))
+        (let [report
+              (vev.transact-store-report-tx-data-groups
+                store (slice groups 0))]
+          (vev.delete-store-tx-data-groups groups)
+          (let [value (cli-tx-report-value report)
+                report-ok report.ok
+                report-error report.error]
+            (vev.delete-store-tx-report report)
+            (return value report-ok report-error)))))))
+
+(defn exec-resolve-tempid-value [resources: [dynamic]Exec-Resource,
+                                 step: vev.Value]
+  -> [value: vev.Value, ok: bool, error: string]
+  (let [[report-ref report?] (value-map-field step ":report")
+        [tempid tempid?] (value-map-field step ":tempid")]
+    (when (or (not report?) (not tempid?) (not (exec-ref? report-ref)))
+      (return (vev.Value {}) false "resolve-tempid requires :report reference and :tempid"))
+    (let [[report report-ok report-error]
+          (exec-resolve-value resources report-ref)]
+      (when (not report-ok)
+        (return report false report-error))
+      (defer (vev.delete-owned-value report))
+      (let [[tempids tempids?] (value-map-field report ":tempids")]
+        (when (or (not tempids?) (not (= tempids.kind .Map)))
+          (return (vev.value-nil) true ""))
+        (let [item-index 0]
+          (while (< (+ item-index 1) (count tempids.items))
+            (when (vev.value-equal? tempids.items[item-index] tempid)
+              (return (vev.value-owned tempids.items[(+ item-index 1)])
+                      true ""))
+            (set! item-index (+ item-index 2))))
+        (return (vev.value-nil) true "")))))
+
+(defn exec-error-value [message: string, operation: string, step-id: string] -> vev.Value
+  (vev.value-map
+    ([]vev.Value
+      [(vev.value-keyword (vev.string-owned ":ok")) (vev.value-bool false)
+       (vev.value-keyword (vev.string-owned ":vev/error"))
+       (vev.value-keyword (vev.string-owned ":vev.error/operation-failed"))
+       (vev.value-keyword (vev.string-owned ":message"))
+       (vev.value-string (vev.string-owned message))
+       (vev.value-keyword (vev.string-owned ":operation"))
+       (vev.value-keyword (vev.string-owned operation))
+       (vev.value-keyword (vev.string-owned ":step"))
+       (vev.value-keyword (vev.string-owned step-id))])))
+
+(defn command-exec [uri: string, request-arg: string, memory?: bool] -> int
+  (let [[request request-ok request-error] (read-value-arg request-arg)]
+    (when (not request-ok)
+      (print-cli-error request-error)
+      (return 1))
+    (defer (vev.delete-owned-value request))
+    (when (not (= request.kind .Map))
+      (print-cli-error "exec request must be an EDN map")
+      (return 1))
+    (let [[steps steps?] (value-map-field request ":steps")
+          [return-form return?] (value-map-field request ":return")]
+      (when (or (not steps?) (not (= steps.kind .Vector)))
+        (print-cli-error "exec request requires a :steps vector")
+        (return 1))
+      (let [needs-write false]
+        (for [step steps.items]
+          (let [[operation operation?] (value-map-field step ":op")
+                [_ store?] (value-map-field step ":store")]
+            (when (and operation? (= operation.kind .Keyword)
+                       (not store?)
+                       (or (= operation.text ":transact")
+                           (= operation.text ":transact-many")
+                           (= operation.text ":ensure-resident")
+                           (= operation.text ":compact-indexes")
+                           (= operation.text ":maintain-indexes")))
+              (set! needs-write true))))
+        (when (and memory? needs-write)
+          (print-cli-error "durable operations are not available with exec --memory")
+          (return 1))
+        (let [store (vev.Store-Conn {})
+              has-store false
+              default-db (vev.Store-DB {})]
+          (if memory?
+            (set! default-db (vev.empty-shared-store-db-for-sqlite-bootstrap))
+            (let [opened (vev.Store-Conn {})
+                  opened-ok false
+                  opened-error ""]
+              (if needs-write
+                (let [[candidate candidate-ok candidate-error]
+                      (vev.open-store uri)]
+                  (set! opened candidate)
+                  (set! opened-ok candidate-ok)
+                  (set! opened-error candidate-error))
+                (let [[candidate candidate-ok candidate-error]
+                      (vev.open-store-read-only uri)]
+                  (set! opened candidate)
+                  (set! opened-ok candidate-ok)
+                  (set! opened-error candidate-error)))
+              (when (not opened-ok)
+                (delete-store! opened)
+                (print-cli-error opened-error)
+                (return 1))
+              (set! store opened)
+              (set! has-store true)
+              (let [[snapshot snapshot-ok snapshot-error]
+                    (vev.store-db (addr store))]
+                (when (not snapshot-ok)
+                  (delete-store! store)
+                  (print-cli-error snapshot-error)
+                  (return 1))
+                (set! default-db snapshot))))
+          (defer
+            (do
+              (vev.close-store-db! (addr default-db))
+              (when has-store (delete-store! store))))
+          (let [resources (make [dynamic]Exec-Resource 0 (count steps.items))]
+            (defer (delete-exec-resources! resources))
+            (for [step steps.items]
+              (when (not (= step.kind .Map))
+                (print-cli-error "exec steps must be maps")
+                (return 1))
+              (let [[id id?] (value-map-field step ":id")
+                    [operation operation?] (value-map-field step ":op")
+                    [on-error on-error?] (value-map-field step ":on-error")]
+                (when (or (not id?) (not (= id.kind .Keyword))
+                          (not operation?) (not (= operation.kind .Keyword)))
+                  (print-cli-error "every exec step requires keyword :id and :op")
+                  (return 1))
+                (when (>= (exec-resource-index resources id.text) 0)
+                  (print-cli-error "exec step ids must be unique")
+                  (return 1))
+                (let [resource (Exec-Resource {id: id.text})
+                      step-ok true
+                      step-error ""
+                      capture? (and on-error?
+                                    (= on-error.kind .Keyword)
+                                    (= on-error.text ":capture"))]
+                  (cond
+                    (or (= operation.text ":db")
+                        (= operation.text ":log"))
+                      (let [[store-form store?]
+                            (value-map-field step ":store")]
+                        (if store?
+                          (let [[step-store owns-store store-ok store-error]
+                                (exec-step-store
+                                  (addr store) has-store step false)]
+                            (if store-ok
+                              (let [[snapshot snapshot-ok snapshot-error]
+                                    (vev.store-db step-store)]
+                                (if snapshot-ok
+                                  (let [[db-pointer db-ok db-error]
+                                        (exec-sqlite-lazy-db-pointer
+                                          store-form.text (addr snapshot))]
+                                    (vev.close-store-db! (addr snapshot))
+                                    (close-exec-step-store!
+                                      step-store owns-store)
+                                    (if db-ok
+                                      (do
+                                        (set! resource.db-pointer db-pointer)
+                                        (set! resource.has-db-pointer true))
+                                      (do
+                                        (set! step-ok false)
+                                        (set! step-error db-error))))
+                                  (do
+                                    (close-exec-step-store!
+                                      step-store owns-store)
+                                    (set! step-ok false)
+                                    (set! step-error snapshot-error))))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error store-error))))
+                          (do
+                            (set! resource.db (vev.retain-store-db default-db))
+                            (set! resource.has-db true))))
+                    (= operation.text ":empty-db")
+                      (do
+                        (set! resource.db
+                              (vev.empty-shared-store-db-for-sqlite-bootstrap))
+                        (set! resource.has-db true))
+                    (= operation.text ":init-db")
+                      (let [[tx tx?] (value-map-field step ":tx")]
+                        (if tx?
+                          (let [tx-text (vev.value-serializable-text tx)
+                                empty-db
+                                (vev.empty-shared-store-db-for-sqlite-bootstrap)]
+                            (defer (delete tx-text))
+                            (let [report
+                                  (vev.with-store-db-report-text
+                                    (addr empty-db) tx-text)]
+                              (vev.close-store-db! (addr empty-db))
+                              (if report.ok
+                                (do
+                                  (set! resource.db
+                                        (vev.retain-store-db report.db-after))
+                                  (set! resource.has-db true))
+                                (do
+                                  (set! step-ok false)
+                                  (set! step-error report.error)))
+                              (vev.delete-store-tx-report report)))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error "init-db requires :tx"))))
+                    (or (= operation.text ":as-of")
+                        (= operation.text ":since")
+                        (= operation.text ":history"))
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if source-ok
+                          (do
+                            (if (= operation.text ":history")
+                              (set! resource.db
+                                    (vev.history-store-db (addr source-db)))
+                              (let [[point point?] (value-map-field step ":time")]
+                                (if (not point?)
+                                  (do
+                                    (set! step-ok false)
+                                    (set! step-error "as-of and since require :time"))
+                                  (if (= point.kind .Instant)
+                                    (let [filtered (vev.Store-DB {})
+                                          filtered-ok false
+                                          filtered-error ""]
+                                      (if (= operation.text ":as-of")
+                                        (let [[candidate candidate-ok candidate-error]
+                                              (vev.as-of-store-db-instant
+                                                (addr source-db) point.int-value)]
+                                          (set! filtered candidate)
+                                          (set! filtered-ok candidate-ok)
+                                          (set! filtered-error candidate-error))
+                                        (let [[candidate candidate-ok candidate-error]
+                                              (vev.since-store-db-instant
+                                                (addr source-db) point.int-value)]
+                                          (set! filtered candidate)
+                                          (set! filtered-ok candidate-ok)
+                                          (set! filtered-error candidate-error)))
+                                      (set! resource.db filtered)
+                                      (when (not filtered-ok)
+                                        (set! step-ok false)
+                                        (set! step-error filtered-error)))
+                                    (let [[coordinate coordinate-ok]
+                                          (time-coordinate point)]
+                                      (if coordinate-ok
+                                        (set! resource.db
+                                              (if (= operation.text ":as-of")
+                                                (vev.as-of-store-db
+                                                  (addr source-db) coordinate)
+                                                (vev.since-store-db
+                                                  (addr source-db) coordinate)))
+                                        (do
+                                          (set! step-ok false)
+                                          (set! step-error "invalid time point"))))))))
+                            (when step-ok (set! resource.has-db true))
+                            (vev.close-store-db! (addr source-db)))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error source-error))))
+                    (or (= operation.text ":with")
+                        (= operation.text ":db-with"))
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [tx tx?] (value-map-field step ":tx")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if (and source-ok tx?)
+                          (let [tx-text (vev.value-serializable-text tx)]
+                            (defer (delete tx-text))
+                            (let [report
+                                  (vev.with-store-db-report-text
+                                    (addr source-db) tx-text)]
+                              (if report.ok
+                                (do
+                                  (set! resource.db
+                                        (vev.retain-store-db report.db-after))
+                                  (set! resource.has-db true)
+                                  (when (= operation.text ":with")
+                                    (set! resource.db-before
+                                          (vev.retain-store-db report.db-before))
+                                    (set! resource.has-db-before true)
+                                    (set! resource.value
+                                          (cli-tx-report-value report))
+                                    (set! resource.has-value true)))
+                                (do
+                                  (set! resource.value
+                                        (cli-tx-report-value report))
+                                  (set! resource.has-value true)
+                                  (set! step-ok false)
+                                  (set! step-error report.error)))
+                              (vev.delete-store-tx-report report)
+                              (vev.close-store-db! (addr source-db))))
+                          (do
+                            (when source-ok
+                              (vev.close-store-db! (addr source-db)))
+                            (set! step-ok false)
+                            (set! step-error
+                                  (if tx? source-error "with requires :tx")))))
+                    (= operation.text ":prepare-query")
+                      (let [[query query?] (value-map-field step ":query")
+                            [sources sources?] (value-map-field step ":sources")
+                            [rules rules?] (value-map-field step ":rules")]
+                        (if query?
+                          (let [query-text (exec-form-text query)
+                                source-defs (make [dynamic]vev.DB-Source)]
+                            (defer (delete query-text))
+                            (defer (delete source-defs))
+                            (when (and sources? (= sources.kind .Map))
+                              (let [source-index 0]
+                                (while (< (+ source-index 1)
+                                          (count sources.items))
+                                  (let [name sources.items[source-index]]
+                                    (when (or (= name.kind .Symbol)
+                                              (= name.kind .Keyword))
+                                      (arr.push! source-defs
+                                        (vev.DB-Source {name: name.text}))))
+                                  (set! source-index (+ source-index 2)))))
+                            (set! resource.prepared-query
+                                  (alloc vev.Prepared-Query))
+                            (if rules?
+                              (let [rules-text
+                                    (exec-form-text rules)]
+                                (defer (delete rules-text))
+                                (set! resource.prepared-query^
+                                      (vev.prepare-query-text-with-rules-and-sources
+                                        query-text rules-text
+                                        (slice source-defs 0))))
+                              (set! resource.prepared-query^
+                                    (vev.prepare-query-text-with-sources
+                                      query-text (slice source-defs 0))))
+                            (if resource.prepared-query^.ok
+                              (set! resource.has-prepared-query true)
+                              (do
+                                (set! step-ok false)
+                                (set! step-error
+                                      resource.prepared-query^.error)
+                                (vev.delete-prepared-query-shallow
+                                  resource.prepared-query^)
+                                (free resource.prepared-query)
+                                (set! resource.prepared-query nil))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error "prepare-query requires :query"))))
+                    (= operation.text ":prepare-pull")
+                      (let [[pattern pattern?] (value-map-field step ":pattern")]
+                        (if pattern?
+                          (let [pattern-text
+                                (exec-form-text pattern)]
+                            (defer (delete pattern-text))
+                            (set! resource.prepared-pull
+                                  (alloc vev.Prepared-Pull-Pattern))
+                            (set! resource.prepared-pull^
+                                  (vev.prepare-pull-pattern-text pattern-text))
+                            (if resource.prepared-pull^.ok
+                              (set! resource.has-prepared-pull true)
+                              (do
+                                (set! step-ok false)
+                                (set! step-error resource.prepared-pull^.error)
+                                (vev.delete-prepared-pull-pattern-shallow
+                                  resource.prepared-pull^)
+                                (free resource.prepared-pull)
+                                (set! resource.prepared-pull nil))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error "prepare-pull requires :pattern"))))
+                    (or (= operation.text ":query")
+                        (= operation.text ":rows")
+                        (= operation.text ":scalar")
+                        (= operation.text ":profile"))
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if source-ok
+                          (let [[value value-ok value-error]
+                                (exec-query-value resources
+                                                  (addr source-db) step)]
+                            (vev.close-store-db! (addr source-db))
+                            (if value-ok
+                              (do
+                                (set! resource.value value)
+                                (set! resource.has-value true))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error value-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error source-error))))
+                    (= operation.text ":pull")
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if source-ok
+                          (let [[value value-ok value-error]
+                                (exec-pull-value resources
+                                                (addr source-db) step)]
+                            (vev.close-store-db! (addr source-db))
+                            (if value-ok
+                              (do
+                                (set! resource.value value)
+                                (set! resource.has-value true))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error value-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error source-error))))
+                    (= operation.text ":pull-many")
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [pattern pattern?] (value-map-field step ":pattern")
+                            [entities entities?] (value-map-field step ":entities")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if (and source-ok pattern? entities?
+                                 (= entities.kind .Vector))
+                          (let [values (make [dynamic]vev.Value)]
+                            (for [selector entities.items]
+                              (let [pull-step
+                                    (vev.value-map
+                                      ([]vev.Value
+                                        [(vev.value-keyword
+                                           (vev.string-owned ":pattern"))
+                                         (vev.value-owned pattern)
+                                         (vev.value-keyword
+                                           (vev.string-owned ":entity"))
+                                         (vev.value-owned selector)]))
+                                    [pulled pulled-ok pulled-error]
+                                    (exec-pull-value
+                                      resources (addr source-db) pull-step)]
+                                (vev.delete-owned-value pull-step)
+                                (if pulled-ok
+                                  (arr.push! values pulled)
+                                  (do
+                                    (for [existing values]
+                                      (vev.delete-owned-value existing))
+                                    (delete values)
+                                    (set! step-ok false)
+                                    (set! step-error pulled-error)
+                                    (break)))))
+                            (when step-ok
+                              (set! resource.value
+                                    (vev.value-vector-owned values))
+                              (set! resource.has-value true))
+                            (vev.close-store-db! (addr source-db)))
+                          (do
+                            (when source-ok
+                              (vev.close-store-db! (addr source-db)))
+                            (set! step-ok false)
+                            (set! step-error
+                                  (if source-ok
+                                    "pull-many requires :pattern and vector :entities"
+                                    source-error)))))
+                    (= operation.text ":index-pull")
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if source-ok
+                          (let [[value value-ok value-error]
+                                (exec-index-pull-value (addr source-db) step)]
+                            (vev.close-store-db! (addr source-db))
+                            (if value-ok
+                              (do
+                                (set! resource.value value)
+                                (set! resource.has-value true))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error value-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error source-error))))
+                    (or (= operation.text ":basis-t")
+                        (= operation.text ":next-t")
+                        (= operation.text ":as-of-t")
+                        (= operation.text ":since-t")
+                        (= operation.text ":history?")
+                        (= operation.text ":db-stats"))
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if source-ok
+                          (let [[value value-ok value-error]
+                                (exec-db-metadata-value
+                                  (addr source-db) operation.text)]
+                            (vev.close-store-db! (addr source-db))
+                            (if value-ok
+                              (do
+                                (set! resource.value value)
+                                (set! resource.has-value true))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error value-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error source-error))))
+                    (or (= operation.text ":entity")
+                        (= operation.text ":touch")
+                        (= operation.text ":entity-get")
+                        (= operation.text ":entity-contains?")
+                        (= operation.text ":entid")
+                        (= operation.text ":ident"))
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if source-ok
+                          (let [[value value-ok value-error]
+                                (exec-entity-value
+                                  (addr source-db) step operation.text)]
+                            (vev.close-store-db! (addr source-db))
+                            (if value-ok
+                              (do
+                                (set! resource.value value)
+                                (set! resource.has-value true))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error value-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error source-error))))
+                    (= operation.text ":attribute")
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if source-ok
+                          (let [[value value-ok value-error]
+                                (exec-attribute-value (addr source-db) step)]
+                            (vev.close-store-db! (addr source-db))
+                            (if value-ok
+                              (do
+                                (set! resource.value value)
+                                (set! resource.has-value true))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error value-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error source-error))))
+                    (or (= operation.text ":datoms")
+                        (= operation.text ":seek-datoms")
+                        (= operation.text ":rseek-datoms")
+                        (= operation.text ":index-range"))
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if source-ok
+                          (let [[value value-ok value-error]
+                                (exec-index-value
+                                  (addr source-db) step operation.text)]
+                            (vev.close-store-db! (addr source-db))
+                            (if value-ok
+                              (do
+                                (set! resource.value value)
+                                (set! resource.has-value true))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error value-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error source-error))))
+                    (= operation.text ":db-info")
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if source-ok
+                          (let [[value value-ok value-error]
+                                (db-descriptor-value (addr source-db) true)]
+                            (vev.close-store-db! (addr source-db))
+                            (if value-ok
+                              (do
+                                (set! resource.value value)
+                                (set! resource.has-value true))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error value-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error source-error))))
+                    (= operation.text ":transact")
+                      (let [[tx tx?] (value-map-field step ":tx")]
+                        (if tx?
+                          (let [[step-store owns-store store-ok store-error]
+                                (exec-step-store
+                                  (addr store) has-store step true)]
+                            (if store-ok
+                              (let [tx-text (vev.value-serializable-text tx)]
+                                (defer (delete tx-text))
+                                (let [report
+                                      (vev.transact-store-report-text
+                                        step-store tx-text)]
+                                  (set! resource.value
+                                        (cli-tx-report-value report))
+                                  (set! resource.has-value true)
+                                  (when report.ok
+                                    (if owns-store
+                                      (let [[store-form _]
+                                            (value-map-field step ":store")
+                                            [after-db after-ok after-error]
+                                            (exec-sqlite-lazy-db-pointer
+                                              store-form.text
+                                              (addr report.db-after))]
+                                        (if after-ok
+                                          (do
+                                            (set! resource.db-pointer after-db)
+                                            (set! resource.has-db-pointer true))
+                                          (do
+                                            (set! step-ok false)
+                                            (set! step-error after-error))))
+                                      (do
+                                        (set! resource.db
+                                              (vev.retain-store-db report.db-after))
+                                        (set! resource.has-db true)))
+                                    (if owns-store
+                                      (let [[store-form _]
+                                            (value-map-field step ":store")
+                                            [before-db before-ok before-error]
+                                            (exec-sqlite-lazy-db-pointer
+                                              store-form.text
+                                              (addr report.db-before))]
+                                        (if before-ok
+                                          (do
+                                            (set! resource.db-before-pointer
+                                                  before-db)
+                                            (set! resource.has-db-before-pointer
+                                                  true))
+                                          (do
+                                            (set! step-ok false)
+                                            (set! step-error before-error))))
+                                      (do
+                                        (set! resource.db-before
+                                              (vev.retain-store-db report.db-before))
+                                        (set! resource.has-db-before true)))
+                                    (close-exec-step-store!
+                                      step-store owns-store))
+                                  (when (not report.ok)
+                                    (set! step-ok false)
+                                    (set! step-error report.error)
+                                    (close-exec-step-store!
+                                      step-store owns-store))
+                                  (vev.delete-store-tx-report report)))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error store-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error "transact requires :tx"))))
+                    (= operation.text ":transact-many")
+                      (let [[transactions transactions?]
+                            (value-map-field step ":transactions")
+                            [mode mode?] (value-map-field step ":mode")
+                            mode-text
+                            (if (and mode?
+                                     (or (= mode.kind .Keyword)
+                                         (= mode.kind .String)))
+                              (if (strings.has_prefix mode.text ":")
+                                (slice mode.text 1)
+                                mode.text)
+                              "logical")]
+                        (if transactions?
+                          (let [[step-store owns-store store-ok store-error]
+                                (exec-step-store
+                                  (addr store) has-store step true)]
+                            (if store-ok
+                              (let [[value value-ok value-error]
+                                    (exec-transact-many-value
+                                      step-store transactions mode-text)]
+                                (close-exec-step-store!
+                                  step-store owns-store)
+                                (set! resource.value value)
+                                (set! resource.has-value true)
+                                (when (not value-ok)
+                                  (set! step-ok false)
+                                  (set! step-error value-error)))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error store-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error
+                                  "transact-many requires :transactions"))))
+                    (= operation.text ":resolve-tempid")
+                      (let [[value value-ok value-error]
+                            (exec-resolve-tempid-value resources step)]
+                        (if value-ok
+                          (do
+                            (set! resource.value value)
+                            (set! resource.has-value true))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error value-error))))
+                    (= operation.text ":tx-range")
+                      (let [[db-form db?] (value-map-field step ":db")
+                            [start start?] (value-map-field step ":start")
+                            [end end?] (value-map-field step ":end")
+                            [source-db source-ok source-error]
+                            (exec-db-from-value resources
+                                                (addr default-db)
+                                                db-form db?)]
+                        (if source-ok
+                          (let [[value value-ok value-error]
+                                (vev.store-db-tx-range-value
+                                  (addr source-db)
+                                  (if start? start (vev.value-nil))
+                                  (if end? end (vev.value-nil)))]
+                            (vev.close-store-db! (addr source-db))
+                            (if value-ok
+                              (do
+                                (set! resource.value value)
+                                (set! resource.has-value true))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error value-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error source-error))))
+                    (= operation.text ":squuid")
+                      (do
+                        (set! resource.value (vev.squuid-value))
+                        (set! resource.has-value true))
+                    (= operation.text ":squuid-time-millis")
+                      (let [[uuid uuid?] (value-map-field step ":uuid")]
+                        (if uuid?
+                          (let [[resolved resolved-ok resolved-error]
+                                (exec-resolve-value resources uuid)]
+                            (if (and resolved-ok (= resolved.kind .Uuid))
+                              (let [[millis millis-ok]
+                                    (vev.squuid-time-millis resolved.text)]
+                                (vev.delete-owned-value resolved)
+                                (if millis-ok
+                                  (do
+                                    (set! resource.value
+                                          (vev.value-int millis))
+                                    (set! resource.has-value true))
+                                  (do
+                                    (set! step-ok false)
+                                    (set! step-error "invalid semi-sequential UUID"))))
+                              (do
+                                (when resolved-ok
+                                  (vev.delete-owned-value resolved))
+                                (set! step-ok false)
+                                (set! step-error
+                                      (if resolved-ok
+                                        "squuid-time-millis requires a UUID :uuid"
+                                        resolved-error)))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error
+                                  "squuid-time-millis requires :uuid"))))
+                    (or (= operation.text ":t-to-tx")
+                        (= operation.text ":tx-to-t"))
+                      (let [[coordinate coordinate?]
+                            (value-map-field step ":value")]
+                        (if (and coordinate? (= coordinate.kind .Int)
+                                 (>= coordinate.int-value 0))
+                          (do
+                            (set! resource.value
+                                  (vev.value-int
+                                    (i64
+                                      (if (= operation.text ":t-to-tx")
+                                        (vev.store-db-time-point-tx
+                                          (u64 coordinate.int-value))
+                                        (vev.store-db-tx-t
+                                          (u64 coordinate.int-value))))))
+                            (set! resource.has-value true))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error "coordinate operation requires non-negative integer :value"))))
+                    (or (= operation.text ":ensure-resident")
+                        (= operation.text ":compact-indexes")
+                        (= operation.text ":maintain-indexes")
+                        (= operation.text ":index-info"))
+                      (let [[step-store owns-store store-ok store-error]
+                            (exec-step-store
+                              (addr store) has-store step
+                              (not (= operation.text ":index-info")))]
+                        (if store-ok
+                          (let [[value value-ok value-error]
+                                (exec-maintenance-value
+                                  step-store step operation.text)]
+                            (close-exec-step-store! step-store owns-store)
+                            (if value-ok
+                              (do
+                                (set! resource.value value)
+                                (set! resource.has-value true))
+                              (do
+                                (set! step-ok false)
+                                (set! step-error value-error))))
+                          (do
+                            (set! step-ok false)
+                            (set! step-error store-error))))
+                    :else
+                      (do
+                        (set! step-ok false)
+                        (set! step-error "unsupported exec operation")))
+                  (if step-ok
+                    (arr.push! resources resource)
+                    (if capture?
+                      (do
+                        (delete-exec-resource! (addr resource))
+                        (arr.push! resources
+                          (Exec-Resource
+                            {id: id.text
+                             value: (exec-error-value
+                                      step-error operation.text id.text)
+                             has-value: true})))
+                      (do
+                        (delete-exec-resource! (addr resource))
+                        (let [error-value
+                              (exec-error-value
+                                step-error operation.text id.text)
+                              error-text
+                              (vev.value-serializable-text error-value)]
+                          (cli.eprintln error-text)
+                          (delete error-text)
+                          (vev.delete-owned-value error-value))
+                        (return 1)))))))
+            (when (= (count resources) 0)
+              (print-owned-value (vev.value-nil))
+              (return 0))
+            (let [effective-return
+                  (if return?
+                    return-form
+                    (vev.value-vector2
+                      (vev.value-keyword ":ref")
+                      (vev.value-keyword
+                        resources[(- (count resources) 1)].id)))
+                  owns-effective-return (not return?)]
+              (defer
+                (when owns-effective-return
+                  (vev.delete-value-containers-shallow effective-return)))
+              (let [[value value-ok value-error]
+                    (exec-resolve-value resources effective-return)]
+                (when (not value-ok)
+                  (print-cli-error value-error)
+                  (return 1))
+                (print-owned-value value)
+                0))))))))
+
+(defn command-index-pull [uri: string, options-arg: string, pipeline-arg: string] -> int
+  (let [[options options-ok options-error] (read-value-arg options-arg)]
+    (when (not options-ok)
+      (print-cli-error options-error)
+      (return 1))
+    (defer (vev.delete-owned-value options))
+    (when (not (= options.kind .Map))
+      (print-cli-error "index-pull options must be an EDN map")
+      (return 1))
+    (let [opened (open-command-db uri pipeline-arg)]
+      (when (not opened.ok)
+        (print-cli-error opened.error)
+        (return 1))
+      (defer (close-open-db! (addr opened)))
+      (let [[value value-ok value-error]
+            (exec-index-pull-value (addr opened.db) options)]
+        (when (not value-ok)
+          (print-cli-error value-error)
+          (return 1))
+        (print-owned-value value)
+        0))))
+
+(defn command-with [uri: string, tx-arg: string, pipeline-arg: string] -> int
+  (let [[tx-text tx-ok tx-error] (read-text-arg tx-arg)]
+    (when (not tx-ok)
+      (print-cli-error tx-error)
+      (return 1))
+    (defer (when (text-arg-owned? tx-arg) (delete tx-text)))
+    (let [opened (open-command-db uri pipeline-arg)]
+      (when (not opened.ok)
+        (print-cli-error opened.error)
+        (return 1))
+      (defer (close-open-db! (addr opened)))
+      (let [report (vev.with-store-db-report-text (addr opened.db) tx-text)
+            value (cli-tx-report-value report)
+            code (if report.ok 0 1)]
+        (print-owned-value value)
+        (vev.delete-store-tx-report report)
+        code))))
+
+(defn delete-texts! [texts: [dynamic]string]
+  (for [text texts]
+    (delete text))
+  (delete texts))
+
+(defn command-transact-many [uri: string, txs-arg: string, mode: string] -> int
+  (when (not (or (= mode "logical") (= mode "flatten")))
+    (print-cli-error "transact-many --mode must be logical or flatten")
+    (return 1))
+  (let [[txs txs-ok txs-error] (read-value-arg txs-arg)]
+    (when (not txs-ok)
+      (print-cli-error txs-error)
+      (return 1))
+    (defer (vev.delete-owned-value txs))
+    (when (not (= txs.kind .Vector))
+      (print-cli-error "transact-many input must be an EDN vector of transactions")
+      (return 1))
+    (let [[store store-ok store-error] (vev.open-store uri)]
+      (when (not store-ok)
+        (delete-store! store)
+        (print-cli-error store-error)
+        (return 1))
+      (defer (delete-store! store))
+      (let [[value value-ok value-error]
+            (exec-transact-many-value (addr store) txs mode)]
+        (when (and (not value-ok) (= value.kind .Nil))
+          (print-cli-error value-error)
+          (return 1))
+        (print-owned-value value)
+        (if value-ok 0 1)))))
+
+(defn command-db-info [uri: string, pipeline-arg: string] -> int
+  (let [opened (open-command-db uri pipeline-arg)]
+    (when (not opened.ok)
+      (print-cli-error opened.error)
+      (return 1))
+    (defer (close-open-db! (addr opened)))
+    (let [[value value-ok value-error]
+          (db-descriptor-value (addr opened.db) true)]
+      (when (not value-ok)
+        (print-cli-error value-error)
+        (return 1))
+      (print-owned-value value)
+      0)))
+
+(defn command-tx-range [uri: string, start-arg: string, end-arg: string] -> int
+  (let [opened (open-command-db uri "")]
+    (when (not opened.ok)
+      (print-cli-error opened.error)
+      (return 1))
+    (defer (close-open-db! (addr opened)))
+    (let [[start start-ok start-error] (read-value-arg start-arg)]
+      (when (not start-ok)
+        (print-cli-error start-error)
+        (return 1))
+      (defer (vev.delete-owned-value start))
+      (let [[end end-ok end-error] (read-value-arg end-arg)]
+        (when (not end-ok)
+          (print-cli-error end-error)
+          (return 1))
+        (defer (vev.delete-owned-value end))
+        (let [[value value-ok value-error]
+              (vev.store-db-tx-range-value (addr opened.db) start end)]
+          (when (not value-ok)
+            (vev.delete-owned-value value)
+            (print-cli-error value-error)
+            (return 1))
+          (print-owned-value value)
+          0)))))
+
+(defn command-entity [operation: string, uri: string, selector-arg: string, attr: string, pipeline-arg: string] -> int
+  (let [[selector selector-ok selector-error] (read-value-arg selector-arg)]
+    (when (not selector-ok)
+      (print-cli-error selector-error)
+      (return 1))
+    (defer (vev.delete-owned-value selector))
+    (let [opened (open-command-db uri pipeline-arg)]
+      (when (not opened.ok)
+        (print-cli-error opened.error)
+        (return 1))
+      (defer (close-open-db! (addr opened)))
+      (let [operation-keyword
+            (if (= operation "entity-contains") ":entity-contains?"
+              (strings.concatenate ([]string [":" operation])))
+            owns-operation-keyword (not (= operation "entity-contains"))
+            items (make [dynamic]vev.Value)]
+        (defer (when owns-operation-keyword (delete operation-keyword)))
+        (arr.push! items (vev.value-keyword (vev.string-owned ":entity")))
+        (arr.push! items (vev.value-owned selector))
+        (when (or (= operation "entity-get") (= operation "entity-contains"))
+          (arr.push! items (vev.value-keyword (vev.string-owned ":attribute")))
+          (arr.push! items (vev.value-keyword (vev.string-owned attr))))
+        (let [step (vev.value-map-owned items)
+              [value value-ok value-error]
+              (exec-entity-value
+                (addr opened.db) step operation-keyword)]
+          (vev.delete-owned-value step)
+          (when (not value-ok)
+            (print-cli-error value-error)
+            (return 1))
+          (print-owned-value value)
+          0)))))
+
+(defn command-attribute [uri: string, attr: string, pipeline-arg: string] -> int
+  (let [opened (open-command-db uri pipeline-arg)]
+    (when (not opened.ok)
+      (print-cli-error opened.error)
+      (return 1))
+    (defer (close-open-db! (addr opened)))
+    (let [step
+          (vev.value-map
+            ([]vev.Value
+              [(vev.value-keyword (vev.string-owned ":attribute"))
+               (vev.value-keyword (vev.string-owned attr))]))
+          [value value-ok value-error]
+          (exec-attribute-value (addr opened.db) step)]
+      (vev.delete-owned-value step)
+      (when (not value-ok)
+        (print-cli-error value-error)
+        (return 1))
+      (print-owned-value value)
+      0)))
+
+(defn command-index-datoms [mode: int, uri: string, index: string, components-arg: string, pipeline-arg: string] -> int
+  (let [[components components-ok components-error] (read-value-arg components-arg)]
+    (when (not components-ok)
+      (print-cli-error components-error)
+      (return 1))
+    (defer (vev.delete-owned-value components))
+    (let [[args args-ok] (index-args-from-value components)]
+      (when (not args-ok)
+        (print-cli-error "index components must be an EDN vector")
+        (return 1))
+      (defer (delete args))
+      (let [opened (open-command-db uri pipeline-arg)]
+        (when (not opened.ok)
+          (print-cli-error opened.error)
+          (return 1))
+        (defer (close-open-db! (addr opened)))
+        (let [[datoms datoms-ok datoms-error]
+              (vev.store-db-index-datoms (addr opened.db) mode index (slice args 0))]
+          (when (not datoms-ok)
+            (vev.delete-owned-datoms datoms)
+            (print-cli-error datoms-error)
+            (return 1))
+          (let [value (cli-datoms-value (slice datoms 0))]
+            (vev.delete-owned-datoms datoms)
+            (print-owned-value value)
+            0))))))
+
+(defn command-index-range [uri: string, attr: string, start-arg: string, end-arg: string, pipeline-arg: string] -> int
+  (let [[start start-ok start-error] (read-value-arg start-arg)]
+    (when (not start-ok)
+      (print-cli-error start-error)
+      (return 1))
+    (defer (vev.delete-owned-value start))
+    (let [[end end-ok end-error] (read-value-arg end-arg)]
+      (when (not end-ok)
+        (print-cli-error end-error)
+        (return 1))
+      (defer (vev.delete-owned-value end))
+      (let [opened (open-command-db uri pipeline-arg)]
+        (when (not opened.ok)
+          (print-cli-error opened.error)
+          (return 1))
+        (defer (close-open-db! (addr opened)))
+        (let [[datoms datoms-ok datoms-error]
+              (vev.store-db-index-range-datoms
+                (addr opened.db)
+                attr
+                (index-arg-from-value start)
+                (not (= start.kind .Nil))
+                (index-arg-from-value end)
+                (not (= end.kind .Nil)))]
+          (when (not datoms-ok)
+            (vev.delete-owned-datoms datoms)
+            (print-cli-error datoms-error)
+            (return 1))
+          (let [value (cli-datoms-value (slice datoms 0))]
+            (vev.delete-owned-datoms datoms)
+            (print-owned-value value)
+            0))))))
+
+(defn command-coordinate [operation: string, value-text: string] -> int
+  (let [[value parsed] (strconv.parse_int value-text)]
+    (when (or (not parsed) (< value 0))
+      (print-cli-error "coordinate must be a non-negative integer")
+      (return 1))
+    (fmt.println
+      (if (= operation "t-to-tx")
+        (vev.store-db-time-point-tx (u64 value))
+        (vev.store-db-tx-t (u64 value))))
+    0))
+
+(defn command-squuid [] -> int
+  (let [uuid (vev.squuid-text)]
+    (defer (delete uuid))
+    (fmt.printf "#uuid \"%s\"\n" uuid)
+    0))
+
+(defn command-squuid-time [uuid-arg: string] -> int
+  (let [[value value-ok value-error] (read-value-arg uuid-arg)]
+    (when (not value-ok)
+      (print-cli-error value-error)
+      (return 1))
+    (defer (vev.delete-owned-value value))
+    (when (not (= value.kind .Uuid))
+      (print-cli-error "squuid-time-millis requires an EDN UUID")
+      (return 1))
+    (let [[millis millis-ok] (vev.squuid-time-millis value.text)]
+      (when (not millis-ok)
+        (print-cli-error "invalid semi-sequential UUID")
+        (return 1))
+      (fmt.println millis)
+      0)))
+
+(defn command-maintenance [operation: string, uri: string, max-steps: int] -> int
+  (let [[store store-ok store-error] (vev.open-store uri)]
+    (when (not store-ok)
+      (delete-store! store)
+      (print-cli-error store-error)
+      (return 1))
+    (defer (delete-store! store))
+    (let [operation-keyword
+          (strings.concatenate ([]string [":" operation]))
+          step
+          (vev.value-map
+            ([]vev.Value
+              [(vev.value-keyword (vev.string-owned ":max-steps"))
+               (vev.value-int (i64 max-steps))]))]
+      (defer (delete operation-keyword))
+      (defer (vev.delete-owned-value step))
+      (let [[value value-ok value-error]
+            (exec-maintenance-value
+              (addr store) step operation-keyword)]
+        (when (not value-ok)
+          (print-cli-error value-error)
+          (return 1))
+        (print-owned-value value)
+        0))))
+
+(defn command-index-info [uri: string, index: string] -> int
+  (let [[store store-ok store-error] (vev.open-store-read-only uri)]
+    (when (not store-ok)
+      (delete-store! store)
+      (print-cli-error store-error)
+      (return 1))
+    (defer (delete-store! store))
+    (let [step
+          (vev.value-map
+            ([]vev.Value
+              [(vev.value-keyword (vev.string-owned ":index"))
+               (vev.value-keyword (vev.string-owned index))]))]
+      (defer (vev.delete-owned-value step))
+      (let [[value value-ok value-error]
+            (exec-maintenance-value (addr store) step ":index-info")]
+        (when (not value-ok)
+          (print-cli-error value-error)
+          (return 1))
+        (print-owned-value value)
+        0))))
+
+(defn watch-report-value [transaction: vev.Value] -> vev.Value
+  (let [[t t?] (value-map-field transaction ":t")
+        [data data?] (value-map-field transaction ":data")
+        t-value (if (and t? (= t.kind .Int)) t.int-value (i64 0))]
+    (vev.value-map
+      ([]vev.Value
+        [(vev.value-keyword (vev.string-owned ":ok")) (vev.value-bool true)
+         (vev.value-keyword (vev.string-owned ":error")) (vev.value-string (vev.string-owned ""))
+         (vev.value-keyword (vev.string-owned ":vev/error")) (vev.value-nil)
+         (vev.value-keyword (vev.string-owned ":tx"))
+         (vev.value-entity (vev.store-db-time-point-tx (u64 t-value)))
+         (vev.value-keyword (vev.string-owned ":tx-data"))
+         (if data? (vev.value-owned data) (vev.value-vector-owned (make [dynamic]vev.Value)))
+         (vev.value-keyword (vev.string-owned ":tempids"))
+         (vev.value-map-owned (make [dynamic]vev.Value))
+         (vev.value-keyword (vev.string-owned ":tx-meta"))
+         (vev.value-vector-owned (make [dynamic]vev.Value))]))))
+
+(defn command-watch [uri: string, after-arg: string] -> int
+  (begin-watch-signals)
+  (let [start (vev.value-nil)]
+    (if (= after-arg "")
+      (let [opened (open-command-db uri "")]
+        (when (not opened.ok)
+          (print-cli-error opened.error)
+          (return 1))
+        (let [[basis basis-ok basis-error] (vev.store-db-basis-t (addr opened.db))]
+          (close-open-db! (addr opened))
+          (when (not basis-ok)
+            (print-cli-error basis-error)
+            (return 1))
+          (set! start (vev.value-int (i64 (+ basis 1))))))
+      (let [[after after-ok after-error] (read-value-arg after-arg)]
+        (when (not after-ok)
+          (print-cli-error after-error)
+          (return 1))
+        (case after.kind
+          .Int
+            (if (>= after.int-value 0)
+              (set! start (vev.value-int (+ after.int-value 1)))
+              (do
+                (vev.delete-owned-value after)
+                (print-cli-error "watch --after must be a non-negative time point")
+                (return 1)))
+          .Entity (set! start (vev.value-entity (+ after.entity 1)))
+          .Instant (set! start (vev.value-instant (+ after.int-value 1)))
+           (do
+             (vev.delete-owned-value after)
+             (print-cli-error "watch --after must be a t, transaction id, or instant")
+             (return 1)))
+        (vev.delete-owned-value after)))
+    (defer (vev.delete-owned-value start))
+    (while (not (watch-interrupted?))
+      (let [opened (open-command-db uri "")]
+        (when (not opened.ok)
+          (print-cli-error opened.error)
+          (return 1))
+        (let [[transactions range-ok range-error]
+              (vev.store-db-tx-range-value
+                (addr opened.db) start (vev.value-nil))]
+          (close-open-db! (addr opened))
+          (when (not range-ok)
+            (vev.delete-owned-value transactions)
+            (print-cli-error range-error)
+            (return 1))
+          (for [transaction transactions.items]
+            (let [report-value (watch-report-value transaction)
+                  [t t?] (value-map-field transaction ":t")]
+              (print-owned-value report-value)
+              (odin "_ = libc.fflush(libc.stdout)")
+              (when (and t? (= t.kind .Int))
+                (vev.delete-owned-value start)
+                (set! start (vev.value-int (+ t.int-value 1))))))
+          (vev.delete-owned-value transactions)))
+      (time.sleep (* 100 time.Millisecond)))
+    0))
 
 (defn usage-error [] -> int
-  (cli.eprintln usage)
+  (print-cli-error usage)
   1)
 
 (defn main []
@@ -173,20 +2768,109 @@ examples:
                  (= os.args[1] "version")))
     (fmt.printf "vevdb %s\n" (version))
     (return))
+  (when (and (= (len os.args) 3)
+             (or (= os.args[2] "-h") (= os.args[2] "--help")))
+    (fmt.printf "command: %s\n\n%s" os.args[1] usage)
+    (return))
+  (let [stdin-arguments 0]
+    (for [arg os.args]
+      (when (= arg "-")
+        (set! stdin-arguments (+ stdin-arguments 1))))
+    (when (> stdin-arguments 1)
+      (print-cli-error "at most one argument may read from standard input")
+      (cli.exit! 1)))
   (let [command os.args[1]
+        pipeline (cli.option os.args "--db" "")
         code (cond
                (and (= command "info") (= (len os.args) 3))
                  (command-info os.args[2])
+               (and (= command "sync") (or (= (len os.args) 3) (= (len os.args) 4)))
+                 (command-sync os.args[2]
+                               (if (= (len os.args) 4) os.args[3] ""))
                (and (= command "confirm-entity-partitions") (= (len os.args) 3))
                  (command-confirm-entity-partitions os.args[2])
                (and (= command "transact") (= (len os.args) 4))
                  (command-transact os.args[2] os.args[3])
-               (and (= command "query") (= (len os.args) 4))
-                 (command-query os.args[2] os.args[3] "[]")
-               (and (= command "query") (= (len os.args) 5))
-                 (command-query os.args[2] os.args[3] os.args[4])
-               (and (= command "pull") (= (len os.args) 5))
-                 (command-pull os.args[2] os.args[3] os.args[4])
+               (and (= command "transact-many") (>= (len os.args) 4))
+                 (command-transact-many os.args[2]
+                                        os.args[3]
+                                        (cli.option os.args "--mode" "logical"))
+               (and (= command "with") (>= (len os.args) 4))
+                 (command-with os.args[2] os.args[3] pipeline)
+               (and (= command "query") (>= (len os.args) 4))
+                 (command-query os.args[2]
+                                os.args[3]
+                                (if (and (>= (len os.args) 5)
+                                         (not (strings.has_prefix os.args[4] "--")))
+                                  os.args[4]
+                                  "[]")
+                                pipeline
+                                (cli.option os.args "--result" "envelope")
+                                (cli.option os.args "--rules" "")
+                                (cli.flag os.args "--profile")
+                                (cli.int-option os.args "--timeout" -1))
+               (and (= command "pull") (>= (len os.args) 5))
+                 (command-pull os.args[2] os.args[3] os.args[4] pipeline)
+               (and (= command "pull-many") (>= (len os.args) 5))
+                 (command-pull-many os.args[2] os.args[3] os.args[4] pipeline)
+               (and (= command "db-info") (>= (len os.args) 3))
+                 (command-db-info os.args[2] pipeline)
+               (and (= command "tx-range") (>= (len os.args) 3) (<= (len os.args) 5))
+                 (command-tx-range os.args[2]
+                                   (if (>= (len os.args) 4) os.args[3] "nil")
+                                   (if (>= (len os.args) 5) os.args[4] "nil"))
+               (and (= command "entity") (>= (len os.args) 4))
+                 (command-entity command os.args[2] os.args[3] "" pipeline)
+               (and (or (= command "entity-get") (= command "entity-contains"))
+                    (>= (len os.args) 5))
+                 (command-entity command os.args[2] os.args[3] os.args[4] pipeline)
+               (and (or (= command "entid") (= command "ident"))
+                    (>= (len os.args) 4))
+                 (command-entity command os.args[2] os.args[3] "" pipeline)
+               (and (= command "attribute") (>= (len os.args) 4))
+                 (command-attribute os.args[2] os.args[3] pipeline)
+               (and (or (= command "datoms")
+                        (= command "seek-datoms")
+                        (= command "rseek-datoms"))
+                    (>= (len os.args) 4))
+                 (command-index-datoms
+                   (if (= command "datoms") 0 (if (= command "seek-datoms") 1 2))
+                   os.args[2]
+                   os.args[3]
+                   (if (and (>= (len os.args) 5)
+                            (not (strings.has_prefix os.args[4] "--")))
+                     os.args[4]
+                     "[]")
+                   pipeline)
+               (and (= command "index-range") (>= (len os.args) 6))
+                 (command-index-range os.args[2] os.args[3] os.args[4] os.args[5] pipeline)
+               (and (= command "index-pull") (>= (len os.args) 4))
+                 (command-index-pull os.args[2] os.args[3] pipeline)
+               (and (or (= command "ensure-resident")
+                        (= command "compact-indexes")
+                        (= command "maintain-indexes"))
+                    (>= (len os.args) 3))
+                 (command-maintenance command os.args[2]
+                                      (cli.int-option os.args "--max-steps" -1))
+               (and (= command "index-info") (>= (len os.args) 3))
+                 (command-index-info os.args[2]
+                                     (if (>= (len os.args) 4) os.args[3] ":eavt"))
+               (and (= command "watch") (>= (len os.args) 3))
+                 (command-watch os.args[2] (cli.option os.args "--after" ""))
+               (and (= command "exec") (= (len os.args) 4)
+                    (not (= os.args[2] "--memory")))
+                 (command-exec os.args[2] os.args[3] false)
+               (and (= command "exec") (= (len os.args) 4)
+                    (= os.args[2] "--memory"))
+                 (command-exec "" os.args[3] true)
+               (and (= command "t-to-tx") (= (len os.args) 3))
+                 (command-coordinate command os.args[2])
+               (and (= command "tx-to-t") (= (len os.args) 3))
+                 (command-coordinate command os.args[2])
+               (and (= command "squuid") (= (len os.args) 2))
+                 (command-squuid)
+               (and (= command "squuid-time-millis") (= (len os.args) 3))
+                 (command-squuid-time os.args[2])
                :else
                  (usage-error))]
     (when (!= code 0)

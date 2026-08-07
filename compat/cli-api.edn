@@ -1,0 +1,190 @@
+;; Machine-readable inventory for the data-oriented vevdb frontend.
+;; Every public top-level entry in clients/kvist/vev.kvist and vev.core has an
+;; explicit disposition. Aliases intentionally remain separate entries.
+{:format-version 1
+ :allowed-dispositions #{:command :db-pipeline :exec :implicit
+                         :representation :host-extension :separate-api}
+ :frontends
+ {:kvist
+  [{:name Conn :disposition :representation}
+   {:name DB :disposition :representation}
+   {:name Log :disposition :representation}
+   {:name Entity :disposition :representation}
+   {:name try-connect :disposition :implicit}
+   {:name connect :disposition :implicit}
+   {:name close-conn :disposition :implicit}
+   {:name compact-indexes! :disposition :command :cli compact-indexes}
+   {:name ensure-resident! :disposition :command :cli ensure-resident}
+   {:name maintain-indexes! :disposition :command :cli maintain-indexes}
+   {:name latest-index-merge-run-count :disposition :command :cli index-info}
+   {:name db :disposition :exec}
+   {:name close-db :disposition :implicit}
+   {:name entity-id-ref :disposition :representation}
+   {:name entity-lookup-ref :disposition :representation}
+   {:name entity-ident :disposition :representation}
+   {:name entity-ref :disposition :representation}
+   {:name entity :disposition :command}
+   {:name close-entity :disposition :implicit}
+   {:name entity-found? :disposition :representation}
+   {:name entity-id :disposition :representation}
+   {:name entid-id :disposition :command :cli entid}
+   {:name entid-ref :disposition :command :cli entid}
+   {:name entid :disposition :command}
+   {:name ident :disposition :command}
+   {:name entid-lookup-ref :disposition :command :cli entid}
+   {:name entity-contains? :disposition :command :cli entity-contains}
+   {:name entity-get :disposition :command}
+   {:name entity-values :disposition :representation :cli entity-get}
+   {:name touch :disposition :command :cli entity}
+   {:name log :disposition :exec}
+   {:name close-log :disposition :implicit}
+   {:name close-tx-report :disposition :implicit}
+   {:name history :disposition :db-pipeline}
+   {:name basis-t :disposition :command :cli db-info}
+   {:name next-t :disposition :command :cli db-info}
+   {:name as-of-coordinate :disposition :db-pipeline :cli as-of}
+   {:name as-of-instant :disposition :db-pipeline :cli as-of}
+   {:name as-of :disposition :db-pipeline}
+   {:name since-coordinate :disposition :db-pipeline :cli since}
+   {:name since-instant :disposition :db-pipeline :cli since}
+   {:name since :disposition :db-pipeline}
+   {:name as-of-t :disposition :command :cli db-info}
+   {:name since-t :disposition :command :cli db-info}
+   {:name is-history :disposition :command :cli db-info}
+   {:name history? :disposition :command :cli db-info}
+   {:name t-to-tx :disposition :command}
+   {:name tx-to-t :disposition :command}
+   {:name sync-db :disposition :command :cli sync}
+   {:name sync-to :disposition :command :cli sync}
+   {:name sync :disposition :command}
+   {:name db-stats :disposition :command :cli db-info}
+   {:name attribute :disposition :command}
+   {:name index-datoms :disposition :representation :cli datoms}
+   {:name datoms :disposition :command}
+   {:name seek-datoms :disposition :command}
+   {:name rseek-datoms :disposition :command}
+   {:name index-range :disposition :command}
+   {:name index-pull :disposition :command}
+   {:name pull-id :disposition :command :cli pull}
+   {:name pull-ref :disposition :command :cli pull}
+   {:name pull :disposition :command}
+   {:name pull-lookup-ref :disposition :command :cli pull}
+   {:name pull-many-ids :disposition :command :cli pull-many}
+   {:name pull-many-refs :disposition :command :cli pull-many}
+   {:name pull-many :disposition :command}
+   {:name lookup-ref-string-exists? :disposition :representation :cli entid}
+   {:name transact-data :disposition :command :cli transact}
+   {:name with-data :disposition :command :cli with}
+   {:name db-with-data :disposition :db-pipeline :cli with}
+   {:name q :disposition :command :cli query}
+   {:name transact :disposition :command}
+   {:name with :disposition :command}
+   {:name db-with :disposition :db-pipeline}
+   {:name try-transact :disposition :command :cli transact}
+   {:name try-with :disposition :command :cli with}
+   {:name resolve-tempid :disposition :exec}
+   {:name log-tx-ids :disposition :command :cli info}
+   {:name tx-range :disposition :command}
+   {:name tx-range-between :disposition :command :cli tx-range}
+   {:name instant-text :disposition :representation}
+   {:name squuid :disposition :command}
+   {:name squuid-time-millis :disposition :command}
+   {:name instant-from-text :disposition :representation}
+   {:name value-instant :disposition :representation}
+   {:name close :disposition :implicit}]
+
+  :clojure
+  [{:name KeyedRow :disposition :representation}
+   {:name CountedRelationResult :disposition :representation}
+   {:name Conn :disposition :representation}
+   {:name DurableConn :disposition :representation}
+   {:name Log :disposition :representation}
+   {:name SQLiteConn :disposition :representation}
+   {:name DB :disposition :representation}
+   {:name EntityView :disposition :representation}
+   {:name Datom :disposition :representation}
+   {:name PreparedQuery :disposition :representation}
+   {:name PreparedPullPattern :disposition :representation}
+   {:name TxBuilder :disposition :host-extension}
+   {:name QueryFnRegistry :disposition :host-extension}
+   {:name TxListenerRegistration :disposition :representation}
+   {:name retain-db :disposition :implicit}
+   {:name create-conn :disposition :exec :cli --memory}
+   {:name open :disposition :implicit}
+   {:name connect :disposition :implicit}
+   {:name open-sqlite :disposition :implicit}
+   {:name db :disposition :exec}
+   {:name sync :disposition :command}
+   {:name connection-info :disposition :command :cli info}
+   {:name log :disposition :exec}
+   {:name compact-indexes! :disposition :command :cli compact-indexes}
+   {:name conn-from-db :disposition :exec :cli --memory}
+   {:name entity :disposition :command}
+   {:name entity-db :disposition :implicit}
+   {:name entid :disposition :command}
+   {:name ident :disposition :command}
+   {:name attribute :disposition :command}
+   {:name datoms :disposition :command}
+   {:name seek-datoms :disposition :command}
+   {:name rseek-datoms :disposition :command}
+   {:name index-range :disposition :command}
+   {:name db-stats :disposition :command :cli db-info}
+   {:name resolve-tempid :disposition :exec}
+   {:name squuid :disposition :command}
+   {:name squuid-time-millis :disposition :command}
+   {:name touch :disposition :command :cli entity}
+   {:name transact-text :disposition :command :cli transact}
+   {:name transact-text! :disposition :command :cli transact}
+   {:name transact :disposition :command}
+   {:name transact! :disposition :command :cli transact}
+   {:name try-transact :disposition :command :cli transact}
+   {:name transact-bulk :disposition :command :cli transact-many}
+   {:name transact-logical-bulk :disposition :command :cli transact-many}
+   {:name transact-logical :disposition :command :cli transact-many}
+   {:name listen :disposition :command :cli watch}
+   {:name listen! :disposition :command :cli watch}
+   {:name unlisten :disposition :implicit}
+   {:name unlisten! :disposition :implicit}
+   {:name empty-db :disposition :exec}
+   {:name with-text :disposition :command :cli with}
+   {:name with :disposition :command}
+   {:name with-report :disposition :command :cli with}
+   {:name try-with :disposition :command :cli with}
+   {:name db-with :disposition :db-pipeline}
+   {:name as-of :disposition :db-pipeline}
+   {:name since :disposition :db-pipeline}
+   {:name history :disposition :db-pipeline}
+   {:name basis-t :disposition :command :cli db-info}
+   {:name next-t :disposition :command :cli db-info}
+   {:name as-of-t :disposition :command :cli db-info}
+   {:name since-t :disposition :command :cli db-info}
+   {:name is-history :disposition :command :cli db-info}
+   {:name history? :disposition :command :cli db-info}
+   {:name tx-range :disposition :command}
+   {:name t->tx :disposition :command :cli t-to-tx}
+   {:name tx->t :disposition :command :cli tx-to-t}
+   {:name tx-builder :disposition :representation}
+   {:name tx-add! :disposition :representation}
+   {:name bulk-add! :disposition :representation}
+   {:name init-db :disposition :exec}
+   {:name prepare :disposition :exec :cli prepare-query}
+   {:name prepared-edn :disposition :representation}
+   {:name parse-clause :disposition :representation}
+   {:name prepare-pull-pattern :disposition :exec :cli prepare-pull}
+   {:name query-fns :disposition :host-extension}
+   {:name query-result :disposition :representation :cli query}
+   {:name query-result-with-fns :disposition :host-extension}
+   {:name query-result-with-rules :disposition :command :cli query}
+   {:name column-batch :disposition :representation}
+   {:name columns :disposition :representation}
+   {:name profile :disposition :command :cli query}
+   {:name profile-with-rules :disposition :command :cli query}
+   {:name rows :disposition :command :cli query}
+   {:name q :disposition :command :cli query}
+   {:name query :disposition :command}
+   {:name scalar :disposition :command :cli query}
+   {:name pull :disposition :command}
+   {:name pull-many :disposition :command}
+   {:name index-pull :disposition :command}
+   {:name rows-legacy :disposition :representation}
+   {:name q-text :disposition :representation :cli query}]}}
