@@ -1,0 +1,357 @@
+; Copyright 2026 Vev Contributors
+; SPDX-License-Identifier: Apache-2.0
+
+(package vev)
+
+(defn db-read-source-bindings-after-rule-body-with-sources-depth [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, rule: Rule, initial: Binding, depth: int] -> [out-bindings: [dynamic]Binding, ok: bool, error: string]
+  (when (rule-body-planned-clause-call-predicate? rule)
+    (return (db-read-source-bindings-after-rule-body-planned-clause-call-with-sources-depth source sources rules rule initial depth)))
+  (let [bindings (make [dynamic]Binding)]
+    (when (< depth 0)
+      (db-read-source-delete-binding-owned initial)
+      (return bindings true ""))
+    (arr.push! bindings initial)
+    (for [step rule.body-steps]
+      (cond
+        (= step.kind .Clause)
+          (let [clause-value rule.clauses[step.index]
+                [clause-source source-clause source-clause-ok source-clause-error] (db-read-source-query-clause-source source sources clause-value)]
+            (when (not source-clause-ok)
+              (db-read-source-delete-bindings-owned bindings)
+              (return (make [dynamic]Binding) false source-clause-error))
+            (let [[next next-ok next-error] (db-read-source-bindings-after-clause clause-source (slice bindings 0) source-clause)]
+              (db-read-source-delete-bindings-owned bindings)
+              (when (not next-ok)
+                (return (make [dynamic]Binding) false next-error))
+              (set! bindings next)))
+        (= step.kind .Predicate)
+          (let [next (db-read-source-bindings-after-predicate (slice bindings 0) rule.predicates[step.index])]
+            (db-read-source-delete-bindings-owned bindings)
+            (set! bindings next))
+        (= step.kind .Function)
+          (let [function rule.function-clauses[step.index]]
+            (if (= function.op "fulltext")
+              (let [[next next-ok next-error] (db-read-source-bindings-after-fulltext-with-sources source sources (slice bindings 0) function)]
+                (db-read-source-delete-bindings-owned bindings)
+                (when (not next-ok)
+                  (return (make [dynamic]Binding) false next-error))
+                (set! bindings next))
+              (let [[next next-ok next-error] (db-read-source-bindings-after-function (slice bindings 0) function)]
+                (db-read-source-delete-bindings-owned bindings)
+                (when (not next-ok)
+                  (return (make [dynamic]Binding) false next-error))
+                (set! bindings next))))
+        (= step.kind .Ground)
+          (let [[next next-ok next-error] (db-read-source-bindings-after-ground (slice bindings 0) rule.grounds[step.index])]
+            (db-read-source-delete-bindings-owned bindings)
+            (when (not next-ok)
+              (return (make [dynamic]Binding) false next-error))
+            (set! bindings next))
+        (= step.kind .GetElse)
+          (let [[next next-ok next-error] (db-read-source-bindings-after-get-else-with-sources source sources (slice bindings 0) rule.get-elses[step.index])]
+            (db-read-source-delete-bindings-owned bindings)
+            (when (not next-ok)
+              (return (make [dynamic]Binding) false next-error))
+            (set! bindings next))
+        (= step.kind .GetSome)
+          (let [[next next-ok next-error] (db-read-source-bindings-after-get-some-with-sources source sources (slice bindings 0) rule.get-somes[step.index])]
+            (db-read-source-delete-bindings-owned bindings)
+            (when (not next-ok)
+              (return (make [dynamic]Binding) false next-error))
+            (set! bindings next))
+        (= step.kind .Not)
+          (let [[next next-ok next-error] (db-read-source-bindings-after-not-group-with-sources source sources (slice bindings 0) rule.not-groups[step.index])]
+            (db-read-source-delete-bindings-owned bindings)
+            (when (not next-ok)
+              (return (make [dynamic]Binding) false next-error))
+            (set! bindings next))
+        (= step.kind .Or)
+          (let [[next next-ok next-error] (db-read-source-bindings-after-or-group-with-sources source sources (slice bindings 0) rule.or-groups[step.index])]
+            (db-read-source-delete-bindings-owned bindings)
+            (when (not next-ok)
+              (return (make [dynamic]Binding) false next-error))
+            (set! bindings next))
+        (= step.kind .RuleCall)
+          (let [next (make [dynamic]Binding)]
+            (for [binding bindings]
+              (let [[rule-bindings rule-ok rule-error] (db-read-source-bindings-after-rule-call-with-sources-depth source sources rules rule.rule-calls[step.index] binding (- depth 1))]
+                (when (not rule-ok)
+                  (db-read-source-delete-bindings-owned next)
+                  (db-read-source-delete-bindings-owned bindings)
+                  (return (make [dynamic]Binding) false rule-error))
+                (for [rule-binding rule-bindings]
+                  (arr.push! next rule-binding))
+                (delete rule-bindings)))
+            (db-read-source-delete-bindings-owned bindings)
+            (let [unique (unique-bindings (slice next 0))]
+              (delete next)
+              (set! bindings unique)))
+        :else
+          (do
+            (db-read-source-delete-bindings-owned bindings)
+            (return (make [dynamic]Binding) false "DB snapshot source rules currently support data, predicate, function, ground, get-else, get-some, not/or, and recursive rule-call body steps only"))))
+    (return bindings true "")))
+
+(defn db-read-source-clause-candidate-count-estimate [source: DB-Read-Source, sources: []DB-Read-Named-Source, clause-value: Clause, binding: Binding] -> [count-value: int, ok: bool, error: string]
+  (let [[clause-source source-clause source-clause-ok source-clause-error] (db-read-source-query-clause-source source sources clause-value)]
+    (when (not source-clause-ok)
+      (return 0 false source-clause-error))
+    (when (= clause-source.kind .Relation-Value)
+      (if (= clause-source.relation-value^.kind .Vector)
+        (return (count clause-source.relation-value^.items) true "")
+        (return 0 true "")))
+    (let [[scan scan-ok scan-error] (db-read-source-clause-index-scan clause-source source-clause binding)]
+      (when (not scan-ok)
+        (delete-clause-index-scan scan)
+        (return 0 false scan-error))
+      (let [out (- scan.high scan.index)]
+        (delete-clause-index-scan scan)
+        (return out true "")))))
+
+(defn best-ready-db-read-source-rule-body-step-index-indexed [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, rule-index: []Rule-Name-Index-Entry, rule: Rule, steps: []Query-Step, binding: Binding] -> [index: int, ok: bool, error: string]
+  (let [best -1
+        best-score 0
+        best-unlocked-predicate-score -1
+        best-count -1]
+    (for [step step-index steps]
+      (let [ready false
+            score 0
+            unlocked-predicate-score -1
+            candidate-count -1]
+        (cond
+          (= step.kind .Clause)
+            (do
+              (set! ready true)
+              (set! score (clause-selectivity-score rule.clauses[step.index] binding))
+              (set! unlocked-predicate-score (best-rule-predicate-score-unlocked-by-clause rule steps binding rule.clauses[step.index]))
+              (let [[count-value count-ok count-error] (db-read-source-clause-candidate-count-estimate source sources rule.clauses[step.index] binding)]
+                (when (not count-ok)
+                  (return 0 false count-error))
+                (set! candidate-count count-value)))
+          (= step.kind .Predicate)
+            (let [available (binding-available-vars binding) :defer
+                  predicate rule.predicates[step.index]]
+              (when (predicate-ready-with-vars? predicate (slice available 0))
+                (set! ready true)
+                (set! score (predicate-selectivity-score predicate))
+                (set! candidate-count 0)))
+          (= step.kind .RuleCall)
+            (let [call rule.rule-calls[step.index]]
+              (when (rule-call-ready-for-binding-indexed? rules rule-index call binding)
+                (set! ready true)
+                (set! score (rule-call-selectivity-score call binding))
+                (set! candidate-count 0))))
+        (when ready
+          (when (or (= best -1)
+                    (< score best-score))
+            (set! best step-index)
+            (set! best-score score)
+            (set! best-unlocked-predicate-score unlocked-predicate-score)
+            (set! best-count candidate-count))
+          (when (and (not (= best step-index))
+                     (= score best-score)
+                     (>= unlocked-predicate-score 0)
+                     (or (< best-unlocked-predicate-score 0)
+                         (< unlocked-predicate-score best-unlocked-predicate-score)))
+            (set! best step-index)
+            (set! best-unlocked-predicate-score unlocked-predicate-score)
+            (set! best-count candidate-count))
+          (when (and (not (= best step-index))
+                     (= score best-score)
+                     (= unlocked-predicate-score best-unlocked-predicate-score))
+            (when (or (< best-count 0)
+                      (< candidate-count best-count))
+              (set! best step-index)
+              (set! best-unlocked-predicate-score unlocked-predicate-score)
+              (set! best-count candidate-count))))))
+    (return best (>= best 0) "")))
+
+(defn db-read-source-bindings-after-rule-call-typed-batch-depth [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, call: Rule-Call, bindings: []Binding, depth: int] -> [out-bindings: [dynamic]Binding, handled: bool]
+  (when (= (count bindings) 0)
+    (return (make [dynamic]Binding) true))
+  (let [rel (query-relation-from-bindings bindings)
+        stats (query-stats-empty)]
+    (defer (delete-query-relation rel))
+    (when (not rel.has-typed-columns)
+      (return (make [dynamic]Binding) false))
+    (let [[next-rel next-ok] (db-read-source-query-relation-apply-rule-call-typed-depth source sources rules rel call ([]Native-Query-Fn []) (addr stats) depth)]
+      (when (not next-ok)
+        (delete-query-relation next-rel)
+        (return (make [dynamic]Binding) false))
+      (let [out (query-relation-materialized-bindings next-rel)]
+        (delete-query-relation next-rel)
+        (return out true)))))
+
+(defn db-read-source-bindings-after-rule-body-planned-clause-call-with-sources-depth [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, rule: Rule, initial: Binding, depth: int] -> [out-bindings: [dynamic]Binding, ok: bool, error: string]
+  (let [bindings (make [dynamic]Binding)
+        remaining (arr.into [dynamic]Query-Step (slice rule.body-steps 0))
+        rule-index (rule-name-index-build rules)]
+    (defer (delete remaining))
+    (defer (delete-rule-name-index rule-index))
+    (when (< depth 0)
+      (db-read-source-delete-binding-owned initial)
+      (return bindings true ""))
+    (arr.push! bindings initial)
+    (while (and (> (count bindings) 0)
+                (> (count remaining) 0))
+      (let [[step-index step-ok step-error] (best-ready-db-read-source-rule-body-step-index-indexed source sources rules (slice rule-index 0) rule (slice remaining 0) bindings[0])]
+        (when (not step-ok)
+          (db-read-source-delete-bindings-owned bindings)
+          (return (make [dynamic]Binding) false step-error))
+        (let [step remaining[step-index]]
+          (cond
+            (= step.kind .Clause)
+              (let [clause-value rule.clauses[step.index]
+                    [clause-source source-clause source-clause-ok source-clause-error] (db-read-source-query-clause-source source sources clause-value)]
+                (when (not source-clause-ok)
+                  (db-read-source-delete-bindings-owned bindings)
+                  (return (make [dynamic]Binding) false source-clause-error))
+                (let [[next next-ok next-error] (db-read-source-bindings-after-clause clause-source (slice bindings 0) source-clause)]
+                  (db-read-source-delete-bindings-owned bindings)
+                  (when (not next-ok)
+                    (return (make [dynamic]Binding) false next-error))
+                  (set! bindings next)))
+            (= step.kind .RuleCall)
+              (let [[batched batched-handled] (db-read-source-bindings-after-rule-call-typed-batch-depth source sources rules rule.rule-calls[step.index] (slice bindings 0) (- depth 1))]
+                (if batched-handled
+                  (do
+                    (db-read-source-delete-bindings-owned bindings)
+                    (set! bindings batched))
+                  (do
+                    (delete batched)
+                    (let [next (make [dynamic]Binding)]
+                      (for [binding bindings]
+                        (let [[rule-bindings rule-ok rule-error] (db-read-source-bindings-after-rule-call-with-sources-depth source sources rules rule.rule-calls[step.index] binding (- depth 1))]
+                          (when (not rule-ok)
+                            (db-read-source-delete-bindings-owned next)
+                            (db-read-source-delete-bindings-owned bindings)
+                            (return (make [dynamic]Binding) false rule-error))
+                          (for [rule-binding rule-bindings]
+                            (arr.push! next rule-binding))
+                          (delete rule-bindings)))
+                      (db-read-source-delete-bindings-owned bindings)
+                      (let [unique (unique-bindings (slice next 0))]
+                        (delete next)
+                        (set! bindings unique))))))
+            (= step.kind .Predicate)
+              (let [next (db-read-source-bindings-after-predicate (slice bindings 0) rule.predicates[step.index])]
+                (db-read-source-delete-bindings-owned bindings)
+                (set! bindings next))
+            :else
+              (do
+                (db-read-source-delete-bindings-owned bindings)
+                (return (make [dynamic]Binding) false "DB snapshot source planned rule bodies support data clauses, predicates, and recursive rule-call body steps only"))))
+          (arr.remove-ordered-at! remaining step-index)))
+    (return bindings true "")))
+
+(defn db-read-source-bindings-after-rule-body-with-sources [source: DB-Read-Source, sources: []DB-Read-Named-Source, rule: Rule, initial: Binding] -> [out-bindings: [dynamic]Binding, ok: bool, error: string]
+  (db-read-source-bindings-after-rule-body-with-sources-depth source sources ([]Rule [rule]) rule initial 20))
+
+(defn db-read-source-bindings-after-rule-call-with-sources-depth [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, call: Rule-Call, binding: Binding, depth: int] -> [out-bindings: [dynamic]Binding, ok: bool, error: string]
+  (let [out (make [dynamic]Binding)
+        matched false]
+    (when (< depth 0)
+      (return out true ""))
+    (let [[call-source local-call source-ok] (db-read-source-resolve-rule-call-source source sources call)]
+      (when (not source-ok)
+        (return out false (fmt.tprintf "DB read source is not bound: %s" call.source)))
+    (for [rule rules]
+      (when (= rule.name local-call.name)
+        (set! matched true)
+        (let [[initial initial-ok] (db-read-source-bind-rule-args binding local-call rule)]
+          (if initial-ok
+            (let [[body-bindings body-ok body-error] (db-read-source-bindings-after-rule-body-with-sources-depth call-source sources rules rule initial depth)]
+              (when (not body-ok)
+                (db-read-source-delete-bindings-owned out)
+                (return (make [dynamic]Binding) false body-error))
+              (for [body-binding body-bindings]
+                (let [[merged merged-ok] (db-read-source-merge-rule-output-owned binding local-call rule body-binding)]
+                  (when merged-ok
+                    (arr.push! out merged))))
+              (db-read-source-delete-bindings-owned body-bindings))
+            (db-read-source-delete-binding-owned initial)))))
+    (if matched
+      (return out true "")
+      (return out false (fmt.tprintf "Unknown rule: %s" local-call.name))))))
+
+(defn db-read-source-bindings-after-rule-call-with-sources [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, call: Rule-Call, binding: Binding] -> [out-bindings: [dynamic]Binding, ok: bool, error: string]
+  (db-read-source-bindings-after-rule-call-with-sources-depth source sources rules call binding 20))
+
+(defn db-read-source-has-relation-value-source? [sources: []DB-Read-Named-Source] -> bool
+  (for [candidate sources]
+    (when (= candidate.source.kind .Relation-Value)
+      (return true)))
+  false)
+
+(defn db-read-source-relation-value-source-for-clause [sources: []DB-Read-Named-Source, clause-value: Clause] -> [value: ^Value, ok: bool]
+  (when (not clause-value.has-source)
+    (return nil false))
+  (for [candidate sources]
+    (when (= candidate.name clause-value.source)
+      (return candidate.source.relation-value (= candidate.source.kind .Relation-Value))))
+  (return nil false))
+
+(defn db-read-source-primary-source? [has-source: bool, source: string] -> bool
+  (or (not has-source)
+      (= source "$")))
+
+(defn db-read-source-typed-db-source-bound? [sources: []DB-Read-Named-Source, has-source: bool, source: string] -> bool
+  (when (db-read-source-primary-source? has-source source)
+    (return true))
+  (when (not (query-source-input-name? source))
+    (return false))
+  (for [candidate sources]
+    (when (= candidate.name source)
+      (return (not (= candidate.source.kind .Relation-Value)))))
+  false)
+
+(defn db-read-source-typed-clause-source-bound? [sources: []DB-Read-Named-Source, clause-value: Clause] -> bool
+  (when (db-read-source-primary-source? clause-value.has-source clause-value.source)
+    (return true))
+  (when (not (query-source-input-name? clause-value.source))
+    (return false))
+  (for [candidate sources]
+    (when (= candidate.name clause-value.source)
+      (return true)))
+  false)
+
+(defn db-read-source-for-rule-call-source [primary: DB-Read-Source, sources: []DB-Read-Named-Source, source-name: string] -> [source: DB-Read-Source, ok: bool]
+  (when (not (query-source-input-name? source-name))
+    (return (DB-Read-Source {}) false))
+  (when (= source-name "$")
+    (return primary true))
+  (for [candidate sources]
+    (when (= candidate.name source-name)
+      (return candidate.source true)))
+  (return (DB-Read-Source {}) false))
+
+(defn db-read-source-relation-value-typed-not-group? [sources: []DB-Read-Named-Source, rules: []Rule, group: Not-Group, registry: []Native-Query-Fn] -> bool
+  (when (> (count group.not-groups) 0)
+    (return false))
+  (when (not (source-rule-calls-typed-eligible? rules (slice group.rule-calls 0) registry))
+    (return false))
+  (for [step group.steps]
+    (cond
+      (= step.kind .Clause)
+        (when (not (db-read-source-typed-clause-source-bound? sources group.clauses[step.index]))
+          (return false))
+      (= step.kind .Predicate) (discard step)
+      (= step.kind .Function) (discard step)
+      (= step.kind .Ground) (discard step)
+      (= step.kind .GetElse)
+        (when (not (db-read-source-typed-db-source-bound? sources group.get-elses[step.index].has-source group.get-elses[step.index].source))
+          (return false))
+      (= step.kind .GetSome)
+        (when (not (db-read-source-typed-db-source-bound? sources group.get-somes[step.index].has-source group.get-somes[step.index].source))
+          (return false))
+      (= step.kind .RuleCall) (discard step)
+      :else (return false)))
+  true)
+
+(defn db-read-source-relation-value-typed-or-group? [sources: []DB-Read-Named-Source, rules: []Rule, group: Or-Group, registry: []Native-Query-Fn] -> bool
+  (when (= (count group.branches) 0)
+    (return false))
+  (for [branch group.branches]
+    (when (not (db-read-source-relation-value-typed-not-group? sources rules branch registry))
+      (return false)))
+  true)
