@@ -1,0 +1,303 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn delete-owned-strings-array [values: [dynamic]string]
+  (for [value values]
+    (delete value))
+  (delete values))
+
+(defn delete-owned-strings-array-with-moved [values: [dynamic]string, moved: [dynamic]bool]
+  (for [value index values]
+    (when (or (>= index (count moved))
+              (not moved[index]))
+      (delete value)))
+  (delete values)
+  (delete moved))
+
+(defn sqlite-direct-frontier-datoms [handle: rawptr, order-text: string, entities: []u64, attr: string] -> [datoms: [dynamic]Datom, ok: bool, error: string]
+  (let [[loaded-entities value-texts value-entities txs added loaded-ok loaded-error] (vev.sqlite-direct-frontier-datom-parts-raw handle order-text entities attr)
+        datoms (make [dynamic]Datom 0 (count loaded-entities))]
+    (defer (delete loaded-entities))
+    (defer (delete value-entities))
+    (defer (delete-owned-strings-array value-texts))
+    (defer (delete txs))
+    (defer (delete added))
+    (when (not loaded-ok)
+      (delete-owned-datoms datoms)
+      (return (make [dynamic]Datom) false loaded-error))
+    (for [_ index loaded-entities]
+      (when (or (>= index (count value-texts))
+                (>= index (count value-entities))
+                (>= index (count txs))
+                (>= index (count added)))
+        (delete-owned-datoms datoms)
+        (return (make [dynamic]Datom) false "sqlite direct frontier datom parts were uneven"))
+      (let [value (Value {})
+            value-ok false
+            value-error ""]
+        (if (>= value-entities[index] 0)
+          (do
+            (set! value (value-entity (u64 value-entities[index])))
+            (set! value-ok true))
+          (let [[parsed parsed-ok parsed-error] (value-from-owned-serial-text value-texts[index])]
+            (set! value parsed)
+            (set! value-ok parsed-ok)
+            (set! value-error parsed-error)))
+        (when (not value-ok)
+          (delete-owned-datoms datoms)
+          (return (make [dynamic]Datom) false value-error))
+        (arr.push! datoms (Datom {e: loaded-entities[index]
+                                  a: (string-owned attr)
+                                  v: value
+                                  tx: txs[index]
+                                  added: added[index]}))))
+    (return datoms true "")))
+
+(defn sqlite-direct-same-entity-ref-fanout-values [handle: rawptr, name-attr: string, edge-attr: string, wanted-values: []Value] -> [left: [dynamic]Value, right: [dynamic]Value, ok: bool, error: string]
+  (let [serialized-values (make [dynamic]string 0 (count wanted-values))]
+    (defer (delete-owned-strings-array serialized-values))
+    (for [value wanted-values]
+      (arr.push! serialized-values (value-serializable-text value)))
+    (let [[left-texts right-texts loaded-ok loaded-error] (vev.sqlite-direct-same-entity-ref-fanout-parts-raw handle name-attr edge-attr (slice serialized-values 0))
+          left-values (make [dynamic]Value 0 (count left-texts))
+          right-values (make [dynamic]Value 0 (count right-texts))]
+      (defer (delete-owned-strings-array left-texts))
+      (defer (delete-owned-strings-array right-texts))
+      (when (not loaded-ok)
+        (delete-owned-values-array left-values)
+        (delete-owned-values-array right-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false loaded-error))
+      (when (not (= (count left-texts) (count right-texts)))
+        (delete-owned-values-array left-values)
+        (delete-owned-values-array right-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false "sqlite same-entity ref fanout columns were uneven"))
+      (for [left-text index left-texts]
+        (let [[left-value left-ok left-error] (value-from-owned-serial-text left-text)]
+          (when (not left-ok)
+            (delete-owned-values-array left-values)
+            (delete-owned-values-array right-values)
+            (return (make [dynamic]Value) (make [dynamic]Value) false left-error))
+          (let [[right-value right-ok right-error] (value-from-owned-serial-text right-texts[index])]
+            (when (not right-ok)
+              (delete-owned-value left-value)
+              (delete-owned-values-array left-values)
+              (delete-owned-values-array right-values)
+              (return (make [dynamic]Value) (make [dynamic]Value) false right-error))
+            (arr.push! left-values left-value)
+            (arr.push! right-values right-value))))
+      (return left-values right-values true ""))))
+
+(defn sqlite-direct-same-value-collaborator-values [handle: rawptr, anchor-name-attr: string, edge-attr: string, shared-value-attr: string, output-name-attr: string, anchor-value: Value, excluded-values: []Value] -> [output-values: [dynamic]Value, shared-values: [dynamic]Value, ok: bool, error: string]
+  (let [serialized-anchor (value-serializable-text anchor-value) :defer
+        serialized-excluded (make [dynamic]string 0 (count excluded-values))]
+    (defer (delete-owned-strings-array serialized-excluded))
+    (for [value excluded-values]
+      (arr.push! serialized-excluded (value-serializable-text value)))
+    (let [[output-texts shared-texts loaded-ok loaded-error]
+          (vev.sqlite-direct-same-value-collaborator-parts-raw handle anchor-name-attr edge-attr shared-value-attr output-name-attr serialized-anchor (slice serialized-excluded 0))
+          parsed-output-values (make [dynamic]Value 0 (count output-texts))
+          parsed-shared-values (make [dynamic]Value 0 (count shared-texts))]
+      (defer (delete-owned-strings-array output-texts))
+      (defer (delete-owned-strings-array shared-texts))
+      (when (not loaded-ok)
+        (delete-owned-values-array parsed-output-values)
+        (delete-owned-values-array parsed-shared-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false loaded-error))
+      (when (not (= (count output-texts) (count shared-texts)))
+        (delete-owned-values-array parsed-output-values)
+        (delete-owned-values-array parsed-shared-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false "sqlite same-value collaborator columns were uneven"))
+      (for [output-text index output-texts]
+        (let [[output-value output-ok output-error] (value-from-owned-serial-text output-text)]
+          (when (not output-ok)
+            (delete-owned-values-array parsed-output-values)
+            (delete-owned-values-array parsed-shared-values)
+            (return (make [dynamic]Value) (make [dynamic]Value) false output-error))
+          (let [[shared-value shared-ok shared-error] (value-from-owned-serial-text shared-texts[index])]
+            (when (not shared-ok)
+              (delete-owned-value output-value)
+              (delete-owned-values-array parsed-output-values)
+              (delete-owned-values-array parsed-shared-values)
+              (return (make [dynamic]Value) (make [dynamic]Value) false shared-error))
+            (arr.push! parsed-output-values output-value)
+            (arr.push! parsed-shared-values shared-value))))
+      (return parsed-output-values parsed-shared-values true ""))))
+
+(defn sqlite-direct-collab-net-two-values [handle: rawptr, anchor-name-attr: string, output-name-attr: string, edge-attr: string, input-names: []Value] -> [input-values: [dynamic]Value, output-values: [dynamic]Value, ok: bool, error: string]
+  (let [serialized-inputs (make [dynamic]string 0 (count input-names))]
+    (defer (delete-owned-strings-array serialized-inputs))
+    (for [value input-names]
+      (arr.push! serialized-inputs (value-serializable-text value)))
+    (let [[input-texts output-texts loaded-ok loaded-error]
+          (vev.sqlite-direct-collab-net-two-parts-raw handle anchor-name-attr output-name-attr edge-attr (slice serialized-inputs 0))
+          parsed-input-values (make [dynamic]Value 0 (count input-texts))
+          parsed-output-values (make [dynamic]Value 0 (count output-texts))]
+      (defer (delete-owned-strings-array input-texts))
+      (defer (delete-owned-strings-array output-texts))
+      (when (not loaded-ok)
+        (delete-owned-values-array parsed-input-values)
+        (delete-owned-values-array parsed-output-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false loaded-error))
+      (when (not (= (count input-texts) (count output-texts)))
+        (delete-owned-values-array parsed-input-values)
+        (delete-owned-values-array parsed-output-values)
+        (return (make [dynamic]Value) (make [dynamic]Value) false "sqlite collaboration depth-2 columns were uneven"))
+      (for [input-text index input-texts]
+        (let [[input-value input-ok input-error] (value-from-owned-serial-text input-text)]
+          (when (not input-ok)
+            (delete-owned-values-array parsed-input-values)
+            (delete-owned-values-array parsed-output-values)
+            (return (make [dynamic]Value) (make [dynamic]Value) false input-error))
+          (let [[output-value output-ok output-error] (value-from-owned-serial-text output-texts[index])]
+            (when (not output-ok)
+              (delete-owned-value input-value)
+              (delete-owned-values-array parsed-input-values)
+              (delete-owned-values-array parsed-output-values)
+              (return (make [dynamic]Value) (make [dynamic]Value) false output-error))
+            (arr.push! parsed-input-values input-value)
+            (arr.push! parsed-output-values output-value))))
+      (return parsed-input-values parsed-output-values true ""))))
+
+(defn sqlite-direct-input-ref-values [handle: rawptr, anchor-attr: string, anchor-value: Value, ref-attr: string, output-attr: string] -> [values: [dynamic]Value, ok: bool, error: string]
+  (let [serialized-anchor (value-serializable-text anchor-value) :defer
+        [output-texts loaded-ok loaded-error] (vev.sqlite-direct-input-ref-value-parts-raw handle anchor-attr serialized-anchor ref-attr output-attr)
+        parsed-values (make [dynamic]Value 0 (count output-texts))]
+    (defer (delete-owned-strings-array output-texts))
+    (when (not loaded-ok)
+      (delete-owned-values-array parsed-values)
+      (return (make [dynamic]Value) false loaded-error))
+    (for [output-text output-texts]
+      (let [[output-value output-ok output-error] (value-from-owned-serial-text output-text)]
+        (when (not output-ok)
+          (delete-owned-values-array parsed-values)
+          (return (make [dynamic]Value) false output-error))
+        (arr.push! parsed-values output-value)))
+    (return parsed-values true "")))
+
+(defn sqlite-direct-track-release-values [handle: rawptr, artist-name-attr: string, artist-name: Value, track-artist-attr: string, track-name-attr: string, medium-track-attr: string, release-media-attr: string, release-name-attr: string, release-year-attr: string] -> [values: [dynamic]Value, ok: bool, error: string]
+  (let [serialized-name (value-serializable-text artist-name) :defer
+        [title-texts album-texts year-texts loaded-ok loaded-error]
+        (vev.sqlite-direct-track-release-parts-raw handle artist-name-attr serialized-name track-artist-attr track-name-attr medium-track-attr release-media-attr release-name-attr release-year-attr)
+        parsed-values (make [dynamic]Value 0 (* (count title-texts) 3))]
+    (defer (delete-owned-strings-array title-texts))
+    (defer (delete-owned-strings-array album-texts))
+    (defer (delete-owned-strings-array year-texts))
+    (when (not loaded-ok)
+      (delete-owned-values-array parsed-values)
+      (return (make [dynamic]Value) false loaded-error))
+    (when (not (and (= (count title-texts) (count album-texts))
+                    (= (count title-texts) (count year-texts))))
+      (delete-owned-values-array parsed-values)
+      (return (make [dynamic]Value) false "sqlite track-release columns were uneven"))
+    (for [title-text index title-texts]
+      (let [[title title-ok title-error] (value-from-owned-serial-text title-text)
+            [album album-ok album-error] (value-from-owned-serial-text album-texts[index])
+            [year year-ok year-error] (value-from-owned-serial-text year-texts[index])]
+        (when (not (and title-ok album-ok year-ok))
+          (when title-ok (delete-owned-value title))
+          (when album-ok (delete-owned-value album))
+          (when year-ok (delete-owned-value year))
+          (delete-owned-values-array parsed-values)
+          (return (make [dynamic]Value)
+                  false
+                  (cond
+                    (not title-ok) title-error
+                    (not album-ok) album-error
+                    :else year-error)))
+        (arr.push! parsed-values title)
+        (arr.push! parsed-values album)
+        (arr.push! parsed-values year)))
+    (return parsed-values true "")))
+
+(defn sqlite-direct-fulltext-track-info-values [handle: rawptr, fulltext-attr: string, search: string, track-artist-attr: string, artist-name-attr: string, medium-track-attr: string, release-medium-attr: string, first-release-attr: string, second-release-attr: string] -> [values: [dynamic]Value, ok: bool, error: string]
+  (let [[title-texts artist-texts first-release-texts second-release-texts loaded-ok loaded-error]
+        (vev.sqlite-direct-fulltext-track-info-parts-raw handle
+                                                     fulltext-attr
+                                                     search
+                                                     track-artist-attr
+                                                     artist-name-attr
+                                                     medium-track-attr
+                                                     release-medium-attr
+                                                     first-release-attr
+                                                     second-release-attr)
+        parsed-values (make [dynamic]Value 0 (* (count title-texts) 4))]
+    (defer (delete-owned-strings-array title-texts))
+    (defer (delete-owned-strings-array artist-texts))
+    (defer (delete-owned-strings-array first-release-texts))
+    (defer (delete-owned-strings-array second-release-texts))
+    (when (not loaded-ok)
+      (delete-owned-values-array parsed-values)
+      (return (make [dynamic]Value) false loaded-error))
+    (when (not (and (= (count title-texts) (count artist-texts))
+                    (= (count title-texts) (count first-release-texts))
+                    (= (count title-texts) (count second-release-texts))))
+      (delete-owned-values-array parsed-values)
+      (return (make [dynamic]Value) false "sqlite fulltext track info columns were uneven"))
+    (for [title-text index title-texts]
+      (let [[title title-ok title-error] (value-from-owned-serial-text title-text)
+            [artist artist-ok artist-error] (value-from-owned-serial-text artist-texts[index])
+            [first-release first-release-ok first-release-error] (value-from-owned-serial-text first-release-texts[index])
+            [second-release second-release-ok second-release-error] (value-from-owned-serial-text second-release-texts[index])]
+        (when (not (and title-ok artist-ok first-release-ok second-release-ok))
+          (when title-ok (delete-owned-value title))
+          (when artist-ok (delete-owned-value artist))
+          (when first-release-ok (delete-owned-value first-release))
+          (when second-release-ok (delete-owned-value second-release))
+          (delete-owned-values-array parsed-values)
+          (return (make [dynamic]Value)
+                  false
+                  (cond
+                    (not title-ok) title-error
+                    (not artist-ok) artist-error
+                    (not first-release-ok) first-release-error
+                    :else second-release-error)))
+        (arr.push! parsed-values title)
+        (arr.push! parsed-values artist)
+        (arr.push! parsed-values first-release)
+        (arr.push! parsed-values second-release)))
+    (return parsed-values true "")))
+
+(defn sqlite-direct-eavt-entity-attrs-datoms [handle: rawptr, entities: []u64, attrs: []string] -> [datoms: [dynamic]Datom, ok: bool, error: string]
+  (let [[loaded-entities loaded-attrs value-texts value-entities txs added loaded-ok loaded-error] (vev.sqlite-direct-eavt-entity-attrs-datom-parts-raw handle entities attrs)
+        datoms (make [dynamic]Datom 0 (count loaded-entities))]
+    (defer (delete loaded-entities))
+    (defer (delete value-entities))
+    (defer (delete-owned-strings-array value-texts))
+    (defer (delete txs))
+    (defer (delete added))
+    (let [moved-attrs (arr.repeat (count loaded-attrs) false)]
+      (defer (delete-owned-strings-array-with-moved loaded-attrs moved-attrs))
+      (when (not loaded-ok)
+        (delete-owned-datoms datoms)
+        (return (make [dynamic]Datom) false loaded-error))
+      (for [_ index loaded-entities]
+        (when (or (>= index (count loaded-attrs))
+                  (>= index (count value-texts))
+                  (>= index (count value-entities))
+                  (>= index (count txs))
+                  (>= index (count added)))
+          (delete-owned-datoms datoms)
+          (return (make [dynamic]Datom) false "sqlite direct EAVT entity attrs datom parts were uneven"))
+        (let [value (Value {})
+              value-ok false
+              value-error ""]
+          (if (>= value-entities[index] 0)
+            (do
+              (set! value (value-entity (u64 value-entities[index])))
+              (set! value-ok true))
+            (let [[parsed parsed-ok parsed-error] (value-from-owned-serial-text value-texts[index])]
+              (set! value parsed)
+              (set! value-ok parsed-ok)
+              (set! value-error parsed-error)))
+          (when (not value-ok)
+            (delete-owned-datoms datoms)
+            (return (make [dynamic]Datom) false value-error))
+          (set! moved-attrs[index] true)
+          (arr.push! datoms (Datom {e: loaded-entities[index]
+                                    a: loaded-attrs[index]
+                                    v: value
+                                    tx: txs[index]
+                                    added: added[index]}))))
+      (return datoms true ""))))
