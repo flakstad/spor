@@ -16354,14 +16354,14 @@
 (defn db-read-source-begin-query-read [source: DB-Read-Source] -> [started: bool, ok: bool, error: string]
   (let [[handle has-handle] (db-read-source-sqlite-handle source)]
     (if has-handle
-      (sqlite-begin-query-read-raw handle)
+      (vev.sqlite-begin-query-read-raw handle)
       (return false true ""))))
 
 (defn db-read-source-end-query-read [source: DB-Read-Source, started: bool]
   (when started
     (let [[handle has-handle] (db-read-source-sqlite-handle source)]
       (when has-handle
-        (sqlite-end-query-read-raw handle true)))))
+        (vev.sqlite-end-query-read-raw handle true)))))
 
 (defn db-read-source-q-query-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
   (let [[parser-ok parser-error] (validate-query-parser-vars query-value)]
@@ -40444,7 +40444,7 @@
   (when (not (or (= order .EAVT)
                  (= order .VAET)))
     (return (Source-Index-Datom-Stream {}) true false 0 ""))
-  (let [[latest-basis latest-ok latest-error] (sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
     (when (not latest-ok)
       (return (Source-Index-Datom-Stream {}) false true 0 latest-error))
     (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
@@ -40472,7 +40472,7 @@
             (not (= source.kind .SQLite-Snapshot))
             source.sqlite-snapshot^.has-retractions)
     (return (make [dynamic]Value) (make [dynamic]Value) true false ""))
-  (let [[latest-basis latest-ok latest-error] (sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
     (when (not latest-ok)
       (return (make [dynamic]Value) (make [dynamic]Value) false true latest-error))
     (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
@@ -40484,7 +40484,7 @@
   (when (or (not (= source.kind .SQLite-Snapshot))
             source.sqlite-snapshot^.has-retractions)
     (return (make [dynamic]Value) (make [dynamic]Value) true false ""))
-  (let [[latest-basis latest-ok latest-error] (sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
     (when (not latest-ok)
       (return (make [dynamic]Value) (make [dynamic]Value) false true latest-error))
     (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
@@ -40503,7 +40503,7 @@
   (when (or (not (= source.kind .SQLite-Snapshot))
             source.sqlite-snapshot^.has-retractions)
     (return (make [dynamic]Value) true false ""))
-  (let [[latest-basis latest-ok latest-error] (sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
     (when (not latest-ok)
       (return (make [dynamic]Value) false true latest-error))
     (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
@@ -40525,7 +40525,7 @@
             (not (= source.kind .SQLite-Snapshot))
             source.sqlite-snapshot^.has-retractions)
     (return (make [dynamic]Value) (make [dynamic]Value) true false ""))
-  (let [[latest-basis latest-ok latest-error] (sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
     (when (not latest-ok)
       (return (make [dynamic]Value) (make [dynamic]Value) false true latest-error))
     (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
@@ -40542,7 +40542,7 @@
   (when (or (not (= source.kind .SQLite-Snapshot))
             source.sqlite-snapshot^.has-retractions)
     (return (make [dynamic]Value) true false ""))
-  (let [[latest-basis latest-ok latest-error] (sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
     (when (not latest-ok)
       (return (make [dynamic]Value) false true latest-error))
     (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
@@ -40559,7 +40559,7 @@
   (when (or (not (= source.kind .SQLite-Snapshot))
             source.sqlite-snapshot^.has-retractions)
     (return (make [dynamic]Value) true false ""))
-  (let [[latest-basis latest-ok latest-error] (sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
     (when (not latest-ok)
       (return (make [dynamic]Value) false true latest-error))
     (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
@@ -40985,7 +40985,7 @@
   (when (or (not (= source.kind .SQLite-Snapshot))
             source.sqlite-snapshot^.has-retractions)
     (return (make [dynamic]Datom) true false 0 0 ""))
-  (let [[latest-basis latest-ok latest-error] (sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
     (when (not latest-ok)
       (return (make [dynamic]Datom) false true 0 0 latest-error))
     (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
@@ -41301,7 +41301,7 @@
 (defn sqlite-index-root-overlaps-values? [cursor: ^SQLite-Index-Cursor, root-id: u64, order-text: string, values: []Value] -> [overlaps: bool, ok: bool, error: string]
   (when (= (count values) 0)
     (return true true ""))
-  (let [[first-bound last-bound bounds-ok bounds-error] (sqlite-index-chunk-bounds-by-id-raw cursor^.handle root-id)]
+  (let [[first-bound last-bound bounds-ok bounds-error] (vev.sqlite-index-chunk-bounds-by-id-raw cursor^.handle root-id)]
     (when (not bounds-ok)
       (return false false bounds-error))
     (defer (delete first-bound))
