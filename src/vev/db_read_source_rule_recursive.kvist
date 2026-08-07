@@ -1,0 +1,1184 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn source-positive-recursive-rule-naive-eligible? [rule: Rule] -> bool
+  (when (= (count rule.body-steps) 0)
+    (return false))
+  (for [step rule.body-steps]
+    (cond
+      (= step.kind .Clause) (discard step)
+      (= step.kind .RuleCall)
+        (when rule.rule-calls[step.index].has-source
+          (return false))
+      (= step.kind .Predicate) (discard step)
+      (= step.kind .Function) (discard step)
+      (= step.kind .Ground) (discard step)
+      (= step.kind .GetElse)
+        (when (not (db-read-source-primary-source? rule.get-elses[step.index].has-source rule.get-elses[step.index].source))
+          (return false))
+      (= step.kind .GetSome)
+        (when (not (db-read-source-primary-source? rule.get-somes[step.index].has-source rule.get-somes[step.index].source))
+          (return false))
+      (= step.kind .Or)
+        (when (not (source-positive-recursive-or-group-eligible? rule.or-groups[step.index]))
+          (return false))
+      (= step.kind .Not)
+        (when (not (source-recursive-negative-filter-group-eligible? rule.not-groups[step.index]))
+          (return false))
+      :else
+        (return false)))
+  true)
+
+(defn source-positive-rule-memo-plan-eligible? [plan: Rule-Call-Plan, call: Rule-Call] -> bool
+  (when (or call.has-source
+            (not plan.recursive))
+    (return false))
+  (for [rule plan.rules]
+    (when (not (source-positive-recursive-rule-eligible? rule))
+      (return false)))
+  true)
+
+(defn source-positive-rule-delta-plan-eligible? [plan: Rule-Call-Plan, call: Rule-Call] -> bool
+  (when (not (source-positive-rule-memo-plan-eligible? plan call))
+    (return false))
+  (let [recursive-names (recursive-component-names-for-rule (slice plan.rules 0) call.name)]
+    (defer (delete recursive-names))
+    (when (= (count recursive-names) 0)
+      (return false))
+    (for [rule plan.rules]
+      (when (not (string-slice-contains? (slice recursive-names 0) rule.name))
+        (return false))
+      (for [rule-call rule.rule-calls]
+        (when (not (string-slice-contains? (slice recursive-names 0) rule-call.name))
+          (return false)))))
+  true)
+
+(defn source-positive-rule-naive-plan-eligible? [plan: Rule-Call-Plan, call: Rule-Call] -> bool
+  (when (or call.has-source
+            (not plan.recursive))
+    (return false))
+  (let [recursive-names (recursive-component-names-for-rule (slice plan.rules 0) call.name)]
+    (defer (delete recursive-names))
+    (when (= (count recursive-names) 0)
+      (return false))
+    (for [rule plan.rules]
+      (when (not (string-slice-contains? (slice recursive-names 0) rule.name))
+        (return false))
+      (when (not (source-positive-recursive-rule-naive-eligible? rule))
+        (return false))
+      (for [rule-call rule.rule-calls]
+        (when (not (string-slice-contains? (slice recursive-names 0) rule-call.name))
+          (return false)))
+      (for [og rule.or-groups]
+        (for [br og.branches]
+          (for [rc br.rule-calls]
+            (when (not (string-slice-contains? (slice recursive-names 0) rc.name))
+              (return false)))))))
+  true)
+
+(defn db-read-source-query-relation-apply-or-branch-memo [source: DB-Read-Source, sources: []DB-Read-Named-Source, memo: ^[dynamic]Rule-Memo-Entry, rel: Query-Relation, row: int, group: Or-Group, branch: Not-Group, registry: []Native-Query-Fn, stats: ^Query-Stats, use-delta: bool, delta-call-index: int] -> [out: Query-Relation, ok: bool]
+  (let [current (query-relation-empty)
+        current-ok false]
+    (if group.has-join
+      (let [[projected projected-ok] (query-relation-single-typed-row-projected rel row (slice group.join-vars 0))]
+        (set! current projected)
+        (set! current-ok projected-ok))
+      (let [[single single-ok] (query-relation-single-typed-row rel row)]
+        (set! current single)
+        (set! current-ok single-ok)))
+    (when (not current-ok)
+      (delete-query-relation current)
+      (return (query-relation-empty) false))
+    (for [step branch.steps]
+      (let [next (query-relation-empty)
+            next-ok false]
+        (cond
+          (= step.kind .RuleCall)
+            (do
+              (set! stats^.rule-calls (+ stats^.rule-calls 1))
+              (set! next (query-relation-after-rule-call-from-memo (DB {}) memo current branch.rule-calls[step.index] use-delta delta-call-index step.index))
+              (set! next-ok true))
+          (or (= step.kind .Clause)
+              (= step.kind .Predicate)
+              (= step.kind .Function)
+              (= step.kind .Ground)
+              (= step.kind .GetElse)
+              (= step.kind .GetSome))
+            (let [[typed-next typed-ok]
+                    (db-read-source-query-relation-apply-typed-step
+                      source
+                      sources
+                      current
+                      step
+                      (slice branch.clauses 0)
+                      (slice branch.predicates 0)
+                      (slice branch.function-clauses 0)
+                      (slice branch.grounds 0)
+                      (slice branch.get-elses 0)
+                      (slice branch.get-somes 0)
+                      (slice branch.not-groups 0)
+                      ([]Or-Group [])
+                      ([]Rule [])
+                      ([]Rule-Call [])
+                      registry
+                      stats)]
+              (set! next typed-next)
+              (set! next-ok typed-ok))
+          :else
+            (discard step))
+        (delete-query-relation current)
+        (when (not next-ok)
+          (delete-query-relation next)
+          (return (query-relation-empty) false))
+        (set! current next)))
+    (return current true)))
+
+(defn db-read-source-query-relation-apply-or-group-memo [source: DB-Read-Source, sources: []DB-Read-Named-Source, memo: ^[dynamic]Rule-Memo-Entry, rel: Query-Relation, group: Or-Group, registry: []Native-Query-Fn, stats: ^Query-Stats, use-delta: bool, delta-call-index: int] -> [out: Query-Relation, ok: bool]
+  (when (not (and rel.has-typed-columns
+                  (source-positive-recursive-or-group-eligible? group)))
+    (return (query-relation-empty) false))
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        output-vars (make [dynamic]string) :defer]
+    (append-or-group-output-vars! (addr output-vars) group)
+    (for [name output-vars]
+      (append-var-binding-attr! (addr attrs) (addr attr-sources) name ""))
+    (let [builder (query-relation-builder (slice attrs 0))
+          row 0]
+      (while (< row rel.typed-rows)
+        (for [branch group.branches]
+          (let [[branch-rel branch-ok] (db-read-source-query-relation-apply-or-branch-memo source sources memo rel row group branch registry stats use-delta delta-call-index)]
+            (when (not branch-ok)
+              (delete-query-relation branch-rel)
+              (delete attrs)
+              (delete attr-sources)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false))
+            (let [branch-row 0]
+              (while (< branch-row (query-relation-row-count branch-rel))
+                (when (not (query-relation-builder-add-relation-row-by-attrs! (addr builder) (slice attrs 0) branch-rel branch-row))
+                  (delete-query-relation branch-rel)
+                  (delete attrs)
+                  (delete attr-sources)
+                  (delete-query-relation-builder builder)
+                  (return (query-relation-empty) false))
+                (set! branch-row (+ branch-row 1))))
+            (delete-query-relation branch-rel)))
+        (set! row (+ row 1)))
+      (return (Query-Relation {attrs: attrs
+                               attr-sources: attr-sources
+                               attr-index: (query-relation-attr-index (slice attrs 0))
+                               tuples: builder.tuples
+                               typed-columns: builder.typed-columns
+                               typed-rows: builder.typed-rows
+                               has-typed-columns: builder.typed-ok}) true))))
+
+(defn db-read-source-query-relation-after-rule-step-memo [source: DB-Read-Source, sources: []DB-Read-Named-Source, memo: ^[dynamic]Rule-Memo-Entry, rule: Rule, rel: Query-Relation, step: Query-Step, registry: []Native-Query-Fn, stats: ^Query-Stats, use-delta: bool, delta-call-index: int] -> [out: Query-Relation, ok: bool]
+  (cond
+    (= step.kind .RuleCall)
+      (do
+        (set! stats^.rule-calls (+ stats^.rule-calls 1))
+        (let [out (query-relation-after-rule-call-from-memo (DB {}) memo rel rule.rule-calls[step.index] use-delta delta-call-index step.index)]
+          (return out true)))
+    (or (= step.kind .Clause)
+        (= step.kind .Predicate)
+        (= step.kind .Function)
+        (= step.kind .Ground)
+        (= step.kind .GetElse)
+        (= step.kind .GetSome))
+      (db-read-source-query-relation-apply-typed-step
+        source
+        sources
+        rel
+        step
+        (slice rule.clauses 0)
+        (slice rule.predicates 0)
+        (slice rule.function-clauses 0)
+        (slice rule.grounds 0)
+        (slice rule.get-elses 0)
+        (slice rule.get-somes 0)
+        (slice rule.not-groups 0)
+        (slice rule.or-groups 0)
+        ([]Rule [])
+        ([]Rule-Call [])
+        registry
+        stats)
+    (= step.kind .Or)
+      (db-read-source-query-relation-apply-or-group-memo source sources memo rel rule.or-groups[step.index] registry stats use-delta delta-call-index)
+    (= step.kind .Not)
+      (db-read-source-query-relation-apply-simple-not-group
+        source
+        sources
+        ([]Rule [])
+        rel
+        rule.not-groups[step.index]
+        registry
+        stats)
+    :else
+      (return (query-relation-empty) false)))
+
+(defn db-read-source-query-relation-after-rule-body-memo [source: DB-Read-Source, sources: []DB-Read-Named-Source, memo: ^[dynamic]Rule-Memo-Entry, rule: Rule, registry: []Native-Query-Fn, stats: ^Query-Stats, use-delta: bool, delta-call-index: int] -> Query-Relation
+  (let [current (query-relation-singleton)]
+    (for [step rule.body-steps]
+      (let [[next-raw next-ok] (db-read-source-query-relation-after-rule-step-memo source sources memo rule current step registry stats use-delta delta-call-index)]
+        (delete-query-relation current)
+        (when (not next-ok)
+          (delete-query-relation next-raw)
+          (return (query-relation-empty)))
+        (let [next (query-relation-dedupe-step next-raw)]
+          (delete-query-relation next-raw)
+          (set! current next)
+          (when (= (query-relation-row-count current) 0)
+            (return current)))))
+    current))
+
+(defn db-read-source-query-relation-from-recursive-rule-call-typed [source: DB-Read-Source, sources: []DB-Read-Named-Source, plan: Rule-Call-Plan, call: Rule-Call, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool]
+  (when (not (source-positive-rule-delta-plan-eligible? plan call))
+    (return (query-relation-empty) false))
+  (let [memo (rule-memo-build (slice plan.rules 0))]
+    (defer (delete-rule-memo memo))
+    (for [rule plan.rules]
+      (let [[_ has-call] (first-rule-call-index rule)]
+        (when (not has-call)
+          (let [rel (db-read-source-query-relation-after-rule-body-memo source sources (addr memo) rule registry stats false -1)]
+            (discard (rule-memo-append-relation-results-to-delta! (addr memo) (addr memo) rule rel))
+            (delete-query-relation rel)))))
+    (while (rule-memo-has-delta? (slice memo 0))
+      (let [next-delta (rule-memo-build (slice plan.rules 0))]
+        (for [rule plan.rules]
+          (let [delta-call-indexes (rule-call-indexes rule)]
+            (for [delta-call-index delta-call-indexes]
+              (let [rel (db-read-source-query-relation-after-rule-body-memo source sources (addr memo) rule registry stats true delta-call-index)]
+                (discard (rule-memo-append-relation-results-to-delta! (addr memo) (addr next-delta) rule rel))
+                (delete-query-relation rel)))
+            (delete delta-call-indexes)))
+        (rule-memo-replace-deltas! (addr memo) (slice next-delta 0))
+        (delete-rule-memo next-delta)))
+    (let [seed (query-relation-singleton)
+          projected (query-relation-after-rule-call-from-memo (DB {}) (addr memo) seed call false -1 -1)
+          deduped (query-relation-dedupe-step projected)]
+      (delete-query-relation seed)
+      (delete-query-relation projected)
+      (set! stats^.rule-iterations (+ stats^.rule-iterations 1))
+      (query-stats-observe-bindings! stats (query-relation-row-count deduped))
+      (return deduped deduped.has-typed-columns))))
+
+(defn db-read-source-query-relation-from-recursive-rule-call-naive-typed [source: DB-Read-Source, sources: []DB-Read-Named-Source, plan: Rule-Call-Plan, call: Rule-Call, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool]
+  (when (not (source-positive-rule-naive-plan-eligible? plan call))
+    (return (query-relation-empty) false))
+  (let [memo (rule-memo-build (slice plan.rules 0))
+        changed true]
+    (defer (delete-rule-memo memo))
+    (while changed
+      (set! changed false)
+      (let [next-delta (rule-memo-build (slice plan.rules 0))]
+        (for [rule plan.rules]
+          (let [rel (db-read-source-query-relation-after-rule-body-memo source sources (addr memo) rule registry stats false -1)]
+            (when (rule-memo-append-relation-results-to-delta! (addr memo) (addr next-delta) rule rel)
+              (set! changed true))
+            (delete-query-relation rel)))
+        (rule-memo-replace-deltas! (addr memo) (slice next-delta 0))
+        (delete-rule-memo next-delta))
+      (set! stats^.rule-iterations (+ stats^.rule-iterations 1)))
+    (let [seed (query-relation-singleton)
+          projected (query-relation-after-rule-call-from-memo (DB {}) (addr memo) seed call false -1 -1)
+          deduped (query-relation-dedupe-step projected)]
+      (delete-query-relation seed)
+      (delete-query-relation projected)
+      (query-stats-observe-bindings! stats (query-relation-row-count deduped))
+      (return deduped deduped.has-typed-columns))))
+
+(defn db-read-source-query-relation-from-rule-body-typed-depth [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, rule: Rule, registry: []Native-Query-Fn, stats: ^Query-Stats, depth: int] -> [rel: Query-Relation, ok: bool]
+  (when (< depth 0)
+    (return (query-relation-empty) false))
+  (when (not (source-rule-body-typed-eligible? rules rule registry))
+    (return (query-relation-empty) false))
+  (when (not (source-rule-body-typed-plannable? rule))
+    (let [current (query-relation-singleton)
+          step-index 0]
+      (while (< step-index (count rule.body-steps))
+        (let [step rule.body-steps[step-index]
+              next (query-relation-empty)
+              next-ok false
+              pair-used false]
+          (when (and (= step.kind .Clause)
+                     (< (+ step-index 1) (count rule.body-steps))
+                     (= rule.body-steps[(+ step-index 1)].kind .Clause))
+            (let [next-step rule.body-steps[(+ step-index 1)]
+                  [pair-rel pair-ok pair-used-value _pair-error] (db-read-source-query-relation-apply-same-bound-entity-value-pair source current rule.clauses[step.index] rule.clauses[next-step.index] stats)]
+              (when pair-used-value
+                (set! next pair-rel)
+                (set! next-ok pair-ok)
+                (set! pair-used true))
+              (when (not pair-used-value)
+                (delete-query-relation pair-rel))))
+          (when (not pair-used)
+            (let [[single-next single-ok] (db-read-source-query-relation-apply-typed-step
+                                            source
+                                            sources
+                                            current
+                                            step
+                                            (slice rule.clauses 0)
+                                            (slice rule.predicates 0)
+                                            (slice rule.function-clauses 0)
+                                            (slice rule.grounds 0)
+                                            (slice rule.get-elses 0)
+                                            (slice rule.get-somes 0)
+                                            (slice rule.not-groups 0)
+                                            (slice rule.or-groups 0)
+                                            rules
+                                            (slice rule.rule-calls 0)
+                                            registry
+                                            stats)]
+              (delete-query-relation next)
+              (set! next single-next)
+              (set! next-ok single-ok)))
+          (delete-query-relation current)
+          (when (not next-ok)
+            (delete-query-relation next)
+            (return (query-relation-empty) false))
+          (let [deduped (query-relation-dedupe-step next)]
+            (delete-query-relation next)
+            (set! current deduped))
+          (when (= (query-relation-row-count current) 0)
+            (return current true))
+          (if pair-used
+            (mut! step-index += 2)
+            (mut! step-index += 1))))
+      (return current true)))
+  (let [current (query-relation-singleton)
+        remaining (arr.into [dynamic]Query-Step (slice rule.body-steps 0))
+        rule-index (rule-name-index-build rules)]
+    (defer (delete remaining))
+    (defer (delete-rule-name-index rule-index))
+    (while (and (> (count remaining) 0)
+                (> (query-relation-row-count current) 0))
+      (let [[chosen-index chosen-ok] (best-ready-query-relation-rule-body-step-index-indexed rules (slice rule-index 0) current rule (slice remaining 0) registry)]
+        (when (not chosen-ok)
+          (delete-query-relation current)
+          (return (query-relation-empty) false))
+        (let [step remaining[chosen-index]
+            next (query-relation-empty)
+            next-ok false
+            pair-index -1]
+        (when (and (= step.kind .Clause)
+                   (>= chosen-index 0))
+          (for [candidate candidate-index remaining]
+            (when (and (= pair-index -1)
+                       (not (= candidate-index chosen-index))
+                       (= candidate.kind .Clause))
+              (let [[pair-rel pair-ok pair-used-value _pair-error] (db-read-source-query-relation-apply-same-bound-entity-value-pair source current rule.clauses[step.index] rule.clauses[candidate.index] stats)]
+                (if pair-used-value
+                  (do
+                    (set! next pair-rel)
+                    (set! next-ok pair-ok)
+                    (set! pair-index candidate-index))
+                  (delete-query-relation pair-rel))))))
+        (when (= pair-index -1)
+          (let [[single-next single-ok] (db-read-source-query-relation-apply-typed-step
+                                          source
+                                          sources
+                                          current
+                                          step
+                                          (slice rule.clauses 0)
+                                          (slice rule.predicates 0)
+                                          (slice rule.function-clauses 0)
+                                          (slice rule.grounds 0)
+                                          (slice rule.get-elses 0)
+                                          (slice rule.get-somes 0)
+                                          (slice rule.not-groups 0)
+                                          (slice rule.or-groups 0)
+                                          rules
+                                          (slice rule.rule-calls 0)
+                                          registry
+                                          stats)]
+            (delete-query-relation next)
+            (set! next single-next)
+            (set! next-ok single-ok)))
+        (delete-query-relation current)
+        (when (not next-ok)
+          (delete-query-relation next)
+          (return (query-relation-empty) false))
+        (let [deduped (query-relation-dedupe-step next)]
+          (delete-query-relation next)
+          (set! current deduped))
+        (when (= (query-relation-row-count current) 0)
+          (return current true))
+        (if (>= pair-index 0)
+          (do
+            (if (> pair-index chosen-index)
+              (do
+                (arr.remove-ordered-at! remaining pair-index)
+                (arr.remove-ordered-at! remaining chosen-index))
+              (do
+                (arr.remove-ordered-at! remaining chosen-index)
+                (arr.remove-ordered-at! remaining pair-index))))
+          (arr.remove-ordered-at! remaining chosen-index)))))
+    (return current true)))
+
+(defn db-read-source-query-relation-from-rule-body-seeded-typed-depth [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, rule: Rule, seed: Query-Relation, registry: []Native-Query-Fn, stats: ^Query-Stats, depth: int] -> [rel: Query-Relation, ok: bool]
+  (when (< depth 0)
+    (return (query-relation-empty) false))
+  (when (not (and seed.has-typed-columns
+                  (source-rule-body-typed-eligible? rules rule registry)))
+    (return (query-relation-empty) false))
+  (when (not (source-rule-body-typed-plannable? rule))
+    (let [current (query-relation-copy seed)
+          step-index 0]
+      (while (< step-index (count rule.body-steps))
+        (let [step rule.body-steps[step-index]
+              next (query-relation-empty)
+              next-ok false
+              pair-used false]
+          (when (and (= step.kind .Clause)
+                     (< (+ step-index 1) (count rule.body-steps))
+                     (= rule.body-steps[(+ step-index 1)].kind .Clause))
+            (let [next-step rule.body-steps[(+ step-index 1)]
+                  [pair-rel pair-ok pair-used-value _pair-error] (db-read-source-query-relation-apply-same-bound-entity-value-pair source current rule.clauses[step.index] rule.clauses[next-step.index] stats)]
+              (when pair-used-value
+                (set! next pair-rel)
+                (set! next-ok pair-ok)
+                (set! pair-used true))
+              (when (not pair-used-value)
+                (delete-query-relation pair-rel))))
+          (when (not pair-used)
+            (let [[single-next single-ok] (db-read-source-query-relation-apply-typed-step
+                                            source
+                                            sources
+                                            current
+                                            step
+                                            (slice rule.clauses 0)
+                                            (slice rule.predicates 0)
+                                            (slice rule.function-clauses 0)
+                                            (slice rule.grounds 0)
+                                            (slice rule.get-elses 0)
+                                            (slice rule.get-somes 0)
+                                            (slice rule.not-groups 0)
+                                            (slice rule.or-groups 0)
+                                            rules
+                                            (slice rule.rule-calls 0)
+                                            registry
+                                            stats)]
+              (delete-query-relation next)
+              (set! next single-next)
+              (set! next-ok single-ok)))
+          (delete-query-relation current)
+          (when (not next-ok)
+            (delete-query-relation next)
+            (return (query-relation-empty) false))
+          (let [deduped (query-relation-dedupe-step next)]
+            (delete-query-relation next)
+            (set! current deduped))
+          (when (= (query-relation-row-count current) 0)
+            (return current true))
+          (if pair-used
+            (mut! step-index += 2)
+            (mut! step-index += 1))))
+      (return current true)))
+  (let [current (query-relation-copy seed)
+        remaining (arr.into [dynamic]Query-Step (slice rule.body-steps 0))
+        rule-index (rule-name-index-build rules)]
+    (defer (delete remaining))
+    (defer (delete-rule-name-index rule-index))
+    (while (and (> (count remaining) 0)
+                (> (query-relation-row-count current) 0))
+      (let [[chosen-index chosen-ok] (best-ready-query-relation-rule-body-step-index-indexed rules (slice rule-index 0) current rule (slice remaining 0) registry)]
+        (when (not chosen-ok)
+          (delete-query-relation current)
+          (return (query-relation-empty) false))
+        (let [step remaining[chosen-index]
+            next (query-relation-empty)
+            next-ok false
+            pair-index -1]
+        (when (and (= step.kind .Clause)
+                   (>= chosen-index 0))
+          (for [candidate candidate-index remaining]
+            (when (and (= pair-index -1)
+                       (not (= candidate-index chosen-index))
+                       (= candidate.kind .Clause))
+              (let [[pair-rel pair-ok pair-used-value _pair-error] (db-read-source-query-relation-apply-same-bound-entity-value-pair source current rule.clauses[step.index] rule.clauses[candidate.index] stats)]
+                (if pair-used-value
+                  (do
+                    (set! next pair-rel)
+                    (set! next-ok pair-ok)
+                    (set! pair-index candidate-index))
+                  (delete-query-relation pair-rel))))))
+        (when (= pair-index -1)
+          (let [[single-next single-ok] (db-read-source-query-relation-apply-typed-step
+                                          source
+                                          sources
+                                          current
+                                          step
+                                          (slice rule.clauses 0)
+                                          (slice rule.predicates 0)
+                                          (slice rule.function-clauses 0)
+                                          (slice rule.grounds 0)
+                                          (slice rule.get-elses 0)
+                                          (slice rule.get-somes 0)
+                                          (slice rule.not-groups 0)
+                                          (slice rule.or-groups 0)
+                                          rules
+                                          (slice rule.rule-calls 0)
+                                          registry
+                                          stats)]
+            (delete-query-relation next)
+            (set! next single-next)
+            (set! next-ok single-ok)))
+        (delete-query-relation current)
+        (when (not next-ok)
+          (delete-query-relation next)
+          (return (query-relation-empty) false))
+        (let [deduped (query-relation-dedupe-step next)]
+          (delete-query-relation next)
+          (set! current deduped))
+        (when (= (query-relation-row-count current) 0)
+          (return current true))
+        (if (>= pair-index 0)
+          (do
+            (if (> pair-index chosen-index)
+              (do
+                (arr.remove-ordered-at! remaining pair-index)
+                (arr.remove-ordered-at! remaining chosen-index))
+              (do
+                (arr.remove-ordered-at! remaining chosen-index)
+                (arr.remove-ordered-at! remaining pair-index))))
+          (arr.remove-ordered-at! remaining chosen-index)))))
+    (return current true)))
+
+(defn bind-rule-param-value! [binding: ^Binding, param: string, value: Value] -> bool
+  (let [[existing exists] (binding-lookup binding^ param)]
+    (if exists
+      (predicate-value-equal? existing value)
+      (do
+        (binding-store! binding param value)
+        true))))
+
+(defn query-relation-seed-for-rule-call [rel: Query-Relation, rule: Rule, call: Rule-Call] -> [seed: Query-Relation, ok: bool]
+  (when (not (and rel.has-typed-columns
+                  (= (count rule.params) (count call.args))))
+    (return (query-relation-empty) false))
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        param-indexes (make [dynamic]int 0 (count rule.params))
+        arg-source-indexes (make [dynamic]int 0 (count rule.params))
+        clone-columns-ok true]
+    (for [param index rule.params]
+      (let [arg call.args[index]]
+        (case arg.kind
+          .Var
+            (let [[arg-index arg-ok] (query-relation-attr-index-lookup rel arg.name)]
+              (if arg-ok
+                (let [[param-index param-exists] (attr-position (slice attrs 0) param)]
+                  (if param-exists
+                    (do
+                      (arr.push! param-indexes param-index)
+                      (when (not (= param arg.name))
+                        (set! clone-columns-ok false)))
+                    (do
+                      (arr.push! attrs param)
+                      (arr.push! attr-sources rel.attr-sources[arg-index])
+                      (arr.push! param-indexes (- (count attrs) 1))))
+                  (arr.push! arg-source-indexes arg-index))
+                (do
+                  (arr.push! param-indexes -1)
+                  (arr.push! arg-source-indexes -1))))
+          .Value
+            (let [[param-index param-exists] (attr-position (slice attrs 0) param)]
+              (if param-exists
+                (arr.push! param-indexes param-index)
+                (do
+                  (arr.push! attrs param)
+                  (arr.push! attr-sources "")
+                  (arr.push! param-indexes (- (count attrs) 1))))
+              (arr.push! arg-source-indexes -1)
+              (set! clone-columns-ok false))
+          .Wildcard
+            (do
+              (arr.push! param-indexes -1)
+              (arr.push! arg-source-indexes -1))
+          .LookupRef
+            (do
+              (delete attrs)
+              (delete attr-sources)
+              (delete param-indexes)
+              (delete arg-source-indexes)
+              (return (query-relation-empty) false))
+          (do
+            (delete attrs)
+            (delete attr-sources)
+            (delete param-indexes)
+            (delete arg-source-indexes)
+            (return (query-relation-empty) false)))))
+    (when clone-columns-ok
+      (let [typed-columns (clone-relation-columns (slice rel.typed-columns 0))
+            next-index (count rel.attrs)]
+        (while (< next-index (count attrs))
+          (let [source-index -1]
+            (for [param-index index param-indexes]
+              (when (= param-index next-index)
+                (set! source-index arg-source-indexes[index])))
+            (when (< source-index 0)
+              (delete attrs)
+              (delete attr-sources)
+              (delete param-indexes)
+              (delete arg-source-indexes)
+              (delete-relation-columns typed-columns)
+              (return (query-relation-empty) false))
+            (arr.push! typed-columns (clone-relation-column rel.typed-columns[source-index])))
+          (set! next-index (+ next-index 1)))
+        (delete param-indexes)
+        (delete arg-source-indexes)
+        (return (Query-Relation {attrs: attrs
+                                 attr-sources: attr-sources
+                                 attr-index: (query-relation-attr-index (slice attrs 0))
+                                 tuples: (make [dynamic]Binding)
+                                 typed-columns: typed-columns
+                                 typed-rows: rel.typed-rows
+                                 has-typed-columns: true}) true)))
+    (let [builder (query-relation-builder-with-capacity (slice attrs 0) rel.typed-rows)
+          row 0]
+      (while (< row rel.typed-rows)
+        (let [row-ok true]
+          (for [column index rel.typed-columns]
+            (when row-ok
+              (when (not (relation-column-row-compatible? builder.typed-columns[index] column row))
+                (set! row-ok false))))
+          (for [arg arg-index call.args]
+            (when row-ok
+              (let [param-index param-indexes[arg-index]]
+                (when (>= param-index 0)
+                  (case arg.kind
+                    .Var
+                      (let [arg-source-index arg-source-indexes[arg-index]
+                            [value value-ok] (typed-relation-column-value rel.typed-columns[arg-source-index] row)]
+                        (if value-ok
+                          (if (< param-index (count rel.attrs))
+                            (let [[existing existing-ok] (typed-relation-column-value rel.typed-columns[param-index] row)]
+                              (set! row-ok (and existing-ok
+                                                 (predicate-value-equal? existing value))))
+                            (when (not (relation-column-row-compatible? builder.typed-columns[param-index] rel.typed-columns[arg-source-index] row))
+                              (set! row-ok false)))
+                          (set! row-ok false)))
+                    .Value
+                      (if (< param-index (count rel.attrs))
+                        (let [[existing existing-ok] (typed-relation-column-value rel.typed-columns[param-index] row)]
+                          (set! row-ok (and existing-ok
+                                             (predicate-value-equal? existing arg.value))))
+                        (when (not (relation-column-can-add? builder.typed-columns[param-index] arg.value))
+                          (set! row-ok false)))
+                    .Wildcard
+                      (discard param-index)
+                    .LookupRef
+                      (set! row-ok false)
+                    (set! row-ok false))))))
+          (when row-ok
+            (when (not (add-relation-column-row! (addr builder.typed-columns) (slice rel.typed-columns 0) row))
+              (delete attrs)
+              (delete attr-sources)
+              (delete param-indexes)
+              (delete arg-source-indexes)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false))
+            (for [arg arg-index call.args]
+              (let [param-index param-indexes[arg-index]]
+                (when (>= param-index 0)
+                  (case arg.kind
+                    .Var
+                      (when (>= param-index (count rel.attrs))
+                        (let [arg-source-index arg-source-indexes[arg-index]]
+                          (relation-column-row-add-checked! (addr builder.typed-columns[param-index]) rel.typed-columns[arg-source-index] row)))
+                    .Value
+                      (when (not (relation-column-add! (addr builder.typed-columns[param-index]) arg.value))
+                        (delete attrs)
+                        (delete attr-sources)
+                        (delete param-indexes)
+                        (delete arg-source-indexes)
+                        (delete-query-relation-builder builder)
+                        (return (query-relation-empty) false))
+                    .Wildcard
+                      (discard param-index)
+                    .LookupRef
+                      (do)
+                    (do)))))
+            (set! builder.typed-rows (+ builder.typed-rows 1)))
+          (set! row (+ row 1))))
+      (delete param-indexes)
+      (delete arg-source-indexes)
+      (return (Query-Relation {attrs: attrs
+                               attr-sources: attr-sources
+                               attr-index: (query-relation-attr-index (slice attrs 0))
+                               tuples: builder.tuples
+                               typed-columns: builder.typed-columns
+                               typed-rows: builder.typed-rows
+                               has-typed-columns: builder.typed-ok}) true))))
+
+(defn db-read-source-query-relation-from-rule-call-typed-depth [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, call: Rule-Call, registry: []Native-Query-Fn, stats: ^Query-Stats, depth: int] -> [rel: Query-Relation, ok: bool]
+  (when (< depth 0)
+    (return (query-relation-empty) false))
+  (let [[call-source local-call source-ok] (db-read-source-resolve-rule-call-source source sources call)]
+    (when (not source-ok)
+      (return (query-relation-empty) false))
+  (let [[two-hop two-hop-ok two-hop-error] (db-read-source-query-relation-from-two-hop-attr-param-rule-call call-source rules local-call stats)]
+    (when (not (= two-hop-error ""))
+      (delete-query-relation two-hop)
+      (return (query-relation-empty) false))
+    (when two-hop-ok
+      (return two-hop true))
+    (delete-query-relation two-hop))
+  (let [[reverse-derived reverse-derived-ok reverse-derived-error] (db-read-source-query-relation-from-reverse-derived-edge-rule-call call-source rules local-call stats)]
+    (when (not (= reverse-derived-error ""))
+      (delete-query-relation reverse-derived)
+      (return (query-relation-empty) false))
+    (when reverse-derived-ok
+      (return reverse-derived true))
+    (delete-query-relation reverse-derived))
+  (let [plan (rule-call-plan rules local-call.name)]
+    (defer (delete-rule-call-plan plan))
+    (when (not (source-rule-call-typed-plan-eligible? plan local-call registry))
+      (return (query-relation-empty) false))
+    (when plan.recursive
+      (if (source-positive-rule-delta-plan-eligible? plan local-call)
+        (return (db-read-source-query-relation-from-recursive-rule-call-typed call-source sources plan local-call registry stats))
+        (return (db-read-source-query-relation-from-recursive-rule-call-naive-typed call-source sources plan local-call registry stats))))
+    (let [out (query-relation-empty)
+          seen (set.empty string)
+          has-out false]
+      (defer (delete seen))
+      (for [rule plan.rules]
+        (when (= rule.name local-call.name)
+          (let [[attr-param attr-param-ok] (rule-attr-param-two-values-same-entity rule local-call)]
+            (when attr-param-ok
+              (let [[attr-param-rel attr-param-built attr-param-error] (db-read-source-query-relation-from-attr-param-two-values-same-entity-rule call-source rule attr-param stats)]
+                (when (not (= attr-param-error ""))
+                  (delete-query-relation attr-param-rel)
+                  (when has-out
+                    (delete-query-relation out))
+                  (return (query-relation-empty) false))
+                (when attr-param-built
+                  (let [[projected projected-ok] (query-relation-project-rule-call-params-typed attr-param-rel (slice rule.params 0) local-call)]
+                    (delete-query-relation attr-param-rel)
+                    (when (not projected-ok)
+                      (delete-query-relation projected)
+                      (when has-out
+                        (delete-query-relation out))
+                      (return (query-relation-empty) false))
+                    (when (not has-out)
+                      (delete-query-relation out)
+                      (set! out (query-relation-empty-typed-like projected))
+                      (set! has-out true))
+                    (when (not (query-relation-append-typed-rows-unique! (addr out) projected (addr seen)))
+                      (delete-query-relation projected)
+                      (delete-query-relation out)
+                      (return (query-relation-empty) false))
+                    (delete-query-relation projected)
+                    (continue)))
+                (delete-query-relation attr-param-rel))))
+          (let [[body-rel body-ok] (db-read-source-query-relation-from-rule-body-typed-depth call-source sources (slice plan.rules 0) rule registry stats depth)]
+            (when (not body-ok)
+              (delete-query-relation body-rel)
+              (when has-out
+                (delete-query-relation out))
+              (return (query-relation-empty) false))
+            (let [[projected projected-ok] (query-relation-project-rule-call-params-typed body-rel (slice rule.params 0) local-call)]
+              (delete-query-relation body-rel)
+              (when (not projected-ok)
+                (delete-query-relation projected)
+                (when has-out
+                  (delete-query-relation out))
+                (return (query-relation-empty) false))
+              (when (not has-out)
+                (delete-query-relation out)
+                (set! out (query-relation-empty-typed-like projected))
+                (set! has-out true))
+              (when (not (query-relation-append-typed-rows-unique! (addr out) projected (addr seen)))
+                (delete-query-relation projected)
+                (delete-query-relation out)
+                (return (query-relation-empty) false))
+              (delete-query-relation projected)))))
+      (if has-out
+        (return out true)
+        (do
+          (delete-query-relation out)
+          (return (query-relation-empty) false)))))))
+
+(defn db-read-source-query-relation-apply-bound-rule-call-typed-depth [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, rel: Query-Relation, call: Rule-Call, registry: []Native-Query-Fn, stats: ^Query-Stats, depth: int] -> [out: Query-Relation, ok: bool]
+  (when (or (< depth 0)
+            (not rel.has-typed-columns)
+            (= (query-relation-rule-call-bound-arg-count rel call) 0))
+    (return (query-relation-empty) false))
+  (let [[call-source local-call source-ok] (db-read-source-resolve-rule-call-source source sources call)]
+    (when (not source-ok)
+      (return (query-relation-empty) false))
+  (let [plan (rule-call-plan rules local-call.name)]
+    (defer (delete-rule-call-plan plan))
+    (when (or plan.recursive
+              (not (source-rule-call-typed-plan-eligible? plan local-call registry)))
+      (return (query-relation-empty) false))
+    (let [rule-rel (query-relation-empty)
+          seen (set.empty string)
+          has-rule-rel false
+          rule-rel-has-passthrough false]
+      (defer (delete seen))
+      (for [rule plan.rules]
+        (when (= rule.name local-call.name)
+          (let [[seed seed-ok] (query-relation-seed-for-rule-call rel rule local-call)]
+            (when (not seed-ok)
+              (delete-query-relation seed)
+              (when has-rule-rel
+                (delete-query-relation rule-rel))
+              (return (query-relation-empty) false))
+            (let [[attr-param attr-param-ok] (rule-attr-param-two-values-same-entity rule local-call)]
+              (when attr-param-ok
+                (let [[bounded-rel bounded-ok bounded-error] (db-read-source-query-relation-from-bound-attr-param-two-values-same-entity-rule call-source rel rule local-call attr-param stats)]
+                  (when (not (= bounded-error ""))
+                    (delete-query-relation seed)
+                    (delete-query-relation bounded-rel)
+                    (when has-rule-rel
+                      (delete-query-relation rule-rel))
+                    (return (query-relation-empty) false))
+                  (when bounded-ok
+                    (delete-query-relation seed)
+                    (let [[projected projected-ok] (query-relation-project-rule-call-params-typed bounded-rel (slice rule.params 0) local-call)]
+                      (delete-query-relation bounded-rel)
+                      (when (not projected-ok)
+                        (delete-query-relation projected)
+                        (when has-rule-rel
+                          (delete-query-relation rule-rel))
+                        (return (query-relation-empty) false))
+                      (when (not has-rule-rel)
+                        (delete-query-relation rule-rel)
+                        (set! rule-rel (query-relation-empty-typed-like projected))
+                        (set! has-rule-rel true))
+                      (when (not (query-relation-append-typed-rows-unique! (addr rule-rel) projected (addr seen)))
+                        (delete-query-relation projected)
+                        (delete-query-relation rule-rel)
+                        (return (query-relation-empty) false))
+                      (delete-query-relation projected)
+                      (continue)))
+                  (delete-query-relation bounded-rel))
+                (let [[attr-param-rel attr-param-built attr-param-error] (db-read-source-query-relation-from-attr-param-two-values-same-entity-rule call-source rule attr-param stats)]
+                  (delete-query-relation seed)
+                  (when (not (= attr-param-error ""))
+                    (delete-query-relation attr-param-rel)
+                    (when has-rule-rel
+                      (delete-query-relation rule-rel))
+                    (return (query-relation-empty) false))
+                  (when attr-param-built
+                    (let [[projected projected-ok] (query-relation-project-rule-call-params-typed attr-param-rel (slice rule.params 0) local-call)]
+                      (delete-query-relation attr-param-rel)
+                      (when (not projected-ok)
+                        (delete-query-relation projected)
+                        (when has-rule-rel
+                          (delete-query-relation rule-rel))
+                        (return (query-relation-empty) false))
+                      (when (not has-rule-rel)
+                        (delete-query-relation rule-rel)
+                        (set! rule-rel (query-relation-empty-typed-like projected))
+                        (set! has-rule-rel true))
+                      (when (not (query-relation-append-typed-rows-unique! (addr rule-rel) projected (addr seen)))
+                        (delete-query-relation projected)
+                        (delete-query-relation rule-rel)
+                        (return (query-relation-empty) false))
+                      (delete-query-relation projected)
+                      (continue)))
+                  (delete-query-relation attr-param-rel))))
+            (let [[body-rel body-ok] (db-read-source-query-relation-from-rule-body-seeded-typed-depth call-source sources (slice plan.rules 0) rule seed registry stats depth)]
+              (delete-query-relation seed)
+              (when (not body-ok)
+                (delete-query-relation body-rel)
+                (when has-rule-rel
+                  (delete-query-relation rule-rel))
+                (return (query-relation-empty) false))
+              (let [passthrough-projected (query-relation-empty)
+                    passthrough-ok false]
+                (when (or (not has-rule-rel) rule-rel-has-passthrough)
+                  (let [[candidate candidate-ok] (query-relation-project-seeded-rule-call-params-typed body-rel rel (slice rule.params 0) local-call)]
+                    (delete-query-relation passthrough-projected)
+                    (set! passthrough-projected candidate)
+                    (set! passthrough-ok candidate-ok)))
+                (when passthrough-ok
+                  (delete-query-relation body-rel)
+                  (when (not has-rule-rel)
+                    (delete-query-relation rule-rel)
+                    (set! rule-rel (query-relation-empty-typed-like passthrough-projected))
+                    (set! has-rule-rel true))
+                  (set! rule-rel-has-passthrough true)
+                  (when (not (query-relation-append-typed-rows-unique! (addr rule-rel) passthrough-projected (addr seen)))
+                    (delete-query-relation passthrough-projected)
+                    (delete-query-relation rule-rel)
+                    (return (query-relation-empty) false))
+                  (delete-query-relation passthrough-projected)
+                  (continue))
+                (delete-query-relation passthrough-projected)
+                (let [[projected projected-ok] (query-relation-project-rule-call-params-typed body-rel (slice rule.params 0) local-call)]
+                (delete-query-relation body-rel)
+                (when (not projected-ok)
+                  (delete-query-relation projected)
+                  (when has-rule-rel
+                    (delete-query-relation rule-rel))
+                  (return (query-relation-empty) false))
+                (when (not has-rule-rel)
+                  (delete-query-relation rule-rel)
+                  (set! rule-rel (query-relation-empty-typed-like projected))
+                  (set! has-rule-rel true))
+                (when (not (query-relation-append-typed-rows-unique! (addr rule-rel) projected (addr seen)))
+                  (delete-query-relation projected)
+                  (delete-query-relation rule-rel)
+                  (return (query-relation-empty) false))
+                (delete-query-relation projected)))))))
+      (when (not has-rule-rel)
+        (delete-query-relation rule-rel)
+        (return (query-relation-empty) false))
+      (if rule-rel-has-passthrough
+        (do
+          (mut! stats^.rule-iterations += 1)
+          (query-stats-observe-bindings! stats (query-relation-row-count rule-rel))
+          (return rule-rel rule-rel.has-typed-columns))
+        (let [joined (query-relation-join (DB {}) ([]DB-Source []) rel rule-rel)
+              deduped (query-relation-dedupe-step joined)]
+          (delete-query-relation rule-rel)
+          (delete-query-relation joined)
+          (mut! stats^.rule-iterations += 1)
+          (query-stats-observe-bindings! stats (query-relation-row-count deduped))
+          (return deduped deduped.has-typed-columns)))))))
+
+(defn db-read-source-query-relation-apply-rule-call-typed-depth [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, rel: Query-Relation, call: Rule-Call, registry: []Native-Query-Fn, stats: ^Query-Stats, depth: int] -> [out: Query-Relation, ok: bool]
+  (when (not rel.has-typed-columns)
+    (return (query-relation-empty) false))
+  (mut! stats^.rule-calls += 1)
+  (let [[call-source local-call source-ok] (db-read-source-resolve-rule-call-source source sources call)]
+    (when source-ok
+      (let [[bounded-two-hop bounded-two-hop-ok bounded-two-hop-error] (db-read-source-query-relation-from-bound-two-hop-attr-param-rule-call call-source rel rules local-call stats)]
+        (when (not (= bounded-two-hop-error ""))
+          (delete-query-relation bounded-two-hop)
+          (return (query-relation-empty) false))
+        (when bounded-two-hop-ok
+          (let [joined (query-relation-join (DB {}) ([]DB-Source []) rel bounded-two-hop)
+                deduped (query-relation-dedupe-step joined)]
+            (delete-query-relation bounded-two-hop)
+            (delete-query-relation joined)
+            (mut! stats^.rule-iterations += 1)
+            (query-stats-observe-bindings! stats (query-relation-row-count deduped))
+            (return deduped deduped.has-typed-columns)))
+        (delete-query-relation bounded-two-hop))
+      (let [[bounded-reverse-derived bounded-reverse-derived-ok bounded-reverse-derived-error] (db-read-source-query-relation-from-bound-reverse-derived-edge-rule-call call-source rel rules local-call stats)]
+        (when (not (= bounded-reverse-derived-error ""))
+          (delete-query-relation bounded-reverse-derived)
+          (return (query-relation-empty) false))
+        (when bounded-reverse-derived-ok
+          (if (query-relation-has-all-attrs? bounded-reverse-derived (slice rel.attrs 0))
+            (do
+              (mut! stats^.rule-iterations += 1)
+              (query-stats-observe-bindings! stats (query-relation-row-count bounded-reverse-derived))
+              (return bounded-reverse-derived bounded-reverse-derived.has-typed-columns))
+            (let [joined (query-relation-join (DB {}) ([]DB-Source []) rel bounded-reverse-derived)
+                  deduped (query-relation-dedupe-step joined)]
+              (delete-query-relation bounded-reverse-derived)
+              (delete-query-relation joined)
+              (mut! stats^.rule-iterations += 1)
+              (query-stats-observe-bindings! stats (query-relation-row-count deduped))
+              (return deduped deduped.has-typed-columns))))
+        (delete-query-relation bounded-reverse-derived))
+      (let [[two-hop two-hop-ok two-hop-error] (db-read-source-query-relation-from-two-hop-attr-param-rule-call call-source rules local-call stats)]
+        (when (not (= two-hop-error ""))
+          (delete-query-relation two-hop)
+          (return (query-relation-empty) false))
+        (when two-hop-ok
+          (let [joined (query-relation-join (DB {}) ([]DB-Source []) rel two-hop)
+                deduped (query-relation-dedupe-step joined)]
+            (delete-query-relation two-hop)
+            (delete-query-relation joined)
+            (mut! stats^.rule-iterations += 1)
+            (query-stats-observe-bindings! stats (query-relation-row-count deduped))
+            (return deduped deduped.has-typed-columns)))
+        (delete-query-relation two-hop))))
+  (let [[bound bound-ok] (db-read-source-query-relation-apply-bound-rule-call-typed-depth source sources rules rel call registry stats depth)]
+    (when bound-ok
+      (return bound true))
+    (delete-query-relation bound))
+  (let [[rule-rel rule-ok] (db-read-source-query-relation-from-rule-call-typed-depth source sources rules call registry stats depth)]
+    (when (not rule-ok)
+      (delete-query-relation rule-rel)
+      (return (query-relation-empty) false))
+    (let [joined (query-relation-join (DB {}) ([]DB-Source []) rel rule-rel)
+          deduped (query-relation-dedupe-step joined)]
+      (delete-query-relation rule-rel)
+      (delete-query-relation joined)
+      (mut! stats^.rule-iterations += 1)
+      (query-stats-observe-bindings! stats (query-relation-row-count deduped))
+      (return deduped deduped.has-typed-columns))))
+
+(defn db-read-source-query-relation-apply-primary-typed-step [source: DB-Read-Source, rel: Query-Relation, step: Query-Step, clauses: []Clause, predicates: []Predicate, functions: []Function-Clause, grounds: []Ground, get-elses: []Get-Else, get-somes: []Get-Some, not-groups: []Not-Group, or-groups: []Or-Group, rules: []Rule, rule-calls: []Rule-Call, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
+  (cond
+    (= step.kind .Clause)
+      (db-read-source-query-relation-apply-primary-clause-typed source rel clauses[step.index] stats)
+    (= step.kind .Predicate)
+      (do
+        (when (not (query-relation-predicate-can-run-typed? rel predicates[step.index] registry))
+          (return (query-relation-empty) false))
+        (let [out (query-relation-filter-predicate (DB {}) rel predicates[step.index] registry)]
+          (return out out.has-typed-columns)))
+    (= step.kind .Function)
+      (let [function functions[step.index]]
+        (if (= function.op "fulltext")
+          (db-read-source-query-relation-extend-fulltext-typed source ([]DB-Read-Named-Source []) rel function)
+          (db-read-source-query-relation-extend-function-typed source rel function registry)))
+    (= step.kind .Ground)
+      (query-relation-apply-ground-typed rel grounds[step.index])
+    (= step.kind .GetElse)
+      (db-read-source-query-relation-apply-primary-get-else-typed source rel get-elses[step.index] stats)
+    (= step.kind .GetSome)
+      (db-read-source-query-relation-apply-primary-get-some-typed source rel get-somes[step.index] stats)
+    (= step.kind .RuleCall)
+      (db-read-source-query-relation-apply-rule-call-typed-depth source ([]DB-Read-Named-Source []) rules rel rule-calls[step.index] registry stats 20)
+    (= step.kind .Not)
+      (db-read-source-query-relation-apply-primary-not-group source rules rel not-groups[step.index] registry stats)
+    (= step.kind .Or)
+      (db-read-source-query-relation-apply-primary-or-group source rules rel or-groups[step.index] registry stats)
+    :else
+      (return (query-relation-empty) false)))
+
+(defn db-read-source-query-relation-apply-primary-branch-step [source: DB-Read-Source, rules: []Rule, rel: Query-Relation, step: Query-Step, group: Not-Group, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
+  (cond
+    (= step.kind .Clause)
+      (db-read-source-query-relation-apply-primary-clause-typed source rel group.clauses[step.index] stats)
+    (= step.kind .Predicate)
+      (do
+        (when (not (query-relation-predicate-can-run-typed? rel group.predicates[step.index] registry))
+          (return (query-relation-empty) false))
+        (let [out (query-relation-filter-predicate (DB {}) rel group.predicates[step.index] registry)]
+          (return out out.has-typed-columns)))
+    (= step.kind .Function)
+      (let [function group.function-clauses[step.index]]
+        (if (= function.op "fulltext")
+          (db-read-source-query-relation-extend-fulltext-typed source ([]DB-Read-Named-Source []) rel function)
+          (db-read-source-query-relation-extend-function-typed source rel function registry)))
+    (= step.kind .Ground)
+      (query-relation-apply-ground-typed rel group.grounds[step.index])
+    (= step.kind .GetElse)
+      (db-read-source-query-relation-apply-primary-get-else-typed source rel group.get-elses[step.index] stats)
+    (= step.kind .GetSome)
+      (db-read-source-query-relation-apply-primary-get-some-typed source rel group.get-somes[step.index] stats)
+    (= step.kind .RuleCall)
+      (db-read-source-query-relation-apply-rule-call-typed-depth source ([]DB-Read-Named-Source []) rules rel group.rule-calls[step.index] registry stats 20)
+    (= step.kind .Not)
+      (db-read-source-query-relation-apply-primary-not-group source rules rel group.not-groups[step.index] registry stats)
+    :else
+      (return (query-relation-empty) false)))
+
+(defn db-read-source-query-relation-primary-branch [source: DB-Read-Source, rules: []Rule, rel: Query-Relation, row: int, group: Not-Group, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
+  (let [current (query-relation-empty)
+        current-ok false]
+    (if group.has-join
+      (let [[projected projected-ok] (query-relation-single-typed-row-projected rel row (slice group.join-vars 0))]
+        (set! current projected)
+        (set! current-ok projected-ok))
+      (let [[single single-ok] (query-relation-single-typed-row rel row)]
+        (set! current single)
+        (set! current-ok single-ok)))
+    (when (not current-ok)
+      (delete-query-relation current)
+      (return (query-relation-empty) false))
+    (if (> (count group.steps) 0)
+      (for [step group.steps]
+        (let [[next next-ok] (db-read-source-query-relation-apply-primary-branch-step source rules current step group registry stats)]
+          (delete-query-relation current)
+          (when (not next-ok)
+            (delete-query-relation next)
+            (return (query-relation-empty) false))
+          (set! current next)
+          (when (= (query-relation-row-count current) 0)
+            (return current true))))
+      (for [clause-value group.clauses]
+        (let [[next next-ok] (db-read-source-query-relation-apply-primary-clause-typed source current clause-value stats)]
+          (delete-query-relation current)
+          (when (not next-ok)
+            (delete-query-relation next)
+            (return (query-relation-empty) false))
+          (set! current next)
+          (when (= (query-relation-row-count current) 0)
+            (return current true)))))
+    (return current true)))
+
+(defn db-read-source-query-relation-apply-primary-not-group [source: DB-Read-Source, rules: []Rule, rel: Query-Relation, group: Not-Group, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
+  (when (not (and rel.has-typed-columns
+                  (db-read-source-primary-typed-branch-group? rules group registry)))
+    (return (query-relation-empty) false))
+  (let [[anti anti-ok] (db-read-source-query-relation-apply-set-anti-join-not-group source ([]DB-Read-Named-Source []) rules rel group registry stats)]
+    (when anti-ok
+      (return anti true))
+    (delete-query-relation anti))
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        builder (query-relation-builder (slice rel.attrs 0))
+        row 0]
+    (while (< row rel.typed-rows)
+      (let [[branch-rel branch-ok] (db-read-source-query-relation-primary-branch source rules rel row group registry stats)]
+        (when (not branch-ok)
+          (delete-query-relation branch-rel)
+          (delete attrs)
+          (delete attr-sources)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false))
+        (let [matched (> (query-relation-row-count branch-rel) 0)]
+          (delete-query-relation branch-rel)
+          (when (not matched)
+            (when (not (query-relation-builder-add-column-row! (addr builder) (slice rel.typed-columns 0) row))
+              (delete attrs)
+              (delete attr-sources)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false)))))
+      (set! row (+ row 1)))
+    (return (Query-Relation {attrs: attrs
+                             attr-sources: attr-sources
+                             attr-index: (query-relation-attr-index (slice attrs 0))
+                             tuples: builder.tuples
+                             typed-columns: builder.typed-columns
+                             typed-rows: builder.typed-rows
+                             has-typed-columns: builder.typed-ok}) true)))
+
+(defn db-read-source-query-relation-apply-primary-or-group [source: DB-Read-Source, rules: []Rule, rel: Query-Relation, group: Or-Group, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
+  (when (not (and rel.has-typed-columns
+                  (db-read-source-primary-typed-or-group? rules group registry)))
+    (return (query-relation-empty) false))
+  (let [[set-or set-or-ok] (db-read-source-query-relation-apply-set-or-group source ([]DB-Read-Named-Source []) rules rel group registry stats)]
+    (when set-or-ok
+      (return set-or true))
+    (delete-query-relation set-or))
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        output-vars (make [dynamic]string) :defer]
+    (append-or-group-output-vars! (addr output-vars) group)
+    (for [name output-vars]
+      (append-var-binding-attr! (addr attrs) (addr attr-sources) name ""))
+    (let [builder (query-relation-builder (slice attrs 0))
+          row 0]
+      (while (< row rel.typed-rows)
+        (for [branch group.branches]
+          (let [[branch-rel branch-ok] (db-read-source-query-relation-primary-branch source rules rel row branch registry stats)]
+            (when (not branch-ok)
+              (delete-query-relation branch-rel)
+              (delete attrs)
+              (delete attr-sources)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false))
+            (let [branch-row 0]
+              (while (< branch-row (query-relation-row-count branch-rel))
+                (when (not (query-relation-builder-add-relation-row-by-attrs! (addr builder) (slice attrs 0) branch-rel branch-row))
+                  (delete-query-relation branch-rel)
+                  (delete attrs)
+                  (delete attr-sources)
+                  (delete-query-relation-builder builder)
+                  (return (query-relation-empty) false))
+                (set! branch-row (+ branch-row 1))))
+            (delete-query-relation branch-rel)))
+        (set! row (+ row 1)))
+      (return (Query-Relation {attrs: attrs
+                               attr-sources: attr-sources
+                               attr-index: (query-relation-attr-index (slice attrs 0))
+                               tuples: builder.tuples
+                               typed-columns: builder.typed-columns
+                               typed-rows: builder.typed-rows
+                               has-typed-columns: builder.typed-ok}) true))))
