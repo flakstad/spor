@@ -1,0 +1,1899 @@
+; Copyright 2026 Vev Contributors
+; SPDX-License-Identifier: Apache-2.0
+
+(package vev)
+
+(defn delete-source-index-datom-streams [streams: [dynamic]Source-Index-Datom-Stream]
+  (for [stream streams]
+    (delete-source-index-datom-stream stream))
+  (delete streams))
+
+(defn delete-source-index-datom-stream [stream: Source-Index-Datom-Stream]
+  (when stream.has-current
+    (when stream.current-owned
+      (delete-owned-datom stream.current)))
+  (when stream.use-owned-datoms
+    (delete stream.owned-order-indexes)
+    (delete-owned-datoms stream.owned-datoms))
+  (when stream.use-sqlite-run-ranges
+    (delete stream.run-roots)
+    (delete stream.run-counts)
+    (delete stream.run-lows)
+    (delete stream.run-highs)
+    (delete-owned-values-array stream.run-values)
+    (delete stream.run-seen-entries)
+    (delete stream.run-page)
+    (when stream.run-loaded-page-valid
+      (release-sqlite-loaded-index-page! stream.run-loaded-page)))
+  (when stream.use-sqlite-sparse-prefixes
+    (delete stream.sparse-roots)
+    (delete stream.sparse-counts)
+    (delete stream.sparse-entities)
+    (delete stream.sparse-seen-entries)
+    (when stream.sparse-loaded-page-valid
+      (release-sqlite-loaded-index-page! stream.sparse-loaded-page))))
+
+(defn clear-source-index-datom-stream-current! [stream: ^Source-Index-Datom-Stream]
+  (when stream^.has-current
+    (when stream^.current-owned
+      (delete-owned-datom stream^.current))
+    (set! stream^.has-current false)
+    (set! stream^.current-owned false)))
+
+(defn set-source-index-datom-stream-current-owned! [stream: ^Source-Index-Datom-Stream, datom: Datom]
+  (set! stream^.current datom)
+  (set! stream^.current-owned true)
+  (set! stream^.has-current true))
+
+(defn set-source-index-datom-stream-current-borrowed! [stream: ^Source-Index-Datom-Stream, datom: Datom]
+  (set! stream^.current datom)
+  (set! stream^.current-owned false)
+  (set! stream^.has-current true))
+
+(defn values-owned-array [values: []Value] -> [dynamic]Value
+  (let [out (make [dynamic]Value 0 (count values))]
+    (for [value values]
+      (arr.push! out (value-owned value)))
+    out))
+
+(defn db-read-source-all-index-entries-current? [source: DB-Read-Source] -> bool
+  (and (= source.kind .SQLite-Snapshot)
+       (not source.sqlite-snapshot^.has-retractions)))
+
+(defn load-source-index-datom-stream-current-from-sqlite-run-ranges! [source: DB-Read-Source, stream: ^Source-Index-Datom-Stream] -> [ok: bool, error: string]
+  (while (< stream^.run-index (count stream^.run-roots))
+    (when (< stream^.run-position stream^.run-lows[stream^.run-index])
+      (set! stream^.run-position stream^.run-lows[stream^.run-index]))
+    (while (< stream^.run-position stream^.run-highs[stream^.run-index])
+      (let [[entry offset entry-ok entry-error] (sqlite-index-root-ordered-entry-offset-at-retained-page-cache stream^.view.sqlite-cursor^.handle
+                                                                                                             stream^.view.sqlite-cursor^.datom-stmt
+                                                                                                             stream^.run-roots[stream^.run-index]
+                                                                                                             stream^.run-position
+                                                                                                             stream^.run-counts[stream^.run-index]
+                                                                                                             stream^.view.sqlite-cursor^.page-size
+                                                                                                             (addr stream^.view.sqlite-cursor^.page-cache)
+                                                                                                             (addr stream^.run-loaded-page)
+                                                                                                             (addr stream^.run-loaded-page-valid))]
+        (when (not entry-ok)
+          (return false entry-error))
+        (let [datom stream^.run-loaded-page.datoms[offset]]
+        (when stream^.run-dedupe-entries
+          (when (set.contains? stream^.run-seen-entries entry)
+            (set! stream^.run-position (+ stream^.run-position 1))
+            (continue))
+          (set.add! stream^.run-seen-entries entry))
+        (let [current true
+              current-ok true
+              current-error ""]
+          (when (not (db-read-source-all-index-entries-current? source))
+            (let [[checked-current checked-ok checked-error] (db-read-source-datom-current-at-entry? source entry)]
+              (set! current checked-current)
+              (set! current-ok checked-ok)
+              (set! current-error checked-error)))
+          (when (not current-ok)
+            (return false current-error))
+          (when current
+            (when (or (not stream^.run-check-values)
+                      (datom-matches-index-values? datom stream^.run-order-text (slice stream^.run-values 0)))
+              (set-source-index-datom-stream-current-borrowed! stream datom)
+              (return true ""))))))
+      (set! stream^.run-position (+ stream^.run-position 1)))
+    (set! stream^.run-index (+ stream^.run-index 1))
+    (set! stream^.run-position 0)
+    (delete stream^.run-page)
+    (set! stream^.run-page (make [dynamic]int))
+    (set! stream^.run-page-start -1)
+    (set! stream^.run-page-end -1)
+    (when stream^.run-loaded-page-valid
+      (release-sqlite-loaded-index-page! stream^.run-loaded-page)
+      (set! stream^.run-loaded-page-valid false)))
+  (return true ""))
+
+(defn load-source-index-datom-stream-current-from-sqlite-sparse-prefixes! [source: DB-Read-Source, stream: ^Source-Index-Datom-Stream] -> [ok: bool, error: string]
+  (while (< stream^.sparse-prefix-index (count stream^.sparse-entities))
+    (while (< stream^.sparse-run-index (count stream^.sparse-roots))
+      (when (not stream^.sparse-range-active)
+        (let [values ([]Value [(value-entity stream^.sparse-entities[stream^.sparse-prefix-index]) (value-keyword stream^.sparse-attr)])
+              [low low-ok low-error] (sqlite-index-root-bound-values stream^.view.sqlite-cursor stream^.sparse-roots[stream^.sparse-run-index] stream^.sparse-counts[stream^.sparse-run-index] stream^.sparse-order-text values false)]
+          (when (not low-ok)
+            (return false low-error))
+          (let [[high high-ok high-error] (sqlite-index-root-bound-values stream^.view.sqlite-cursor stream^.sparse-roots[stream^.sparse-run-index] stream^.sparse-counts[stream^.sparse-run-index] stream^.sparse-order-text values true)]
+            (when (not high-ok)
+              (return false high-error))
+            (set! stream^.sparse-position low)
+            (set! stream^.sparse-high high)
+            (set! stream^.sparse-range-active true))))
+      (while (< stream^.sparse-position stream^.sparse-high)
+        (let [[entry offset entry-ok entry-error] (sqlite-index-root-ordered-entry-offset-at-retained-page-cache stream^.view.sqlite-cursor^.handle
+                                                                                                                 stream^.view.sqlite-cursor^.datom-stmt
+                                                                                                                 stream^.sparse-roots[stream^.sparse-run-index]
+                                                                                                                 stream^.sparse-position
+                                                                                                                 stream^.sparse-counts[stream^.sparse-run-index]
+                                                                                                                 stream^.view.sqlite-cursor^.page-size
+                                                                                                                 (addr stream^.view.sqlite-cursor^.page-cache)
+                                                                                                                 (addr stream^.sparse-loaded-page)
+                                                                                                                 (addr stream^.sparse-loaded-page-valid))]
+          (when (not entry-ok)
+            (return false entry-error))
+          (let [datom stream^.sparse-loaded-page.datoms[offset]]
+            (when stream^.sparse-dedupe-entries
+              (when (set.contains? stream^.sparse-seen-entries entry)
+                (set! stream^.sparse-position (+ stream^.sparse-position 1))
+                (continue))
+              (set.add! stream^.sparse-seen-entries entry))
+            (let [current true
+                  current-ok true
+                  current-error ""]
+              (when (not (db-read-source-all-index-entries-current? source))
+                (let [[checked-current checked-ok checked-error] (db-read-source-datom-current-at-entry? source entry)]
+                  (set! current checked-current)
+                  (set! current-ok checked-ok)
+                  (set! current-error checked-error)))
+              (when (not current-ok)
+                (return false current-error))
+              (when current
+                (set-source-index-datom-stream-current-borrowed! stream datom)
+                (return true "")))))
+        (set! stream^.sparse-position (+ stream^.sparse-position 1)))
+      (set! stream^.sparse-run-index (+ stream^.sparse-run-index 1))
+      (set! stream^.sparse-range-active false)
+      (set! stream^.sparse-position 0)
+      (set! stream^.sparse-high 0)
+      (when stream^.sparse-loaded-page-valid
+        (release-sqlite-loaded-index-page! stream^.sparse-loaded-page)
+        (set! stream^.sparse-loaded-page-valid false)))
+    (set! stream^.sparse-prefix-index (+ stream^.sparse-prefix-index 1))
+    (set! stream^.sparse-run-index 0)
+    (set! stream^.sparse-range-active false)
+    (set! stream^.sparse-position 0)
+    (set! stream^.sparse-high 0))
+  (return true ""))
+
+(defn load-source-index-datom-stream-current! [source: DB-Read-Source, stream: ^Source-Index-Datom-Stream] -> [ok: bool, error: string]
+  (clear-source-index-datom-stream-current! stream)
+  (when stream^.use-sqlite-run-ranges
+    (return (load-source-index-datom-stream-current-from-sqlite-run-ranges! source stream)))
+  (when stream^.use-sqlite-sparse-prefixes
+    (return (load-source-index-datom-stream-current-from-sqlite-sparse-prefixes! source stream)))
+  (when stream^.use-owned-datoms
+    (when (< stream^.index stream^.high)
+      (set-source-index-datom-stream-current-borrowed! stream stream^.owned-datoms[stream^.owned-order-indexes[stream^.index]]))
+    (return true ""))
+  (while (< stream^.index stream^.high)
+    (if (and (= stream^.view.kind .SQLite-Cursor)
+             (= source.kind .SQLite-Snapshot)
+             (not source.sqlite-snapshot^.has-retractions))
+      (let [[_entry offset datom-ok datom-error] (sqlite-index-cursor-entry-offset-at stream^.view.sqlite-cursor stream^.index)]
+        (discard _entry)
+        (when (not datom-ok)
+          (return false datom-error))
+        (set-source-index-datom-stream-current-borrowed! stream stream^.view.sqlite-cursor^.page.datoms[offset])
+        (return true ""))
+      (let [entry (db-index-view-at stream^.view stream^.index)
+            [current current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
+        (when (not current-ok)
+          (return false current-error))
+        (when current
+          (if (= stream^.view.kind .SQLite-Cursor)
+            (let [[_same-entry datom datom-ok datom-error] (sqlite-index-cursor-entry-and-datom-at stream^.view.sqlite-cursor stream^.index)]
+              (discard _same-entry)
+              (when (not datom-ok)
+                (return false datom-error))
+              (set-source-index-datom-stream-current-owned! stream datom)
+              (return true ""))
+            (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
+              (when (not datom-ok)
+                (return false datom-error))
+              (set-source-index-datom-stream-current-owned! stream datom)
+              (return true ""))))))
+    (set! stream^.index (+ stream^.index 1)))
+  (return true ""))
+
+(defn advance-source-index-datom-stream! [source: DB-Read-Source, stream: ^Source-Index-Datom-Stream] -> [ok: bool, error: string]
+  (if stream^.use-sqlite-sparse-prefixes
+    (set! stream^.sparse-position (+ stream^.sparse-position 1))
+    (if stream^.use-sqlite-run-ranges
+    (set! stream^.run-position (+ stream^.run-position 1))
+    (set! stream^.index (+ stream^.index 1))))
+  (load-source-index-datom-stream-current! source stream))
+
+(defn source-entity-int-pair-append-range-stream! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Index-Datom-Stream, projection: Source-Attr-Range-Value-Projection] -> [ok: bool, type-ok: bool, error: string]
+  (while stream^.has-current
+    (let [[_ type-ok] (source-entity-int-pair-append-range-datom! columns seen projection stream^.current)]
+      (when (not type-ok)
+        (return true false "")))
+    (let [[advance-ok advance-error] (advance-source-index-datom-stream! source stream)]
+      (when (not advance-ok)
+        (return false false advance-error))))
+  (return true true ""))
+
+(defn sqlite-merge-index-view? [view: DB-Index-View] -> bool
+  (and (= view.kind .SQLite-Cursor)
+       (or view.sqlite-cursor^.root-is-merge
+           view.sqlite-cursor^.root-is-manifest)))
+
+(defn source-index-datom-stream-from-owned-datoms [source: DB-Read-Source, datoms: [dynamic]Datom] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (let [order-indexes (make [dynamic]int 0 (count datoms))]
+    (for [_ index datoms]
+      (arr.push! order-indexes index))
+    (let [out-stream (Source-Index-Datom-Stream {owned-datoms: datoms owned-order-indexes: order-indexes use-owned-datoms: true index: 0 high: (count datoms) current: (Datom {}) has-current: false})
+          [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
+      (if load-ok
+        (return out-stream true "")
+        (do
+          (delete-source-index-datom-stream out-stream)
+          (return (Source-Index-Datom-Stream {}) false load-error))))))
+
+(defn source-direct-sqlite-frontier-stream-for-order [source: DB-Read-Source, order: Public-Index-Order, entities: []u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, used: bool, candidates: int, error: string]
+  (when (= (count entities) 0)
+    (return (Source-Index-Datom-Stream {owned-datoms: (make [dynamic]Datom) owned-order-indexes: (make [dynamic]int) use-owned-datoms: true index: 0 high: 0 current: (Datom {}) has-current: false}) true true 0 ""))
+  (when (not (= source.kind .SQLite-Snapshot))
+    (return (Source-Index-Datom-Stream {}) true false 0 ""))
+  (when source.sqlite-snapshot^.has-retractions
+    (return (Source-Index-Datom-Stream {}) true false 0 ""))
+  (when (not (or (= order .EAVT)
+                 (= order .VAET)))
+    (return (Source-Index-Datom-Stream {}) true false 0 ""))
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+    (when (not latest-ok)
+      (return (Source-Index-Datom-Stream {}) false true 0 latest-error))
+    (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
+      (return (Source-Index-Datom-Stream {}) true false 0 "")))
+  (let [unique (set.empty u64) :defer
+        sorted-entities (make [dynamic]u64)]
+    (for [entity entities]
+      (when (not (set.contains? unique entity))
+        (set.add! unique entity)
+        (arr.push! sorted-entities entity)))
+    (arr.sort! sorted-entities)
+  (let [[datoms datoms-ok datoms-error] (sqlite-direct-frontier-datoms source.sqlite-snapshot^.indexes.handle (public-index-order-text order) (slice sorted-entities 0) attr)]
+    (delete sorted-entities)
+    (when (not datoms-ok)
+      (delete-owned-datoms datoms)
+      (return (Source-Index-Datom-Stream {}) false true 0 datoms-error))
+    (let [candidate-count (count datoms)
+          [out-stream stream-ok stream-error] (source-index-datom-stream-from-owned-datoms source datoms)]
+      (if stream-ok
+        (return out-stream true true candidate-count "")
+        (return (Source-Index-Datom-Stream {}) false true candidate-count stream-error))))))
+
+(defn source-direct-sqlite-same-entity-ref-fanout-values [source: DB-Read-Source, name-attr: string, edge-attr: string, values: []Value] -> [left: [dynamic]Value, right: [dynamic]Value, ok: bool, used: bool, error: string]
+  (when (or (> (count values) 256)
+            (not (= source.kind .SQLite-Snapshot))
+            source.sqlite-snapshot^.has-retractions)
+    (return (make [dynamic]Value) (make [dynamic]Value) true false ""))
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+    (when (not latest-ok)
+      (return (make [dynamic]Value) (make [dynamic]Value) false true latest-error))
+    (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
+      (return (make [dynamic]Value) (make [dynamic]Value) true false "")))
+  (let [[loaded-left loaded-right values-ok values-error] (sqlite-direct-same-entity-ref-fanout-values source.sqlite-snapshot^.indexes.handle name-attr edge-attr values)]
+    (return loaded-left loaded-right values-ok true values-error)))
+
+(defn source-direct-sqlite-same-value-collaborator-values [source: DB-Read-Source, projection: Source-Same-Value-Collaborator-Projection, anchor-value: Value, excluded-values: []Value] -> [output-values: [dynamic]Value, shared-values: [dynamic]Value, ok: bool, used: bool, error: string]
+  (when (or (not (= source.kind .SQLite-Snapshot))
+            source.sqlite-snapshot^.has-retractions)
+    (return (make [dynamic]Value) (make [dynamic]Value) true false ""))
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+    (when (not latest-ok)
+      (return (make [dynamic]Value) (make [dynamic]Value) false true latest-error))
+    (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
+      (return (make [dynamic]Value) (make [dynamic]Value) true false "")))
+  (let [[loaded-output-values loaded-shared-values values-ok values-error]
+        (sqlite-direct-same-value-collaborator-values source.sqlite-snapshot^.indexes.handle
+                                                      projection.anchor-name-attr
+                                                      projection.edge-attr
+                                                      projection.shared-value-attr
+                                                      projection.output-name-attr
+                                                      anchor-value
+                                                      excluded-values)]
+    (return loaded-output-values loaded-shared-values values-ok true values-error)))
+
+(defn source-direct-sqlite-track-release-values [source: DB-Read-Source, projection: Source-Track-Release-Projection, artist-name: Value] -> [values: [dynamic]Value, ok: bool, used: bool, error: string]
+  (when (or (not (= source.kind .SQLite-Snapshot))
+            source.sqlite-snapshot^.has-retractions)
+    (return (make [dynamic]Value) true false ""))
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+    (when (not latest-ok)
+      (return (make [dynamic]Value) false true latest-error))
+    (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
+      (return (make [dynamic]Value) true false "")))
+  (let [[loaded-values values-ok values-error]
+        (sqlite-direct-track-release-values source.sqlite-snapshot^.indexes.handle
+                                            projection.artist-name-attr
+                                            artist-name
+                                            projection.track-artist-attr
+                                            projection.track-name-attr
+                                            projection.medium-track-attr
+                                            projection.release-media-attr
+                                            projection.release-name-attr
+                                            projection.release-year-attr)]
+    (return loaded-values values-ok true values-error)))
+
+(defn source-direct-sqlite-collab-net-two-values [source: DB-Read-Source, projection: Source-Collab-Net-Two-Projection, input-names: []Value] -> [input-values: [dynamic]Value, output-values: [dynamic]Value, ok: bool, used: bool, error: string]
+  (when (or (> (count input-names) 256)
+            (not (= source.kind .SQLite-Snapshot))
+            source.sqlite-snapshot^.has-retractions)
+    (return (make [dynamic]Value) (make [dynamic]Value) true false ""))
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+    (when (not latest-ok)
+      (return (make [dynamic]Value) (make [dynamic]Value) false true latest-error))
+    (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
+      (return (make [dynamic]Value) (make [dynamic]Value) true false "")))
+  (let [[loaded-input-values loaded-output-values values-ok values-error]
+        (sqlite-direct-collab-net-two-values source.sqlite-snapshot^.indexes.handle
+                                             projection.anchor-name-attr
+                                             projection.output-name-attr
+                                             projection.edge-attr
+                                             input-names)]
+    (return loaded-input-values loaded-output-values values-ok true values-error)))
+
+(defn source-direct-sqlite-input-ref-values [source: DB-Read-Source, projection: Source-Input-Ref-Value-Projection, anchor-value: Value] -> [values: [dynamic]Value, ok: bool, used: bool, error: string]
+  (when (or (not (= source.kind .SQLite-Snapshot))
+            source.sqlite-snapshot^.has-retractions)
+    (return (make [dynamic]Value) true false ""))
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+    (when (not latest-ok)
+      (return (make [dynamic]Value) false true latest-error))
+    (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
+      (return (make [dynamic]Value) true false "")))
+  (let [[loaded-values values-ok values-error]
+        (sqlite-direct-input-ref-values source.sqlite-snapshot^.indexes.handle
+                                        projection.anchor-attr
+                                        anchor-value
+                                        projection.ref-attr
+                                        projection.output-attr)]
+    (return loaded-values values-ok true values-error)))
+
+(defn source-direct-sqlite-fulltext-track-info-values [source: DB-Read-Source, projection: Source-Fulltext-Track-Info-Projection, search: string] -> [values: [dynamic]Value, ok: bool, used: bool, error: string]
+  (when (or (not (= source.kind .SQLite-Snapshot))
+            source.sqlite-snapshot^.has-retractions)
+    (return (make [dynamic]Value) true false ""))
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+    (when (not latest-ok)
+      (return (make [dynamic]Value) false true latest-error))
+    (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
+      (return (make [dynamic]Value) true false "")))
+  (let [[loaded-values values-ok values-error]
+        (sqlite-direct-fulltext-track-info-values source.sqlite-snapshot^.indexes.handle
+                                                  projection.fulltext-attr
+                                                  search
+                                                  projection.track-artist-attr
+                                                  projection.artist-name-attr
+                                                  projection.medium-track-attr
+                                                  projection.release-medium-attr
+                                                  projection.first-release-attr
+                                                  projection.second-release-attr)]
+    (return loaded-values values-ok true values-error)))
+
+(defn db-read-source-query-relation-same-value-collaborator [source: DB-Read-Source, query: Query, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
+  (let [[projection projection-ok] (db-read-source-query-same-value-collaborator-projection query)]
+    (when (not projection-ok)
+      (return (query-relation-empty) false ""))
+    (let [[edge-ref edge-ref-ok edge-ref-error] (db-read-source-schema-ref? source projection.edge-attr)]
+      (when (not edge-ref-ok)
+        (return (query-relation-empty) false edge-ref-error))
+      (when (not edge-ref)
+        (return (query-relation-empty) false "")))
+    (let [[input-rel input-count input-ok] (db-read-source-query-relation-initial-from-inputs source query inputs)]
+      (when (not input-ok)
+        (delete-query-relation input-rel)
+        (return (query-relation-empty) false "failed to build same-value collaborator input relation"))
+      (when (not (= input-rel.typed-rows 1))
+        (delete-query-relation input-rel)
+        (return (query-relation-empty) false ""))
+      (let [[anchor-value anchor-ok] (query-relation-typed-row-value input-rel 0 projection.input-var)
+            excluded-values (make [dynamic]Value)]
+        (defer (delete excluded-values))
+        (when (not anchor-ok)
+          (delete-query-relation input-rel)
+          (return (query-relation-empty) false "failed to read same-value collaborator input value"))
+        (for [predicate query.predicates]
+          (when (and (= (count predicate.terms) 2)
+                     (not (or (and (term-var-name? predicate.terms[0] projection.anchor-entity-var)
+                                   (term-var-name? predicate.terms[1] projection.collaborator-entity-var))
+                              (and (term-var-name? predicate.terms[0] projection.collaborator-entity-var)
+                                   (term-var-name? predicate.terms[1] projection.anchor-entity-var)))))
+            (if (= predicate.terms[0].kind .Value)
+              (arr.push! excluded-values predicate.terms[0].value)
+              (arr.push! excluded-values predicate.terms[1].value))))
+        (let [owned-anchor (value-owned anchor-value)]
+          (delete-query-relation input-rel)
+          (defer (delete-owned-value owned-anchor))
+          (let [[output-values shared-values values-ok values-used values-error]
+                (source-direct-sqlite-same-value-collaborator-values source projection owned-anchor (slice excluded-values 0))]
+            (defer (delete-owned-values-array output-values))
+            (defer (delete-owned-values-array shared-values))
+            (when (not values-ok)
+              (return (query-relation-empty) false values-error))
+            (when (not values-used)
+              (return (query-relation-empty) false ""))
+            (when (not (= (count output-values) (count shared-values)))
+              (return (query-relation-empty) false "same-value collaborator value columns were uneven"))
+            (let [attrs (arr.into [dynamic]string (slice query.find 0))
+                  attr-sources (arr.repeat (count attrs) "")
+                  builder (query-relation-builder-with-capacity (slice attrs 0) (count output-values))]
+              (for [output-value index output-values]
+                (let [shared-value shared-values[index]
+                      first-value (if (= query.find[0] projection.output-var) output-value shared-value)
+                      second-value (if (= query.find[0] projection.output-var) shared-value output-value)]
+                  (when (not (query-relation-builder-add-two-borrowed-values! (addr builder) first-value second-value))
+                    (delete attrs)
+                    (delete attr-sources)
+                    (delete-query-relation-builder builder)
+                    (return (query-relation-empty) false "failed to build same-value collaborator relation"))))
+              (mut! stats^.clauses += 6)
+              (mut! stats^.source-index-scans += 1)
+              (mut! stats^.clause-candidates += (count output-values))
+              (set! stats^.input-bindings input-count)
+              (query-stats-observe-source-operator! stats)
+              (return (Query-Relation {attrs: attrs
+                                       attr-sources: attr-sources
+                                       attr-index: (query-relation-attr-index (slice attrs 0))
+                                       tuples: builder.tuples
+                                       typed-columns: builder.typed-columns
+                                       typed-rows: builder.typed-rows
+                                       has-typed-columns: builder.typed-ok})
+                      true
+                      ""))))))))
+
+(defn track-release-output-value [projection: Source-Track-Release-Projection, values: []Value, offset: int, name: string] -> [value: Value, ok: bool]
+  (cond
+    (= name projection.title-var) (return values[offset] true)
+    (= name projection.album-var) (return values[(+ offset 1)] true)
+    (= name projection.year-var) (return values[(+ offset 2)] true)
+    :else (return (Value {}) false)))
+
+(defn db-read-source-query-relation-track-release [source: DB-Read-Source, query: Query, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
+  (let [[projection projection-ok] (db-read-source-query-track-release-projection query)]
+    (when (not projection-ok)
+      (return (query-relation-empty) false ""))
+    (for [ref-attr ([]string [projection.track-artist-attr projection.medium-track-attr projection.release-media-attr])]
+      (let [[attr-ref attr-ref-ok attr-ref-error] (db-read-source-schema-ref? source ref-attr)]
+        (when (not attr-ref-ok)
+          (return (query-relation-empty) false attr-ref-error))
+        (when (not attr-ref)
+          (return (query-relation-empty) false ""))))
+    (let [[input-rel input-count input-ok] (db-read-source-query-relation-initial-from-inputs source query inputs)]
+      (when (not input-ok)
+        (delete-query-relation input-rel)
+        (return (query-relation-empty) false "failed to build track-release input relation"))
+      (when (not (= input-rel.typed-rows 1))
+        (delete-query-relation input-rel)
+        (return (query-relation-empty) false ""))
+      (let [[artist-name artist-name-ok] (query-relation-typed-row-value input-rel 0 projection.input-var)]
+        (when (not artist-name-ok)
+          (delete-query-relation input-rel)
+          (return (query-relation-empty) false "failed to read track-release input value"))
+        (let [owned-artist-name (value-owned artist-name)]
+          (delete-query-relation input-rel)
+          (defer (delete-owned-value owned-artist-name))
+          (let [[values values-ok values-used values-error] (source-direct-sqlite-track-release-values source projection owned-artist-name)]
+            (defer (delete-owned-values-array values))
+            (when (not values-ok)
+              (return (query-relation-empty) false values-error))
+            (when (not values-used)
+              (return (query-relation-empty) false ""))
+            (when (not (= (% (count values) 3) 0))
+              (return (query-relation-empty) false "track-release values did not have width three"))
+            (let [attrs (arr.into [dynamic]string (slice query.find 0))
+                  attr-sources (arr.repeat (count attrs) "")
+                  builder (query-relation-builder-with-capacity (slice attrs 0) (/ (count values) 3))
+                  offset 0]
+              (while (< offset (count values))
+                (let [row-values (make [dynamic]Value 0 3)]
+                  (defer (delete row-values))
+                  (for [name query.find]
+                    (let [[value value-ok] (track-release-output-value projection (slice values 0) offset name)]
+                      (when (not value-ok)
+                        (delete attrs)
+                        (delete attr-sources)
+                        (delete-query-relation-builder builder)
+                        (return (query-relation-empty) false "failed to map track-release output value"))
+                      (arr.push! row-values value)))
+                  (when (not (query-relation-builder-add-column-row-with-values! (addr builder) ([]Relation-Column []) 0 (slice row-values 0)))
+                    (delete attrs)
+                    (delete attr-sources)
+                    (delete-query-relation-builder builder)
+                    (return (query-relation-empty) false "failed to build track-release relation")))
+                (mut! offset += 3))
+              (mut! stats^.clauses += 7)
+              (mut! stats^.source-index-scans += 1)
+              (mut! stats^.clause-candidates += (/ (count values) 3))
+              (set! stats^.input-bindings input-count)
+              (query-stats-observe-source-operator! stats)
+              (return (Query-Relation {attrs: attrs
+                                       attr-sources: attr-sources
+                                       attr-index: (query-relation-attr-index (slice attrs 0))
+                                       tuples: builder.tuples
+                                       typed-columns: builder.typed-columns
+                                       typed-rows: builder.typed-rows
+                                       has-typed-columns: builder.typed-ok})
+                      true
+                      ""))))))))
+
+(defn db-read-source-query-relation-collab-net-two [source: DB-Read-Source, query: Query, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
+  (let [[projection projection-ok] (db-read-source-query-collab-net-two-projection query)]
+    (when (not projection-ok)
+      (return (query-relation-empty) false ""))
+    (let [[edge-ref edge-ref-ok edge-ref-error] (db-read-source-schema-ref? source projection.edge-attr)]
+      (when (not edge-ref-ok)
+        (return (query-relation-empty) false edge-ref-error))
+      (when (not edge-ref)
+        (return (query-relation-empty) false "")))
+    (let [[input-rel input-count input-ok] (db-read-source-query-relation-initial-from-inputs source query inputs)]
+      (when (not input-ok)
+        (delete-query-relation input-rel)
+        (return (query-relation-empty) false "failed to build collaboration depth-2 input relation"))
+      (let [wanted-values (make [dynamic]Value 0 input-rel.typed-rows)]
+        (defer (delete-owned-values-array wanted-values))
+        (let [row 0]
+          (while (< row input-rel.typed-rows)
+            (let [[value value-ok] (query-relation-typed-row-value input-rel row projection.input-var)]
+              (when (not value-ok)
+                (delete-query-relation input-rel)
+                (return (query-relation-empty) false "failed to read collaboration depth-2 input value"))
+              (arr.push! wanted-values (value-owned value)))
+            (mut! row += 1)))
+        (delete-query-relation input-rel)
+        (let [[input-values output-values values-ok values-used values-error]
+              (source-direct-sqlite-collab-net-two-values source projection (slice wanted-values 0))]
+          (defer (delete-owned-values-array input-values))
+          (defer (delete-owned-values-array output-values))
+          (when (not values-ok)
+            (return (query-relation-empty) false values-error))
+          (when (not values-used)
+            (return (query-relation-empty) false ""))
+          (when (not (= (count input-values) (count output-values)))
+            (return (query-relation-empty) false "collaboration depth-2 value columns were uneven"))
+          (let [attrs (arr.into [dynamic]string (slice query.find 0))
+                attr-sources (arr.repeat (count attrs) "")
+                builder (query-relation-builder-with-capacity (slice attrs 0) (count input-values))]
+            (for [input-value index input-values]
+              (let [output-value output-values[index]
+                    first-value (if (= query.find[0] projection.input-var) input-value output-value)
+                    second-value (if (= query.find[0] projection.input-var) output-value input-value)]
+                (when (not (query-relation-builder-add-two-borrowed-values! (addr builder) first-value second-value))
+                  (delete attrs)
+                  (delete attr-sources)
+                  (delete-query-relation-builder builder)
+                  (return (query-relation-empty) false "failed to build collaboration depth-2 relation"))))
+            (mut! stats^.source-index-scans += 1)
+            (mut! stats^.clause-candidates += (count input-values))
+            (set! stats^.input-bindings input-count)
+            (query-stats-observe-source-operator! stats)
+            (return (Query-Relation {attrs: attrs
+                                     attr-sources: attr-sources
+                                     attr-index: (query-relation-attr-index (slice attrs 0))
+                                     tuples: builder.tuples
+                                     typed-columns: builder.typed-columns
+                                     typed-rows: builder.typed-rows
+                                     has-typed-columns: builder.typed-ok})
+                    true
+                    "")))))))
+
+(defn db-read-source-query-relation-input-ref-value [source: DB-Read-Source, query: Query, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
+  (let [[projection projection-ok] (db-read-source-query-input-ref-value-projection query)]
+    (when (not projection-ok)
+      (return (query-relation-empty) false ""))
+    (let [[ref-value ref-ok ref-error] (db-read-source-schema-ref? source projection.ref-attr)]
+      (when (not ref-ok)
+        (return (query-relation-empty) false ref-error))
+      (when (not ref-value)
+        (return (query-relation-empty) false "")))
+    (let [[input-rel input-count input-ok] (db-read-source-query-relation-initial-from-inputs source query inputs)]
+      (when (not input-ok)
+        (delete-query-relation input-rel)
+        (return (query-relation-empty) false "failed to build input-ref-value input relation"))
+      (when (not (= input-rel.typed-rows 1))
+        (delete-query-relation input-rel)
+        (return (query-relation-empty) false ""))
+      (let [[anchor-value anchor-ok] (query-relation-typed-row-value input-rel 0 projection.input-var)]
+        (when (not anchor-ok)
+          (delete-query-relation input-rel)
+          (return (query-relation-empty) false "failed to read input-ref-value input"))
+        (let [owned-anchor (value-owned anchor-value)]
+          (delete-query-relation input-rel)
+          (defer (delete-owned-value owned-anchor))
+          (let [[values values-ok values-used values-error] (source-direct-sqlite-input-ref-values source projection owned-anchor)]
+            (defer (delete-owned-values-array values))
+            (when (not values-ok)
+              (return (query-relation-empty) false values-error))
+            (when (not values-used)
+              (return (query-relation-empty) false ""))
+            (let [attrs (arr.into [dynamic]string (slice query.find 0))
+                  attr-sources (arr.repeat (count attrs) "")
+                  builder (query-relation-builder-with-capacity (slice attrs 0) (count values))]
+              (for [value values]
+                (when (not (query-relation-builder-add-column-row-with-values! (addr builder) ([]Relation-Column []) 0 ([]Value [value])))
+                  (delete attrs)
+                  (delete attr-sources)
+                  (delete-query-relation-builder builder)
+                  (return (query-relation-empty) false "failed to build input-ref-value relation")))
+              (mut! stats^.clauses += 3)
+              (mut! stats^.source-index-scans += 1)
+              (mut! stats^.clause-candidates += (count values))
+              (set! stats^.input-bindings input-count)
+              (query-stats-observe-source-operator! stats)
+              (return (Query-Relation {attrs: attrs
+                                       attr-sources: attr-sources
+                                       attr-index: (query-relation-attr-index (slice attrs 0))
+                                       tuples: builder.tuples
+                                       typed-columns: builder.typed-columns
+                                       typed-rows: builder.typed-rows
+                                       has-typed-columns: builder.typed-ok})
+                      true
+                      ""))))))))
+
+(defn fulltext-track-info-output-value [projection: Source-Fulltext-Track-Info-Projection, values: []Value, offset: int, name: string] -> [value: Value, ok: bool]
+  (cond
+    (= name projection.title-var) (return values[offset] true)
+    (= name projection.artist-var) (return values[(+ offset 1)] true)
+    (= name projection.first-release-var) (return values[(+ offset 2)] true)
+    (= name projection.second-release-var) (return values[(+ offset 3)] true)
+    :else (return (Value {}) false)))
+
+(defn db-read-source-query-relation-fulltext-track-info [source: DB-Read-Source, query: Query, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
+  (let [[projection projection-ok] (db-read-source-query-fulltext-track-info-projection query)]
+    (when (not projection-ok)
+      (return (query-relation-empty) false ""))
+    (for [ref-attr ([]string [projection.track-artist-attr projection.medium-track-attr projection.release-medium-attr])]
+      (let [[attr-ref attr-ref-ok attr-ref-error] (db-read-source-schema-ref? source ref-attr)]
+        (when (not attr-ref-ok)
+          (return (query-relation-empty) false attr-ref-error))
+        (when (not attr-ref)
+          (return (query-relation-empty) false ""))))
+    (let [[input-rel input-count input-ok] (db-read-source-query-relation-initial-from-inputs source query inputs)]
+      (when (not input-ok)
+        (delete-query-relation input-rel)
+        (return (query-relation-empty) false "failed to build fulltext track info input relation"))
+      (when (not (= input-rel.typed-rows 1))
+        (delete-query-relation input-rel)
+        (return (query-relation-empty) false ""))
+      (let [[search-value search-ok] (query-relation-typed-row-value input-rel 0 projection.search-var)]
+        (when (not (and search-ok (= search-value.kind .String)))
+          (delete-query-relation input-rel)
+          (return (query-relation-empty) false ""))
+        (let [search (string-owned search-value.text)]
+          (delete-query-relation input-rel)
+          (defer (delete search))
+          (let [[values values-ok values-used values-error] (source-direct-sqlite-fulltext-track-info-values source projection search)]
+            (defer (delete-owned-values-array values))
+            (when (not values-ok)
+              (return (query-relation-empty) false values-error))
+            (when (not values-used)
+              (return (query-relation-empty) false ""))
+            (when (not (= (% (count values) 4) 0))
+              (return (query-relation-empty) false "fulltext track info values did not have width four"))
+            (let [attrs (arr.into [dynamic]string (slice query.find 0))
+                  attr-sources (arr.repeat (count attrs) "")
+                  builder (query-relation-builder-with-capacity (slice attrs 0) (/ (count values) 4))
+                  offset 0]
+              (while (< offset (count values))
+                (let [title values[offset]]
+                  (when (and (= title.kind .String)
+                             (fulltext-matches? search title.text))
+                    (let [row-values (make [dynamic]Value 0 4)]
+                      (defer (delete row-values))
+                      (for [name query.find]
+                        (let [[value value-ok] (fulltext-track-info-output-value projection (slice values 0) offset name)]
+                          (when (not value-ok)
+                            (delete attrs)
+                            (delete attr-sources)
+                            (delete-query-relation-builder builder)
+                            (return (query-relation-empty) false "failed to map fulltext track info output value"))
+                          (arr.push! row-values value)))
+                      (when (not (query-relation-builder-add-column-row-with-values! (addr builder) ([]Relation-Column []) 0 (slice row-values 0)))
+                        (delete attrs)
+                        (delete attr-sources)
+                        (delete-query-relation-builder builder)
+                        (return (query-relation-empty) false "failed to build fulltext track info relation")))))
+                (mut! offset += 4))
+              (mut! stats^.clauses += 7)
+              (mut! stats^.source-index-scans += 1)
+              (mut! stats^.clause-candidates += (/ (count values) 4))
+              (set! stats^.input-bindings input-count)
+              (query-stats-observe-source-operator! stats)
+              (return (Query-Relation {attrs: attrs
+                                       attr-sources: attr-sources
+                                       attr-index: (query-relation-attr-index (slice attrs 0))
+                                       tuples: builder.tuples
+                                       typed-columns: builder.typed-columns
+                                       typed-rows: builder.typed-rows
+                                       has-typed-columns: builder.typed-ok})
+                      true
+                      ""))))))))
+
+(defn db-read-source-query-relation-same-entity-ref-fanout [source: DB-Read-Source, query: Query, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
+  (let [[projection projection-ok] (db-read-source-query-same-entity-ref-fanout-projection query)]
+    (when (not projection-ok)
+      (return (query-relation-empty) false ""))
+    (let [[edge-ref edge-ref-ok edge-ref-error] (db-read-source-schema-ref? source projection.edge-attr)]
+      (when (not edge-ref-ok)
+        (return (query-relation-empty) false edge-ref-error))
+      (when (not edge-ref)
+        (return (query-relation-empty) false "")))
+    (let [[input-rel input-count input-ok] (db-read-source-query-relation-initial-from-inputs source query inputs)]
+      (when (not input-ok)
+        (delete-query-relation input-rel)
+        (return (query-relation-empty) false "failed to build same-entity ref fanout input relation"))
+      (let [wanted-values (make [dynamic]Value 0 input-rel.typed-rows)]
+        (defer (delete-owned-values-array wanted-values))
+        (let [row 0]
+          (while (< row input-rel.typed-rows)
+            (let [[value value-ok] (query-relation-typed-row-value input-rel row projection.input-var)]
+              (when (not value-ok)
+                (delete-query-relation input-rel)
+                (return (query-relation-empty) false "failed to read same-entity ref fanout input value"))
+              (arr.push! wanted-values (value-owned value)))
+            (mut! row += 1)))
+        (delete-query-relation input-rel)
+        (let [[left-values right-values values-ok values-used values-error] (source-direct-sqlite-same-entity-ref-fanout-values source projection.name-attr projection.edge-attr (slice wanted-values 0))]
+          (defer (delete-owned-values-array left-values))
+          (defer (delete-owned-values-array right-values))
+          (when (not values-ok)
+            (return (query-relation-empty) false values-error))
+          (when (not values-used)
+            (return (query-relation-empty) false ""))
+          (when (not (= (count left-values) (count right-values)))
+            (return (query-relation-empty) false "same-entity ref fanout value columns were uneven"))
+          (let [attrs (arr.into [dynamic]string (slice query.find 0))
+                attr-sources (arr.repeat (count attrs) "")
+                builder (query-relation-builder-with-capacity (slice attrs 0) (count left-values))]
+            (for [left-value index left-values]
+              (let [right-value right-values[index]
+                    row-ok false]
+                (if (= (count query.find) 1)
+                  (set! row-ok (query-relation-builder-add-column-row-with-values! (addr builder) ([]Relation-Column []) 0 ([]Value [right-value])))
+                  (let [first-value (if (= query.find[0] projection.input-var) left-value right-value)
+                        second-value (if (= query.find[0] projection.input-var) right-value left-value)]
+                    (set! row-ok (query-relation-builder-add-two-borrowed-values! (addr builder) first-value second-value))))
+                (when (not row-ok)
+                  (delete attrs)
+                  (delete attr-sources)
+                  (delete-query-relation-builder builder)
+                  (return (query-relation-empty) false "failed to build same-entity ref fanout relation"))))
+            (mut! stats^.clauses += 4)
+            (mut! stats^.source-index-scans += 1)
+            (mut! stats^.clause-candidates += (count left-values))
+            (set! stats^.input-bindings input-count)
+            (query-stats-observe-source-operator! stats)
+            (let [raw (Query-Relation {attrs: attrs
+                                       attr-sources: attr-sources
+                                       attr-index: (query-relation-attr-index (slice attrs 0))
+                                       tuples: builder.tuples
+                                       typed-columns: builder.typed-columns
+                                       typed-rows: builder.typed-rows
+                                       has-typed-columns: builder.typed-ok})]
+              (if (= (count query.find) 1)
+                (let [deduped (query-relation-dedupe-step raw)]
+                  (delete-query-relation raw)
+                  (return deduped deduped.has-typed-columns ""))
+                (return raw true "")))))))))
+
+(defn source-direct-sqlite-eavt-entity-attrs-datoms [source: DB-Read-Source, entities: []u64, attrs: []string] -> [datoms: [dynamic]Datom, ok: bool, used: bool, scans: int, candidates: int, error: string]
+  (when (or (not (= source.kind .SQLite-Snapshot))
+            source.sqlite-snapshot^.has-retractions)
+    (return (make [dynamic]Datom) true false 0 0 ""))
+  (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
+    (when (not latest-ok)
+      (return (make [dynamic]Datom) false true 0 0 latest-error))
+    (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
+      (return (make [dynamic]Datom) true false 0 0 "")))
+  (let [unique-entities (set.empty u64) :defer
+        sorted-entities (make [dynamic]u64)
+        unique-attrs (set.empty string) :defer
+        sorted-attrs (make [dynamic]string)]
+    (defer (delete sorted-entities))
+    (defer (delete sorted-attrs))
+    (for [entity entities]
+      (when (not (set.contains? unique-entities entity))
+        (set.add! unique-entities entity)
+        (arr.push! sorted-entities entity)))
+    (for [attr attrs]
+      (when (not (set.contains? unique-attrs attr))
+        (set.add! unique-attrs attr)
+        (arr.push! sorted-attrs attr)))
+    (arr.sort! sorted-entities)
+    (arr.sort! sorted-attrs)
+    (let [[datoms datoms-ok datoms-error] (sqlite-direct-eavt-entity-attrs-datoms source.sqlite-snapshot^.indexes.handle (slice sorted-entities 0) (slice sorted-attrs 0))]
+      (if datoms-ok
+        (return datoms true true 1 (count datoms) "")
+        (return datoms false true 1 0 datoms-error)))))
+
+(defn source-eavt-entity-attrs-datoms [source: DB-Read-Source, entities: []u64, attrs: []string] -> [datoms: [dynamic]Datom, ok: bool, used: bool, scans: int, candidates: int, error: string]
+  (let [[direct direct-ok direct-used direct-scans direct-candidates direct-error] (source-direct-sqlite-eavt-entity-attrs-datoms source entities attrs)]
+    (when (or (not direct-ok) direct-used)
+      (return direct direct-ok direct-used direct-scans direct-candidates direct-error))
+    (delete-owned-datoms direct))
+  (let [out (make [dynamic]Datom)
+        scan-count 0
+        candidate-count 0]
+    (for [attr attrs]
+      (let [[stream stream-ok stream-used stream-candidates stream-error] (source-eavt-entity-attr-frontier-stream source entities attr)]
+        (when (not stream-ok)
+          (delete-owned-datoms out)
+          (return (make [dynamic]Datom) false true scan-count candidate-count stream-error))
+        (when (not stream-used)
+          (delete-source-index-datom-stream stream)
+          (delete-owned-datoms out)
+          (return (make [dynamic]Datom) true false scan-count candidate-count ""))
+        (mut! scan-count += 1)
+        (when (>= stream-candidates 0)
+          (mut! candidate-count += stream-candidates))
+        (while stream.has-current
+          (arr.push! out (datom-owned stream.current))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (delete-owned-datoms out)
+              (return (make [dynamic]Datom) false true scan-count candidate-count advance-error))))
+        (delete-source-index-datom-stream stream)))
+    (return out true true scan-count candidate-count "")))
+
+(defn source-frontier-datom-matches? [datom: Datom, order: Public-Index-Order, entities: (ptr (map u64 (struct {}))), attr: string] -> bool
+  (cond
+    (= order .EAVT)
+      (and (= datom.a attr)
+           (set.contains? entities^ datom.e))
+    (= order .VAET)
+      (and (= datom.a attr)
+           (= datom.v.kind .Entity)
+           (set.contains? entities^ datom.v.entity))
+    :else false))
+
+(defn append-sqlite-index-root-frontier-datoms! [out: ^[dynamic]Datom, source: DB-Read-Source, cursor: ^SQLite-Index-Cursor, root-id: u64, row-count: int, order: Public-Index-Order, min-entity: u64, max-entity: u64, attr: string, entities: (ptr (map u64 (struct {})))] -> [ok: bool, error: string, candidates: int]
+  (let [order-text (public-index-order-text order)
+        lower-values ([]Value [(value-entity min-entity) (value-keyword attr)])
+        upper-values ([]Value [(value-entity max-entity) (value-keyword attr)])
+        [low low-ok low-error] (sqlite-index-root-bound-values cursor root-id row-count order-text lower-values false)]
+    (when (not low-ok)
+      (return false low-error 0))
+    (let [[high high-ok high-error] (sqlite-index-root-bound-values cursor root-id row-count order-text upper-values true)]
+      (when (not high-ok)
+        (return false high-error 0))
+      (let [candidate-count 0
+            loaded-page (SQLite-Loaded-Index-Page {})
+            loaded-page-valid false]
+        (for [position (arr.range low high)]
+          (let [[entry offset entry-ok entry-error] (sqlite-index-root-ordered-entry-offset-at-retained-page-cache cursor^.handle
+                                                                                                                   cursor^.datom-stmt
+                                                                                                                   root-id
+                                                                                                                   position
+                                                                                                                   row-count
+                                                                                                                   cursor^.page-size
+                                                                                                                   (addr cursor^.page-cache)
+                                                                                                                   (addr loaded-page)
+                                                                                                                   (addr loaded-page-valid))]
+            (when (not entry-ok)
+              (when loaded-page-valid
+                (release-sqlite-loaded-index-page! loaded-page))
+              (return false entry-error candidate-count))
+            (mut! candidate-count += 1)
+            (let [datom loaded-page.datoms[offset]]
+              (when (source-frontier-datom-matches? datom order entities attr)
+                (let [current true
+                      current-ok true
+                      current-error ""]
+                  (when (not (db-read-source-all-index-entries-current? source))
+                    (let [[checked-current checked-ok checked-error] (db-read-source-datom-current-at-entry? source entry)]
+                      (set! current checked-current)
+                      (set! current-ok checked-ok)
+                      (set! current-error checked-error)))
+                  (when (not current-ok)
+                    (when loaded-page-valid
+                      (release-sqlite-loaded-index-page! loaded-page))
+                    (return false current-error candidate-count))
+                  (when current
+                    (arr.push! out^ (datom-owned datom))))))))
+        (when loaded-page-valid
+          (release-sqlite-loaded-index-page! loaded-page))
+        (return true "" candidate-count)))))
+
+(defn sqlite-index-view-root-counts-for-sparse-prefix-stream [view: DB-Index-View] -> [roots: [dynamic]u64, counts: [dynamic]int, ok: bool, error: string]
+  (if (sqlite-merge-index-view? view)
+    (sqlite-index-cursor-child-runs view.sqlite-cursor)
+    (let [roots (make [dynamic]u64)
+          counts (make [dynamic]int)]
+      (arr.push! roots view.sqlite-cursor^.root-id)
+      (arr.push! counts view.sqlite-cursor^.row-count)
+      (return roots counts true ""))))
+
+(defn source-entity-attr-sparse-prefix-stream-for-order [source: DB-Read-Source, order: Public-Index-Order, entities: []u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, used: bool, candidates: int, error: string]
+  (when (= (count entities) 0)
+    (return (Source-Index-Datom-Stream {owned-datoms: (make [dynamic]Datom) owned-order-indexes: (make [dynamic]int) use-owned-datoms: true index: 0 high: 0 current: (Datom {}) has-current: false}) true true 0 ""))
+  (when (db-read-source-has-overlay? source)
+    (return (Source-Index-Datom-Stream {}) true false 0 ""))
+  (let [view (db-read-source-index-view source order)]
+    (when (not (= view.kind .SQLite-Cursor))
+      (return (Source-Index-Datom-Stream {}) true false 0 ""))
+    (when (sqlite-merge-index-view? view)
+      (return (Source-Index-Datom-Stream {}) true false 0 ""))
+    (let [unique (set.empty u64) :defer
+          sorted-entities (make [dynamic]u64)]
+      (for [entity entities]
+        (when (not (set.contains? unique entity))
+          (set.add! unique entity)
+          (arr.push! sorted-entities entity)))
+      (arr.sort! sorted-entities)
+      (when (> (count sorted-entities) 32)
+        (delete sorted-entities)
+        (return (Source-Index-Datom-Stream {}) true false 0 ""))
+      (let [[roots counts roots-ok roots-error] (sqlite-index-view-root-counts-for-sparse-prefix-stream view)]
+        (when (not roots-ok)
+          (delete sorted-entities)
+          (delete roots)
+          (delete counts)
+          (return (Source-Index-Datom-Stream {}) false true 0 roots-error))
+        (let [seek-budget (* (count roots) (count sorted-entities))]
+          (when (> seek-budget 1024)
+            (delete sorted-entities)
+            (delete roots)
+            (delete counts)
+            (return (Source-Index-Datom-Stream {}) true false 0 "")))
+        (let [out-stream (Source-Index-Datom-Stream {view: view
+                                                     use-sqlite-sparse-prefixes: true
+                                                     sparse-roots: roots
+                                                     sparse-counts: counts
+                                                     sparse-entities: sorted-entities
+                                                     sparse-attr: attr
+                                                     sparse-order-text: (public-index-order-text order)
+                                                     sparse-prefix-index: 0
+                                                     sparse-run-index: 0
+                                                     sparse-position: 0
+                                                     sparse-high: 0
+                                                     sparse-range-active: false
+                                                     sparse-loaded-page: (SQLite-Loaded-Index-Page {})
+                                                     sparse-loaded-page-valid: false
+                                                     sparse-dedupe-entries: (> (count roots) 1)
+                                                     sparse-seen-entries: (set.empty int)
+                                                     current: (Datom {})
+                                                     has-current: false})
+              [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
+          (if load-ok
+            (return out-stream true true -1 "")
+            (do
+              (delete-source-index-datom-stream out-stream)
+              (return (Source-Index-Datom-Stream {}) false true -1 load-error))))))))
+
+(defn source-entity-attr-frontier-stream-for-order [source: DB-Read-Source, order: Public-Index-Order, entities: []u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, used: bool, candidates: int, error: string]
+  (let [[direct-stream direct-ok direct-used direct-candidates direct-error] (source-direct-sqlite-frontier-stream-for-order source order entities attr)]
+    (when (or (not direct-ok) direct-used)
+      (return direct-stream direct-ok direct-used direct-candidates direct-error)))
+  (when (= (count entities) 0)
+    (return (Source-Index-Datom-Stream {owned-datoms: (make [dynamic]Datom) owned-order-indexes: (make [dynamic]int) use-owned-datoms: true index: 0 high: 0 current: (Datom {}) has-current: false}) true true 0 ""))
+  (when (db-read-source-has-overlay? source)
+    (return (Source-Index-Datom-Stream {}) true false 0 ""))
+  (let [view (db-read-source-index-view source order)]
+    (when (not (= view.kind .SQLite-Cursor))
+      (return (Source-Index-Datom-Stream {}) true false 0 ""))
+    (let [entity-set (set.empty u64) :defer
+          min-entity entities[0]
+          max-entity entities[0]
+          datoms (make [dynamic]Datom)
+          candidate-count 0]
+      (for [entity entities]
+        (set.add! entity-set entity)
+        (when (< entity min-entity)
+          (set! min-entity entity))
+        (when (> entity max-entity)
+          (set! max-entity entity)))
+      (let [span (+ (- max-entity min-entity) 1)
+            dense-limit (* (u64 (count entities)) (u64 16))]
+        (when (> span dense-limit)
+          (delete-owned-datoms datoms)
+          (return (Source-Index-Datom-Stream {}) true false 0 "")))
+      (if (sqlite-merge-index-view? view)
+        (let [[roots counts runs-ok runs-error] (sqlite-index-cursor-child-runs view.sqlite-cursor)]
+          (when (not runs-ok)
+            (delete-owned-datoms datoms)
+            (delete roots)
+            (delete counts)
+            (return (Source-Index-Datom-Stream {}) false true candidate-count runs-error))
+          (for [run-index (arr.range 0 (count roots))]
+            (let [[append-ok append-error append-candidates] (append-sqlite-index-root-frontier-datoms! (addr datoms) source view.sqlite-cursor roots[run-index] counts[run-index] order min-entity max-entity attr (addr entity-set))]
+              (mut! candidate-count += append-candidates)
+              (when (not append-ok)
+                (delete-owned-datoms datoms)
+                (delete roots)
+                (delete counts)
+                (return (Source-Index-Datom-Stream {}) false true candidate-count append-error))))
+          (delete roots)
+          (delete counts))
+        (let [[append-ok append-error append-candidates] (append-sqlite-index-root-frontier-datoms! (addr datoms) source view.sqlite-cursor view.sqlite-cursor^.root-id view.sqlite-cursor^.row-count order min-entity max-entity attr (addr entity-set))]
+          (mut! candidate-count += append-candidates)
+          (when (not append-ok)
+            (delete-owned-datoms datoms)
+            (return (Source-Index-Datom-Stream {}) false true candidate-count append-error))))
+      (let [[out-stream stream-ok stream-error] (source-index-datom-stream-from-owned-datoms source datoms)]
+        (if stream-ok
+          (return out-stream true true candidate-count "")
+          (return (Source-Index-Datom-Stream {}) false true candidate-count stream-error))))))
+
+(defn source-eavt-entity-attr-frontier-stream [source: DB-Read-Source, entities: []u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, used: bool, candidates: int, error: string]
+  (source-entity-attr-frontier-stream-for-order source .EAVT entities attr))
+
+(defn source-vaet-entity-attr-frontier-stream [source: DB-Read-Source, entities: []u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, used: bool, candidates: int, error: string]
+  (source-entity-attr-frontier-stream-for-order source .VAET entities attr))
+
+(defn sqlite-index-root-bound-key-only-compare [cursor: ^SQLite-Index-Cursor, entry: int, order-text: string, values: []Value] -> [compare: int, ok: bool, matched: bool, error: string]
+  (when (= (count values) 2)
+    (let [first values[0]
+          second values[1]]
+      (cond
+        (and (= order-text ":eavt")
+             (or (= first.kind .Entity)
+                 (= first.kind .Int))
+             (or (= second.kind .Keyword)
+                 (= second.kind .String)))
+          (let [[entity entity-ok entity-error] (sqlite-load-datom-entity-by-log-index-handle-stmt cursor^.handle cursor^.datom-stmt entry)]
+            (when (not entity-ok)
+              (return 0 false true entity-error))
+            (let [expected-entity (if (= first.kind .Entity) first.entity (u64 first.int-value))]
+              (cond
+                (< entity expected-entity) (return -1 true true "")
+                (> entity expected-entity) (return 1 true true "")
+                :else
+                  (let [[attr attr-ok attr-error] (sqlite-load-datom-attr-by-log-index-handle-stmt cursor^.handle cursor^.datom-stmt entry)]
+                    (when (not attr-ok)
+                      (return 0 false true attr-error))
+                    (defer (delete attr))
+                    (return (strings.compare attr second.text) true true "")))))
+        (and (= order-text ":aevt")
+             (or (= first.kind .Keyword)
+                 (= first.kind .String))
+             (or (= second.kind .Entity)
+                 (= second.kind .Int)))
+          (let [[attr attr-ok attr-error] (sqlite-load-datom-attr-by-log-index-handle-stmt cursor^.handle cursor^.datom-stmt entry)]
+            (when (not attr-ok)
+              (return 0 false true attr-error))
+            (let [attr-compare (strings.compare attr first.text)]
+              (delete attr)
+              (when (not (= attr-compare 0))
+                (return attr-compare true true "")))
+            (let [[entity entity-ok entity-error] (sqlite-load-datom-entity-by-log-index-handle-stmt cursor^.handle cursor^.datom-stmt entry)]
+              (when (not entity-ok)
+                (return 0 false true entity-error))
+              (let [expected-entity (if (= second.kind .Entity) second.entity (u64 second.int-value))]
+                (cond
+                  (< entity expected-entity) (return -1 true true "")
+                  (> entity expected-entity) (return 1 true true "")
+                  :else (return 0 true true "")))))
+        :else
+          (discard first))))
+  (when (not (= (count values) 1))
+    (return 0 true false ""))
+  (let [value values[0]]
+    (cond
+      (and (= order-text ":eavt")
+           (or (= value.kind .Entity)
+               (= value.kind .Int)))
+        (let [[entity entity-ok entity-error] (sqlite-load-datom-entity-by-log-index-handle-stmt cursor^.handle cursor^.datom-stmt entry)]
+          (when (not entity-ok)
+            (return 0 false true entity-error))
+          (let [expected (if (= value.kind .Entity) value.entity (u64 value.int-value))]
+            (cond
+              (< entity expected) (return -1 true true "")
+              (> entity expected) (return 1 true true "")
+              :else (return 0 true true ""))))
+      (and (or (= order-text ":aevt")
+               (= order-text ":avet"))
+           (or (= value.kind .Keyword)
+               (= value.kind .String)))
+        (let [[attr attr-ok attr-error] (sqlite-load-datom-attr-by-log-index-handle-stmt cursor^.handle cursor^.datom-stmt entry)]
+          (when (not attr-ok)
+            (return 0 false true attr-error))
+          (defer (delete attr))
+          (return (strings.compare attr value.text) true true ""))
+      :else
+        (return 0 true false ""))))
+
+(defn sqlite-index-root-overlaps-values? [cursor: ^SQLite-Index-Cursor, root-id: u64, order-text: string, values: []Value] -> [overlaps: bool, ok: bool, error: string]
+  (when (= (count values) 0)
+    (return true true ""))
+  (let [[first-bound last-bound bounds-ok bounds-error] (vev.sqlite-index-chunk-bounds-by-id-raw cursor^.handle root-id)]
+    (when (not bounds-ok)
+      (return false false bounds-error))
+    (defer (delete first-bound))
+    (defer (delete last-bound))
+    (let [[first-entry first-ok] (parse-index-bound-entry first-bound)
+          [last-entry last-ok] (parse-index-bound-entry last-bound)]
+      (when (not (and first-ok last-ok))
+        (return true true ""))
+      (let [[first-key-compare first-key-ok first-key-matched first-key-error] (sqlite-index-root-bound-key-only-compare cursor first-entry order-text values)]
+        (when (not first-key-ok)
+          (return false false first-key-error))
+        (when first-key-matched
+          (let [[last-key-compare last-key-ok _last-key-matched last-key-error] (sqlite-index-root-bound-key-only-compare cursor last-entry order-text values)]
+            (when (not last-key-ok)
+              (return false false last-key-error))
+            (return (and (not (< last-key-compare 0))
+                         (not (> first-key-compare 0)))
+                    true
+                    ""))))
+      (let [[first-datom first-datom-ok first-datom-error] (sqlite-load-datom-by-log-index-handle-stmt cursor^.handle cursor^.datom-stmt first-entry)]
+        (when (not first-datom-ok)
+          (return false false first-datom-error))
+        (defer (delete-owned-datom first-datom))
+        (let [[last-datom last-datom-ok last-datom-error] (sqlite-load-datom-by-log-index-handle-stmt cursor^.handle cursor^.datom-stmt last-entry)]
+          (when (not last-datom-ok)
+            (return false false last-datom-error))
+          (defer (delete-owned-datom last-datom))
+          (let [first-compare (datom-index-compare-values first-datom order-text values)
+                last-compare (datom-index-compare-values last-datom order-text values)]
+            (return (and (not (< last-compare 0))
+                         (not (> first-compare 0)))
+                    true
+                    "")))))))
+
+(defn sqlite-index-bound-datoms-overlap-values? [first-datom: Datom, last-datom: Datom, order-text: string, values: []Value] -> bool
+  (when (= (count values) 0)
+    (return true))
+  (let [first-compare (datom-index-compare-values first-datom order-text values)
+        last-compare (datom-index-compare-values last-datom order-text values)]
+    (and (not (< last-compare 0))
+         (not (> first-compare 0)))))
+
+(defn sqlite-manifest-attr-prefix [order: Public-Index-Order, values: []Value] -> [attr: string, ok: bool]
+  (when (not (or (= order .AEVT)
+                 (= order .AVET)))
+    (return "" false))
+  (when (= (count values) 0)
+    (return "" false))
+  (let [value values[0]]
+    (if (or (= value.kind .Keyword)
+            (= value.kind .String))
+      (return value.text true)
+      (return "" false))))
+
+(defn sqlite-index-root-bound-values [cursor: ^SQLite-Index-Cursor, root-id: u64, row-count: int, order-text: string, values: []Value, upper?: bool] -> [position: int, ok: bool, error: string]
+  (when (= (count values) 0)
+    (return (if upper? row-count 0) true ""))
+  (let [page (make [dynamic]int)
+        page-start -1
+        page-end -1
+        low 0
+        high row-count]
+    (while (< low high)
+      (let [mid (/ (+ low high) 2)
+            [entry entry-ok entry-error] (sqlite-index-root-ordered-entry-at-shared-cache cursor^.handle root-id mid row-count cursor^.page-size (addr cursor^.page-cache) (addr page) (addr page-start) (addr page-end))]
+        (when (not entry-ok)
+          (delete page)
+          (return low false entry-error))
+        (let [[key-compare key-ok key-matched key-error] (sqlite-index-root-bound-key-only-compare cursor entry order-text values)]
+          (when (not key-ok)
+            (delete page)
+            (return low false key-error))
+          (if key-matched
+            (if (if upper? (<= key-compare 0) (< key-compare 0))
+              (set! low (+ mid 1))
+              (set! high mid))
+            (let [[datom datom-ok datom-error] (sqlite-load-datom-by-log-index-handle-stmt cursor^.handle cursor^.datom-stmt entry)]
+              (when (not datom-ok)
+                (delete page)
+                (return low false datom-error))
+              (let [compare (datom-index-compare-values datom order-text values)]
+                (delete-owned-datom datom)
+                (if (if upper? (<= compare 0) (< compare 0))
+                  (set! low (+ mid 1))
+                  (set! high mid))))))))
+    (delete page)
+    (return low true "")))
+
+(defn append-sqlite-index-root-values! [out: ^[dynamic]Datom, source: DB-Read-Source, cursor: ^SQLite-Index-Cursor, root-id: u64, row-count: int, order-text: string, values: []Value, low: int, high: int] -> [ok: bool, error: string]
+  (let [page (make [dynamic]int)
+        page-start -1
+        page-end -1]
+    (for [position (arr.range low high)]
+      (let [[entry entry-ok entry-error] (sqlite-index-root-ordered-entry-at-cached cursor^.handle root-id position row-count cursor^.page-size (addr page) (addr page-start) (addr page-end))]
+        (when (not entry-ok)
+          (delete page)
+          (return false entry-error))
+        (let [[current current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
+          (when (not current-ok)
+            (delete page)
+            (return false current-error))
+          (when current
+            (let [[datom datom-ok datom-error] (sqlite-load-datom-by-log-index-handle-stmt cursor^.handle cursor^.datom-stmt entry)]
+              (when (not datom-ok)
+                (delete page)
+                (return false datom-error))
+              (if (datom-matches-index-values? datom order-text values)
+                (arr.push! out^ datom)
+                (delete-owned-datom datom)))))))
+    (delete page)
+    (return true "")))
+
+(defn source-index-datom-stream-from-sqlite-manifest-bound-runs [source: DB-Read-Source, order: Public-Index-Order, values: []Value, view: DB-Index-View, roots: [dynamic]u64, counts: [dynamic]int, lows: [dynamic]int, highs: [dynamic]int, first-datoms: [dynamic]Datom, last-datoms: [dynamic]Datom] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (let [selected-roots (make [dynamic]u64)
+        selected-counts (make [dynamic]int)
+        selected-lows (make [dynamic]int)
+        selected-highs (make [dynamic]int)
+        order-text (public-index-order-text order)]
+    (for [child-index (arr.range 0 (count roots))]
+      (when (sqlite-index-bound-datoms-overlap-values? first-datoms[child-index] last-datoms[child-index] order-text values)
+        (let [stored-low lows[child-index]
+              stored-high highs[child-index]
+              use-stored-bounds (and (>= stored-low 0)
+                                     (>= stored-high stored-low)
+                                     (<= stored-high counts[child-index])
+                                     (<= (count values) 1))
+              low stored-low
+              low-ok true
+              low-error ""]
+          (when (not use-stored-bounds)
+            (let [[computed-low computed-low-ok computed-low-error] (sqlite-index-root-bound-values view.sqlite-cursor roots[child-index] counts[child-index] order-text values false)]
+              (set! low computed-low)
+              (set! low-ok computed-low-ok)
+              (set! low-error computed-low-error)))
+          (when (not low-ok)
+            (delete selected-roots)
+            (delete selected-counts)
+            (delete selected-lows)
+            (delete selected-highs)
+            (delete roots)
+            (delete counts)
+            (delete lows)
+            (delete highs)
+            (delete-owned-datoms first-datoms)
+            (delete-owned-datoms last-datoms)
+            (return (Source-Index-Datom-Stream {}) false low-error))
+          (let [high stored-high
+                high-ok true
+                high-error ""]
+            (when (not use-stored-bounds)
+              (let [[computed-high computed-high-ok computed-high-error] (sqlite-index-root-bound-values view.sqlite-cursor roots[child-index] counts[child-index] order-text values true)]
+                (set! high computed-high)
+                (set! high-ok computed-high-ok)
+                (set! high-error computed-high-error)))
+            (when (not high-ok)
+              (delete selected-roots)
+              (delete selected-counts)
+              (delete selected-lows)
+              (delete selected-highs)
+              (delete roots)
+              (delete counts)
+              (delete lows)
+              (delete highs)
+              (delete-owned-datoms first-datoms)
+              (delete-owned-datoms last-datoms)
+              (return (Source-Index-Datom-Stream {}) false high-error))
+            (when (< low high)
+              (arr.push! selected-roots roots[child-index])
+              (arr.push! selected-counts counts[child-index])
+              (arr.push! selected-lows low)
+              (arr.push! selected-highs high))))))
+    (delete roots)
+    (delete counts)
+    (delete lows)
+    (delete highs)
+    (delete-owned-datoms first-datoms)
+    (delete-owned-datoms last-datoms)
+    (let [out-stream (Source-Index-Datom-Stream {view: view
+                                                 use-sqlite-run-ranges: true
+                                                 run-roots: selected-roots
+                                                 run-counts: selected-counts
+                                                 run-lows: selected-lows
+                                                 run-highs: selected-highs
+                                                 run-values: (values-owned-array values)
+                                                 run-order-text: order-text
+                                                 run-check-values: true
+                                                 run-index: 0
+                                                 run-position: 0
+                                                 run-page: (make [dynamic]int)
+                                                 run-page-start: -1
+                                                 run-page-end: -1
+                                                 run-loaded-page: (SQLite-Loaded-Index-Page {})
+                                                 run-loaded-page-valid: false
+                                                 run-dedupe-entries: (> (count selected-roots) 1)
+                                                 run-seen-entries: (set.empty int)
+                                                 current: (Datom {})
+                                                 has-current: false})
+          [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
+      (if load-ok
+        (return out-stream true "")
+        (do
+          (delete-source-index-datom-stream out-stream)
+          (return (Source-Index-Datom-Stream {}) false load-error))))))
+
+(defn source-index-datom-stream-for-sqlite-manifest-sequential-values [source: DB-Read-Source, order: Public-Index-Order, values: []Value, view: DB-Index-View] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (let [[prefix-attr has-prefix-attr] (sqlite-manifest-attr-prefix order values)]
+    (if has-prefix-attr
+      (let [[roots counts lows highs first-datoms last-datoms runs-ok runs-error] (sqlite-index-run-manifest-child-runs-with-attr-bound-datoms view.sqlite-cursor^.handle view.sqlite-cursor^.manifest-id prefix-attr)]
+        (if runs-ok
+          (source-index-datom-stream-from-sqlite-manifest-bound-runs source order values view roots counts lows highs first-datoms last-datoms)
+          (do
+            (delete roots)
+            (delete counts)
+            (delete lows)
+            (delete highs)
+            (delete-owned-datoms first-datoms)
+            (delete-owned-datoms last-datoms)
+            (return (Source-Index-Datom-Stream {}) false runs-error))))
+      (let [[roots counts lows highs first-datoms last-datoms runs-ok runs-error] (sqlite-index-run-manifest-child-runs-with-bound-datoms view.sqlite-cursor^.handle view.sqlite-cursor^.manifest-id)]
+        (if runs-ok
+          (source-index-datom-stream-from-sqlite-manifest-bound-runs source order values view roots counts lows highs first-datoms last-datoms)
+          (do
+            (delete roots)
+            (delete counts)
+            (delete lows)
+            (delete highs)
+            (delete-owned-datoms first-datoms)
+            (delete-owned-datoms last-datoms)
+            (return (Source-Index-Datom-Stream {}) false runs-error)))))))
+
+(defn source-index-datom-stream-for-sqlite-sequential-values [source: DB-Read-Source, order: Public-Index-Order, values: []Value, view: DB-Index-View] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (when view.sqlite-cursor^.root-is-manifest
+    (return (source-index-datom-stream-for-sqlite-manifest-sequential-values source order values view)))
+  (let [selected-roots (make [dynamic]u64)
+        selected-counts (make [dynamic]int)
+        selected-lows (make [dynamic]int)
+        selected-highs (make [dynamic]int)
+        order-text (public-index-order-text order)
+        [roots counts runs-ok runs-error] (sqlite-index-cursor-child-runs view.sqlite-cursor)]
+    (when (not runs-ok)
+      (delete selected-roots)
+      (delete selected-counts)
+      (delete selected-lows)
+      (delete selected-highs)
+      (delete roots)
+      (delete counts)
+      (return (Source-Index-Datom-Stream {}) false runs-error))
+    (for [child-index (arr.range 0 (count roots))]
+      (let [[low low-ok low-error] (sqlite-index-root-bound-values view.sqlite-cursor roots[child-index] counts[child-index] order-text values false)]
+        (when (not low-ok)
+          (delete selected-roots)
+          (delete selected-counts)
+          (delete selected-lows)
+          (delete selected-highs)
+          (delete roots)
+          (delete counts)
+          (return (Source-Index-Datom-Stream {}) false low-error))
+        (let [[high high-ok high-error] (sqlite-index-root-bound-values view.sqlite-cursor roots[child-index] counts[child-index] order-text values true)]
+          (when (not high-ok)
+            (delete selected-roots)
+            (delete selected-counts)
+            (delete selected-lows)
+            (delete selected-highs)
+            (delete roots)
+            (delete counts)
+            (return (Source-Index-Datom-Stream {}) false high-error))
+          (when (< low high)
+            (arr.push! selected-roots roots[child-index])
+            (arr.push! selected-counts counts[child-index])
+            (arr.push! selected-lows low)
+            (arr.push! selected-highs high)))))
+    (delete roots)
+    (delete counts)
+    (let [out-stream (Source-Index-Datom-Stream {view: view
+                                                 use-sqlite-run-ranges: true
+                                                 run-roots: selected-roots
+                                                 run-counts: selected-counts
+                                                 run-lows: selected-lows
+                                                 run-highs: selected-highs
+                                                 run-values: (values-owned-array values)
+                                                 run-order-text: order-text
+                                                 run-check-values: false
+                                                 run-index: 0
+                                                 run-position: 0
+                                                 run-page: (make [dynamic]int)
+                                                 run-page-start: -1
+                                                 run-page-end: -1
+                                                 run-loaded-page: (SQLite-Loaded-Index-Page {})
+                                                 run-loaded-page-valid: false
+                                                 run-dedupe-entries: (> (count selected-roots) 1)
+                                                 run-seen-entries: (set.empty int)
+                                                 current: (Datom {})
+                                                 has-current: false})
+          [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
+      (if load-ok
+        (return out-stream true "")
+        (do
+          (delete-source-index-datom-stream out-stream)
+          (return (Source-Index-Datom-Stream {}) false load-error))))))
+
+(defn source-index-datom-stream-for-values [source: DB-Read-Source, order: Public-Index-Order, values: []Value] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (when (db-read-source-has-overlay? source)
+    (let [datoms (make [dynamic]Datom)
+          [scan-ok scan-error] (db-read-source-append-index-datoms! (addr datoms) source order values)]
+      (when (not scan-ok)
+        (delete-owned-datoms datoms)
+        (return (Source-Index-Datom-Stream {}) false scan-error))
+      (let [order-indexes (sorted-datom-order-indexes (slice datoms 0) order)
+            out-stream (Source-Index-Datom-Stream {owned-datoms: datoms owned-order-indexes: order-indexes use-owned-datoms: true index: 0 high: (count datoms) current: (Datom {}) has-current: false})
+            [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
+        (if load-ok
+          (return out-stream true "")
+          (do
+            (delete-source-index-datom-stream out-stream)
+            (return (Source-Index-Datom-Stream {}) false load-error))))))
+  (let [view (db-read-source-index-view source order)]
+    (when (sqlite-merge-index-view? view)
+      (return (source-index-datom-stream-for-sqlite-sequential-values source order values view))))
+  (let [[view low high range-ok range-error] (db-read-source-prefix-index-range source order values)]
+    (when (not range-ok)
+      (return (Source-Index-Datom-Stream {}) false range-error))
+    (let [out-stream (Source-Index-Datom-Stream {view: view index: low high: high current: (Datom {}) has-current: false})
+          [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
+      (if load-ok
+        (return out-stream true "")
+        (return out-stream false load-error)))))
+
+(defn source-index-datom-stream-for-index-range [source: DB-Read-Source, view: DB-Index-View, low: int, high: int] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (let [out-stream (Source-Index-Datom-Stream {view: view index: low high: high current: (Datom {}) has-current: false})
+        [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
+    (if load-ok
+      (return out-stream true "")
+      (return out-stream false load-error))))
+
+(defn source-index-datom-stream-for-attr-range [source: DB-Read-Source, projection: Source-Attr-Range-Value-Projection] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (when (db-read-source-has-overlay? source)
+    (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source projection.attr)]
+      (when (not datoms-ok)
+        (return (Source-Index-Datom-Stream {}) false datoms-error))
+      (let [filtered (make [dynamic]Datom)]
+        (for [datom datoms]
+          (when (predicate-pair-matches? projection.op datom.v projection.value)
+            (arr.push! filtered (datom-owned datom))))
+        (delete-owned-datoms datoms)
+        (let [order-indexes (sorted-datom-order-indexes (slice filtered 0) .AVET)
+              out-stream (Source-Index-Datom-Stream {owned-datoms: filtered owned-order-indexes: order-indexes use-owned-datoms: true index: 0 high: (count filtered) current: (Datom {}) has-current: false})
+              [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
+          (if load-ok
+            (return out-stream true "")
+            (do
+              (delete-source-index-datom-stream out-stream)
+              (return (Source-Index-Datom-Stream {}) false load-error)))))))
+  (let [[view low high range-ok range-error] (db-read-source-attr-range-index-bounds source projection)]
+    (when (not range-ok)
+      (return (Source-Index-Datom-Stream {}) false range-error))
+    (source-index-datom-stream-for-index-range source view low high)))
+
+(defstruct Source-Clause-Datom-Stream {
+  scan: Clause-Index-Scan
+  use-index-stream: bool
+  index-stream: Source-Index-Datom-Stream
+  index: int
+  current: Datom
+  current-owned: bool
+  has-current: bool
+})
+
+(defn delete-source-clause-datom-stream [stream: Source-Clause-Datom-Stream]
+  (when stream.has-current
+    (when stream.current-owned
+      (delete-owned-datom stream.current)))
+  (when stream.use-index-stream
+    (delete-source-index-datom-stream stream.index-stream))
+  (delete-clause-index-scan stream.scan))
+
+(defn load-source-clause-datom-stream-current! [source: DB-Read-Source, stream: ^Source-Clause-Datom-Stream] -> [ok: bool, error: string]
+  (when stream^.has-current
+    (when stream^.current-owned
+      (delete-owned-datom stream^.current))
+    (set! stream^.has-current false)
+    (set! stream^.current-owned false))
+  (when stream^.use-index-stream
+    (while stream^.index-stream.has-current
+      (let [datom stream^.index-stream.current]
+        (when (db-read-source-clause-index-scan-candidate? stream^.scan datom)
+          (set! stream^.current datom)
+          (set! stream^.current-owned false)
+          (set! stream^.has-current true)
+          (return true "")))
+      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream^.index-stream))]
+        (when (not advance-ok)
+          (return false advance-error))))
+    (return true ""))
+  (while (< stream^.index stream^.scan.high)
+    (if (and (= stream^.scan.view.kind .SQLite-Cursor)
+             (= source.kind .SQLite-Snapshot)
+             (not source.sqlite-snapshot^.has-retractions))
+      (let [[_entry offset datom-ok datom-error] (sqlite-index-cursor-entry-offset-at stream^.scan.view.sqlite-cursor stream^.index)]
+        (discard _entry)
+        (when (not datom-ok)
+          (return false datom-error))
+        (let [datom stream^.scan.view.sqlite-cursor^.page.datoms[offset]]
+          (when (db-read-source-clause-index-scan-candidate? stream^.scan datom)
+            (set! stream^.current datom)
+            (set! stream^.current-owned false)
+            (set! stream^.has-current true)
+            (return true ""))))
+      (let [entry (clause-index-scan-datom-index stream^.scan stream^.index)
+            [current current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
+        (when (not current-ok)
+          (return false current-error))
+        (when current
+          (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
+            (when (not datom-ok)
+              (return false datom-error))
+            (if (db-read-source-clause-index-scan-candidate? stream^.scan datom)
+              (do
+                (set! stream^.current datom)
+                (set! stream^.current-owned true)
+                (set! stream^.has-current true)
+                (return true ""))
+              (delete-owned-datom datom))))))
+    (set! stream^.index (+ stream^.index 1)))
+  (return true ""))
+
+(defn source-index-datom-stream-for-clause-index-scan [source: DB-Read-Source, scan: Clause-Index-Scan] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (let [values (make [dynamic]Value)
+        order: Public-Index-Order .EAVT]
+    (defer (delete-owned-values-array values))
+    (if scan.reverse-attr
+      (cond
+        scan.e-ok
+          (do
+            (set! order .VAET)
+            (arr.push! values (value-owned scan.e-value)))
+        scan.v-ok
+          (do
+            (set! order .EAVT)
+            (arr.push! values (value-owned scan.v-value))
+            (arr.push! values (value-keyword scan.forward-attr)))
+        :else
+          (do
+            (set! order .AEVT)
+            (arr.push! values (value-keyword scan.forward-attr))))
+      (cond
+        (and scan.e-ok scan.a-ok)
+          (do
+            (set! order .EAVT)
+            (arr.push! values (value-owned scan.e-value))
+            (arr.push! values (value-owned scan.a-value)))
+        (and scan.a-ok scan.v-ok)
+          (do
+            (set! order .AVET)
+            (arr.push! values (value-owned scan.a-value))
+            (arr.push! values (value-owned scan.v-value)))
+        scan.e-ok
+          (do
+            (set! order .EAVT)
+            (arr.push! values (value-owned scan.e-value)))
+        scan.a-ok
+          (do
+            (set! order .AEVT)
+            (arr.push! values (value-owned scan.a-value)))
+        scan.v-ok
+          (do
+            (set! order .VAET)
+            (arr.push! values (value-owned scan.v-value)))
+        :else
+          (set! order .EAVT)))
+    (source-index-datom-stream-for-values source order (slice values 0))))
+
+(defn source-clause-scan-should-use-index-stream? [scan: Clause-Index-Scan] -> bool
+  (when (not (and (= scan.view.kind .SQLite-Cursor)
+                  (sqlite-merge-index-view? scan.view)))
+    (return false))
+  (if scan.reverse-attr
+    (not (or scan.e-ok scan.v-ok))
+    (and (not scan.e-ok)
+         (or scan.a-ok
+             (not scan.v-ok)))))
+
+(defn source-clause-datom-stream-for-scan [source: DB-Read-Source, scan: Clause-Index-Scan] -> [stream: Source-Clause-Datom-Stream, ok: bool, error: string]
+  (when (source-clause-scan-should-use-index-stream? scan)
+    (let [[index-stream index-ok index-error] (source-index-datom-stream-for-clause-index-scan source scan)]
+      (when (not index-ok)
+        (delete-source-index-datom-stream index-stream)
+        (return (Source-Clause-Datom-Stream {}) false index-error))
+      (let [out-stream (Source-Clause-Datom-Stream {scan: scan
+                                                    use-index-stream: true
+                                                    index-stream: index-stream
+                                                    index: scan.index
+                                                    current: (Datom {})
+                                                    has-current: false})
+            [load-ok load-error] (load-source-clause-datom-stream-current! source (addr out-stream))]
+        (if load-ok
+          (return out-stream true "")
+          (do
+            (delete-source-clause-datom-stream out-stream)
+            (return (Source-Clause-Datom-Stream {}) false load-error))))))
+  (let [out-stream (Source-Clause-Datom-Stream {scan: scan index: scan.index current: (Datom {}) has-current: false})
+        [load-ok load-error] (load-source-clause-datom-stream-current! source (addr out-stream))]
+    (if load-ok
+      (return out-stream true "")
+      (do
+        (delete-source-clause-datom-stream out-stream)
+        (return (Source-Clause-Datom-Stream {}) false load-error)))))
+
+(defn source-clause-datom-stream-for-binding [source: DB-Read-Source, clause-value: Clause, binding: Binding] -> [stream: Source-Clause-Datom-Stream, ok: bool, error: string]
+  (let [[scan scan-ok scan-error] (db-read-source-clause-index-scan source clause-value binding)]
+    (when (not scan-ok)
+      (delete-clause-index-scan scan)
+      (return (Source-Clause-Datom-Stream {}) false scan-error))
+    (source-clause-datom-stream-for-scan source scan)))
+
+(defn source-clause-datom-stream-for-typed-row [source: DB-Read-Source, rel: Query-Relation, row: int, clause-value: Clause] -> [stream: Source-Clause-Datom-Stream, ok: bool, error: string]
+  (let [[scan scan-ok scan-error] (db-read-source-clause-index-scan-typed-row source rel row clause-value)]
+    (when (not scan-ok)
+      (delete-clause-index-scan scan)
+      (return (Source-Clause-Datom-Stream {}) false scan-error))
+    (source-clause-datom-stream-for-scan source scan)))
+
+(defn source-clause-datom-stream-for-typed-row-with-op [source: DB-Read-Source, rel: Query-Relation, row: int, clause-value: Clause, op: Physical-Op] -> [stream: Source-Clause-Datom-Stream, ok: bool, error: string]
+  (let [[scan scan-ok scan-error] (db-read-source-clause-index-scan-typed-row source rel row clause-value)]
+    (when (not scan-ok)
+      (delete-clause-index-scan scan)
+      (return (Source-Clause-Datom-Stream {}) false scan-error))
+    (let [[tighten-ok tighten-error] (physical-op-tighten-db-read-source-attr-value-scan! source (addr scan) clause-value op rel row)]
+      (when (not tighten-ok)
+        (delete-clause-index-scan scan)
+        (return (Source-Clause-Datom-Stream {}) false tighten-error)))
+    (let [[tighten-ok tighten-error] (physical-op-tighten-db-read-source-eavt-ea-value-scan! source (addr scan) clause-value op rel row)]
+      (when (not tighten-ok)
+        (delete-clause-index-scan scan)
+        (return (Source-Clause-Datom-Stream {}) false tighten-error)))
+    (source-clause-datom-stream-for-scan source scan)))
+
+(defn db-read-source-clause-candidates-for-typed-row-with-op [source: DB-Read-Source, rel: Query-Relation, row: int, clause-value: Clause, op: Physical-Op] -> [datoms: [dynamic]Datom, scan: Clause-Index-Scan, ok: bool, error: string]
+  (let [[candidate-scan scan-ok scan-error] (db-read-source-clause-index-scan-typed-row source rel row clause-value)]
+    (when (not scan-ok)
+      (delete-clause-index-scan candidate-scan)
+      (return (make [dynamic]Datom) (db-read-source-empty-clause-index-scan source) false scan-error))
+    (let [[tighten-ok tighten-error] (physical-op-tighten-db-read-source-attr-value-scan! source (addr candidate-scan) clause-value op rel row)]
+      (when (not tighten-ok)
+        (delete-clause-index-scan candidate-scan)
+        (return (make [dynamic]Datom) (db-read-source-empty-clause-index-scan source) false tighten-error)))
+    (let [[tighten-ok tighten-error] (physical-op-tighten-db-read-source-eavt-ea-value-scan! source (addr candidate-scan) clause-value op rel row)]
+      (when (not tighten-ok)
+        (delete-clause-index-scan candidate-scan)
+        (return (make [dynamic]Datom) (db-read-source-empty-clause-index-scan source) false tighten-error)))
+    (let [out (make [dynamic]Datom)
+          scan-source (if (= source.kind .Tx-Ops-Overlay) source.overlay-base^ source)
+          scan-index candidate-scan.index]
+      (if (source-clause-scan-should-use-index-stream? candidate-scan)
+        (let [stream-scan (clause-index-scan-clone candidate-scan)
+              [stream stream-ok stream-error] (source-clause-datom-stream-for-scan scan-source stream-scan)]
+          (when (not stream-ok)
+            (delete-owned-datoms out)
+            (return (make [dynamic]Datom) candidate-scan false stream-error))
+          (while stream.has-current
+            (arr.push! out (datom-owned stream.current))
+            (let [[advance-ok advance-error] (advance-source-clause-datom-stream! scan-source (addr stream))]
+              (when (not advance-ok)
+                (delete-source-clause-datom-stream stream)
+                (delete-owned-datoms out)
+                (return (make [dynamic]Datom) candidate-scan false advance-error))))
+          (delete-source-clause-datom-stream stream))
+        (while (< scan-index candidate-scan.high)
+          (let [entry (clause-index-scan-datom-index candidate-scan scan-index)
+                [datom datom-ok datom-error] (db-read-source-datom-at-entry scan-source entry)]
+            (when (not datom-ok)
+              (delete-owned-datoms out)
+              (return (make [dynamic]Datom) candidate-scan false datom-error))
+            (if (db-read-source-clause-index-scan-candidate? candidate-scan datom)
+              (let [[current current-ok current-error] (db-read-source-datom-current-at-entry? scan-source entry)]
+                (when (not current-ok)
+                  (delete-owned-datom datom)
+                  (delete-owned-datoms out)
+                  (return (make [dynamic]Datom) candidate-scan false current-error))
+                (if current
+                  (arr.push! out datom)
+                  (delete-owned-datom datom)))
+              (delete-owned-datom datom)))
+          (set! scan-index (+ scan-index 1))))
+      (if (= source.kind .Tx-Ops-Overlay)
+        (db-read-source-apply-overlay-ops-for-clause-scan! (addr out) source candidate-scan)
+        (when (db-read-source-has-inline-overlay? source)
+          (db-read-source-apply-inline-overlay-for-clause-scan! (addr out) source candidate-scan)))
+      (return out candidate-scan true ""))))
+
+(defn source-clause-datom-stream [source: DB-Read-Source, clause-value: Clause] -> [stream: Source-Clause-Datom-Stream, ok: bool, error: string]
+  (let [binding (Binding {items: (make [dynamic]Var-Binding)})
+        [out-stream stream-ok stream-error] (source-clause-datom-stream-for-binding source clause-value binding)]
+    (delete binding.items)
+    (return out-stream stream-ok stream-error)))
+
+(defn advance-source-clause-datom-stream! [source: DB-Read-Source, stream: ^Source-Clause-Datom-Stream] -> [ok: bool, error: string]
+  (if stream^.use-index-stream
+    (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream^.index-stream))]
+      (when (not advance-ok)
+        (return false advance-error)))
+    (set! stream^.index (+ stream^.index 1)))
+  (load-source-clause-datom-stream-current! source stream))
+
+(defn source-index-datom-stream [source: DB-Read-Source, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (let [values ([]Value [(value-keyword attr)])]
+    (source-index-datom-stream-for-values source .AEVT values)))
+
+(defn source-avet-attr-value-stream [source: DB-Read-Source, attr: string, value: Value] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (let [values ([]Value [(value-keyword attr) value])]
+    (source-index-datom-stream-for-values source .AVET values)))
+
+(defn source-attr-scan-stream [source: DB-Read-Source, attr: string, has-value: bool, value: Value] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (if has-value
+    (source-avet-attr-value-stream source attr value)
+    (source-index-datom-stream source attr)))
+
+(defstruct Source-Attr-Value-Match-Stream {
+  exact-stream: Source-Index-Datom-Stream
+  attr-stream: Source-Index-Datom-Stream
+  resolved: Value
+  use-fallback: bool
+  has-current: bool
+})
+
+(defn source-attr-value-match-current [stream: Source-Attr-Value-Match-Stream] -> Datom
+  (if stream.use-fallback
+    stream.attr-stream.current
+    stream.exact-stream.current))
+
+(defn delete-source-attr-value-match-stream [stream: Source-Attr-Value-Match-Stream]
+  (delete-source-index-datom-stream stream.exact-stream)
+  (delete-source-index-datom-stream stream.attr-stream))
+
+(defn load-source-attr-value-match-fallback-current! [source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream] -> [ok: bool, error: string]
+  (set! stream^.has-current false)
+  (while stream^.attr-stream.has-current
+    (when (= (index-position-compare stream^.attr-stream.current.v stream^.resolved) 0)
+      (set! stream^.has-current true)
+      (return true ""))
+    (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream^.attr-stream))]
+      (when (not advance-ok)
+        (return false advance-error))))
+  (return true ""))
+
+(defn source-attr-value-match-stream [source: DB-Read-Source, attr: string, value: Value] -> [stream: Source-Attr-Value-Match-Stream, ok: bool, error: string]
+  (let [[resolved resolved-ok resolved-error] (db-read-source-resolve-clause-value-for-attr source attr value)]
+    (when (not resolved-ok)
+      (return (Source-Attr-Value-Match-Stream {}) false resolved-error))
+    (let [[exact exact-ok exact-error] (source-avet-attr-value-stream source attr resolved)]
+      (when (not exact-ok)
+        (return (Source-Attr-Value-Match-Stream {}) false exact-error))
+      (when exact.has-current
+        (return (Source-Attr-Value-Match-Stream {exact-stream: exact resolved: resolved use-fallback: false has-current: true}) true ""))
+      (let [[attr-stream attr-ok attr-error] (source-index-datom-stream source attr)]
+        (when (not attr-ok)
+          (delete-source-index-datom-stream exact)
+          (return (Source-Attr-Value-Match-Stream {}) false attr-error))
+        (let [out (Source-Attr-Value-Match-Stream {exact-stream: exact attr-stream: attr-stream resolved: resolved use-fallback: true has-current: false})
+              [load-ok load-error] (load-source-attr-value-match-fallback-current! source (addr out))]
+          (if load-ok
+            (return out true "")
+            (return out false load-error)))))))
+
+(defn advance-source-attr-value-match-stream! [source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream] -> [ok: bool, error: string]
+  (if stream^.use-fallback
+    (do
+      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream^.attr-stream))]
+        (when (not advance-ok)
+          (return false advance-error)))
+      (load-source-attr-value-match-fallback-current! source stream))
+    (do
+      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream^.exact-stream))]
+        (when (not advance-ok)
+          (return false advance-error)))
+      (set! stream^.has-current stream^.exact-stream.has-current)
+      (return true ""))))
+
+(defn source-entity-int-pair-append-filter-stream! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
+  (while stream^.has-current
+    (let [filter-datom (source-attr-value-match-current stream^)
+          [append-ok type-ok append-error] (source-entity-int-pair-append-filter-datom! columns seen source filter-datom value-attr many)]
+      (when (not append-ok)
+        (return false false append-error))
+      (when (not type-ok)
+        (return true false "")))
+    (let [[advance-ok advance-error] (advance-source-attr-value-match-stream! source stream)]
+      (when (not advance-ok)
+        (return false false advance-error))))
+  (return true true ""))
+
+(defn source-entity-string-pair-append-filter-stream! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
+  (while stream^.has-current
+    (let [filter-datom (source-attr-value-match-current stream^)
+          [append-ok type-ok append-error] (source-entity-string-pair-append-filter-datom! columns seen source filter-datom value-attr many)]
+      (when (not append-ok)
+        (return false false append-error))
+      (when (not type-ok)
+        (return true false "")))
+    (let [[advance-ok advance-error] (advance-source-attr-value-match-stream! source stream)]
+      (when (not advance-ok)
+        (return false false advance-error))))
+  (return true true ""))
+
+(defn source-entity-string-int-triple-append-filter-stream! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, plan: Entity-Two-Value-Plan, best-filter-index: int] -> [ok: bool, type-ok: bool, error: string]
+  (while stream^.has-current
+    (let [filter-datom (source-attr-value-match-current stream^)
+          [append-ok type-ok append-error] (source-entity-string-int-triple-append-filter-datom! columns seen source filter-datom plan best-filter-index)]
+      (when (not append-ok)
+        (return false false append-error))
+      (when (not type-ok)
+        (return true false "")))
+    (let [[advance-ok advance-error] (advance-source-attr-value-match-stream! source stream)]
+      (when (not advance-ok)
+        (return false false advance-error))))
+  (return true true ""))
+
+(defn source-eavt-entity-attr-stream [source: DB-Read-Source, entity: u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (let [values ([]Value [(value-entity entity) (value-keyword attr)])]
+    (source-index-datom-stream-for-values source .EAVT values)))
+
+(defn source-eavt-entity-stream [source: DB-Read-Source, entity: u64] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (let [values ([]Value [(value-entity entity)])]
+    (source-index-datom-stream-for-values source .EAVT values)))
+
+(defn source-vaet-entity-attr-stream [source: DB-Read-Source, entity: u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
+  (let [values ([]Value [(value-entity entity) (value-keyword attr)])]
+    (source-index-datom-stream-for-values source .VAET values)))
+
+(defn append-source-entity-attr-option-values! [option-row: ^Result-Row, source: DB-Read-Source, entity: u64, attr: string] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (arr.push! option-row^.values (value-owned stream.current.v))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn append-distinct-source-entity-attr-value-rows! [rows: ^[dynamic]Result-Row, source: DB-Read-Source, entity: u64, attr: string] -> [ok: bool, error: string]
+  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity attr)]
+    (when (not stream-ok)
+      (return false stream-error))
+    (while stream.has-current
+      (when (not (row-values-exist? (slice rows^ 0) ([]Value [stream.current.v])))
+        (append-distinct-single-value-row! rows (value-owned stream.current.v)))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr stream))]
+        (when (not load-ok)
+          (delete-source-index-datom-stream stream)
+          (return false load-error))))
+    (delete-source-index-datom-stream stream)
+    (return true "")))
+
+(defn source-index-datom-streams-active? [streams: []Source-Index-Datom-Stream] -> bool
+  (for [stream streams]
+    (when (not stream.has-current)
+      (return false)))
+  true)
+
+(defn source-index-datom-streams-same-entity? [streams: []Source-Index-Datom-Stream] -> bool
+  (when (= (count streams) 0)
+    (return false))
+  (let [entity streams[0].current.e]
+    (for [stream streams]
+      (when (not (= stream.current.e entity))
+        (return false)))
+    true))
+
+(defn source-index-datom-streams-max-entity [streams: []Source-Index-Datom-Stream] -> u64
+  (let [entity streams[0].current.e]
+    (for [stream streams]
+      (when (> stream.current.e entity)
+        (set! entity stream.current.e)))
+    entity))
+
+(defn advance-source-index-datom-streams-to-entity! [source: DB-Read-Source, streams: ^[dynamic]Source-Index-Datom-Stream, entity: u64] -> [ok: bool, error: string]
+  (for [_ stream-index streams^]
+    (while (and streams^[stream-index].has-current
+                (< streams^[stream-index].current.e entity))
+      (let [[load-ok load-error] (advance-source-index-datom-stream! source (addr streams^[stream-index]))]
+        (when (not load-ok)
+          (return false load-error)))))
+  (return true ""))
