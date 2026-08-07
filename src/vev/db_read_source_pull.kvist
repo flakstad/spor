@@ -1,0 +1,442 @@
+; Copyright 2026 Vev Contributors
+; SPDX-License-Identifier: Apache-2.0
+
+(package vev)
+
+(defn db-read-source-pull-spec-supported? [spec: Pull-Spec, registry: []Native-Query-Fn] -> bool
+  (when (and spec.has-xform
+             (not (or (= spec.xform "vector")
+                      (= spec.xform "name")
+                      (query-fn-supported? registry spec.xform))))
+    (return false))
+  (cond
+    (= spec.a "*") (= (count spec.pattern) 0)
+    (= spec.a ":db/id") (= (count spec.pattern) 0)
+    (reverse-attr? spec.a) true
+    :else true))
+
+(defn db-read-source-pull-default-attr [spec: Pull-Spec] -> Pull-Attr
+  (Pull-Attr {a: (string-owned (pull-output-attr spec))
+              a-owned: true
+              key-kind: (pull-output-key-kind spec)
+              v: (value-owned spec.default-value)
+              attrs: (make [dynamic]Pull-Attr)}))
+
+(defn db-read-source-pull-missing-attr [spec: Pull-Spec] -> Pull-Attr
+  (if spec.has-default
+    (db-read-source-pull-default-attr spec)
+    (pull-spec-transform-attr
+      spec
+      (pull-attr-from-spec spec (value-nil) (make [dynamic]Pull-Attr)))))
+
+(defn db-read-source-pull-entity [value: Value] -> [entity: u64, ok: bool]
+  (cond
+    (= value.kind .Entity) (return value.entity true)
+    (= value.kind .Int) (return (u64 value.int-value) true)
+    :else (return 0 false)))
+
+(defn db-read-source-pull-missing-attr-with-fns [spec: Pull-Spec, registry: []Native-Query-Fn] -> Pull-Attr
+  (if spec.has-default
+    (db-read-source-pull-default-attr spec)
+    (pull-spec-transform-attr-with-fns
+      spec
+      (pull-attr-from-spec spec (value-nil) (make [dynamic]Pull-Attr))
+      registry)))
+
+(defn db-read-source-pull-child-attrs-with-fns [source: DB-Read-Source, entity: u64, pattern: []Pull-Spec, root: []Pull-Spec, seen-counts: (ptr (map u64 int)), registry: []Native-Query-Fn] -> [attrs: [dynamic]Pull-Attr, ok: bool, error: string]
+  (when (pull-seen-contains? seen-counts entity)
+    (return (pull-id-attrs entity) true ""))
+  (pull-seen-push! seen-counts entity)
+  (let [[child child-ok child-error] (db-read-source-pull-result-for-pattern-seen-with-fns source entity pattern root seen-counts registry)]
+    (pull-seen-pop! seen-counts entity)
+    (when (not child-ok)
+      (return (make [dynamic]Pull-Attr) false child-error))
+    (return child.attrs true "")))
+
+(defn append-db-read-source-reverse-pull-datom! [attrs: ^[dynamic]Pull-Attr, source: DB-Read-Source, spec: Pull-Spec, root: []Pull-Spec, seen-counts: (ptr (map u64 int)), registry: []Native-Query-Fn, datom: Datom, seen: ^int, limit: int] -> [ok: bool, error: string]
+  (when (>= seen^ limit)
+    (return true ""))
+  (let [children (make [dynamic]Pull-Attr)]
+    (when (> (count spec.pattern) 0)
+      (let [[child-attrs child-ok child-error] (db-read-source-pull-child-attrs-with-fns source datom.e (slice spec.pattern 0) (slice spec.pattern 0) seen-counts registry)]
+        (when (not child-ok)
+          (delete-pull-attrs-owned-values children)
+          (return false child-error))
+        (delete children)
+        (set! children child-attrs)))
+    (when (and (= (count spec.pattern) 0)
+               spec.has-recursion
+               (not (= spec.recursion-depth 0)))
+      (if (pull-unbounded-recursion-depth? spec.recursion-depth)
+        (let [[child-attrs child-ok child-error] (db-read-source-pull-child-attrs-with-fns source datom.e root root seen-counts registry)]
+          (when (not child-ok)
+            (delete-pull-attrs-owned-values children)
+            (return false child-error))
+          (delete children)
+          (set! children child-attrs))
+        (let [rec-pattern (pull-recursion-pattern root spec.a) :defer
+              [child-attrs child-ok child-error] (db-read-source-pull-child-attrs-with-fns source datom.e (slice rec-pattern 0) (slice rec-pattern 0) seen-counts registry)]
+          (when (not child-ok)
+            (delete-pull-attrs-owned-values children)
+            (return false child-error))
+          (delete children)
+          (set! children child-attrs))))
+    (if (pull-include-ref-result? spec (slice children 0))
+      (do
+        (set! seen^ (+ seen^ 1))
+        (arr.push! attrs^
+          (pull-spec-transform-attr-with-fns
+            spec
+            (Pull-Attr {a: (string-owned (pull-output-attr spec))
+                        a-owned: true
+                        key-kind: (pull-output-key-kind spec)
+                        v: (value-entity datom.e)
+                        attrs: children
+                        has-explicit-pattern: (> (count spec.pattern) 0)})
+            registry)))
+      (delete-pull-attrs-owned-values children)))
+  (return true ""))
+
+(defn append-db-read-source-forward-pull-datom! [attrs: ^[dynamic]Pull-Attr, source: DB-Read-Source, spec: Pull-Spec, root: []Pull-Spec, seen-counts: (ptr (map u64 int)), registry: []Native-Query-Fn, datom: Datom, seen: ^int, limit: int] -> [ok: bool, error: string]
+  (when (>= seen^ limit)
+    (return true ""))
+  (let [children (make [dynamic]Pull-Attr)]
+    (when (and (> (count spec.pattern) 0)
+               (= datom.v.kind .Entity))
+      (let [[child-attrs child-ok child-error] (db-read-source-pull-child-attrs-with-fns source datom.v.entity (slice spec.pattern 0) (slice spec.pattern 0) seen-counts registry)]
+        (when (not child-ok)
+          (delete-pull-attrs-owned-values children)
+          (return false child-error))
+        (delete children)
+        (set! children child-attrs)))
+    (when (and (= (count spec.pattern) 0)
+               (= datom.v.kind .Entity)
+               spec.has-recursion
+               (not (= spec.recursion-depth 0)))
+      (if (pull-unbounded-recursion-depth? spec.recursion-depth)
+        (let [[child-attrs child-ok child-error] (db-read-source-pull-child-attrs-with-fns source datom.v.entity root root seen-counts registry)]
+          (when (not child-ok)
+            (delete-pull-attrs-owned-values children)
+            (return false child-error))
+          (delete children)
+          (set! children child-attrs))
+        (let [rec-pattern (pull-recursion-pattern root spec.a) :defer
+              [child-attrs child-ok child-error] (db-read-source-pull-child-attrs-with-fns source datom.v.entity (slice rec-pattern 0) (slice rec-pattern 0) seen-counts registry)]
+          (when (not child-ok)
+            (delete-pull-attrs-owned-values children)
+            (return false child-error))
+          (delete children)
+          (set! children child-attrs))))
+    (if (pull-include-ref-result? spec (slice children 0))
+      (do
+        (set! seen^ (+ seen^ 1))
+        (arr.push! attrs^
+          (pull-spec-transform-attr-with-fns
+            spec
+            (Pull-Attr {a: (string-owned (pull-output-attr spec))
+                        a-owned: true
+                        key-kind: (pull-output-key-kind spec)
+                        v: (value-owned datom.v)
+                        attrs: children
+                        has-explicit-pattern: (> (count spec.pattern) 0)})
+            registry)))
+      (delete-pull-attrs-owned-values children)))
+  (return true ""))
+
+(defn db-read-source-pull-result-for-pattern-seen-with-fns [source: DB-Read-Source, entity: u64, pattern: []Pull-Spec, root: []Pull-Spec, seen-counts: (ptr (map u64 int)), registry: []Native-Query-Fn] -> [result: Pull-Result, ok: bool, error: string]
+  (let [attrs (make [dynamic]Pull-Attr)]
+    (for [spec pattern]
+      (if (and spec.has-recursion (<= spec.recursion-depth 0))
+        (do)
+        (do
+          (when (not (db-read-source-pull-spec-supported? spec registry))
+            (delete-pull-attrs-owned-values attrs)
+            (return (Pull-Result {}) false "SQLite DB snapshot source currently supports forward, wildcard, reverse, nested, pattern-input, default, limit, recursion, and built-in xform pull attrs only"))
+          (when (not (= spec.a "*"))
+            (pull-remove-output-attr-owned-values! (addr attrs) (pull-output-attr spec)))
+          (cond
+            (= spec.a "*")
+              (do
+                (when (not (pull-output-has-attr? attrs ":db/id"))
+                  (arr.push! attrs
+                    (Pull-Attr {a: ":db/id"
+                                key-kind: .Keyword
+                                v: (value-entity entity)
+                                attrs: (make [dynamic]Pull-Attr)})))
+                (if (db-read-source-has-overlay? source)
+                  (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity source entity)]
+                    (when (not datoms-ok)
+                      (delete-pull-attrs-owned-values attrs)
+                      (return (Pull-Result {}) false datoms-error))
+                    (for [datom datoms]
+                      (when (not (pull-output-has-attr? attrs datom.a))
+                        (arr.push! attrs
+                          (Pull-Attr {a: (string-owned datom.a)
+                                      a-owned: true
+                                      key-kind: .Keyword
+                                      v: (value-owned datom.v)
+                                      attrs: (make [dynamic]Pull-Attr)}))))
+                    (delete-owned-datoms datoms))
+                  (let [[stream stream-ok stream-error] (source-eavt-entity-stream source entity)]
+                    (when (not stream-ok)
+                      (delete-pull-attrs-owned-values attrs)
+                      (return (Pull-Result {}) false stream-error))
+                    (while stream.has-current
+                      (when (not (pull-output-has-attr? attrs stream.current.a))
+                        (arr.push! attrs
+                          (Pull-Attr {a: (string-owned stream.current.a)
+                                      a-owned: true
+                                      key-kind: .Keyword
+                                      v: (value-owned stream.current.v)
+                                      attrs: (make [dynamic]Pull-Attr)})))
+                      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+                        (when (not advance-ok)
+                          (delete-source-index-datom-stream stream)
+                          (delete-pull-attrs-owned-values attrs)
+                          (return (Pull-Result {}) false advance-error))))
+                    (delete-source-index-datom-stream stream))))
+            (= spec.a ":db/id")
+              (arr.push! attrs
+                (pull-spec-transform-attr-with-fns
+                  spec
+                  (Pull-Attr {a: (string-owned (pull-output-attr spec))
+                              a-owned: true
+                              key-kind: (pull-output-key-kind spec)
+                              v: (value-entity entity)
+                              attrs: (make [dynamic]Pull-Attr)})
+                  registry))
+            (reverse-attr? spec.a)
+              (let [forward-attr (forward-attr-for-reverse spec.a) :defer
+                    limit (pull-limit spec)
+                    seen 0]
+                (if (db-read-source-has-overlay? source)
+                  (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-reverse-entity-attr source entity forward-attr)]
+                    (when (not datoms-ok)
+                      (delete-pull-attrs-owned-values attrs)
+                      (return (Pull-Result {}) false datoms-error))
+                    (for [datom datoms]
+                      (let [[append-ok append-error] (append-db-read-source-reverse-pull-datom! (addr attrs) source spec root seen-counts registry datom (addr seen) limit)]
+                        (when (not append-ok)
+                          (delete-owned-datoms datoms)
+                          (delete-pull-attrs-owned-values attrs)
+                          (return (Pull-Result {}) false append-error))))
+                    (delete-owned-datoms datoms))
+                  (let [[stream stream-ok stream-error] (source-vaet-entity-attr-stream source entity forward-attr)]
+                    (when (not stream-ok)
+                      (delete-pull-attrs-owned-values attrs)
+                      (return (Pull-Result {}) false stream-error))
+                    (while (and stream.has-current (< seen limit))
+                      (let [[append-ok append-error] (append-db-read-source-reverse-pull-datom! (addr attrs) source spec root seen-counts registry stream.current (addr seen) limit)]
+                        (when (not append-ok)
+                          (delete-source-index-datom-stream stream)
+                          (delete-pull-attrs-owned-values attrs)
+                          (return (Pull-Result {}) false append-error)))
+                      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+                        (when (not advance-ok)
+                          (delete-source-index-datom-stream stream)
+                          (delete-pull-attrs-owned-values attrs)
+                          (return (Pull-Result {}) false advance-error))))
+                    (delete-source-index-datom-stream stream)))
+                (when (and (= seen 0) (or spec.has-default spec.has-xform))
+                  (arr.push! attrs (db-read-source-pull-missing-attr-with-fns spec registry))))
+            :else
+              (let [limit (pull-limit spec)
+                    seen 0]
+                (if (db-read-source-has-overlay? source)
+                  (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity spec.a)]
+                    (when (not datoms-ok)
+                      (delete-pull-attrs-owned-values attrs)
+                      (return (Pull-Result {}) false datoms-error))
+                    (for [datom datoms]
+                      (let [[append-ok append-error] (append-db-read-source-forward-pull-datom! (addr attrs) source spec root seen-counts registry datom (addr seen) limit)]
+                        (when (not append-ok)
+                          (delete-owned-datoms datoms)
+                          (delete-pull-attrs-owned-values attrs)
+                          (return (Pull-Result {}) false append-error))))
+                    (delete-owned-datoms datoms))
+                  (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity spec.a)]
+                    (when (not stream-ok)
+                      (delete-pull-attrs-owned-values attrs)
+                      (return (Pull-Result {}) false stream-error))
+                    (while (and stream.has-current (< seen limit))
+                      (let [[append-ok append-error] (append-db-read-source-forward-pull-datom! (addr attrs) source spec root seen-counts registry stream.current (addr seen) limit)]
+                        (when (not append-ok)
+                          (delete-source-index-datom-stream stream)
+                          (delete-pull-attrs-owned-values attrs)
+                          (return (Pull-Result {}) false append-error)))
+                      (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+                        (when (not advance-ok)
+                          (delete-source-index-datom-stream stream)
+                          (delete-pull-attrs-owned-values attrs)
+                          (return (Pull-Result {}) false advance-error))))
+                    (delete-source-index-datom-stream stream)))
+                (when (and (= seen 0) (or spec.has-default spec.has-xform))
+                  (arr.push! attrs (db-read-source-pull-missing-attr-with-fns spec registry))))))))
+    (return (Pull-Result {e: entity attrs: attrs}) true "")))
+
+(defn db-read-source-pull-result-for-pattern [source: DB-Read-Source, entity: u64, pattern: []Pull-Spec] -> [result: Pull-Result, ok: bool, error: string]
+  (db-read-source-pull-result-for-pattern-with-fns source entity pattern ([]Native-Query-Fn [])))
+
+(defn db-read-source-pull-result-for-pattern-with-fns [source: DB-Read-Source, entity: u64, pattern: []Pull-Spec, registry: []Native-Query-Fn] -> [result: Pull-Result, ok: bool, error: string]
+  (let [seen-counts (make (map u64 int))]
+    (defer (delete seen-counts))
+    (pull-seen-push! (addr seen-counts) entity)
+    (db-read-source-pull-result-for-pattern-seen-with-fns source entity pattern pattern (addr seen-counts) registry)))
+
+(defn db-read-source-pull-find-source [primary: DB-Read-Source, sources: []DB-Read-Named-Source, pull-find: Pull-Find] -> [source: DB-Read-Source, ok: bool, error: string]
+  (if pull-find.has-source
+    (db-read-source-for-name primary sources pull-find.source)
+    (return primary true "")))
+
+(defn db-read-source-pulls-for-binding-with-sources-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, binding: Binding, registry: []Native-Query-Fn] -> [pulls: [dynamic]Pull-Result, ok: bool, error: string]
+  (let [out (make [dynamic]Pull-Result 0 (count query-value.pulls))]
+    (for [pull-find query-value.pulls]
+      (let [[pull-source pull-source-ok pull-source-error] (db-read-source-pull-find-source source sources pull-find)]
+        (when (not pull-source-ok)
+          (for [pull out]
+            (delete-pull-result-owned-values pull))
+          (delete out)
+          (return (make [dynamic]Pull-Result) false pull-source-error))
+      (let [[entity-value entity-value-ok] (binding-lookup binding pull-find.var)]
+        (when (not entity-value-ok)
+          (for [pull out]
+            (delete-pull-result-owned-values pull))
+          (delete out)
+          (return (make [dynamic]Pull-Result) false "pull entity var is not bound"))
+        (let [[entity entity-ok] (db-read-source-pull-entity entity-value)]
+          (when (not entity-ok)
+            (for [pull out]
+              (delete-pull-result-owned-values pull))
+            (delete out)
+            (return (make [dynamic]Pull-Result) false "pull entity value must be an entity id"))
+          (let [[pattern pattern-ok] (db-read-source-pull-find-pattern query-value inputs pull-find)]
+            (when (not pattern-ok)
+              (for [existing out]
+                (delete-pull-result-owned-values existing))
+              (delete out)
+              (return (make [dynamic]Pull-Result) false "pull pattern input must be a pull pattern"))
+            (let [[pull pull-ok pull-error] (db-read-source-pull-result-for-pattern-with-fns pull-source entity pattern registry)]
+            (when (not pull-ok)
+              (for [existing out]
+                (delete-pull-result-owned-values existing))
+              (delete out)
+              (return (make [dynamic]Pull-Result) false pull-error))
+            (arr.push! out pull)))))))
+    (return out true "")))
+
+(defn db-read-source-pulls-for-binding-with-fns [source: DB-Read-Source, query-value: Query, inputs: []Query-Input, binding: Binding, registry: []Native-Query-Fn] -> [pulls: [dynamic]Pull-Result, ok: bool, error: string]
+  (db-read-source-pulls-for-binding-with-sources-and-fns source ([]DB-Read-Named-Source []) query-value inputs binding registry))
+
+(defn db-read-source-pulls-for-binding [source: DB-Read-Source, query-value: Query, inputs: []Query-Input, binding: Binding] -> [pulls: [dynamic]Pull-Result, ok: bool, error: string]
+  (db-read-source-pulls-for-binding-with-fns source query-value inputs binding ([]Native-Query-Fn [])))
+
+(defn db-read-source-aggregate-result-rows-for-bindings-with-sources-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, bindings: []Binding, registry: []Native-Query-Fn] -> Result-Set
+  (let [rows (make [dynamic]Result-Row)
+        seen-groups (make [dynamic]Result-Row)]
+    (defer (delete-result-rows-owned-values seen-groups))
+    (when (= (count query-value.find) 0)
+      (let [values (make [dynamic]Value 0 (count query-value.aggregates))
+            pulls (make [dynamic]Pull-Result)]
+        (for [aggregate query-value.aggregates]
+          (arr.push! values (aggregate-value-for-group-with-fns bindings query-value aggregate ([]Value []) registry)))
+        (arr.push! rows (Result-Row {values: values pulls: pulls}))
+        (return (result-set-ok rows))))
+    (for [binding bindings]
+      (let [[group-values group-ok] (binding-values-for-vars binding (slice query-value.find 0))]
+        (if (not group-ok)
+          (delete group-values)
+          (if (row-values-exist? (slice seen-groups 0) (slice group-values 0))
+            (delete group-values)
+            (do
+              (arr.push! seen-groups (aggregate-owned-key-row (slice group-values 0)))
+              (let [values (make [dynamic]Value 0 (+ (count query-value.find) (count query-value.aggregates)))
+                    [pulls pulls-ok pulls-error] (db-read-source-pulls-for-binding-with-sources-and-fns source sources query-value inputs binding registry)]
+                (when (not pulls-ok)
+                  (delete group-values)
+                  (delete values)
+                  (for [pull pulls]
+                    (delete-pull-result-owned-values pull))
+                  (delete pulls)
+                  (delete-result-rows-owned-values rows)
+                  (return (result-set-error pulls-error)))
+                (for [value group-values]
+                  (arr.push! values (value-owned value)))
+                (for [aggregate query-value.aggregates]
+                  (arr.push! values (aggregate-value-for-group-with-fns bindings query-value aggregate (slice group-values 0) registry)))
+                (delete group-values)
+                (arr.push! rows (Result-Row {values: values pulls: pulls}))))))))
+    (result-set-ok rows)))
+
+(defn db-read-source-result-rows-for-bindings-with-sources-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, bindings: []Binding, registry: []Native-Query-Fn] -> Result-Set
+  (when (> (count query-value.aggregates) 0)
+    (return (db-read-source-aggregate-result-rows-for-bindings-with-sources-and-fns source sources query-value inputs bindings registry)))
+  (let [rows (make [dynamic]Result-Row)
+        seen (set.empty string)
+        trust-unique-bindings (query-can-trust-unique-bindings? query-value)]
+    (defer (delete-owned-string-set seen))
+    (for [binding bindings]
+      (let [values (make [dynamic]Value 0 (count query-value.find))
+            dedupe-values (make [dynamic]Value)
+            [pulls pulls-ok pulls-error] (db-read-source-pulls-for-binding-with-sources-and-fns source sources query-value inputs binding registry)
+            row-ok true
+            pushed false]
+        (when (not pulls-ok)
+          (for [value values]
+            (delete-owned-value value))
+          (delete values)
+          (delete dedupe-values)
+          (delete-result-rows-owned-values rows)
+          (return (result-set-error pulls-error)))
+        (for [name query-value.find]
+          (let [[value value-ok] (binding-lookup binding name)]
+            (if value-ok
+              (do
+                (arr.push! values (value-owned value))
+                (arr.push! dedupe-values value))
+              (set! row-ok false))))
+        (for [name query-value.with]
+          (let [[value value-ok] (binding-lookup binding name)]
+            (if value-ok
+              (arr.push! dedupe-values value)
+              (set! row-ok false))))
+        (if (not row-ok)
+          (do
+            (for [value values]
+              (delete-owned-value value))
+            (delete values)
+            (delete dedupe-values)
+            (for [pull pulls]
+              (delete-pull-result-owned-values pull))
+            (delete pulls))
+          (do
+            (if trust-unique-bindings
+              (do
+                (arr.push! rows (Result-Row {values: values pulls: pulls}))
+                (set! pushed true))
+              (let [[key key-ok] (result-row-dedupe-key (slice dedupe-values 0) (slice pulls 0))]
+                (if key-ok
+                  (let [already-seen (set.contains? seen key)]
+                    (when (not already-seen)
+                      (set.add! seen key)
+                      (arr.push! rows (Result-Row {values: values pulls: pulls}))
+                      (set! pushed true))
+                    (when already-seen
+                      (delete key)))
+                  (when (not (row-values-exist? (slice rows 0) (slice dedupe-values 0)))
+                    (arr.push! rows (Result-Row {values: values pulls: pulls}))
+                    (set! pushed true)))))
+            (delete dedupe-values)
+            (when (not pushed)
+              (for [value values]
+                (delete-owned-value value))
+              (delete values)
+              (for [pull pulls]
+                (delete-pull-result-owned-values pull))
+              (delete pulls))))))
+    (result-set-ok rows)))
+
+(defn db-read-source-result-rows-for-bindings-with-fns [source: DB-Read-Source, query-value: Query, inputs: []Query-Input, bindings: []Binding, registry: []Native-Query-Fn] -> Result-Set
+  (db-read-source-result-rows-for-bindings-with-sources-and-fns source ([]DB-Read-Named-Source []) query-value inputs bindings registry))
+
+(defn db-read-source-result-rows-for-bindings [source: DB-Read-Source, query-value: Query, inputs: []Query-Input, bindings: []Binding] -> Result-Set
+  (db-read-source-result-rows-for-bindings-with-fns source query-value inputs bindings ([]Native-Query-Fn [])))
