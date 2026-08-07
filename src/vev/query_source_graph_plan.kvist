@@ -1,0 +1,1330 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn source-clause-fixed-forward-attr? [clause-value: Clause] -> bool
+  (and (= clause-value.a.kind .Value)
+       (= clause-value.a.value.kind .Keyword)
+       (not (reverse-attr? clause-value.a.value.text))
+       (= clause-value.tx-term.kind .Wildcard)
+       (= clause-value.op-term.kind .Wildcard)))
+
+(defn source-clause-same-source? [base: Clause, candidate: Clause] -> bool
+  (and (= base.has-source candidate.has-source)
+       (or (not base.has-source)
+           (= base.source candidate.source))))
+
+(defn source-query-find-has-var? [query: Query, name: string] -> bool
+  (for [find-var query.find]
+    (when (= find-var name)
+      (return true)))
+  false)
+
+(defn source-clause-entity-var? [clause-value: Clause, name: string] -> bool
+  (and (= clause-value.e.kind .Var)
+       (= clause-value.e.name name)))
+
+(defn empty-source-same-entity-ref-fanout-projection [] -> Source-Same-Entity-Ref-Fanout-Projection
+  (Source-Same-Entity-Ref-Fanout-Projection {}))
+
+(defn empty-source-same-value-collaborator-projection [] -> Source-Same-Value-Collaborator-Projection
+  (Source-Same-Value-Collaborator-Projection {}))
+
+(defn empty-source-track-release-projection [] -> Source-Track-Release-Projection
+  (Source-Track-Release-Projection {}))
+
+(defn empty-source-collab-net-two-projection [] -> Source-Collab-Net-Two-Projection
+  (Source-Collab-Net-Two-Projection {}))
+
+(defn empty-source-input-ref-value-projection [] -> Source-Input-Ref-Value-Projection
+  (Source-Input-Ref-Value-Projection {}))
+
+(defn empty-source-fulltext-track-info-projection [] -> Source-Fulltext-Track-Info-Projection
+  (Source-Fulltext-Track-Info-Projection {}))
+
+(defn query-two-find-vars? [query: Query, first-var: string, second-var: string] -> bool
+  (and (= (count query.find) 2)
+       (or (and (= query.find[0] first-var)
+                (= query.find[1] second-var))
+           (and (= query.find[0] second-var)
+                (= query.find[1] first-var)))))
+
+(defn query-same-entity-ref-fanout-find-vars? [query: Query, input-var: string, output-var: string] -> bool
+  (or (query-two-find-vars? query input-var output-var)
+      (and (= (count query.find) 1)
+           (= query.find[0] output-var))))
+
+(defn query-distinct-vars-predicate? [query: Query, left-var: string, right-var: string] -> bool
+  (when (not (= (count query.predicates) 1))
+    (return false))
+  (let [predicate query.predicates[0]]
+    (and (or (= predicate.op "!=")
+             (= predicate.op "not="))
+         (= (count predicate.terms) 2)
+         (or (and (term-var-name? predicate.terms[0] left-var)
+                  (term-var-name? predicate.terms[1] right-var))
+             (and (term-var-name? predicate.terms[0] right-var)
+                  (term-var-name? predicate.terms[1] left-var))))))
+
+(defn query-find-four-vars? [query: Query, first-var: string, second-var: string, third-var: string, fourth-var: string] -> bool
+  (when (not (= (count query.find) 4))
+    (return false))
+  (let [seen-first false
+        seen-second false
+        seen-third false
+        seen-fourth false]
+    (for [find-var query.find]
+      (cond
+        (= find-var first-var) (set! seen-first true)
+        (= find-var second-var) (set! seen-second true)
+        (= find-var third-var) (set! seen-third true)
+        (= find-var fourth-var) (set! seen-fourth true)
+        :else (return false)))
+    (and seen-first seen-second seen-third seen-fourth)))
+
+(defn db-read-source-query-fulltext-track-info-projection [query: Query] -> [projection: Source-Fulltext-Track-Info-Projection, ok: bool]
+  (when (not (and (= (count query.find) 4)
+                  (= (count query.with) 0)
+                  (= (count query.inputs) 1)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rule-calls) 1)
+                  (= (count query.predicates) 0)
+                  (= (count query.function-clauses) 1)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 0)
+                  (= (count query.where-steps) 2)
+                  (query-find-vars-unique? query)))
+    (return (empty-source-fulltext-track-info-projection) false))
+  (let [function query.function-clauses[0]
+        info-call query.rule-calls[0]]
+    (when (not (and (= (count function.terms) 3)
+                    (= (count info-call.args) 5)))
+      (return (empty-source-fulltext-track-info-projection) false))
+    (for [arg info-call.args]
+      (when (not (= arg.kind .Var))
+        (return (empty-source-fulltext-track-info-projection) false)))
+    (let [[source-name source-ok] (fulltext-source-name function)
+          [fulltext-attr attr-ok] (fulltext-attr-from-term function.terms[1])
+          output-binding (fulltext-output-row-binding function.out-binding)
+          output-vars (make [dynamic]string)
+          seen-output-vars (set.empty string)]
+      (defer (delete output-vars))
+      (defer (delete seen-output-vars))
+      (append-input-binding-vars-indexed! (addr output-vars) (addr seen-output-vars) output-binding)
+      (when (not (and source-ok
+                      (query-source-input-name? source-name)
+                      attr-ok
+                      (= function.terms[2].kind .Var)
+                      (= function.terms[2].name query.inputs[0])
+                      (> (count output-vars) 0)
+                      (= output-vars[0] info-call.args[0].name)
+                      (query-find-four-vars? query info-call.args[1].name info-call.args[2].name info-call.args[3].name info-call.args[4].name)))
+        (return (empty-source-fulltext-track-info-projection) false))
+      (for [output-var output-index output-vars]
+        (when (> output-index 0)
+          (when (= output-var query.inputs[0])
+            (return (empty-source-fulltext-track-info-projection) false))
+          (for [arg info-call.args]
+            (when (= output-var arg.name)
+              (return (empty-source-fulltext-track-info-projection) false)))
+          (for [find-var query.find]
+            (when (= output-var find-var)
+              (return (empty-source-fulltext-track-info-projection) false)))))
+      (for [info-rule query.rules]
+        (when (= info-rule.name info-call.name)
+          (when (not (and (= (count info-rule.params) 5)
+                          (= (count info-rule.clauses) 5)
+                          (= (count info-rule.rule-calls) 1)
+                          (= (count info-rule.predicates) 0)
+                          (= (count info-rule.function-clauses) 0)
+                          (= (count info-rule.get-elses) 0)
+                          (= (count info-rule.get-somes) 0)
+                          (= (count info-rule.grounds) 0)
+                          (= (count info-rule.not-groups) 0)
+                          (= (count info-rule.or-groups) 0)))
+            (return (empty-source-fulltext-track-info-projection) false))
+          (let [title info-rule.clauses[0]
+                track-artist info-rule.clauses[1]
+                artist-name info-rule.clauses[2]
+                first-release info-rule.clauses[3]
+                second-release info-rule.clauses[4]
+                release-call info-rule.rule-calls[0]]
+            (for [clause-value info-rule.clauses]
+              (when (not (source-clause-fixed-forward-attr? clause-value))
+                (return (empty-source-fulltext-track-info-projection) false)))
+            (when (or (not (term-var-name? title.e info-rule.params[0]))
+                      (not (term-var-name? title.v info-rule.params[1]))
+                      (not (= title.a.value.text fulltext-attr))
+                      (not (term-var-name? track-artist.e info-rule.params[0]))
+                      (not (= track-artist.v.kind .Var))
+                      (not (source-clause-entity-var? artist-name track-artist.v.name))
+                      (not (term-var-name? artist-name.v info-rule.params[2]))
+                      (not (= (count release-call.args) 2))
+                      (not (term-var-name? release-call.args[0] info-rule.params[0]))
+                      (not (= release-call.args[1].kind .Var))
+                      (not (source-clause-entity-var? first-release release-call.args[1].name))
+                      (not (term-var-name? first-release.v info-rule.params[3]))
+                      (not (source-clause-entity-var? second-release release-call.args[1].name))
+                      (not (term-var-name? second-release.v info-rule.params[4])))
+              (return (empty-source-fulltext-track-info-projection) false))
+            (for [release-rule query.rules]
+              (when (= release-rule.name release-call.name)
+                (when (not (and (= (count release-rule.params) 2)
+                                (= (count release-rule.clauses) 2)
+                                (= (count release-rule.rule-calls) 0)
+                                (rule-has-only-plain-clauses-and-calls? release-rule)))
+                  (return (empty-source-fulltext-track-info-projection) false))
+                (let [medium-track release-rule.clauses[0]
+                      release-medium release-rule.clauses[1]]
+                  (when (or (not (source-clause-fixed-forward-attr? medium-track))
+                            (not (source-clause-fixed-forward-attr? release-medium))
+                            (not (= medium-track.e.kind .Var))
+                            (not (term-var-name? medium-track.v release-rule.params[0]))
+                            (not (term-var-name? release-medium.e release-rule.params[1]))
+                            (not (= release-medium.v.kind .Var))
+                            (not (= release-medium.v.name medium-track.e.name)))
+                    (return (empty-source-fulltext-track-info-projection) false))
+                  (return (Source-Fulltext-Track-Info-Projection {search-var: query.inputs[0]
+                                                                  fulltext-attr: fulltext-attr
+                                                                  title-var: info-call.args[1].name
+                                                                  track-artist-attr: track-artist.a.value.text
+                                                                  artist-name-attr: artist-name.a.value.text
+                                                                  artist-var: info-call.args[2].name
+                                                                  medium-track-attr: medium-track.a.value.text
+                                                                  release-medium-attr: release-medium.a.value.text
+                                                                  first-release-attr: first-release.a.value.text
+                                                                  first-release-var: info-call.args[3].name
+                                                                  second-release-attr: second-release.a.value.text
+                                                                  second-release-var: info-call.args[4].name})
+                          true))))))))
+    (return (empty-source-fulltext-track-info-projection) false)))
+
+(defn db-read-source-query-same-entity-ref-fanout-projection [query: Query] -> [projection: Source-Same-Entity-Ref-Fanout-Projection, ok: bool]
+  (when (not (and (or (= (count query.find) 1)
+                      (= (count query.find) 2))
+                  (= (count query.with) 0)
+                  (= (count query.inputs) 0)
+                  (= (+ (count query.collection-inputs) (count query.relation-inputs)) 1)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rule-calls) 0)
+                  (= (count query.predicates) 1)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 4)
+                  (= (count query.where-steps) 5)
+                  (query-find-vars-unique? query)))
+    (return (empty-source-same-entity-ref-fanout-projection) false))
+  (let [input-var (if (= (count query.collection-inputs) 1)
+                    query.collection-inputs[0]
+                    (if (and (= (count query.relation-inputs) 1)
+                             (= (count query.relation-inputs[0].vars) 1))
+                      query.relation-inputs[0].vars[0]
+                      ""))]
+    (when (= input-var "")
+      (return (empty-source-same-entity-ref-fanout-projection) false))
+    (let [anchor-index 0]
+      (while (< anchor-index (count query.clauses))
+        (let [anchor query.clauses[anchor-index]]
+          (when (and (source-clause-fixed-forward-attr? anchor)
+                     (= anchor.e.kind .Var)
+                     (term-var-name? anchor.v input-var))
+            (let [first-edge-index 0]
+              (while (< first-edge-index (count query.clauses))
+                (let [first-edge query.clauses[first-edge-index]]
+                  (when (and (not (= first-edge-index anchor-index))
+                             (source-clause-fixed-forward-attr? first-edge)
+                             (= first-edge.e.kind .Var)
+                             (term-var-name? first-edge.v anchor.e.name))
+                    (let [second-edge-index 0]
+                      (while (< second-edge-index (count query.clauses))
+                        (let [second-edge query.clauses[second-edge-index]]
+                          (when (and (not (= second-edge-index anchor-index))
+                                     (not (= second-edge-index first-edge-index))
+                                     (source-clause-fixed-forward-attr? second-edge)
+                                     (= second-edge.e.kind .Var)
+                                     (= second-edge.e.name first-edge.e.name)
+                                     (= second-edge.v.kind .Var)
+                                     (not (= second-edge.v.name anchor.e.name))
+                                     (= second-edge.a.value.text first-edge.a.value.text)
+                                     (query-distinct-vars-predicate? query anchor.e.name second-edge.v.name))
+                            (let [output-index 0]
+                              (while (< output-index (count query.clauses))
+                                (let [output query.clauses[output-index]]
+                                  (when (and (not (= output-index anchor-index))
+                                             (not (= output-index first-edge-index))
+                                             (not (= output-index second-edge-index))
+                                             (source-clause-fixed-forward-attr? output)
+                                             (source-clause-entity-var? output second-edge.v.name)
+                                             (= output.v.kind .Var)
+                                             (= output.a.value.text anchor.a.value.text)
+                                             (query-same-entity-ref-fanout-find-vars? query input-var output.v.name))
+                                    (return (Source-Same-Entity-Ref-Fanout-Projection {input-var: input-var
+                                                                                    output-var: output.v.name
+                                                                                    name-attr: anchor.a.value.text
+                                                                                    edge-attr: first-edge.a.value.text})
+                                            true)))
+                                (mut! output-index += 1)))))
+                        (mut! second-edge-index += 1))))
+                  (mut! first-edge-index += 1)))))
+        (mut! anchor-index += 1))))
+  (return (empty-source-same-entity-ref-fanout-projection) false)))
+
+(defn db-read-source-query-same-value-collaborator-projection [query: Query] -> [projection: Source-Same-Value-Collaborator-Projection, ok: bool]
+  (when (not (and (= (count query.find) 2)
+                  (= (count query.with) 0)
+                  (= (count query.inputs) 1)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rules) 0)
+                  (= (count query.rule-calls) 0)
+                  (> (count query.predicates) 0)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 6)
+                  (= (count query.where-steps) (+ 6 (count query.predicates)))
+                  (query-find-vars-unique? query)))
+    (return (empty-source-same-value-collaborator-projection) false))
+  (for [clause-value query.clauses]
+    (when (not (source-clause-fixed-forward-attr? clause-value))
+      (return (empty-source-same-value-collaborator-projection) false)))
+  (let [anchor-name query.clauses[0]
+        anchor-edge query.clauses[1]
+        shared-value query.clauses[2]
+        same-value query.clauses[3]
+        collaborator-edge query.clauses[4]
+        output-name query.clauses[5]
+        input-var query.inputs[0]]
+    (when (not (and (= anchor-name.e.kind .Var)
+                    (term-var-name? anchor-name.v input-var)
+                    (= anchor-edge.e.kind .Var)
+                    (= anchor-edge.v.kind .Var)
+                    (= anchor-edge.v.name anchor-name.e.name)
+                    (= shared-value.e.kind .Var)
+                    (= shared-value.e.name anchor-edge.e.name)
+                    (= shared-value.v.kind .Var)
+                    (= same-value.e.kind .Var)
+                    (= same-value.v.kind .Var)
+                    (= same-value.v.name shared-value.v.name)
+                    (= same-value.a.value.text shared-value.a.value.text)
+                    (= collaborator-edge.e.kind .Var)
+                    (= collaborator-edge.e.name same-value.e.name)
+                    (= collaborator-edge.v.kind .Var)
+                    (= collaborator-edge.a.value.text anchor-edge.a.value.text)
+                    (= output-name.e.kind .Var)
+                    (= output-name.e.name collaborator-edge.v.name)
+                    (= output-name.v.kind .Var)
+                    (query-two-find-vars? query output-name.v.name shared-value.v.name)))
+      (return (empty-source-same-value-collaborator-projection) false))
+    (let [has-entity-distinct false]
+      (for [predicate query.predicates]
+        (when (not (and (or (= predicate.op "!=")
+                            (= predicate.op "not="))
+                        (= (count predicate.terms) 2)))
+          (return (empty-source-same-value-collaborator-projection) false))
+        (if (or (and (term-var-name? predicate.terms[0] anchor-name.e.name)
+                     (term-var-name? predicate.terms[1] collaborator-edge.v.name))
+                (and (term-var-name? predicate.terms[0] collaborator-edge.v.name)
+                     (term-var-name? predicate.terms[1] anchor-name.e.name)))
+          (set! has-entity-distinct true)
+          (when (not (or (and (term-var-name? predicate.terms[0] shared-value.v.name)
+                              (= predicate.terms[1].kind .Value))
+                         (and (= predicate.terms[0].kind .Value)
+                              (term-var-name? predicate.terms[1] shared-value.v.name))))
+            (return (empty-source-same-value-collaborator-projection) false))))
+      (when (not has-entity-distinct)
+        (return (empty-source-same-value-collaborator-projection) false)))
+    (return (Source-Same-Value-Collaborator-Projection {input-var: input-var
+                                                        anchor-entity-var: anchor-name.e.name
+                                                        collaborator-entity-var: collaborator-edge.v.name
+                                                        output-var: output-name.v.name
+                                                        shared-value-var: shared-value.v.name
+                                                        anchor-name-attr: anchor-name.a.value.text
+                                                        edge-attr: anchor-edge.a.value.text
+                                                        shared-value-attr: shared-value.a.value.text
+                                                        output-name-attr: output-name.a.value.text})
+            true)))
+
+(defn db-read-source-query-track-release-projection [query: Query] -> [projection: Source-Track-Release-Projection, ok: bool]
+  (when (not (and (= (count query.find) 3)
+                  (= (count query.with) 0)
+                  (= (count query.inputs) 1)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rule-calls) 1)
+                  (= (count query.predicates) 0)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 5)
+                  (= (count query.where-steps) 6)
+                  (query-find-vars-unique? query)))
+    (return (empty-source-track-release-projection) false))
+  (for [clause-value query.clauses]
+    (when (not (source-clause-fixed-forward-attr? clause-value))
+      (return (empty-source-track-release-projection) false)))
+  (let [artist-name query.clauses[0]
+        track-artist query.clauses[1]
+        track-name query.clauses[2]
+        release-name query.clauses[3]
+        release-year query.clauses[4]
+        release-call query.rule-calls[0]]
+    (when (not (and (= artist-name.e.kind .Var)
+                    (term-var-name? artist-name.v query.inputs[0])
+                    (= track-artist.e.kind .Var)
+                    (term-var-name? track-artist.v artist-name.e.name)
+                    (source-clause-entity-var? track-name track-artist.e.name)
+                    (= track-name.v.kind .Var)
+                    (= (count release-call.args) 2)
+                    (term-var-name? release-call.args[0] track-artist.e.name)
+                    (= release-call.args[1].kind .Var)
+                    (source-clause-entity-var? release-name release-call.args[1].name)
+                    (= release-name.v.kind .Var)
+                    (source-clause-entity-var? release-year release-call.args[1].name)
+                    (= release-year.v.kind .Var)
+                    (query-find-three-vars? query track-name.v.name release-name.v.name release-year.v.name)))
+      (return (empty-source-track-release-projection) false))
+    (for [release-rule query.rules]
+      (when (= release-rule.name release-call.name)
+        (when (not (and (= (count release-rule.params) 2)
+                        (= (count release-rule.clauses) 2)
+                        (= (count release-rule.rule-calls) 0)
+                        (rule-has-only-plain-clauses-and-calls? release-rule)))
+          (return (empty-source-track-release-projection) false))
+        (let [medium-track release-rule.clauses[0]
+              release-media release-rule.clauses[1]]
+          (when (or (not (source-clause-fixed-forward-attr? medium-track))
+                    (not (source-clause-fixed-forward-attr? release-media))
+                    (not (= medium-track.e.kind .Var))
+                    (not (term-var-name? medium-track.v release-rule.params[0]))
+                    (not (term-var-name? release-media.e release-rule.params[1]))
+                    (not (= release-media.v.kind .Var))
+                    (not (= release-media.v.name medium-track.e.name)))
+            (return (empty-source-track-release-projection) false))
+          (return (Source-Track-Release-Projection {input-var: query.inputs[0]
+                                                    title-var: track-name.v.name
+                                                    album-var: release-name.v.name
+                                                    year-var: release-year.v.name
+                                                    artist-name-attr: artist-name.a.value.text
+                                                    track-artist-attr: track-artist.a.value.text
+                                                    track-name-attr: track-name.a.value.text
+                                                    medium-track-attr: medium-track.a.value.text
+                                                    release-media-attr: release-media.a.value.text
+                                                    release-name-attr: release-name.a.value.text
+                                                    release-year-attr: release-year.a.value.text})
+                  true)))))
+  (return (empty-source-track-release-projection) false))
+
+(defn db-read-source-query-collab-net-two-projection [query: Query] -> [projection: Source-Collab-Net-Two-Projection, ok: bool]
+  (when (not (and (= (count query.find) 2)
+                  (= (count query.with) 0)
+                  (= (count query.inputs) 0)
+                  (= (count query.collection-inputs) 1)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rule-calls) 1)
+                  (= (count query.predicates) 0)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 0)
+                  (= (count query.where-steps) 1)
+                  (query-find-vars-unique? query)))
+    (return (empty-source-collab-net-two-projection) false))
+  (let [query-call query.rule-calls[0]
+        input-var query.collection-inputs[0]]
+    (when (not (and (= (count query-call.args) 2)
+                    (term-var-name? query-call.args[0] input-var)
+                    (= query-call.args[1].kind .Var)
+                    (query-two-find-vars? query input-var query-call.args[1].name)))
+      (return (empty-source-collab-net-two-projection) false))
+    (for [collab-rule query.rules]
+      (when (= collab-rule.name query-call.name)
+        (when (not (and (= (count collab-rule.params) 2)
+                        (= (count collab-rule.clauses) 2)
+                        (= (count collab-rule.rule-calls) 1)
+                        (= (count collab-rule.predicates) 0)
+                        (= (count collab-rule.function-clauses) 0)
+                        (= (count collab-rule.get-elses) 0)
+                        (= (count collab-rule.get-somes) 0)
+                        (= (count collab-rule.grounds) 0)
+                        (= (count collab-rule.not-groups) 0)
+                        (= (count collab-rule.or-groups) 0)))
+          (return (empty-source-collab-net-two-projection) false))
+        (let [anchor-name collab-rule.clauses[0]
+              output-name collab-rule.clauses[1]
+              net-call collab-rule.rule-calls[0]]
+          (when (not (and (source-clause-fixed-forward-attr? anchor-name)
+                          (source-clause-fixed-forward-attr? output-name)
+                          (= anchor-name.e.kind .Var)
+                          (term-var-name? anchor-name.v collab-rule.params[0])
+                          (= output-name.e.kind .Var)
+                          (term-var-name? output-name.v collab-rule.params[1])
+                          (= (count net-call.args) 3)
+                          (= net-call.args[0].kind .Value)
+                          (= net-call.args[0].value.kind .Keyword)
+                          (term-var-name? net-call.args[1] anchor-name.e.name)
+                          (term-var-name? net-call.args[2] output-name.e.name)))
+            (return (empty-source-collab-net-two-projection) false))
+          (let [[_ hop-rule _ net-ok] (two-hop-attr-param-derived-rule-shape (slice query.rules 0) net-call.name)]
+            (when (not (and net-ok
+                            (= (count hop-rule.predicates) 1)
+                            (rule-attr-param-distinct-predicate? hop-rule hop-rule.params[1] hop-rule.params[2])))
+              (return (empty-source-collab-net-two-projection) false)))
+          (return (Source-Collab-Net-Two-Projection {input-var: input-var
+                                                     output-var: query-call.args[1].name
+                                                     anchor-name-attr: anchor-name.a.value.text
+                                                     output-name-attr: output-name.a.value.text
+                                                     edge-attr: net-call.args[0].value.text})
+                  true)))))
+  (return (empty-source-collab-net-two-projection) false))
+
+(defn db-read-source-query-input-ref-value-projection [query: Query] -> [projection: Source-Input-Ref-Value-Projection, ok: bool]
+  (when (not (and (= (count query.find) 1)
+                  (= (count query.with) 0)
+                  (= (count query.inputs) 1)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rules) 0)
+                  (= (count query.rule-calls) 0)
+                  (= (count query.predicates) 0)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 3)
+                  (= (count query.where-steps) 3)))
+    (return (empty-source-input-ref-value-projection) false))
+  (let [anchor query.clauses[0]
+        edge query.clauses[1]
+        output query.clauses[2]]
+    (when (not (and (source-clause-fixed-forward-attr? anchor)
+                    (source-clause-fixed-forward-attr? edge)
+                    (source-clause-fixed-forward-attr? output)
+                    (= anchor.e.kind .Var)
+                    (term-var-name? anchor.v query.inputs[0])
+                    (= edge.e.kind .Var)
+                    (term-var-name? edge.v anchor.e.name)
+                    (source-clause-entity-var? output edge.e.name)
+                    (= output.v.kind .Var)
+                    (= query.find[0] output.v.name)))
+      (return (empty-source-input-ref-value-projection) false))
+    (return (Source-Input-Ref-Value-Projection {input-var: query.inputs[0]
+                                                output-var: output.v.name
+                                                anchor-attr: anchor.a.value.text
+                                                ref-attr: edge.a.value.text
+                                                output-attr: output.a.value.text})
+            true)))
+
+(defn source-multi-hop-anchor-clause? [query: Query, clause-value: Clause] -> bool
+  (and (source-clause-fixed-forward-attr? clause-value)
+       (= clause-value.e.kind .Var)
+       (or (= clause-value.v.kind .Value)
+           (and (= clause-value.v.kind .Var)
+                (db-read-source-query-has-one-scalar-input? query clause-value.v.name)))))
+
+(defn source-multi-hop-clauses-compatible? [query: Query, anchor: Clause] -> bool
+  (for [clause-value query.clauses]
+    (when (or (not (source-clause-same-source? anchor clause-value))
+              (not (source-clause-fixed-forward-attr? clause-value)))
+      (return false)))
+  true)
+
+(defn db-read-source-query-multi-hop-ref-chain-projection-any-order [query: Query] -> [projection: Source-Multi-Hop-Ref-Chain-Projection, ok: bool]
+  (when (not (and (= (count query.find) 3)
+                  (= (count query.with) 0)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rules) 0)
+                  (= (count query.rule-calls) 0)
+                  (= (count query.predicates) 1)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 7)
+                  (= (count query.where-steps) 8)
+                  (query-find-vars-unique? query)))
+    (return (empty-source-multi-hop-ref-chain-projection) false))
+  (for [step query.where-steps]
+    (when (not (or (= step.kind .Clause)
+                   (and (= step.kind .Predicate)
+                        (= step.index 0))))
+      (return (empty-source-multi-hop-ref-chain-projection) false)))
+  (let [anchor-index 0]
+    (while (< anchor-index (count query.clauses))
+      (let [anchor query.clauses[anchor-index]]
+        (when (and (source-multi-hop-anchor-clause? query anchor)
+                   (source-multi-hop-clauses-compatible? query anchor))
+          (let [reverse-index 0]
+            (while (< reverse-index (count query.clauses))
+              (let [reverse-ref query.clauses[reverse-index]]
+                (when (and (not (= reverse-index anchor-index))
+                           (= reverse-ref.e.kind .Var)
+                           (= reverse-ref.v.kind .Var)
+                           (= reverse-ref.v.name anchor.e.name)
+                           (not (= reverse-ref.e.name anchor.e.name)))
+                  (let [filter-index 0]
+                    (while (< filter-index (count query.clauses))
+                      (let [filter-clause query.clauses[filter-index]]
+                        (when (and (not (= filter-index anchor-index))
+                                   (not (= filter-index reverse-index))
+                                   (source-clause-entity-var? filter-clause reverse-ref.e.name)
+                                   (= filter-clause.v.kind .Var))
+                          (let [[filter-op filter-value filter-ok] (source-var-range-filter query.predicates[0] filter-clause.v.name)]
+                            (when filter-ok
+                              (let [hop1-index 0]
+                            (while (< hop1-index (count query.clauses))
+                              (let [hop1 query.clauses[hop1-index]]
+                                (when (and (not (= hop1-index anchor-index))
+                                           (not (= hop1-index reverse-index))
+                                           (not (= hop1-index filter-index))
+                                           (source-clause-entity-var? hop1 reverse-ref.e.name)
+                                           (= hop1.v.kind .Var)
+                                           (not (= hop1.v.name filter-clause.v.name)))
+                                  (let [hop2-index 0]
+                                    (while (< hop2-index (count query.clauses))
+                                      (let [hop2 query.clauses[hop2-index]]
+                                        (when (and (not (= hop2-index anchor-index))
+                                                   (not (= hop2-index reverse-index))
+                                                   (not (= hop2-index filter-index))
+                                                   (not (= hop2-index hop1-index))
+                                                   (source-clause-entity-var? hop2 hop1.v.name)
+                                                   (= hop2.v.kind .Var)
+                                                   (not (= hop2.v.name hop1.v.name)))
+                                          (let [first-value-index 0]
+                                            (while (< first-value-index (count query.clauses))
+                                              (let [first-value query.clauses[first-value-index]]
+                                                (when (and (not (= first-value-index anchor-index))
+                                                           (not (= first-value-index reverse-index))
+                                                           (not (= first-value-index filter-index))
+                                                           (not (= first-value-index hop1-index))
+                                                           (not (= first-value-index hop2-index))
+                                                           (source-clause-entity-var? first-value reverse-ref.e.name)
+                                                           (= first-value.v.kind .Var)
+                                                           (not (= first-value.v.name filter-clause.v.name))
+                                                           (not (= first-value.v.name hop1.v.name))
+                                                           (not (= first-value.v.name hop2.v.name))
+                                                           (source-query-find-has-var? query first-value.v.name))
+                                                  (let [final-value-index 0]
+                                                    (while (< final-value-index (count query.clauses))
+                                                      (let [final-value query.clauses[final-value-index]]
+                                                        (when (and (not (= final-value-index anchor-index))
+                                                                   (not (= final-value-index reverse-index))
+                                                                   (not (= final-value-index filter-index))
+                                                                   (not (= final-value-index hop1-index))
+                                                                   (not (= final-value-index hop2-index))
+                                                                   (not (= final-value-index first-value-index))
+                                                                   (source-clause-entity-var? final-value hop2.v.name)
+                                                                   (= final-value.v.kind .Var)
+                                                                   (not (= final-value.v.name filter-clause.v.name))
+                                                                   (not (= final-value.v.name first-value.v.name))
+                                                                   (source-query-find-has-var? query final-value.v.name)
+                                                                   (query-find-three-vars? query first-value.v.name filter-clause.v.name final-value.v.name))
+                                                          (return (Source-Multi-Hop-Ref-Chain-Projection {anchor-var: anchor.e.name
+                                                                                                          anchor-attr: anchor.a.value.text
+                                                                                                          anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                                                                          anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                                                                          has-anchor-input: (= anchor.v.kind .Var)
+                                                                                                          first-entity-var: reverse-ref.e.name
+                                                                                                          reverse-ref-attr: reverse-ref.a.value.text
+                                                                                                          filter-attr: filter-clause.a.value.text
+                                                                                                          filter-var: filter-clause.v.name
+                                                                                                          filter-op: filter-op
+                                                                                                          filter-value: filter-value
+                                                                                                          first-value-attr: first-value.a.value.text
+                                                                                                          first-value-var: first-value.v.name
+                                                                                                          hop1-attr: hop1.a.value.text
+                                                                                                          hop1-var: hop1.v.name
+                                                                                                          hop2-attr: hop2.a.value.text
+                                                                                                          hop2-var: hop2.v.name
+                                                                                                          final-value-attr: final-value.a.value.text
+                                                                                                          final-value-var: final-value.v.name})
+                                                                  true)))
+                                                        (set! final-value-index (+ final-value-index 1))))))
+                                                (set! first-value-index (+ first-value-index 1))))))
+                                        (set! hop2-index (+ hop2-index 1))))))
+                                (set! hop1-index (+ hop1-index 1)))))))
+                        (set! filter-index (+ filter-index 1))))))
+                (set! reverse-index (+ reverse-index 1))))))
+        (set! anchor-index (+ anchor-index 1))))
+    (return (empty-source-multi-hop-ref-chain-projection) false)))
+
+(defn db-read-source-query-multi-hop-ref-chain-projection [query: Query] -> [projection: Source-Multi-Hop-Ref-Chain-Projection, ok: bool]
+  (when (not (and (= (count query.find) 3)
+                  (= (count query.with) 0)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rules) 0)
+                  (= (count query.rule-calls) 0)
+                  (= (count query.predicates) 1)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 7)
+                  (= (count query.where-steps) 8)
+                  (query-find-vars-unique? query)))
+    (return (empty-source-multi-hop-ref-chain-projection) false))
+  (for [step query.where-steps]
+    (when (not (or (= step.kind .Clause)
+                   (and (= step.kind .Predicate)
+                        (= step.index 0))))
+      (return (empty-source-multi-hop-ref-chain-projection) false)))
+  (let [anchor query.clauses[0]
+        reverse-ref query.clauses[1]
+        filter-clause query.clauses[2]
+        first-value query.clauses[3]
+        hop1 query.clauses[4]
+        hop2 query.clauses[5]
+        final-value query.clauses[6]
+        [filter-op filter-value filter-ok] (source-var-range-filter query.predicates[0] filter-clause.v.name)]
+    (when (not filter-ok)
+      (return (empty-source-multi-hop-ref-chain-projection) false))
+    (for [clause-value query.clauses]
+      (when (or (not (= anchor.has-source clause-value.has-source))
+                (and anchor.has-source
+                     (not (= anchor.source clause-value.source)))
+                (not (source-clause-fixed-forward-attr? clause-value)))
+        (return (empty-source-multi-hop-ref-chain-projection) false)))
+    (when (or (not (= anchor.e.kind .Var))
+              (not (or (= anchor.v.kind .Value)
+                       (and (= anchor.v.kind .Var)
+                            (db-read-source-query-has-one-scalar-input? query anchor.v.name))))
+              (not (= reverse-ref.e.kind .Var))
+              (not (= reverse-ref.v.kind .Var))
+              (not (= reverse-ref.v.name anchor.e.name))
+              (= reverse-ref.e.name anchor.e.name)
+              (not (= filter-clause.e.kind .Var))
+              (not (= filter-clause.e.name reverse-ref.e.name))
+              (not (= filter-clause.v.kind .Var))
+              (not (= first-value.e.kind .Var))
+              (not (= first-value.e.name reverse-ref.e.name))
+              (not (= first-value.v.kind .Var))
+              (not (= hop1.e.kind .Var))
+              (not (= hop1.e.name reverse-ref.e.name))
+              (not (= hop1.v.kind .Var))
+              (not (= hop2.e.kind .Var))
+              (not (= hop2.e.name hop1.v.name))
+              (not (= hop2.v.kind .Var))
+              (not (= final-value.e.kind .Var))
+              (not (= final-value.e.name hop2.v.name))
+              (not (= final-value.v.kind .Var))
+              (= filter-clause.v.name first-value.v.name)
+              (= filter-clause.v.name final-value.v.name)
+              (= first-value.v.name final-value.v.name)
+              (= hop1.v.name hop2.v.name))
+      (return (empty-source-multi-hop-ref-chain-projection) false))
+    (for [find-var query.find]
+      (when (not (or (= find-var filter-clause.v.name)
+                     (= find-var first-value.v.name)
+                     (= find-var final-value.v.name)))
+        (return (empty-source-multi-hop-ref-chain-projection) false)))
+    (return (Source-Multi-Hop-Ref-Chain-Projection {anchor-var: anchor.e.name
+                                                    anchor-attr: anchor.a.value.text
+                                                    anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                    anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                    has-anchor-input: (= anchor.v.kind .Var)
+                                                    first-entity-var: reverse-ref.e.name
+                                                    reverse-ref-attr: reverse-ref.a.value.text
+                                                    filter-attr: filter-clause.a.value.text
+                                                    filter-var: filter-clause.v.name
+                                                    filter-op: filter-op
+                                                    filter-value: filter-value
+                                                    first-value-attr: first-value.a.value.text
+                                                    first-value-var: first-value.v.name
+                                                    hop1-attr: hop1.a.value.text
+                                                    hop1-var: hop1.v.name
+                                                    hop2-attr: hop2.a.value.text
+                                                    hop2-var: hop2.v.name
+                                                    final-value-attr: final-value.a.value.text
+                                                    final-value-var: final-value.v.name})
+            true)))
+
+(defn source-final-filter-ref-chain-projection-from-candidates [query: Query, anchor: Clause, reverse-ref: Clause, first-value: Clause, hop1: Clause, hop2: Clause, filter-clause: Clause, final-value: Clause] -> [projection: Source-Multi-Hop-Ref-Chain-Projection, ok: bool]
+  (let [[filter-op filter-value filter-ok] (source-var-range-filter query.predicates[0] filter-clause.v.name)]
+    (when (not filter-ok)
+      (return (empty-source-multi-hop-ref-chain-projection) false))
+    (when (or (not (source-multi-hop-anchor-clause? query anchor))
+              (not (source-clause-same-source? anchor reverse-ref))
+              (not (source-clause-same-source? anchor first-value))
+              (not (source-clause-same-source? anchor hop1))
+              (not (source-clause-same-source? anchor hop2))
+              (not (source-clause-same-source? anchor filter-clause))
+              (not (source-clause-same-source? anchor final-value))
+              (not (source-clause-fixed-forward-attr? reverse-ref))
+              (not (source-clause-fixed-forward-attr? first-value))
+              (not (source-clause-fixed-forward-attr? hop1))
+              (not (source-clause-fixed-forward-attr? hop2))
+              (not (source-clause-fixed-forward-attr? filter-clause))
+              (not (source-clause-fixed-forward-attr? final-value))
+              (not (= reverse-ref.e.kind .Var))
+              (not (= reverse-ref.v.kind .Var))
+              (not (= reverse-ref.v.name anchor.e.name))
+              (= reverse-ref.e.name anchor.e.name)
+              (not (source-clause-entity-var? first-value reverse-ref.e.name))
+              (not (= first-value.v.kind .Var))
+              (not (source-query-find-has-var? query first-value.v.name))
+              (not (= hop1.e.kind .Var))
+              (not (= hop1.v.kind .Var))
+              (not (= hop1.v.name reverse-ref.e.name))
+              (not (= hop2.e.kind .Var))
+              (not (= hop2.v.kind .Var))
+              (not (= hop2.v.name hop1.e.name))
+              (not (source-clause-entity-var? filter-clause hop2.e.name))
+              (not (= filter-clause.v.kind .Var))
+              (not (source-query-find-has-var? query filter-clause.v.name))
+              (not (source-clause-entity-var? final-value hop2.e.name))
+              (not (= final-value.v.kind .Var))
+              (not (source-query-find-has-var? query final-value.v.name))
+              (= first-value.v.name filter-clause.v.name)
+              (= first-value.v.name final-value.v.name)
+              (= filter-clause.v.name final-value.v.name)
+              (not (query-find-three-vars? query first-value.v.name final-value.v.name filter-clause.v.name)))
+      (return (empty-source-multi-hop-ref-chain-projection) false))
+    (return (Source-Multi-Hop-Ref-Chain-Projection {anchor-var: anchor.e.name
+                                                    anchor-attr: anchor.a.value.text
+                                                    anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                    anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                    has-anchor-input: (= anchor.v.kind .Var)
+                                                    first-entity-var: reverse-ref.e.name
+                                                    reverse-ref-attr: reverse-ref.a.value.text
+                                                    filter-attr: filter-clause.a.value.text
+                                                    filter-var: filter-clause.v.name
+                                                    filter-op: filter-op
+                                                    filter-value: filter-value
+                                                    first-value-attr: first-value.a.value.text
+                                                    first-value-var: first-value.v.name
+                                                    hop1-attr: hop1.a.value.text
+                                                    hop1-var: hop1.e.name
+                                                    hop2-attr: hop2.a.value.text
+                                                    hop2-var: hop2.e.name
+                                                    final-value-attr: final-value.a.value.text
+                                                    final-value-var: final-value.v.name})
+            true)))
+
+(defn source-two-final-value-ref-chain-projection-from-candidates [query: Query, anchor: Clause, reverse-ref: Clause, first-value: Clause, hop1: Clause, hop2: Clause, final-value: Clause, second-final-value: Clause] -> [projection: Source-Multi-Hop-Ref-Chain-Projection, ok: bool]
+  (when (or (not (source-multi-hop-anchor-clause? query anchor))
+            (not (source-clause-same-source? anchor reverse-ref))
+            (not (source-clause-same-source? anchor first-value))
+            (not (source-clause-same-source? anchor hop1))
+            (not (source-clause-same-source? anchor hop2))
+            (not (source-clause-same-source? anchor final-value))
+            (not (source-clause-same-source? anchor second-final-value))
+            (not (source-clause-fixed-forward-attr? reverse-ref))
+            (not (source-clause-fixed-forward-attr? first-value))
+            (not (source-clause-fixed-forward-attr? hop1))
+            (not (source-clause-fixed-forward-attr? hop2))
+            (not (source-clause-fixed-forward-attr? final-value))
+            (not (source-clause-fixed-forward-attr? second-final-value))
+            (not (= reverse-ref.e.kind .Var))
+            (not (= reverse-ref.v.kind .Var))
+            (not (= reverse-ref.v.name anchor.e.name))
+            (= reverse-ref.e.name anchor.e.name)
+            (not (source-clause-entity-var? first-value reverse-ref.e.name))
+            (not (= first-value.v.kind .Var))
+            (not (source-query-find-has-var? query first-value.v.name))
+            (not (= hop1.e.kind .Var))
+            (not (= hop1.v.kind .Var))
+            (not (= hop1.v.name reverse-ref.e.name))
+            (not (= hop2.e.kind .Var))
+            (not (= hop2.v.kind .Var))
+            (not (= hop2.v.name hop1.e.name))
+            (not (source-clause-entity-var? final-value hop2.e.name))
+            (not (= final-value.v.kind .Var))
+            (not (source-query-find-has-var? query final-value.v.name))
+            (not (source-clause-entity-var? second-final-value hop2.e.name))
+            (not (= second-final-value.v.kind .Var))
+            (not (source-query-find-has-var? query second-final-value.v.name))
+            (= first-value.v.name final-value.v.name)
+            (= first-value.v.name second-final-value.v.name)
+            (= final-value.v.name second-final-value.v.name)
+            (not (query-find-three-vars? query first-value.v.name final-value.v.name second-final-value.v.name)))
+    (return (empty-source-multi-hop-ref-chain-projection) false))
+  (return (Source-Multi-Hop-Ref-Chain-Projection {anchor-var: anchor.e.name
+                                                  anchor-attr: anchor.a.value.text
+                                                  anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                  anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                  has-anchor-input: (= anchor.v.kind .Var)
+                                                  first-entity-var: reverse-ref.e.name
+                                                  reverse-ref-attr: reverse-ref.a.value.text
+                                                  filter-attr: second-final-value.a.value.text
+                                                  filter-var: second-final-value.v.name
+                                                  filter-op: ""
+                                                  filter-value: (value-nil)
+                                                  first-value-attr: first-value.a.value.text
+                                                  first-value-var: first-value.v.name
+                                                  hop1-attr: hop1.a.value.text
+                                                  hop1-var: hop1.e.name
+                                                  hop2-attr: hop2.a.value.text
+                                                  hop2-var: hop2.e.name
+                                                  final-value-attr: final-value.a.value.text
+                                                  final-value-var: final-value.v.name})
+          true))
+
+(defn db-read-source-query-multi-hop-ref-chain-two-final-values-projection-ordered [query: Query] -> [projection: Source-Multi-Hop-Ref-Chain-Projection, ok: bool]
+  (when (not (and (= (count query.find) 3)
+                  (= (count query.with) 0)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rules) 0)
+                  (= (count query.rule-calls) 0)
+                  (= (count query.predicates) 0)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 7)
+                  (= (count query.where-steps) 7)
+                  (query-find-vars-unique? query)))
+    (return (empty-source-multi-hop-ref-chain-projection) false))
+  (when (not (and (= query.where-steps[0].kind .Clause)
+                  (= query.where-steps[0].index 0)
+                  (= query.where-steps[1].kind .Clause)
+                  (= query.where-steps[1].index 1)
+                  (= query.where-steps[2].kind .Clause)
+                  (= query.where-steps[2].index 2)
+                  (= query.where-steps[3].kind .Clause)
+                  (= query.where-steps[3].index 3)
+                  (= query.where-steps[4].kind .Clause)
+                  (= query.where-steps[4].index 4)
+                  (= query.where-steps[5].kind .Clause)
+                  (= query.where-steps[5].index 5)
+                  (= query.where-steps[6].kind .Clause)
+                  (= query.where-steps[6].index 6)))
+    (return (empty-source-multi-hop-ref-chain-projection) false))
+  (source-two-final-value-ref-chain-projection-from-candidates
+    query
+    query.clauses[0]
+    query.clauses[1]
+    query.clauses[2]
+    query.clauses[3]
+    query.clauses[4]
+    query.clauses[5]
+    query.clauses[6]))
+
+(defn db-read-source-query-multi-hop-ref-chain-final-filter-projection-ordered [query: Query] -> [projection: Source-Multi-Hop-Ref-Chain-Projection, ok: bool]
+  (when (not (and (= (count query.find) 3)
+                  (= (count query.with) 0)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rules) 0)
+                  (= (count query.rule-calls) 0)
+                  (= (count query.predicates) 1)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 7)
+                  (= (count query.where-steps) 8)
+                  (query-find-vars-unique? query)))
+    (return (empty-source-multi-hop-ref-chain-projection) false))
+  (when (not (and (= query.where-steps[0].kind .Clause)
+                  (= query.where-steps[0].index 0)
+                  (= query.where-steps[1].kind .Clause)
+                  (= query.where-steps[1].index 1)
+                  (= query.where-steps[2].kind .Clause)
+                  (= query.where-steps[2].index 2)
+                  (= query.where-steps[3].kind .Clause)
+                  (= query.where-steps[3].index 3)
+                  (= query.where-steps[4].kind .Clause)
+                  (= query.where-steps[4].index 4)
+                  (= query.where-steps[5].kind .Clause)
+                  (= query.where-steps[5].index 5)
+                  (= query.where-steps[6].kind .Clause)
+                  (= query.where-steps[6].index 6)
+                  (= query.where-steps[7].kind .Predicate)
+                  (= query.where-steps[7].index 0)))
+    (return (empty-source-multi-hop-ref-chain-projection) false))
+  (source-final-filter-ref-chain-projection-from-candidates
+    query
+    query.clauses[0]
+    query.clauses[1]
+    query.clauses[2]
+    query.clauses[3]
+    query.clauses[4]
+    query.clauses[6]
+    query.clauses[5]))
+
+(defn db-read-source-query-anchor-two-branch-join-projection [query: Query] -> [projection: Source-Anchor-Two-Branch-Join-Projection, ok: bool]
+  (when (not (and (= (count query.find) 3)
+                  (= (count query.with) 0)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rules) 0)
+                  (= (count query.rule-calls) 0)
+                  (= (count query.predicates) 1)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 8)
+                  (= (count query.where-steps) 9)
+                  (query-find-vars-unique? query)))
+    (return (empty-source-anchor-two-branch-join-projection) false))
+  (for [step query.where-steps]
+    (when (not (or (= step.kind .Clause)
+                   (and (= step.kind .Predicate)
+                        (= step.index 0))))
+      (return (empty-source-anchor-two-branch-join-projection) false)))
+  (let [anchor query.clauses[0]
+        direct-ref query.clauses[1]
+        direct-value query.clauses[2]
+        first-ref query.clauses[3]
+        filter-clause query.clauses[4]
+        first-value query.clauses[5]
+        hop1 query.clauses[6]
+        hop2 query.clauses[7]
+        [filter-op filter-value filter-ok] (source-var-range-filter query.predicates[0] filter-clause.v.name)]
+    (when (not filter-ok)
+      (return (empty-source-anchor-two-branch-join-projection) false))
+    (for [clause-value query.clauses]
+      (when (or (not (= anchor.has-source clause-value.has-source))
+                (and anchor.has-source
+                     (not (= anchor.source clause-value.source)))
+                (not (source-clause-fixed-forward-attr? clause-value)))
+        (return (empty-source-anchor-two-branch-join-projection) false)))
+    (when (or (not (= anchor.e.kind .Var))
+              (not (or (= anchor.v.kind .Value)
+                       (and (= anchor.v.kind .Var)
+                            (db-read-source-query-has-one-scalar-input? query anchor.v.name))))
+              (not (= direct-ref.e.kind .Var))
+              (not (= direct-ref.v.kind .Var))
+              (not (= direct-ref.v.name anchor.e.name))
+              (not (= direct-value.e.kind .Var))
+              (not (= direct-value.e.name direct-ref.e.name))
+              (not (= direct-value.v.kind .Var))
+              (not (= first-ref.e.kind .Var))
+              (not (= first-ref.v.kind .Var))
+              (not (= first-ref.v.name anchor.e.name))
+              (not (= filter-clause.e.kind .Var))
+              (not (= filter-clause.e.name first-ref.e.name))
+              (not (= filter-clause.v.kind .Var))
+              (not (= first-value.e.kind .Var))
+              (not (= first-value.e.name first-ref.e.name))
+              (not (= first-value.v.kind .Var))
+              (not (= hop1.e.kind .Var))
+              (not (= hop1.e.name first-ref.e.name))
+              (not (= hop1.v.kind .Var))
+              (not (= hop2.e.kind .Var))
+              (not (= hop2.e.name hop1.v.name))
+              (not (= hop2.v.kind .Var))
+              (not (= hop2.v.name direct-ref.e.name))
+              (= direct-ref.e.name first-ref.e.name)
+              (= direct-value.v.name first-value.v.name)
+              (= direct-value.v.name filter-clause.v.name)
+              (= first-value.v.name filter-clause.v.name))
+      (return (empty-source-anchor-two-branch-join-projection) false))
+    (for [find-var query.find]
+      (when (not (or (= find-var direct-value.v.name)
+                     (= find-var first-value.v.name)
+                     (= find-var filter-clause.v.name)))
+        (return (empty-source-anchor-two-branch-join-projection) false)))
+    (return (Source-Anchor-Two-Branch-Join-Projection {anchor-var: anchor.e.name
+                                                       anchor-attr: anchor.a.value.text
+                                                       anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                       anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                       has-anchor-input: (= anchor.v.kind .Var)
+                                                       direct-entity-var: direct-ref.e.name
+                                                       direct-ref-attr: direct-ref.a.value.text
+                                                       direct-value-attr: direct-value.a.value.text
+                                                       direct-value-var: direct-value.v.name
+                                                       first-entity-var: first-ref.e.name
+                                                       first-ref-attr: first-ref.a.value.text
+                                                       filter-attr: filter-clause.a.value.text
+                                                       filter-var: filter-clause.v.name
+                                                       filter-op: filter-op
+                                                       filter-value: filter-value
+                                                       first-value-attr: first-value.a.value.text
+                                                       first-value-var: first-value.v.name
+                                                       hop1-attr: hop1.a.value.text
+                                                       hop1-var: hop1.v.name
+                                                       hop2-attr: hop2.a.value.text})
+            true)))
+
+(defn source-two-branch-projection-from-candidates [query: Query, anchor: Clause, direct-ref: Clause, direct-value: Clause, first-ref: Clause, filter-clause: Clause, first-value: Clause, hop1: Clause, hop2: Clause] -> [projection: Source-Anchor-Two-Branch-Join-Projection, ok: bool]
+  (when (not (and (= filter-clause.v.kind .Var)
+                  (source-clause-entity-var? filter-clause first-ref.e.name)))
+    (return (empty-source-anchor-two-branch-join-projection) false))
+  (let [[filter-op filter-value filter-ok] (source-var-range-filter query.predicates[0] filter-clause.v.name)]
+    (when (not filter-ok)
+      (return (empty-source-anchor-two-branch-join-projection) false))
+    (when (or (not (source-multi-hop-anchor-clause? query anchor))
+              (not (source-clause-same-source? anchor direct-ref))
+              (not (source-clause-same-source? anchor direct-value))
+              (not (source-clause-same-source? anchor first-ref))
+              (not (source-clause-same-source? anchor filter-clause))
+              (not (source-clause-same-source? anchor first-value))
+              (not (source-clause-same-source? anchor hop1))
+              (not (source-clause-same-source? anchor hop2))
+              (not (source-clause-fixed-forward-attr? direct-ref))
+              (not (source-clause-fixed-forward-attr? direct-value))
+              (not (source-clause-fixed-forward-attr? first-ref))
+              (not (source-clause-fixed-forward-attr? filter-clause))
+              (not (source-clause-fixed-forward-attr? first-value))
+              (not (source-clause-fixed-forward-attr? hop1))
+              (not (source-clause-fixed-forward-attr? hop2))
+              (not (= direct-ref.e.kind .Var))
+              (not (= direct-ref.v.kind .Var))
+              (not (= direct-ref.v.name anchor.e.name))
+              (not (= direct-value.e.kind .Var))
+              (not (= direct-value.e.name direct-ref.e.name))
+              (not (= direct-value.v.kind .Var))
+              (not (= first-ref.e.kind .Var))
+              (not (= first-ref.v.kind .Var))
+              (not (= first-ref.v.name anchor.e.name))
+              (not (= first-value.e.kind .Var))
+              (not (= first-value.e.name first-ref.e.name))
+              (not (= first-value.v.kind .Var))
+              (not (= hop1.e.kind .Var))
+              (not (= hop1.e.name first-ref.e.name))
+              (not (= hop1.v.kind .Var))
+              (not (= hop2.e.kind .Var))
+              (not (= hop2.e.name hop1.v.name))
+              (not (= hop2.v.kind .Var))
+              (not (= hop2.v.name direct-ref.e.name))
+              (= direct-ref.e.name first-ref.e.name)
+              (= direct-value.v.name first-value.v.name)
+              (= direct-value.v.name filter-clause.v.name)
+              (= first-value.v.name filter-clause.v.name)
+              (not (query-find-three-vars? query direct-value.v.name first-value.v.name filter-clause.v.name)))
+      (return (empty-source-anchor-two-branch-join-projection) false))
+    (return (Source-Anchor-Two-Branch-Join-Projection {anchor-var: anchor.e.name
+                                                       anchor-attr: anchor.a.value.text
+                                                       anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                       anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                       has-anchor-input: (= anchor.v.kind .Var)
+                                                       direct-entity-var: direct-ref.e.name
+                                                       direct-ref-attr: direct-ref.a.value.text
+                                                       direct-value-attr: direct-value.a.value.text
+                                                       direct-value-var: direct-value.v.name
+                                                       first-entity-var: first-ref.e.name
+                                                       first-ref-attr: first-ref.a.value.text
+                                                       filter-attr: filter-clause.a.value.text
+                                                       filter-var: filter-clause.v.name
+                                                       filter-op: filter-op
+                                                       filter-value: filter-value
+                                                       first-value-attr: first-value.a.value.text
+                                                       first-value-var: first-value.v.name
+                                                       hop1-attr: hop1.a.value.text
+                                                       hop1-var: hop1.v.name
+                                                       hop2-attr: hop2.a.value.text})
+            true)))
+
+(defn db-read-source-query-anchor-two-branch-join-projection-any-order [query: Query] -> [projection: Source-Anchor-Two-Branch-Join-Projection, ok: bool]
+  (when (not (and (= (count query.find) 3)
+                  (= (count query.with) 0)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rules) 0)
+                  (= (count query.rule-calls) 0)
+                  (= (count query.predicates) 1)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 8)
+                  (= (count query.where-steps) 9)
+                  (query-find-vars-unique? query)))
+    (return (empty-source-anchor-two-branch-join-projection) false))
+  (for [step query.where-steps]
+    (when (not (or (= step.kind .Clause)
+                   (and (= step.kind .Predicate)
+                        (= step.index 0))))
+      (return (empty-source-anchor-two-branch-join-projection) false)))
+  (for [anchor-index (arr.range 0 (count query.clauses))]
+    (let [anchor query.clauses[anchor-index]]
+      (when (and (source-multi-hop-anchor-clause? query anchor)
+                 (source-multi-hop-clauses-compatible? query anchor))
+        (for [direct-ref-index (arr.range 0 (count query.clauses))]
+          (let [direct-ref query.clauses[direct-ref-index]]
+            (when (and (not (= direct-ref-index anchor-index))
+                       (= direct-ref.e.kind .Var)
+                       (= direct-ref.v.kind .Var)
+                       (= direct-ref.v.name anchor.e.name)
+                       (not (= direct-ref.e.name anchor.e.name)))
+              (for [first-ref-index (arr.range 0 (count query.clauses))]
+                (let [first-ref query.clauses[first-ref-index]]
+                  (when (and (not (= first-ref-index anchor-index))
+                             (not (= first-ref-index direct-ref-index))
+                             (= first-ref.e.kind .Var)
+                             (= first-ref.v.kind .Var)
+                             (= first-ref.v.name anchor.e.name)
+                             (not (= first-ref.e.name anchor.e.name))
+                             (not (= first-ref.e.name direct-ref.e.name)))
+                    (for [direct-value-index (arr.range 0 (count query.clauses))]
+                      (let [direct-value query.clauses[direct-value-index]]
+                        (when (and (not (= direct-value-index anchor-index))
+                                   (not (= direct-value-index direct-ref-index))
+                                   (not (= direct-value-index first-ref-index))
+                                   (source-clause-entity-var? direct-value direct-ref.e.name)
+                                   (= direct-value.v.kind .Var)
+                                   (source-query-find-has-var? query direct-value.v.name))
+                          (for [filter-index (arr.range 0 (count query.clauses))]
+                            (let [filter-clause query.clauses[filter-index]]
+                              (when (and (not (= filter-index anchor-index))
+                                         (not (= filter-index direct-ref-index))
+                                         (not (= filter-index first-ref-index))
+                                         (not (= filter-index direct-value-index))
+                                         (source-clause-entity-var? filter-clause first-ref.e.name)
+                                         (= filter-clause.v.kind .Var))
+                                (let [[_ _ filter-ok] (source-var-range-filter query.predicates[0] filter-clause.v.name)]
+                                  (when filter-ok
+                                    (for [first-value-index (arr.range 0 (count query.clauses))]
+                                      (let [first-value query.clauses[first-value-index]]
+                                        (when (and (not (= first-value-index anchor-index))
+                                                   (not (= first-value-index direct-ref-index))
+                                                   (not (= first-value-index first-ref-index))
+                                                   (not (= first-value-index direct-value-index))
+                                                   (not (= first-value-index filter-index))
+                                                   (source-clause-entity-var? first-value first-ref.e.name)
+                                                   (= first-value.v.kind .Var)
+                                                   (not (= first-value.v.name filter-clause.v.name))
+                                                   (source-query-find-has-var? query first-value.v.name))
+                                          (for [hop1-index (arr.range 0 (count query.clauses))]
+                                            (let [hop1 query.clauses[hop1-index]]
+                                              (when (and (not (= hop1-index anchor-index))
+                                                         (not (= hop1-index direct-ref-index))
+                                                         (not (= hop1-index first-ref-index))
+                                                         (not (= hop1-index direct-value-index))
+                                                         (not (= hop1-index filter-index))
+                                                         (not (= hop1-index first-value-index))
+                                                         (source-clause-entity-var? hop1 first-ref.e.name)
+                                                         (= hop1.v.kind .Var))
+                                                (for [hop2-index (arr.range 0 (count query.clauses))]
+                                                  (let [hop2 query.clauses[hop2-index]]
+                                                    (when (and (not (= hop2-index anchor-index))
+                                                               (not (= hop2-index direct-ref-index))
+                                                               (not (= hop2-index first-ref-index))
+                                                               (not (= hop2-index direct-value-index))
+                                                               (not (= hop2-index filter-index))
+                                                               (not (= hop2-index first-value-index))
+                                                               (not (= hop2-index hop1-index))
+                                                               (source-clause-entity-var? hop2 hop1.v.name)
+                                                               (= hop2.v.kind .Var)
+                                                               (= hop2.v.name direct-ref.e.name))
+                                                      (let [[candidate candidate-ok] (source-two-branch-projection-from-candidates query anchor direct-ref direct-value first-ref filter-clause first-value hop1 hop2)]
+                                                        (when candidate-ok
+                                                          (return candidate true)))))))))))))))))))))))))))))
+  (return (empty-source-anchor-two-branch-join-projection) false))
+
+(defn db-read-source-query-two-attr-entity-projection [query: Query] -> [projection: Two-Attr-Entity-Projection, ok: bool]
+  (when (not (and (= (count query.find) 2)
+                  (= (count query.with) 0)
+                  (= (count query.inputs) 0)
+                  (= (count query.collection-inputs) 0)
+                  (= (count query.tuple-inputs) 0)
+                  (= (count query.relation-inputs) 0)
+                  (= (count query.input-specs) 0)
+                  (= (count query.pulls) 0)
+                  (= (count query.aggregates) 0)
+                  (= (count query.rules) 0)
+                  (= (count query.rule-calls) 0)
+                  (= (count query.predicates) 0)
+                  (= (count query.function-clauses) 0)
+                  (= (count query.get-elses) 0)
+                  (= (count query.get-somes) 0)
+                  (= (count query.grounds) 0)
+                  (= (count query.not-groups) 0)
+                  (= (count query.or-groups) 0)
+                  (= (count query.clauses) 2)
+                  (= (count query.where-steps) 2)
+                  (= query.where-steps[0].kind .Clause)
+                  (= query.where-steps[1].kind .Clause)))
+    (return (empty-two-attr-entity-projection) false))
+  (let [first query.clauses[0]
+        second query.clauses[1]]
+    (when (or (not (= first.has-source second.has-source))
+              (and first.has-source (not (= first.source second.source)))
+              (not (= first.e.kind .Var))
+              (not (= second.e.kind .Var))
+              (not (= first.e.name second.e.name))
+              (not (= first.a.kind .Value))
+              (not (= second.a.kind .Value))
+              (not (= first.a.value.kind .Keyword))
+              (not (= second.a.value.kind .Keyword))
+              (not (= first.v.kind .Var))
+              (not (= second.v.kind .Var))
+              (= first.v.name second.v.name)
+              (not (= first.tx-term.kind .Wildcard))
+              (not (= second.tx-term.kind .Wildcard))
+              (not (= first.op-term.kind .Wildcard))
+              (not (= second.op-term.kind .Wildcard)))
+      (return (empty-two-attr-entity-projection) false))
+    (when (not (or (and (= query.find[0] first.v.name)
+                        (= query.find[1] second.v.name))
+                   (and (= query.find[0] second.v.name)
+                        (= query.find[1] first.v.name))))
+      (return (empty-two-attr-entity-projection) false))
+    (return (Two-Attr-Entity-Projection {first-attr: first.a.value.text
+                                         first-var: first.v.name
+                                         second-attr: second.a.value.text
+                                         second-var: second.v.name})
+            true)))
