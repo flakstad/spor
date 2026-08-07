@@ -1,0 +1,462 @@
+; Copyright 2026 Vev Contributors
+; SPDX-License-Identifier: Apache-2.0
+
+(package vev)
+
+(defn q-db-read-source-star-attr-entity-projection [source: DB-Read-Source, query: Query] -> Result-Set
+  (let [[merge-ok merge-error] (db-read-source-star-can-merge-cardinality-one? source query)]
+    (when (not (= merge-error ""))
+      (return (result-set-error merge-error)))
+    (when merge-ok
+      (return (q-db-read-source-star-attr-entity-projection-cardinality-one-merge source query))))
+  (let [rows (make [dynamic]Result-Row)
+        driver-index (source-star-attr-driver-index source query)
+        driver-attr query.clauses[driver-index].a.value.text]
+    (if (db-read-source-has-overlay? source)
+      (let [[driver-datoms driver-ok driver-error] (db-read-source-datoms-by-attr source driver-attr)]
+        (when (not driver-ok)
+          (return (result-set-error driver-error)))
+        (defer (delete-owned-datoms driver-datoms))
+        (for [driver-datom driver-datoms]
+          (let [[append-ok append-error] (append-db-read-source-star-attr-entity-row! (addr rows) source query driver-index driver-datom)]
+            (when (not append-ok)
+              (delete-result-rows-owned-values rows)
+              (return (result-set-error append-error))))))
+      (let [[driver-stream driver-ok driver-error] (source-index-datom-stream source driver-attr)]
+        (when (not driver-ok)
+          (return (result-set-error driver-error)))
+        (while driver-stream.has-current
+          (let [[append-ok append-error] (append-db-read-source-star-attr-entity-row! (addr rows) source query driver-index driver-stream.current)]
+            (when (not append-ok)
+              (delete-source-index-datom-stream driver-stream)
+              (delete-result-rows-owned-values rows)
+              (return (result-set-error append-error))))
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr driver-stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream driver-stream)
+              (delete-result-rows-owned-values rows)
+              (return (result-set-error advance-error)))))
+        (delete-source-index-datom-stream driver-stream)))
+    (result-set-ok rows)))
+
+(defn q-db-read-source-entity-string-pair-columns [source: DB-Read-Source, query: Query, inputs: []Query-Input] -> [columns: Entity-String-Pair-Columns, ok: bool, error: string]
+  (let [out (empty-entity-string-pair-columns)
+        seen (set.empty string)]
+    (defer (delete seen))
+    (when (> (count inputs) 0)
+      (return out false ""))
+    (let [[projection projection-ok] (db-read-source-query-filtered-entity-attr-value-projection query)]
+      (when (not projection-ok)
+        (return out false ""))
+      (when (not (and (= (count query.find) 2)
+                      (= query.find[0] projection.entity-var)
+                      (= query.find[1] projection.value-var)))
+        (return out false ""))
+      (let [[many many-ok many-error] (db-read-source-schema-cardinality-many? source projection.value-attr)]
+        (when (not many-ok)
+          (return out false many-error))
+        (if (db-read-source-has-overlay? source)
+          (let [filter-datoms (make [dynamic]Datom)
+                [filter-ok filter-error] (db-read-source-append-attr-value-datoms! (addr filter-datoms) source projection.filter-attr projection.filter-value)]
+            (when (not filter-ok)
+              (delete-owned-datoms filter-datoms)
+              (return out false filter-error))
+            (let [[append-ok type-ok append-error] (source-entity-string-pair-append-filter-datoms! (addr out) (addr seen) source (slice filter-datoms 0) projection.value-attr many)]
+              (when (not append-ok)
+                (delete-owned-datoms filter-datoms)
+                (return out false append-error))
+              (when (not type-ok)
+                (delete-owned-datoms filter-datoms)
+                (return out false "")))
+            (delete-owned-datoms filter-datoms))
+          (let [[filter-stream filter-ok filter-error] (source-attr-value-match-stream source projection.filter-attr projection.filter-value)]
+            (when (not filter-ok)
+              (return out false filter-error))
+            (let [[append-ok type-ok append-error] (source-entity-string-pair-append-filter-stream! (addr out) (addr seen) source (addr filter-stream) projection.value-attr many)]
+              (when (not append-ok)
+                (delete-source-attr-value-match-stream filter-stream)
+                (return out false append-error))
+              (when (not type-ok)
+                (delete-source-attr-value-match-stream filter-stream)
+                (return out false "")))
+            (delete-source-attr-value-match-stream filter-stream)))
+        (return out true "")))))
+
+(defn q-query-profiled-with-sources-and-fns [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, registry: []Native-Query-Fn] -> Profiled-Result-Set
+  (let [stats (query-stats-empty)
+        [valid error] (validate-query-call-with-fns db query inputs sources registry)]
+    (when (not valid)
+      (return (profiled-result-set (result-set-error error) stats)))
+  (let [[attr-top-n-plan attr-top-n-ok] (query-attr-top-n-aggregate-plan query)]
+    (when attr-top-n-ok
+      (return (q-attr-top-n-aggregate-profiled db query attr-top-n-plan stats))))
+  (let [[missing-plan missing-ok] (query-missing-attr-projection-plan db query)]
+    (when missing-ok
+      (return (q-missing-attr-projection-profiled db missing-plan stats))))
+  (let [[self-join-plan self-join-ok] (query-entity-value-self-join-plan db query)]
+    (when self-join-ok
+      (return (q-entity-value-self-join-profiled db self-join-plan stats))))
+  (when (query-relation-engine-eligible? query sources)
+    (let [post-rel (relation-engine-relation-profiled db query inputs sources registry (addr stats))
+          rows (make [dynamic]Result-Row)]
+      (if (> (count query.aggregates) 0)
+        (let [[typed-aggregate-rows typed-aggregate-ok] (aggregate-result-rows-for-typed-relation-with-sources-and-fns db sources query inputs post-rel registry)]
+          (if typed-aggregate-ok
+            (do
+              (delete rows)
+              (set! rows typed-aggregate-rows))
+            (do
+              (delete-result-rows-shallow typed-aggregate-rows)
+              (let [materialized (query-relation-materialized-bindings post-rel) :defer]
+                (query-stats-observe-materialization! (addr stats) (count materialized))
+                (if (= (count query.find) 0)
+                  (let [values (make [dynamic]Value 0 (count query.aggregates))
+                        pulls (make [dynamic]Pull-Result)]
+                    (for [aggregate query.aggregates]
+                      (arr.push! values (aggregate-value-for-group-with-fns (slice materialized 0) query aggregate ([]Value []) registry)))
+                    (arr.push! rows (Result-Row {values: values pulls: pulls})))
+                  (append-aggregate-rows-with-sources-and-fns! (addr rows) db sources query inputs (slice materialized 0) registry))))))
+        (do
+          (delete rows)
+          (let [[typed-rows typed-ok] (result-rows-for-typed-relation-with-sources-and-fns db sources query inputs post-rel registry)]
+            (if typed-ok
+              (set! rows typed-rows)
+              (do
+                (delete-result-rows-shallow typed-rows)
+                (let [materialized (query-relation-materialized-bindings post-rel) :defer]
+                  (query-stats-observe-materialization! (addr stats) (count materialized))
+                  (set! rows (result-rows-for-bindings-with-sources-and-fns db sources query inputs (slice materialized 0) registry))))))))
+      (delete-query-relation post-rel)
+      (set! stats.clauses (query-logical-clause-count query))
+      (set! stats.output-rows (count rows))
+      (return (profiled-result-set (result-set-ok rows) stats))))
+  (let [[distinct-clause distinct-ok] (query-single-attr-value-distinct-clause query)]
+    (when distinct-ok
+      (return (q-single-attr-value-distinct-profiled db distinct-clause stats))))
+  (let [[entity-clause entity-ok] (query-single-entity-by-attr-value-clause db query)]
+    (when entity-ok
+      (return (q-single-entity-by-attr-value-profiled db entity-clause stats))))
+  (let [[entity-value-projection entity-value-ok] (query-entity-attr-value-projection db query)]
+    (when entity-value-ok
+      (return (q-entity-attr-value-projection-profiled db query entity-value-projection stats))))
+  (let [[entity-two-plan entity-two-ok] (query-entity-two-value-plan db query)]
+    (when entity-two-ok
+      (return (q-entity-two-value-plan-profiled db query entity-two-plan stats)))
+    (delete entity-two-plan.filters))
+  (let [[projection projection-ok] (query-two-attr-entity-projection query)]
+    (when projection-ok
+      (return (q-two-attr-entity-projection-profiled db query projection stats))))
+  (when (> (count query.where-steps) 0)
+    (let [ordered-query query
+          bindings (bindings-after-ordered-where-profiled-with-fns db sources (addr ordered-query) inputs registry (addr stats))]
+      (when (> (count query.aggregates) 0)
+        (let [rows (make [dynamic]Result-Row)]
+          (if (= (count query.find) 0)
+            (let [values (make [dynamic]Value 0 (count query.aggregates))
+                  pulls (make [dynamic]Pull-Result)]
+              (for [aggregate query.aggregates]
+                (arr.push! values (aggregate-value-for-group-with-fns (slice bindings 0) query aggregate ([]Value []) registry)))
+              (arr.push! rows (Result-Row {values: values pulls: pulls})))
+            (append-aggregate-rows-with-sources-and-fns! (addr rows) db sources query inputs (slice bindings 0) registry))
+          (delete bindings)
+          (set! stats.output-rows (count rows))
+          (return (profiled-result-set (result-set-ok rows) stats))))
+      (let [rows (result-rows-for-bindings-with-sources-and-fns db sources query inputs (slice bindings 0) registry)]
+        (delete bindings)
+        (set! stats.output-rows (count rows))
+        (return (profiled-result-set (result-set-ok rows) stats)))))
+  (let [bindings (bindings-from-inputs db query inputs)
+        remaining (arr.into [dynamic]Clause (slice query.clauses 0))]
+    (set! stats.input-bindings (count bindings))
+    (query-stats-observe-bindings! (addr stats) (count bindings))
+    (defer (delete remaining))
+    (while (and (> (count bindings) 0) (> (count remaining) 0))
+      (let [clause-index (best-clause-index (slice remaining 0) bindings[0])
+            clause remaining[clause-index]
+            next-bindings (make [dynamic]Binding)]
+        (set! stats.steps (+ stats.steps 1))
+        (for [binding bindings]
+          (append-bindings-after-clause-with-sources-profiled! (addr next-bindings) db sources clause binding (addr stats)))
+        (delete bindings)
+        (set! bindings next-bindings)
+        (query-stats-observe-bindings! (addr stats) (count bindings))
+        (arr.remove-ordered-at! remaining clause-index)))
+    (for [call call-index query.rule-calls]
+      (let [next-bindings (make [dynamic]Binding)
+            use-cached-plan (< call-index (count query.rule-call-plans))
+            plan (if use-cached-plan query.rule-call-plans[call-index] (rule-call-plan (slice query.rules 0) call.name))]
+        (set! stats.steps (+ stats.steps 1))
+        (for [binding bindings]
+          (let [rule-bindings (bindings-after-rule-call-profiled-with-plan db plan call binding registry (addr stats))]
+            (for [rule-binding rule-bindings]
+              (arr.push! next-bindings rule-binding))
+            (delete rule-bindings)))
+        (when (not use-cached-plan)
+          (delete-rule-call-plan plan))
+        (delete bindings)
+        (set! bindings next-bindings)
+        (query-stats-observe-bindings! (addr stats) (count bindings))))
+    (for [ground query.grounds]
+      (set! stats.steps (+ stats.steps 1))
+      (let [next-bindings (apply-ground (slice bindings 0) ground)]
+        (delete bindings)
+        (set! bindings next-bindings)
+        (query-stats-observe-bindings! (addr stats) (count bindings))))
+    (for [get-else query.get-elses]
+      (let [next-bindings (make [dynamic]Binding)]
+        (set! stats.steps (+ stats.steps 1))
+        (for [binding bindings]
+          (let [[next ok] (apply-get-else db binding get-else)]
+            (when ok
+              (arr.push! next-bindings next))))
+        (delete bindings)
+        (set! bindings next-bindings)
+        (query-stats-observe-bindings! (addr stats) (count bindings))))
+    (for [get-some query.get-somes]
+      (let [next-bindings (make [dynamic]Binding)]
+        (set! stats.steps (+ stats.steps 1))
+        (for [binding bindings]
+          (let [[next ok] (apply-get-some db binding get-some)]
+            (when ok
+              (arr.push! next-bindings next))))
+        (delete bindings)
+        (set! bindings next-bindings)
+        (query-stats-observe-bindings! (addr stats) (count bindings))))
+    (for [function query.function-clauses]
+      (set! stats.steps (+ stats.steps 1))
+      (let [next-bindings (bindings-after-function-with-fns (slice bindings 0) function registry)]
+        (delete bindings)
+        (set! bindings next-bindings)
+        (query-stats-observe-bindings! (addr stats) (count bindings))))
+    (for [predicate query.predicates]
+      (set! stats.steps (+ stats.steps 1))
+      (let [next-bindings (bindings-after-predicate-with-db-and-fns db (slice bindings 0) predicate registry)]
+        (delete bindings)
+        (set! bindings next-bindings)
+        (query-stats-observe-bindings! (addr stats) (count bindings))))
+    (for [group query.or-groups]
+      (let [next-bindings (make [dynamic]Binding)]
+        (set! stats.steps (+ stats.steps 1))
+        (for [binding bindings]
+          (for [branch group.branches]
+            (let [branch-bindings (bindings-after-or-branch-with-rules-sources-and-fns db (slice query.rules 0) sources group branch binding registry)]
+              (for [branch-binding branch-bindings]
+                (arr.push! next-bindings branch-binding))
+              (delete branch-bindings))))
+        (delete bindings)
+        (set! bindings next-bindings)
+        (query-stats-observe-bindings! (addr stats) (count bindings))))
+    (for [not-group query.not-groups]
+      (let [next-bindings (make [dynamic]Binding)]
+        (set! stats.steps (+ stats.steps 1))
+        (for [binding bindings]
+          (when (not (binding-matches-not-group-with-rules-sources-and-fns? db (slice query.rules 0) sources not-group binding registry))
+            (arr.push! next-bindings binding)))
+        (delete bindings)
+        (set! bindings next-bindings)
+        (query-stats-observe-bindings! (addr stats) (count bindings))))
+    (when (> (count query.aggregates) 0)
+      (let [rows (make [dynamic]Result-Row)]
+        (if (= (count query.find) 0)
+          (let [values (make [dynamic]Value 0 (count query.aggregates))
+                pulls (make [dynamic]Pull-Result)]
+            (for [aggregate query.aggregates]
+              (arr.push! values (aggregate-value-for-group-with-fns (slice bindings 0) query aggregate ([]Value []) registry)))
+            (arr.push! rows (Result-Row {values: values pulls: pulls})))
+          (append-aggregate-rows-with-sources-and-fns! (addr rows) db sources query inputs (slice bindings 0) registry))
+        (delete bindings)
+        (set! stats.output-rows (count rows))
+        (return (profiled-result-set (result-set-ok rows) stats))))
+    (let [rows (result-rows-for-bindings-with-sources-and-fns db sources query inputs (slice bindings 0) registry)]
+      (delete bindings)
+      (set! stats.output-rows (count rows))
+      (return (profiled-result-set (result-set-ok rows) stats))))))
+
+(defn q-query-with-sources-and-fns [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, registry: []Native-Query-Fn] -> Result-Set
+  (q-query-profiled-with-sources-and-fns db query inputs sources registry).result)
+
+(defn q-query-with-sources [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source] -> Result-Set
+  (q-query-with-sources-and-fns db query inputs sources ([]Native-Query-Fn [])))
+
+(defn q-query-with-inputs-and-fns [db: DB, query: Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (q-query-with-sources-and-fns db query inputs ([]DB-Source []) registry))
+
+(defn q-query-with-fns [db: DB, query: Query, registry: []Native-Query-Fn] -> Result-Set
+  (q-query-with-inputs-and-fns db query ([]Query-Input []) registry))
+
+(defn relation-db-not-group [group: Not-Group, source: string] -> Not-Group
+  (let [clauses (rule-clauses-with-source (slice group.clauses 0) source true) :defer
+        owned-clauses (arr.into [dynamic]Clause (slice clauses 0))
+        predicates (arr.into [dynamic]Predicate (slice group.predicates 0))
+        function-clauses (arr.into [dynamic]Function-Clause (slice group.function-clauses 0))
+        get-elses (get-elses-with-source (slice group.get-elses 0) source true)
+        get-somes (get-somes-with-source (slice group.get-somes 0) source true)
+        grounds (arr.into [dynamic]Ground (slice group.grounds 0))
+        rule-calls (relation-db-rule-calls (slice group.rule-calls 0) source)
+        child-groups (make [dynamic]Not-Group) :defer
+        join-vars (arr.into [dynamic]string (slice group.join-vars 0))
+        steps (arr.into [dynamic]Query-Step (slice group.steps 0))]
+    (for [child group.not-groups]
+      (arr.push! child-groups (relation-db-not-group child source)))
+    (let [owned-child-groups (arr.into [dynamic]Not-Group (slice child-groups 0))]
+    (Not-Group {clauses: owned-clauses
+                predicates: predicates
+                function-clauses: function-clauses
+                get-elses: get-elses
+                get-somes: get-somes
+                grounds: grounds
+                rule-calls: rule-calls
+                not-groups: owned-child-groups
+                steps: steps
+                has-join: group.has-join
+                join-vars: join-vars}))))
+
+(defn relation-db-or-group [group: Or-Group, source: string] -> Or-Group
+  (let [branches (make [dynamic]Not-Group) :defer]
+    (for [branch group.branches]
+      (arr.push! branches (relation-db-not-group branch source)))
+    (if group.has-join
+      (or-join-group (slice group.join-vars 0) (slice branches 0))
+      (or-group (slice branches 0)))))
+
+(defn relation-db-rule [rule: Rule, source: string] -> Rule
+  (let [clauses (rule-clauses-with-source (slice rule.clauses 0) source true) :defer
+        source-get-elses (get-elses-with-source (slice rule.get-elses 0) source true) :defer
+        source-get-somes (get-somes-with-source (slice rule.get-somes 0) source true)
+        not-groups (make [dynamic]Not-Group) :defer
+        or-groups (make [dynamic]Or-Group) :defer]
+    (for [group rule.not-groups]
+      (arr.push! not-groups (relation-db-not-group group source)))
+    (for [group rule.or-groups]
+      (arr.push! or-groups (relation-db-or-group group source)))
+    (let [params (arr.into [dynamic]string (slice rule.params 0))
+          owned-clauses (arr.into [dynamic]Clause (slice clauses 0))
+          predicates (arr.into [dynamic]Predicate (slice rule.predicates 0))
+          function-clauses (arr.into [dynamic]Function-Clause (slice rule.function-clauses 0))
+          get-elses (arr.into [dynamic]Get-Else (slice source-get-elses 0))
+          get-somes source-get-somes
+          grounds (arr.into [dynamic]Ground (slice rule.grounds 0))
+          rule-calls (arr.into [dynamic]Rule-Call (slice rule.rule-calls 0))
+          owned-not-groups (arr.into [dynamic]Not-Group (slice not-groups 0))
+          owned-or-groups (arr.into [dynamic]Or-Group (slice or-groups 0))
+          body-steps (arr.into [dynamic]Query-Step (slice rule.body-steps 0))]
+      (Rule {name: rule.name
+             required-param-count: rule.required-param-count
+             params: params
+             clauses: owned-clauses
+             predicates: predicates
+             function-clauses: function-clauses
+             get-elses: get-elses
+             get-somes: get-somes
+             grounds: grounds
+             rule-calls: rule-calls
+             not-groups: owned-not-groups
+             or-groups: owned-or-groups
+             body-steps: body-steps}))))
+
+(defn relation-db-rule-call [call: Rule-Call, source: string] -> Rule-Call
+  (when call.has-source
+    (return call))
+  (Rule-Call {name: call.name
+              source: source
+              has-source: true
+              args: call.args}))
+
+(defn relation-db-rule-calls [calls: []Rule-Call, source: string] -> [dynamic]Rule-Call
+  (let [out (make [dynamic]Rule-Call 0 (count calls))]
+    (for [call calls]
+      (arr.push! out (relation-db-rule-call call source)))
+    out))
+
+(defn relation-db-inputs [query-value: Query, source: string] -> [dynamic]string
+  (let [out (make [dynamic]string 0 (+ (count query-value.inputs) 1))]
+    (for [input query-value.inputs]
+      (when (not (= input "$"))
+        (arr.push! out input)))
+    (arr.push! out source)
+    out))
+
+(defn relation-db-input-specs [query-value: Query, source: string] -> [dynamic]Query-Input-Spec
+  (let [out (make [dynamic]Query-Input-Spec)]
+    (if (> (count query-value.input-specs) 0)
+      (for [spec query-value.input-specs]
+        (when (not (and (= spec.kind .Scalar)
+                        (= spec.name "$")))
+          (arr.push! out spec)))
+      (do
+        (for [input query-value.inputs]
+          (when (not (= input "$"))
+            (arr.push! out (Query-Input-Spec {kind: .Scalar name: input}))))
+        (for [input query-value.collection-inputs]
+          (arr.push! out (Query-Input-Spec {kind: .Collection name: input})))
+        (for [input query-value.tuple-inputs]
+          (arr.push! out (Query-Input-Spec {kind: .Tuple tuple: input}))
+        (for [input query-value.relation-inputs]
+          (arr.push! out (Query-Input-Spec {kind: .Relation relation: input}))))))
+    (arr.push! out (Query-Input-Spec {kind: .Scalar name: source}))
+    out))
+
+(defn relation-db-query [query-value: Query, source: string] -> Query
+  (let [inputs (relation-db-inputs query-value source) :defer
+        input-specs (relation-db-input-specs query-value source) :defer
+        clauses (rule-clauses-with-source (slice query-value.clauses 0) source true) :defer
+        rule-calls (relation-db-rule-calls (slice query-value.rule-calls 0) source) :defer
+        rules (make [dynamic]Rule) :defer
+        not-groups (make [dynamic]Not-Group) :defer
+        or-groups (make [dynamic]Or-Group) :defer]
+    (for [rule query-value.rules]
+      (arr.push! rules (relation-db-rule rule source)))
+    (for [group query-value.not-groups]
+      (arr.push! not-groups (relation-db-not-group group source)))
+    (for [group query-value.or-groups]
+      (arr.push! or-groups (relation-db-or-group group source)))
+    (let [out (query (slice query-value.find 0)
+                     (slice query-value.with 0)
+                     (slice inputs 0)
+                     (slice query-value.collection-inputs 0)
+                     (slice query-value.tuple-inputs 0)
+                     (slice query-value.relation-inputs 0)
+                     (slice clauses 0)
+                     (slice query-value.predicates 0)
+                     (slice query-value.function-clauses 0)
+                     (slice rules 0)
+                     (slice rule-calls 0)
+                     (slice query-value.get-elses 0)
+                     (slice query-value.get-somes 0)
+                     (slice query-value.grounds 0)
+                     (slice not-groups 0)
+                     (slice or-groups 0)
+                     (slice query-value.pulls 0)
+                     (slice query-value.aggregates 0))]
+      (delete out.input-specs)
+      (set! out.input-specs (arr.into [dynamic]Query-Input-Spec (slice input-specs 0)))
+      (query-with-rules-input
+        (query-with-where-steps out (slice query-value.where-steps 0))
+        query-value.has-rules-input))))
+
+(defn q-query-relation-db-with-fns [rows: Value, query-value: Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (let [source (primary-relation-db-source-name)
+        relation-query (relation-db-query query-value source)
+        relation-inputs (arr.into [dynamic]Query-Input inputs) :defer
+        empty-datoms (make [dynamic]Datom)
+        empty (build-db empty-datoms)]
+    (if (= rows.kind .Map)
+      (arr.push! relation-inputs (query-input-map-relation rows))
+      (arr.push! relation-inputs (query-input-scalar rows)))
+    (let [result (q-query-with-sources-and-fns empty relation-query (slice relation-inputs 0) ([]DB-Source []) registry)]
+      (delete empty-datoms)
+      (delete empty.current)
+      (delete empty.eavt)
+      (delete empty.aevt)
+      (delete empty.avet)
+      (delete empty.vaet)
+      result)))
+
+(defn q-query-relation-db [rows: Value, query-value: Query, inputs: []Query-Input] -> Result-Set
+  (q-query-relation-db-with-fns rows query-value inputs ([]Native-Query-Fn [])))
+
+(defn q-query-with-inputs [db: DB, query: Query, inputs: []Query-Input] -> Result-Set
+  (q-query-with-sources db query inputs ([]DB-Source [])))
+
+(defn q-query [db: DB, query: Query] -> Result-Set
+  (q-query-with-inputs db query ([]Query-Input [])))
