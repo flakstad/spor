@@ -1,5 +1,5 @@
-; Copyright 2026 Vev Contributors
-; SPDX-License-Identifier: Apache-2.0
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
 
 (package vev)
 
