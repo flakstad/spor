@@ -1,0 +1,665 @@
+; Copyright 2026 Vev Contributors
+; SPDX-License-Identifier: Apache-2.0
+
+(package vev)
+
+(defn db-read-source-query-clause [clause-value: Clause] -> [clause: Clause, ok: bool, error: string]
+  (if clause-value.has-source
+    (if (query-source-input-name? clause-value.source)
+      (return (unsourced-clause clause-value) true "")
+      (return (Clause {}) false "SQLite DB snapshot source clauses must use $-prefixed source names"))
+    (return clause-value true "")))
+
+(defn db-read-source-query-clause-source [source: DB-Read-Source, sources: []DB-Read-Named-Source, clause-value: Clause] -> [clause-source: DB-Read-Source, clause: Clause, ok: bool, error: string]
+  (if clause-value.has-source
+    (let [[clause-source clause-source-ok clause-source-error] (db-read-source-for-name source sources clause-value.source)]
+      (when (not clause-source-ok)
+        (return (DB-Read-Source {}) (Clause {}) false clause-source-error))
+      (return clause-source (unsourced-clause clause-value) true ""))
+    (return source clause-value true "")))
+
+(defn db-read-source-clause-binds-var? [clause: Clause, name: string] -> bool
+  (or (and (= clause.e.kind .Var) (= clause.e.name name))
+      (and (= clause.a.kind .Var) (= clause.a.name name))
+      (and (= clause.v.kind .Var) (= clause.v.name name))))
+
+(defn db-read-source-clause-term-supported-for-aggregate? [clause: Clause, term: Term] -> bool
+  (case term.kind
+    .Value true
+    .Var (db-read-source-clause-binds-var? clause term.name)
+     false))
+
+(defn db-read-source-single-clause-aggregate-query [query-value: Query] -> [clause: Clause, ok: bool]
+  (let [empty-clause (Clause {})]
+    (when (not (and (= (count query-value.find) 0)
+                    (= (count query-value.inputs) 0)
+                    (= (count query-value.collection-inputs) 0)
+                    (= (count query-value.tuple-inputs) 0)
+                    (= (count query-value.relation-inputs) 0)
+                    (= (count query-value.input-specs) 0)
+                    (= (count query-value.pulls) 0)
+                    (> (count query-value.aggregates) 0)
+                    (= (count query-value.rules) 0)
+                    (= (count query-value.rule-calls) 0)
+                    (= (count query-value.predicates) 0)
+                    (= (count query-value.function-clauses) 0)
+                    (= (count query-value.get-elses) 0)
+                    (= (count query-value.get-somes) 0)
+                    (= (count query-value.grounds) 0)
+                    (= (count query-value.not-groups) 0)
+                    (= (count query-value.or-groups) 0)
+                    (= (count query-value.clauses) 1)
+                    (= (count query-value.where-steps) 1)
+                    (= query-value.where-steps[0].kind .Clause)))
+      (return empty-clause false))
+    (let [query-clause query-value.clauses[0]]
+      (for [with-var query-value.with]
+        (when (not (db-read-source-clause-binds-var? query-clause with-var))
+          (return empty-clause false)))
+      (for [aggregate query-value.aggregates]
+        (when (or (not (or (= aggregate.op "count")
+                           (= aggregate.op "count-distinct")
+                           (= aggregate.op "distinct")
+                           (= aggregate.op "min")
+                           (= aggregate.op "max")
+                           (= aggregate.op "rand")
+                           (= aggregate.op "sample")))
+                  (and (or (= aggregate.op "count")
+                           (= aggregate.op "count-distinct")
+                           (= aggregate.op "distinct"))
+                       aggregate.has-limit)
+                  (and (or (= aggregate.op "min")
+                           (= aggregate.op "max")
+                           (= aggregate.op "rand")
+                           (= aggregate.op "sample"))
+                       (and aggregate.has-limit
+                            (<= aggregate.limit 0)))
+                  (and (= aggregate.op "sample")
+                       (not aggregate.has-limit))
+                  aggregate.has-limit-var
+                  aggregate.has-function-var
+                  (not (db-read-source-clause-binds-var? query-clause aggregate.var)))
+          (return empty-clause false))
+        (for [arg aggregate.args]
+          (when (not (db-read-source-clause-term-supported-for-aggregate? query-clause arg))
+            (return empty-clause false))))
+      (return query-clause true))))
+
+(defn db-read-source-single-clause-grouped-aggregate-query [query-value: Query] -> [clause: Clause, ok: bool]
+  (let [empty-clause (Clause {})]
+    (when (not (and (> (count query-value.find) 0)
+                    (= (count query-value.inputs) 0)
+                    (= (count query-value.collection-inputs) 0)
+                    (= (count query-value.tuple-inputs) 0)
+                    (= (count query-value.relation-inputs) 0)
+                    (= (count query-value.input-specs) 0)
+                    (= (count query-value.pulls) 0)
+                    (= (count query-value.aggregates) 1)
+                    (= (count query-value.rules) 0)
+                    (= (count query-value.rule-calls) 0)
+                    (= (count query-value.predicates) 0)
+                    (= (count query-value.function-clauses) 0)
+                    (= (count query-value.get-elses) 0)
+                    (= (count query-value.get-somes) 0)
+                    (= (count query-value.grounds) 0)
+                    (= (count query-value.not-groups) 0)
+                    (= (count query-value.or-groups) 0)
+                    (= (count query-value.clauses) 1)
+                    (= (count query-value.where-steps) 1)
+                    (= query-value.where-steps[0].kind .Clause)))
+      (return empty-clause false))
+    (let [query-clause query-value.clauses[0]
+          aggregate query-value.aggregates[0]]
+      (when (or (not (or (= aggregate.op "count")
+                         (= aggregate.op "count-distinct")
+                         (= aggregate.op "distinct")
+                         (= aggregate.op "min")
+                         (= aggregate.op "max")
+                         (= aggregate.op "rand")
+                         (= aggregate.op "sample")
+                         (= aggregate.op "sum")
+                         (= aggregate.op "avg")))
+                (and aggregate.has-limit
+                     (not (or (= aggregate.op "min")
+                              (= aggregate.op "max")
+                              (= aggregate.op "rand")
+                              (= aggregate.op "sample"))))
+                (and aggregate.has-limit
+                     (or (= aggregate.op "min")
+                         (= aggregate.op "max")
+                         (= aggregate.op "rand")
+                         (= aggregate.op "sample"))
+                     (<= aggregate.limit 0))
+                (and (= aggregate.op "sample")
+                     (not aggregate.has-limit))
+                aggregate.has-limit-var
+                aggregate.has-function-var
+                (not (= query-clause.e.kind .Var))
+                (not (= query-clause.a.kind .Value))
+                (not (= query-clause.a.value.kind .Keyword))
+                (not (= query-clause.v.kind .Var))
+                (not (db-read-source-clause-binds-var? query-clause aggregate.var)))
+        (return empty-clause false))
+      (for [name query-value.find]
+        (when (not (db-read-source-clause-binds-var? query-clause name))
+          (return empty-clause false)))
+      (for [with-var query-value.with]
+        (when (not (db-read-source-clause-binds-var? query-clause with-var))
+          (return empty-clause false)))
+      (for [arg aggregate.args]
+        (when (not (db-read-source-clause-term-supported-for-aggregate? query-clause arg))
+          (return empty-clause false)))
+      (return query-clause true))))
+
+(defn db-read-source-datom-value-for-var-owned [clause: Clause, datom: Datom, name: string] -> [value: Value, ok: bool]
+  (cond
+    (and (= clause.e.kind .Var) (= clause.e.name name)) (return (value-entity datom.e) true)
+    (and (= clause.a.kind .Var) (= clause.a.name name)) (return (value-keyword (string-owned datom.a)) true)
+    (and (= clause.v.kind .Var) (= clause.v.name name)) (return (value-owned datom.v) true)
+    :else (return (Value {}) false)))
+
+(defn db-read-source-datom-term-value-owned [clause: Clause, datom: Datom, term: Term] -> [value: Value, ok: bool]
+  (case term.kind
+    .Value (return (value-owned term.value) true)
+    .Var (return (db-read-source-datom-value-for-var-owned clause datom term.name))
+     (return (Value {}) false)))
+
+(defn db-read-source-aggregate-key-values [clause: Clause, datom: Datom, query-value: Query, aggregate: Aggregate-Find] -> [values: [dynamic]Value, ok: bool]
+  (let [out (make [dynamic]Value)]
+    (for [name query-value.with]
+      (let [[value value-ok] (db-read-source-datom-value-for-var-owned clause datom name)]
+        (if value-ok
+          (arr.push! out value)
+          (return out false))))
+    (if (> (count aggregate.args) 0)
+      (for [arg aggregate.args]
+        (let [[value value-ok] (db-read-source-datom-term-value-owned clause datom arg)]
+          (if value-ok
+            (arr.push! out value)
+            (return out false))))
+      (let [[value value-ok] (db-read-source-datom-value-for-var-owned clause datom aggregate.var)]
+        (if value-ok
+          (arr.push! out value)
+          (return out false))))
+    (return out true)))
+
+(defn delete-owned-values-array [values: [dynamic]Value]
+  (for [value values]
+    (delete-owned-value value))
+  (delete values))
+
+(defn source-top-n-values-owned [values: []Value, limit: int, max?: bool] -> Value
+  (let [sorted (arr.into [dynamic]Value values)
+        out (make [dynamic]Value)]
+    (defer (delete sorted))
+    (sort-values! (addr sorted))
+    (let [take-count (min limit (count sorted))]
+      (if max?
+        (let [index (count sorted)
+              remaining take-count]
+          (while (> remaining 0)
+            (set! index (- index 1))
+            (arr.push! out (value-owned sorted[index]))
+            (set! remaining (- remaining 1))))
+        (let [index 0]
+          (while (< index take-count)
+            (arr.push! out (value-owned sorted[index]))
+            (set! index (+ index 1)))))
+      (value-vector-owned out))))
+
+(defn db-read-source-single-clause-aggregate-value [clause: Clause, datoms: []Datom, query-value: Query, aggregate: Aggregate-Find] -> Value
+  (let [current (aggregate-initial-value aggregate)
+        distinct-values (make [dynamic]Value)
+        aggregate-values (make [dynamic]Value)
+        seen-keys (make [dynamic]Result-Row)]
+    (defer (delete-result-rows-owned-values seen-keys))
+    (defer (delete-owned-values-array distinct-values))
+    (defer (delete-owned-values-array aggregate-values))
+    (for [datom datoms]
+      (let [[key key-ok] (db-read-source-aggregate-key-values clause datom query-value aggregate)]
+        (when key-ok
+          (let [already-seen (row-values-exist? (slice seen-keys 0) (slice key 0))]
+            (when already-seen
+              (delete-owned-values-array key))
+            (when (not already-seen)
+              (arr.push! seen-keys (Result-Row {values: key pulls: (make [dynamic]Pull-Result)}))
+              (if (= aggregate.op "count")
+                (set! current.int-value (+ current.int-value 1))
+                (let [[input-value input-ok] (db-read-source-datom-value-for-var-owned clause datom aggregate.var)]
+                  (when input-ok
+                    (cond
+                      (or (= aggregate.op "count-distinct")
+                          (= aggregate.op "distinct"))
+                        (let [value-seen (value-exists? (slice distinct-values 0) input-value)]
+                          (if value-seen
+                            (delete-owned-value input-value)
+                            (arr.push! distinct-values input-value)))
+                      (or (= aggregate.op "min")
+                          (= aggregate.op "max")
+                          (numeric-aggregate-op? aggregate.op)
+                          (= aggregate.op "rand")
+                          (= aggregate.op "sample"))
+                        (arr.push! aggregate-values input-value)
+                      :else
+                        (delete-owned-value input-value))))))))))
+    (cond
+      (= aggregate.op "count-distinct")
+        (value-int (i64 (count distinct-values)))
+      (= aggregate.op "distinct")
+        (distinct-values-vector-owned (slice distinct-values 0))
+      (and aggregate.has-limit
+           (or (= aggregate.op "min")
+               (= aggregate.op "max")))
+        (source-top-n-values-owned (slice aggregate-values 0) aggregate.limit (= aggregate.op "max"))
+      (and (= aggregate.op "rand") (not aggregate.has-limit))
+        (random-value-owned (slice aggregate-values 0))
+      (limited-selection-aggregate-op? aggregate.op)
+        (selection-values-owned (slice aggregate-values 0) aggregate.limit aggregate.op)
+      (= aggregate.op "median")
+        (median-numeric (slice aggregate-values 0))
+      (= aggregate.op "variance")
+        (variance-numeric (slice aggregate-values 0))
+      (= aggregate.op "stddev")
+        (stddev-numeric (slice aggregate-values 0))
+      (and (not aggregate.has-limit)
+           (= aggregate.op "min")
+           (> (count aggregate-values) 0))
+        (do
+          (sort-values! (addr aggregate-values))
+          (value-owned aggregate-values[0]))
+      (and (not aggregate.has-limit)
+           (= aggregate.op "max")
+           (> (count aggregate-values) 0))
+        (do
+          (sort-values! (addr aggregate-values))
+          (value-owned aggregate-values[(- (count aggregate-values) 1)]))
+      :else current)))
+
+(defn db-read-source-aggregate-streamable? [source: DB-Read-Source] -> bool
+  (or (= source.kind .Resident)
+      (= source.kind .Shared-Resident-Indexes)
+      (= source.kind .Shared-Resident-Datoms-And-Indexes)
+      (= source.kind .SQLite-Snapshot)))
+
+(defn db-read-source-single-clause-aggregate-value-streamed [source: DB-Read-Source, clause: Clause, query-value: Query, aggregate: Aggregate-Find] -> [value: Value, ok: bool, error: string]
+  (when (not (db-read-source-aggregate-streamable? source))
+    (return (Value {}) false ""))
+  (let [binding (Binding {items: (make [dynamic]Var-Binding)})
+        [scan scan-ok scan-error] (db-read-source-clause-index-scan source clause binding)]
+    (delete binding.items)
+    (when (not scan-ok)
+      (delete-clause-index-scan scan)
+      (return (Value {}) false scan-error))
+    (defer (delete-clause-index-scan scan))
+    (let [current (aggregate-initial-value aggregate)
+          distinct-values (make [dynamic]Value)
+          aggregate-values (make [dynamic]Value)
+          seen-keys (make [dynamic]Result-Row)
+          scan-index scan.index]
+      (defer (delete-result-rows-owned-values seen-keys))
+      (defer (delete-owned-values-array distinct-values))
+      (defer (delete-owned-values-array aggregate-values))
+      (while (< scan-index scan.high)
+        (let [entry (clause-index-scan-datom-index scan scan-index)
+              [datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
+          (when (not datom-ok)
+            (return (Value {}) false datom-error))
+          (if (db-read-source-clause-index-scan-candidate? scan datom)
+            (let [[current-datom current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
+              (when (not current-ok)
+                (delete-owned-datom datom)
+                (return (Value {}) false current-error))
+              (when current-datom
+                (let [[key key-ok] (db-read-source-aggregate-key-values clause datom query-value aggregate)]
+                  (when key-ok
+                    (let [already-seen (row-values-exist? (slice seen-keys 0) (slice key 0))]
+                      (when already-seen
+                        (delete-owned-values-array key))
+                      (when (not already-seen)
+                        (arr.push! seen-keys (Result-Row {values: key pulls: (make [dynamic]Pull-Result)}))
+                        (if (= aggregate.op "count")
+                          (set! current.int-value (+ current.int-value 1))
+                          (let [[input-value input-ok] (db-read-source-datom-value-for-var-owned clause datom aggregate.var)]
+                            (when input-ok
+                              (cond
+                                (or (= aggregate.op "count-distinct")
+                                    (= aggregate.op "distinct"))
+                                  (let [value-seen (value-exists? (slice distinct-values 0) input-value)]
+                                    (if value-seen
+                                      (delete-owned-value input-value)
+                                      (arr.push! distinct-values input-value)))
+                                (or (= aggregate.op "min")
+                                    (= aggregate.op "max")
+                                    (numeric-aggregate-op? aggregate.op)
+                                    (= aggregate.op "rand")
+                                    (= aggregate.op "sample"))
+                                  (arr.push! aggregate-values input-value)
+                                :else
+                                  (delete-owned-value input-value)))))))))))
+              (delete-owned-datom datom))
+            (delete-owned-datom datom))
+        (set! scan-index (+ scan-index 1)))
+      (cond
+        (= aggregate.op "count-distinct")
+          (return (value-int (i64 (count distinct-values))) true "")
+        (= aggregate.op "distinct")
+          (return (distinct-values-vector-owned (slice distinct-values 0)) true "")
+        (and aggregate.has-limit
+             (or (= aggregate.op "min")
+                 (= aggregate.op "max")))
+          (return (source-top-n-values-owned (slice aggregate-values 0) aggregate.limit (= aggregate.op "max")) true "")
+        (and (= aggregate.op "rand") (not aggregate.has-limit))
+          (return (random-value-owned (slice aggregate-values 0)) true "")
+        (limited-selection-aggregate-op? aggregate.op)
+          (return (selection-values-owned (slice aggregate-values 0) aggregate.limit aggregate.op) true "")
+        (= aggregate.op "median")
+          (return (median-numeric (slice aggregate-values 0)) true "")
+        (= aggregate.op "variance")
+          (return (variance-numeric (slice aggregate-values 0)) true "")
+        (= aggregate.op "stddev")
+          (return (stddev-numeric (slice aggregate-values 0)) true "")
+        (and (not aggregate.has-limit)
+             (= aggregate.op "min")
+             (> (count aggregate-values) 0))
+          (do
+            (sort-values! (addr aggregate-values))
+            (return (value-owned aggregate-values[0]) true ""))
+        (and (not aggregate.has-limit)
+             (= aggregate.op "max")
+             (> (count aggregate-values) 0))
+          (do
+            (sort-values! (addr aggregate-values))
+            (return (value-owned aggregate-values[(- (count aggregate-values) 1)]) true ""))
+        :else
+          (return current true "")))))
+
+(defn q-db-read-source-single-clause-aggregates [source: DB-Read-Source, query-value: Query, clause-value: Clause] -> Result-Set
+  (when (db-read-source-aggregate-streamable? source)
+    (let [values (make [dynamic]Value 0 (count query-value.aggregates))
+          rows (make [dynamic]Result-Row)
+          pulls (make [dynamic]Pull-Result)]
+      (for [aggregate query-value.aggregates]
+        (let [[value value-ok value-error] (db-read-source-single-clause-aggregate-value-streamed source clause-value query-value aggregate)]
+          (when (not value-ok)
+            (delete-owned-values-array values)
+            (delete pulls)
+            (delete rows)
+            (return (result-set-error value-error)))
+          (arr.push! values value)))
+      (arr.push! rows (Result-Row {values: values pulls: pulls}))
+      (return (result-set-ok rows))))
+  (let [[datoms datoms-ok datoms-error] (db-read-source-clause-candidates source clause-value)]
+    (when (not datoms-ok)
+      (return (result-set-error datoms-error)))
+    (defer (delete-owned-datoms datoms))
+      (let [values (make [dynamic]Value 0 (count query-value.aggregates))
+          rows (make [dynamic]Result-Row)
+          pulls (make [dynamic]Pull-Result)]
+      (for [aggregate query-value.aggregates]
+        (arr.push! values (db-read-source-single-clause-aggregate-value clause-value (slice datoms 0) query-value aggregate)))
+      (arr.push! rows (Result-Row {values: values pulls: pulls}))
+      (result-set-ok rows))))
+
+(defn db-read-source-group-values-for-datom [clause: Clause, datom: Datom, names: []string] -> [values: [dynamic]Value, ok: bool]
+  (let [out (make [dynamic]Value 0 (count names))]
+    (for [name names]
+      (let [[value value-ok] (db-read-source-datom-value-for-var-owned clause datom name)]
+        (if value-ok
+          (arr.push! out value)
+          (return out false))))
+    (return out true)))
+
+(defn result-row-values-index [rows: []Result-Row, values: []Value] -> [index: int, ok: bool]
+  (for [row index rows]
+    (when (values-equal? (slice row.values 0) values)
+      (return index true)))
+  (return 0 false))
+
+(defn values-owned-with-tail [prefix: []Value, tail: []Value] -> [dynamic]Value
+  (let [out (make [dynamic]Value 0 (+ (count prefix) (count tail)))]
+    (for [value prefix]
+      (arr.push! out (value-owned value)))
+    (for [value tail]
+      (arr.push! out (value-owned value)))
+    out))
+
+(defn reduce-db-read-source-single-clause-grouped-aggregate-datom! [rows: ^[dynamic]Result-Row, aggregate-values: ^[dynamic]Value, avg-counts: ^[dynamic]i64, group-top-values: ^[dynamic]Result-Row, seen-keys: ^[dynamic]Result-Row, distinct-values: ^[dynamic]Result-Row, query-value: Query, clause-value: Clause, aggregate: Aggregate-Find, datom: Datom]
+  (let [[group-values group-ok] (db-read-source-group-values-for-datom clause-value datom (slice query-value.find 0))]
+    (if (not group-ok)
+      (delete-owned-values-array group-values)
+      (let [[key key-ok] (db-read-source-aggregate-key-values clause-value datom query-value aggregate)]
+        (if (not key-ok)
+          (do
+            (delete-owned-values-array key)
+            (delete-owned-values-array group-values))
+          (let [aggregate-key (values-owned-with-tail (slice group-values 0) (slice key 0))
+                already-seen (row-values-exist? (slice seen-keys^ 0) (slice aggregate-key 0))]
+            (delete-owned-values-array key)
+            (if already-seen
+              (do
+                (delete-owned-values-array aggregate-key)
+                (delete-owned-values-array group-values))
+              (do
+                (arr.push! seen-keys^ (Result-Row {values: aggregate-key pulls: (make [dynamic]Pull-Result)}))
+                (let [[group-index group-seen] (result-row-values-index (slice rows^ 0) (slice group-values 0))
+                      actual-group-index group-index]
+                  (when (not group-seen)
+                    (set! actual-group-index (count rows^))
+                    (arr.push! rows^ (Result-Row {values: group-values pulls: (make [dynamic]Pull-Result)}))
+                    (arr.push! aggregate-values^ (aggregate-initial-value aggregate))
+                    (arr.push! avg-counts^ 0)
+                    (arr.push! group-top-values^ (Result-Row {values: (make [dynamic]Value) pulls: (make [dynamic]Pull-Result)})))
+                  (when group-seen
+                    (delete-owned-values-array group-values))
+                  (if (or (= aggregate.op "count")
+                          (= aggregate.op "count-distinct")
+                          (= aggregate.op "distinct"))
+                    (if (= aggregate.op "count")
+                      (set! aggregate-values^[actual-group-index].int-value (+ aggregate-values^[actual-group-index].int-value 1))
+                      (let [[input-value input-ok] (db-read-source-datom-value-for-var-owned clause-value datom aggregate.var)]
+                        (if input-ok
+                          (let [distinct-key (values-owned-with-tail (slice rows^[actual-group-index].values 0) ([]Value [input-value]))
+                                distinct-seen (row-values-exist? (slice distinct-values^ 0) (slice distinct-key 0))]
+                            (delete-owned-value input-value)
+                            (if distinct-seen
+                              (delete-owned-values-array distinct-key)
+                              (do
+                                (arr.push! distinct-values^ (Result-Row {values: distinct-key pulls: (make [dynamic]Pull-Result)}))
+                                (if (= aggregate.op "count-distinct")
+                                  (set! aggregate-values^[actual-group-index].int-value (+ aggregate-values^[actual-group-index].int-value 1))
+                                  (arr.push! aggregate-values^[actual-group-index].items (value-owned input-value))))))
+                          (delete-owned-value input-value))))
+                    (let [[input-value input-ok] (db-read-source-datom-value-for-var-owned clause-value datom aggregate.var)]
+                      (if input-ok
+                        (cond
+                          (= aggregate.op "sum")
+                            (do
+                              (set! aggregate-values^[actual-group-index] (apply-aggregate-value aggregate-values^[actual-group-index] aggregate input-value))
+                              (delete-owned-value input-value))
+                          (= aggregate.op "avg")
+                            (do
+                              (set! aggregate-values^[actual-group-index] (apply-aggregate-value aggregate-values^[actual-group-index] aggregate input-value))
+                              (set! avg-counts^[actual-group-index] (+ avg-counts^[actual-group-index] 1))
+                              (delete-owned-value input-value))
+                          (= aggregate.op "min")
+                            (if aggregate.has-limit
+                              (arr.push! group-top-values^[actual-group-index].values input-value)
+                              (if (= aggregate-values^[actual-group-index].kind .Nil)
+                                (set! aggregate-values^[actual-group-index] input-value)
+                                (if (value-less? input-value aggregate-values^[actual-group-index])
+                                  (do
+                                    (delete-owned-value aggregate-values^[actual-group-index])
+                                    (set! aggregate-values^[actual-group-index] input-value))
+                                  (delete-owned-value input-value))))
+                          (= aggregate.op "max")
+                            (if aggregate.has-limit
+                              (arr.push! group-top-values^[actual-group-index].values input-value)
+                              (if (= aggregate-values^[actual-group-index].kind .Nil)
+                                (set! aggregate-values^[actual-group-index] input-value)
+                                (if (value-less? aggregate-values^[actual-group-index] input-value)
+                                  (do
+                                    (delete-owned-value aggregate-values^[actual-group-index])
+                                    (set! aggregate-values^[actual-group-index] input-value))
+                                  (delete-owned-value input-value))))
+                          (or (= aggregate.op "rand")
+                              (numeric-aggregate-op? aggregate.op)
+                              (= aggregate.op "sample"))
+                            (arr.push! group-top-values^[actual-group-index].values input-value)
+                          :else
+                            (delete-owned-value input-value))
+                        (delete-owned-value input-value)))))))))))))
+
+(defn q-db-read-source-single-clause-grouped-aggregate [source: DB-Read-Source, query-value: Query, clause-value: Clause] -> Result-Set
+  (let [rows (make [dynamic]Result-Row)
+        aggregate-values (make [dynamic]Value)
+        avg-counts (make [dynamic]i64)
+        group-top-values (make [dynamic]Result-Row)
+        seen-keys (make [dynamic]Result-Row)
+        distinct-values (make [dynamic]Result-Row)
+        aggregate query-value.aggregates[0]]
+    (defer (delete-owned-values-array aggregate-values))
+    (defer (delete avg-counts))
+    (defer (delete-result-rows-owned-values seen-keys))
+    (defer (delete-result-rows-owned-values distinct-values))
+    (if (db-read-source-has-overlay? source)
+      (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source clause-value.a.value.text)]
+        (when (not datoms-ok)
+          (delete-result-rows-owned-values rows)
+          (delete-result-rows-owned-values group-top-values)
+          (return (result-set-error datoms-error)))
+        (defer (delete-owned-datoms datoms))
+        (for [datom datoms]
+          (reduce-db-read-source-single-clause-grouped-aggregate-datom! (addr rows) (addr aggregate-values) (addr avg-counts) (addr group-top-values) (addr seen-keys) (addr distinct-values) query-value clause-value aggregate datom)))
+      (let [[stream stream-ok stream-error] (source-index-datom-stream source clause-value.a.value.text)]
+        (when (not stream-ok)
+          (delete-result-rows-owned-values rows)
+          (delete-result-rows-owned-values group-top-values)
+          (return (result-set-error stream-error)))
+        (while stream.has-current
+          (reduce-db-read-source-single-clause-grouped-aggregate-datom! (addr rows) (addr aggregate-values) (addr avg-counts) (addr group-top-values) (addr seen-keys) (addr distinct-values) query-value clause-value aggregate stream.current)
+          (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
+            (when (not advance-ok)
+              (delete-source-index-datom-stream stream)
+              (delete-result-rows-owned-values rows)
+              (delete-result-rows-owned-values group-top-values)
+              (return (result-set-error advance-error)))))
+        (delete-source-index-datom-stream stream)))
+    (for [aggregate-value index aggregate-values]
+      (cond
+        (= aggregate.op "distinct")
+          (arr.push! rows[index].values (distinct-values-vector-owned (slice aggregate-value.items 0)))
+        (and aggregate.has-limit
+             (or (= aggregate.op "min")
+                 (= aggregate.op "max")))
+          (arr.push! rows[index].values (source-top-n-values-owned (slice group-top-values[index].values 0) aggregate.limit (= aggregate.op "max")))
+        (and (= aggregate.op "rand") (not aggregate.has-limit))
+          (arr.push! rows[index].values (random-value-owned (slice group-top-values[index].values 0)))
+        (limited-selection-aggregate-op? aggregate.op)
+          (arr.push! rows[index].values (selection-values-owned (slice group-top-values[index].values 0) aggregate.limit aggregate.op))
+        (= aggregate.op "median")
+          (arr.push! rows[index].values (median-numeric (slice group-top-values[index].values 0)))
+        (= aggregate.op "variance")
+          (arr.push! rows[index].values (variance-numeric (slice group-top-values[index].values 0)))
+        (= aggregate.op "stddev")
+          (arr.push! rows[index].values (stddev-numeric (slice group-top-values[index].values 0)))
+        (and (= aggregate.op "avg") (> avg-counts[index] 0))
+          (if (= aggregate-value.kind .Float)
+            (arr.push! rows[index].values (value-float (/ aggregate-value.float-value (f64 avg-counts[index]))))
+            (if (= (% aggregate-value.int-value avg-counts[index]) 0)
+              (arr.push! rows[index].values (value-int (/ aggregate-value.int-value avg-counts[index])))
+              (arr.push! rows[index].values (value-float (/ (f64 aggregate-value.int-value) (f64 avg-counts[index]))))))
+        :else
+          (arr.push! rows[index].values (value-owned aggregate-value))))
+    (delete-result-rows-owned-values group-top-values)
+    (return (result-set-ok rows))))
+
+(defn db-read-source-attr-top-n-values [source: DB-Read-Source, plan: Attr-Top-N-Aggregate-Plan, aggregate: Aggregate-Find] -> [value: Value, ok: bool, error: string]
+  (let [view (db-read-source-index-view source .AVET)
+        attr-prefix ([]Value [(value-keyword plan.attr)])
+        [low low-ok low-error] (db-read-source-lower-bound-values source view attr-prefix)]
+    (when (not low-ok)
+      (return (Value {}) false low-error))
+    (let [[high high-ok high-error] (db-read-source-upper-bound-values source view attr-prefix)]
+      (when (not high-ok)
+        (return (Value {}) false high-error))
+      (let [out (make [dynamic]Value)
+            last-value (Value {})
+            has-last false]
+        (defer
+          (when has-last
+            (delete-owned-value last-value)))
+        (if (= aggregate.op "max")
+          (let [i high]
+            (while (and (> i low)
+                        (or (not aggregate.has-limit)
+                            (< (count out) aggregate.limit)))
+              (set! i (- i 1))
+              (let [entry (db-index-view-at view i)
+                    [current current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
+                (when (not current-ok)
+                  (delete-owned-values-array out)
+                  (return (Value {}) false current-error))
+                (when current
+                  (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
+                    (when (not datom-ok)
+                      (delete-owned-values-array out)
+                      (return (Value {}) false datom-error))
+                    (when (not (and has-last (value-equal? datom.v last-value)))
+                      (when (not aggregate.has-limit)
+                        (let [value (value-owned datom.v)]
+                          (delete-owned-datom datom)
+                          (delete out)
+                          (return value true "")))
+                      (arr.push! out (value-owned datom.v))
+                      (when has-last
+                        (delete-owned-value last-value))
+                      (set! last-value (value-owned datom.v))
+                      (set! has-last true))
+                    (delete-owned-datom datom))))))
+          (let [i low]
+            (while (and (< i high)
+                        (or (not aggregate.has-limit)
+                            (< (count out) aggregate.limit)))
+              (let [entry (db-index-view-at view i)
+                    [current current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
+                (when (not current-ok)
+                  (delete-owned-values-array out)
+                  (return (Value {}) false current-error))
+                (when current
+                  (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
+                    (when (not datom-ok)
+                      (delete-owned-values-array out)
+                      (return (Value {}) false datom-error))
+                    (when (not (and has-last (value-equal? datom.v last-value)))
+                      (when (not aggregate.has-limit)
+                        (let [value (value-owned datom.v)]
+                          (delete-owned-datom datom)
+                          (delete out)
+                          (return value true "")))
+                      (arr.push! out (value-owned datom.v))
+                      (when has-last
+                        (delete-owned-value last-value))
+                      (set! last-value (value-owned datom.v))
+                      (set! has-last true))
+                    (delete-owned-datom datom)))
+                (set! i (+ i 1))))))
+        (if aggregate.has-limit
+          (return (value-vector-owned out) true "")
+          (do
+            (delete out)
+            (return (Value {}) true "")))))))
+
+(defn q-db-read-source-attr-top-n-aggregates [source: DB-Read-Source, query-value: Query, plan: Attr-Top-N-Aggregate-Plan] -> Result-Set
+  (let [values (make [dynamic]Value 0 (count query-value.aggregates))
+        rows (make [dynamic]Result-Row)
+        pulls (make [dynamic]Pull-Result)]
+    (for [aggregate query-value.aggregates]
+      (let [[value value-ok value-error] (db-read-source-attr-top-n-values source plan aggregate)]
+        (when (not value-ok)
+          (delete-owned-values-array values)
+          (delete pulls)
+          (delete rows)
+          (return (result-set-error value-error)))
+        (arr.push! values value)))
+    (arr.push! rows (Result-Row {values: values pulls: pulls}))
+    (result-set-ok rows)))
