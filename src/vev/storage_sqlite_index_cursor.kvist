@@ -1,0 +1,1382 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn sqlite-open-index-cursor-handle [handle: rawptr, index-name: string, page-size: int] -> [out-cursor: SQLite-Index-Cursor, ok: bool, error: string]
+  (when (<= page-size 0)
+    (return (SQLite-Index-Cursor {}) false "sqlite index page size must be positive"))
+  (let [[basis basis-ok basis-error] (vev.sqlite-latest-index-root-basis-raw handle)]
+    (when (not basis-ok)
+      (return (SQLite-Index-Cursor {}) false basis-error))
+    (sqlite-open-index-cursor-handle-at-basis handle index-name basis page-size)))
+
+(defn sqlite-open-index-cursor-handle-at-basis [handle: rawptr, index-name: string, basis-tx: u64, page-size: int] -> [out-cursor: SQLite-Index-Cursor, ok: bool, error: string]
+  (when (<= page-size 0)
+    (return (SQLite-Index-Cursor {}) false "sqlite index page size must be positive"))
+  (let [[rows root-id manifest-id manifest-run-count first-key root-level root-child-count info-ok info-error] (vev.sqlite-index-root-chunk-info-at-basis-raw handle index-name basis-tx)]
+    (when (not info-ok)
+      (return (SQLite-Index-Cursor {}) false info-error))
+    (let [order-text (if (= index-name ":eavt")
+                       (string-owned "eavt")
+                       (if (= index-name ":aevt")
+                         (string-owned "aevt")
+                         (if (= index-name ":avet")
+                           (string-owned "avet")
+                           (string-owned "vaet"))))
+          root-is-merge (sqlite-index-merge-root-key? first-key)
+          root-is-manifest (> manifest-id 0)
+          datom-stmt: rawptr nil]
+      (when (or root-is-merge root-is-manifest)
+        (let [[prepared prepared-ok prepared-error] (vev.sqlite-prepare-datom-by-log-index-raw handle)]
+          (when (not prepared-ok)
+            (delete first-key)
+            (delete order-text)
+            (return (SQLite-Index-Cursor {}) false prepared-error))
+          (set! datom-stmt prepared)))
+    (return (SQLite-Index-Cursor {handle: handle
+                                  owns-handle: false
+                                  index-name: (string-owned index-name)
+                                  basis-tx: basis-tx
+                                  root-id: root-id
+                                  manifest-id: manifest-id
+                                  manifest-run-count: manifest-run-count
+                                  root-first-key: first-key
+                                  root-is-merge: root-is-merge
+                                  root-is-manifest: root-is-manifest
+                                  root-level: root-level
+                                  root-child-count: root-child-count
+                                  order-text: order-text
+                                  datom-stmt: datom-stmt
+                                  entry-page-stmt: nil
+                                  page-size: page-size
+                                  row-count: (int rows)
+                                  page: (sqlite-loaded-index-page-empty 0)
+                                  page-cache: (sqlite-index-page-cache-empty)
+                                  merge-ready: false
+                                  merge-next-output: 0
+                                  merge-roots: (make [dynamic]u64)
+                                  merge-counts: (make [dynamic]int)
+                                  merge-positions: (make [dynamic]int)
+                                  merge-current-entries: (make [dynamic]int)
+                                  merge-current-datoms: (make [dynamic]Datom)
+                                  merge-has-current: (make [dynamic]bool)
+                                  merge-loaded-pages: (make [dynamic]SQLite-Loaded-Index-Page)
+                                  merge-loaded-page-valid: (make [dynamic]bool)
+                                  merge-page0: (make [dynamic]int)
+                                  merge-page-start0: -1
+                                  merge-page-end0: -1
+                                  merge-page1: (make [dynamic]int)
+                                  merge-page-start1: -1
+                                  merge-page-end1: -1
+                                  merge-page2: (make [dynamic]int)
+                                  merge-page-start2: -1
+                                  merge-page-end2: -1
+                                  merge-page3: (make [dynamic]int)
+                                  merge-page-start3: -1
+                                  merge-page-end3: -1
+                                  direct-children-ready: false
+                                  direct-child-roots: (make [dynamic]u64)
+                                  direct-child-counts: (make [dynamic]int)
+                                  entry-runs-ready: false
+                                  entry-run-roots: (make [dynamic]u64)
+                                  entry-run-bases: (make [dynamic]int)
+                                  entry-run-counts: (make [dynamic]int)
+                                  entry-run-entry-payloads: (make [dynamic]bool)})
+            true
+            ""))))
+
+(defn sqlite-open-index-cursor-handle-at-root-page [handle: rawptr, index-name: string, basis-tx: u64, root-page: SQLite-Index-Root-Page, page-size: int] -> [out-cursor: SQLite-Index-Cursor, ok: bool, error: string]
+  (when (<= page-size 0)
+    (return (SQLite-Index-Cursor {}) false "sqlite index page size must be positive"))
+  (let [[rows first-key root-level info-ok info-error] (vev.sqlite-index-chunk-info-by-id-raw handle root-page.root-id)]
+    (when (not info-ok)
+      (return (SQLite-Index-Cursor {}) false info-error))
+    (let [[root-child-count child-count-ok child-count-error] (vev.sqlite-index-chunk-child-count-raw handle root-page.root-id)]
+      (when (not child-count-ok)
+        (delete first-key)
+        (return (SQLite-Index-Cursor {}) false child-count-error))
+      (let [order-text (if (= index-name ":eavt")
+                         (string-owned "eavt")
+                         (if (= index-name ":aevt")
+                           (string-owned "aevt")
+                           (if (= index-name ":avet")
+                             (string-owned "avet")
+                             (string-owned "vaet"))))
+            root-is-merge (sqlite-index-merge-root-key? first-key)
+            root-is-manifest (> root-page.manifest-id 0)
+            row-count rows
+            manifest-run-count: u64 0
+            datom-stmt: rawptr nil]
+        (when root-is-manifest
+          (let [[_parent-manifest-id _base-root manifest-row-count run-count manifest-ok manifest-error] (vev.sqlite-index-run-manifest-info-raw handle root-page.manifest-id)]
+            (discard _parent-manifest-id)
+            (discard _base-root)
+            (when (not manifest-ok)
+              (delete first-key)
+              (delete order-text)
+              (return (SQLite-Index-Cursor {}) false manifest-error))
+            (set! row-count manifest-row-count)
+            (set! manifest-run-count run-count)))
+        (when (or root-is-merge root-is-manifest)
+          (let [[prepared prepared-ok prepared-error] (vev.sqlite-prepare-datom-by-log-index-raw handle)]
+            (when (not prepared-ok)
+              (delete first-key)
+              (delete order-text)
+              (return (SQLite-Index-Cursor {}) false prepared-error))
+            (set! datom-stmt prepared)))
+        (return (SQLite-Index-Cursor {handle: handle
+                                      owns-handle: false
+                                      index-name: (string-owned index-name)
+                                      basis-tx: basis-tx
+                                      root-id: root-page.root-id
+                                      manifest-id: root-page.manifest-id
+                                      manifest-run-count: manifest-run-count
+                                      root-first-key: first-key
+                                      root-is-merge: root-is-merge
+                                      root-is-manifest: root-is-manifest
+                                      root-level: root-level
+                                      root-child-count: root-child-count
+                                      order-text: order-text
+                                      datom-stmt: datom-stmt
+                                      entry-page-stmt: nil
+                                      page-size: page-size
+                                      row-count: (int row-count)
+                                      page: (sqlite-loaded-index-page-empty 0)
+                                      page-cache: (sqlite-index-page-cache-empty)
+                                      merge-ready: false
+                                      merge-next-output: 0
+                                      merge-roots: (make [dynamic]u64)
+                                      merge-counts: (make [dynamic]int)
+                                      merge-positions: (make [dynamic]int)
+                                      merge-current-entries: (make [dynamic]int)
+                                      merge-current-datoms: (make [dynamic]Datom)
+                                      merge-has-current: (make [dynamic]bool)
+                                      merge-loaded-pages: (make [dynamic]SQLite-Loaded-Index-Page)
+                                      merge-loaded-page-valid: (make [dynamic]bool)
+                                      merge-page0: (make [dynamic]int)
+                                      merge-page-start0: -1
+                                      merge-page-end0: -1
+                                      merge-page1: (make [dynamic]int)
+                                      merge-page-start1: -1
+                                      merge-page-end1: -1
+                                      merge-page2: (make [dynamic]int)
+                                      merge-page-start2: -1
+                                      merge-page-end2: -1
+                                      merge-page3: (make [dynamic]int)
+                                      merge-page-start3: -1
+                                      merge-page-end3: -1
+                                      direct-children-ready: false
+                                      direct-child-roots: (make [dynamic]u64)
+                                      direct-child-counts: (make [dynamic]int)
+                                      entry-runs-ready: false
+                                      entry-run-roots: (make [dynamic]u64)
+                                      entry-run-bases: (make [dynamic]int)
+                                      entry-run-counts: (make [dynamic]int)
+                                      entry-run-entry-payloads: (make [dynamic]bool)})
+                true
+                "")))))
+
+(defn sqlite-conn-open-index-cursor [store: ^SQLite-Conn, index-name: string, page-size: int] -> [out-cursor: SQLite-Index-Cursor, ok: bool, error: string]
+  (sqlite-open-index-cursor-handle store^.handle index-name page-size))
+
+(defn sqlite-open-index-cursor [path: string, index-name: string, page-size: int] -> [out-cursor: SQLite-Index-Cursor, ok: bool, error: string]
+  (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
+    (when (not open-ok)
+      (return (SQLite-Index-Cursor {}) false open-error))
+    (let [[cursor cursor-ok cursor-error] (sqlite-open-index-cursor-handle handle index-name page-size)]
+      (when (not cursor-ok)
+        (vev.sqlite-close-live-raw handle)
+        (return cursor false cursor-error))
+      (set! cursor.owns-handle true)
+      (return cursor true ""))))
+
+(defn sqlite-index-cursor-count [cursor: SQLite-Index-Cursor] -> int
+  cursor.row-count)
+
+(defn sqlite-index-cursor-use-page-cache! [cursor: ^SQLite-Index-Cursor, cache: SQLite-Index-Page-Cache]
+  (release-sqlite-index-page-cache! cursor^.page-cache)
+  (set! cursor^.page-cache (retain-sqlite-index-page-cache cache)))
+
+(defn sqlite-index-cursor-stream-ended? [cursor: ^SQLite-Index-Cursor, error: string] -> bool
+  (or (and (or cursor^.root-is-merge cursor^.root-is-manifest)
+           (or (= error "sqlite index cursor page did not contain requested position")
+               (= error "sqlite merge root page ended before expected row count")))
+      (and (= error "sqlite index cursor page did not contain requested position")
+           (< cursor^.page.end cursor^.row-count)
+           (= cursor^.page.end (+ cursor^.page.start (count cursor^.page.entries))))))
+
+(defn sqlite-index-cursor-ensure-direct-children! [cursor: ^SQLite-Index-Cursor] -> [ok: bool, error: string]
+  (when cursor^.direct-children-ready
+    (return true ""))
+  (delete cursor^.direct-child-roots)
+  (delete cursor^.direct-child-counts)
+  (let [[roots counts children-ok children-error] (vev.sqlite-index-child-chunks-with-counts-raw cursor^.handle cursor^.root-id)]
+    (when (not children-ok)
+      (delete roots)
+      (delete counts)
+      (set! cursor^.direct-child-roots (make [dynamic]u64))
+      (set! cursor^.direct-child-counts (make [dynamic]int))
+      (set! cursor^.direct-children-ready false)
+      (return false children-error))
+    (set! cursor^.direct-child-roots roots)
+    (set! cursor^.direct-child-counts counts)
+    (set! cursor^.direct-children-ready true)
+    (return true "")))
+
+(defn sqlite-index-cursor-ensure-entry-runs! [cursor: ^SQLite-Index-Cursor] -> [ok: bool, error: string]
+  (when cursor^.entry-runs-ready
+    (return true ""))
+  (delete cursor^.entry-run-roots)
+  (delete cursor^.entry-run-bases)
+  (delete cursor^.entry-run-counts)
+  (delete cursor^.entry-run-entry-payloads)
+  (let [[roots bases counts entry-payloads runs-ok runs-error] (vev.sqlite-index-entry-runs-for-root-raw cursor^.handle cursor^.root-id)]
+    (when (not runs-ok)
+      (delete roots)
+      (delete bases)
+      (delete counts)
+      (delete entry-payloads)
+      (set! cursor^.entry-run-roots (make [dynamic]u64))
+      (set! cursor^.entry-run-bases (make [dynamic]int))
+      (set! cursor^.entry-run-counts (make [dynamic]int))
+      (set! cursor^.entry-run-entry-payloads (make [dynamic]bool))
+      (set! cursor^.entry-runs-ready false)
+      (return false runs-error))
+    (set! cursor^.entry-run-roots roots)
+    (set! cursor^.entry-run-bases bases)
+    (set! cursor^.entry-run-counts counts)
+    (set! cursor^.entry-run-entry-payloads entry-payloads)
+    (set! cursor^.entry-runs-ready true)
+    (return true "")))
+
+(defn sqlite-index-cursor-entry-run-start-index [cursor: ^SQLite-Index-Cursor, page-start: int] -> int
+  (let [lo 0
+        hi (count cursor^.entry-run-roots)]
+    (while (< lo hi)
+      (let [mid (+ lo (/ (- hi lo) 2))
+            run-end (+ cursor^.entry-run-bases[mid] cursor^.entry-run-counts[mid])]
+        (if (<= run-end page-start)
+          (set! lo (+ mid 1))
+          (set! hi mid))))
+    lo))
+
+(defn sqlite-index-cursor-ensure-entry-page-stmt! [cursor: ^SQLite-Index-Cursor] -> [ok: bool, error: string]
+  (when (not (= cursor^.entry-page-stmt nil))
+    (return true ""))
+  (let [[stmt stmt-ok stmt-error] (vev.sqlite-prepare-index-chunk-entries-page-raw cursor^.handle)]
+    (when (not stmt-ok)
+      (return false stmt-error))
+    (set! cursor^.entry-page-stmt stmt)
+    (return true "")))
+
+(defn sqlite-index-cursor-load-entry-run-window [cursor: ^SQLite-Index-Cursor, page-start: int] -> [entries: [dynamic]int, ok: bool, error: string]
+  (let [page-end (min (+ page-start cursor^.page-size) cursor^.row-count)
+        [runs-ok runs-error] (sqlite-index-cursor-ensure-entry-runs! cursor)]
+    (when (not runs-ok)
+      (return (make [dynamic]int) false runs-error))
+    (let [selected-roots (make [dynamic]u64) :defer
+          selected-starts (make [dynamic]int) :defer
+          selected-limits (make [dynamic]int) :defer
+          selected-total 0
+          run-index (sqlite-index-cursor-entry-run-start-index cursor page-start)]
+      (while (< run-index (count cursor^.entry-run-roots))
+        (let [run-base cursor^.entry-run-bases[run-index]
+              run-count cursor^.entry-run-counts[run-index]
+              run-end (+ run-base run-count)]
+          (when (>= run-base page-end)
+            (break))
+          (when (and (< page-start run-end)
+                     (> page-end run-base))
+            (when (not cursor^.entry-run-entry-payloads[run-index])
+              (return (make [dynamic]int) false "sqlite index entry run window included inline payload"))
+            (let [local-start (max 0 (- page-start run-base))
+                  local-end (min run-count (- page-end run-base))
+                  local-limit (- local-end local-start)]
+              (arr.push! selected-roots cursor^.entry-run-roots[run-index])
+              (arr.push! selected-starts local-start)
+              (arr.push! selected-limits local-limit)
+              (set! selected-total (+ selected-total local-limit)))))
+          (set! run-index (+ run-index 1)))
+      (when (= selected-total 0)
+        (return (make [dynamic]int) true ""))
+      (when (= (count selected-roots) 1)
+        (let [[stmt-ok stmt-error] (sqlite-index-cursor-ensure-entry-page-stmt! cursor)]
+          (when (not stmt-ok)
+            (return (make [dynamic]int) false stmt-error))
+          (return (vev.sqlite-step-prepared-index-chunk-entries-page-raw cursor^.handle cursor^.entry-page-stmt selected-roots[0] (i64 selected-starts[0]) (i64 selected-limits[0])))))
+      (let [[loaded-entries loaded-ok loaded-error] (vev.sqlite-index-chunk-entries-windows-raw cursor^.handle (slice selected-roots 0) (slice selected-starts 0) (slice selected-limits 0))]
+        (return loaded-entries loaded-ok loaded-error)))))
+
+(defn sqlite-index-cursor-load-direct-root-window [cursor: ^SQLite-Index-Cursor, page-start: int] -> [entries: [dynamic]int, ok: bool, error: string]
+  (let [out (make [dynamic]int 0 cursor^.page-size)
+        page-end (min (+ page-start cursor^.page-size) cursor^.row-count)
+        [entry-run-window entry-run-ok _entry-run-error] (sqlite-index-cursor-load-entry-run-window cursor page-start)]
+    (when entry-run-ok
+      (delete out)
+      (return entry-run-window true ""))
+    (delete entry-run-window)
+    (let [[children-ok children-error] (sqlite-index-cursor-ensure-direct-children! cursor)]
+    (when (not children-ok)
+      (delete out)
+      (return (make [dynamic]int) false children-error))
+    (let [selected-roots (make [dynamic]u64) :defer
+          selected-starts (make [dynamic]int) :defer
+          selected-limits (make [dynamic]int) :defer
+          selected-total 0
+          child-base 0
+          covers-payload false]
+      (for [child-root child-index cursor^.direct-child-roots]
+        (let [child-row-count cursor^.direct-child-counts[child-index]
+              child-start child-base
+              child-end (+ child-base child-row-count)]
+          (when (and (< page-start child-end)
+                     (> page-end child-start))
+            (let [local-start (max 0 (- page-start child-start))
+                  local-end (min child-row-count (- page-end child-start))
+                  local-limit (- local-end local-start)]
+              (arr.push! selected-roots child-root)
+              (arr.push! selected-starts local-start)
+              (arr.push! selected-limits local-limit)
+              (set! selected-total (+ selected-total local-limit))))
+          (set! child-base child-end)))
+      (when (< child-base cursor^.row-count)
+        (let [payload-start child-base
+              payload-end cursor^.row-count]
+          (when (and (< page-start payload-end)
+                     (> page-end payload-start))
+            (set! covers-payload true))))
+      (when (and (not covers-payload)
+                 (> selected-total 0))
+        (let [[batched batched-ok _batched-error] (vev.sqlite-index-chunk-entries-windows-raw cursor^.handle (slice selected-roots 0) (slice selected-starts 0) (slice selected-limits 0))]
+          (when batched-ok
+            (delete out)
+            (return batched true ""))
+          (delete batched))))
+    (let [child-base 0]
+      (for [child-root child-index cursor^.direct-child-roots]
+        (let [child-row-count cursor^.direct-child-counts[child-index]
+              child-start child-base
+              child-end (+ child-base child-row-count)]
+          (when (and (< page-start child-end)
+                     (> page-end child-start))
+            (let [local-start (max 0 (- page-start child-start))
+                  local-end (min child-row-count (- page-end child-start))
+                  [child-ok child-error] (sqlite-index-root-ordered-window-direct-into! (addr out) cursor^.handle child-root local-start (- local-end local-start))]
+              (when (not child-ok)
+                (delete out)
+                (return (make [dynamic]int) false child-error))))
+          (set! child-base child-end)))
+      (when (< child-base cursor^.row-count)
+        (let [payload-start child-base
+              payload-end cursor^.row-count]
+          (when (and (< page-start payload-end)
+                     (> page-end payload-start))
+            (let [local-start (max 0 (- page-start payload-start))
+                  local-end (min (- payload-end payload-start) (- page-end payload-start))
+                  [payload-ok payload-error] (sqlite-index-chunk-append-payload-window! (addr out) cursor^.handle cursor^.root-id local-start (- local-end local-start))]
+              (when (not payload-ok)
+                (delete out)
+                (return (make [dynamic]int) false payload-error)))))))
+    (return out true ""))))
+
+(defn sqlite-index-chunk-append-payload-window! [out: ^[dynamic]int, handle: rawptr, chunk-id: u64, offset: int, limit: int] -> [ok: bool, error: string]
+  (when (<= limit 0)
+    (return true ""))
+  (let [[payload payload-ok payload-error] (vev.sqlite-index-chunk-payload-text-raw handle chunk-id)]
+    (when (not payload-ok)
+      (return false payload-error))
+    (defer (delete payload))
+    (when (= payload "[]")
+      (return true ""))
+    (if (= payload ":entries")
+      (let [[entries entries-ok entries-error] (vev.sqlite-index-chunk-entries-page-raw handle chunk-id (i64 offset) (i64 limit))]
+        (when (not entries-ok)
+          (return false entries-error))
+        (for [entry entries]
+          (arr.push! out^ entry))
+        (delete entries)
+        (return true ""))
+      (let [[entries entries-ok entries-error] (parse-index-entries-text-window payload offset limit)]
+        (when (not entries-ok)
+          (return false entries-error))
+        (for [entry entries]
+          (arr.push! out^ entry))
+        (delete entries)
+        (return true "")))))
+
+(defn sqlite-index-root-ordered-window-direct-into! [out: ^[dynamic]int, handle: rawptr, root-id: u64, offset: int, limit: int] -> [ok: bool, error: string]
+  (when (<= limit 0)
+    (return true ""))
+  (let [[row-count first-key level info-ok info-error] (vev.sqlite-index-chunk-info-by-id-raw handle root-id)]
+    (when (not info-ok)
+      (return false info-error))
+    (defer (delete first-key))
+    (when (< offset 0)
+      (return false "sqlite index direct window offset was negative"))
+    (when (>= offset (int row-count))
+      (return true ""))
+    (let [clamped-limit (min limit (- (int row-count) offset))]
+      (when (= level 0)
+        (return (sqlite-index-chunk-append-payload-window! out handle root-id offset clamped-limit)))
+      (let [[child-roots child-counts children-ok children-error] (vev.sqlite-index-child-chunks-with-counts-raw handle root-id)]
+        (defer (delete child-roots))
+        (defer (delete child-counts))
+        (when (not children-ok)
+          (return false children-error))
+        (let [remaining-start offset
+              remaining-end (+ offset clamped-limit)
+              child-base 0]
+          (for [child-root child-index child-roots]
+            (let [child-row-count child-counts[child-index]
+                  child-start child-base
+                  child-end (+ child-base child-row-count)]
+              (when (and (< remaining-start child-end)
+                         (> remaining-end child-start))
+                (let [local-start (max 0 (- remaining-start child-start))
+                      local-end (min child-row-count (- remaining-end child-start))
+                      [child-window-ok child-window-error] (sqlite-index-root-ordered-window-direct-into! out handle child-root local-start (- local-end local-start))]
+                  (when (not child-window-ok)
+                    (return false child-window-error))))
+              (set! child-base child-end)))
+          (when (< child-base (int row-count))
+            (let [payload-start child-base
+                  payload-end (int row-count)]
+              (when (and (< remaining-start payload-end)
+                         (> remaining-end payload-start))
+                (let [local-start (max 0 (- remaining-start payload-start))
+                      local-end (min (- payload-end payload-start) (- remaining-end payload-start))
+                      [payload-ok payload-error] (sqlite-index-chunk-append-payload-window! out handle root-id local-start (- local-end local-start))]
+                  (when (not payload-ok)
+                    (return false payload-error)))))))
+        (return true "")))))
+
+(defn sqlite-index-root-ordered-window-direct [handle: rawptr, root-id: u64, offset: int, limit: int] -> [entries: [dynamic]int, ok: bool, error: string]
+  (let [out (make [dynamic]int 0 limit)
+        [append-ok append-error] (sqlite-index-root-ordered-window-direct-into! (addr out) handle root-id offset limit)]
+    (if append-ok
+      (return out true "")
+      (do
+        (delete out)
+        (return (make [dynamic]int) false append-error)))))
+
+(defn sqlite-index-root-ordered-window [handle: rawptr, root-id: u64, offset: int, limit: int] -> [entries: [dynamic]int, base-offset: int, ok: bool, error: string]
+  (let [[_row-count _first-key level info-ok _info-error] (vev.sqlite-index-chunk-info-by-id-raw handle root-id)]
+    (when info-ok
+      (delete _first-key)
+      (when (= level 0)
+        (let [[payload payload-ok _payload-error] (vev.sqlite-index-chunk-payload-text-raw handle root-id)]
+          (when payload-ok
+            (defer (delete payload))
+            (when (= payload ":entries")
+              (let [[entries entries-ok entries-error] (vev.sqlite-index-chunk-entries-page-raw handle root-id (i64 offset) (i64 limit))]
+                (return entries offset entries-ok entries-error)))))))
+    (when info-ok
+      (let [[direct direct-ok _direct-error] (sqlite-index-root-ordered-window-direct handle root-id offset limit)]
+        (when direct-ok
+          (return direct offset true ""))
+        (delete direct))))
+  (let [[text raw-base loaded-ok loaded-error] (vev.sqlite-index-entries-page-text-for-root-raw handle root-id (i64 offset) (i64 limit))]
+    (when (not loaded-ok)
+      (return (make [dynamic]int) 0 false loaded-error))
+    (defer (delete text))
+    (let [[window window-ok window-error] (parse-index-entries-page-text-window text raw-base offset limit)]
+      (if window-ok
+        (return window offset true "")
+        (return window 0 false window-error)))))
+
+(defn sqlite-index-root-ordered-entry-at [handle: rawptr, root-id: u64, index: int] -> [entry: int, ok: bool, error: string]
+  (let [[page base page-ok page-error] (sqlite-index-root-ordered-window handle root-id index 1)]
+    (when (not page-ok)
+      (return 0 false page-error))
+    (defer (delete page))
+    (let [offset (- index base)]
+      (when (or (< offset 0)
+                (>= offset (count page)))
+        (return 0 false "sqlite index ordered root entry was outside loaded page"))
+      (return page[offset] true ""))))
+
+(defn sqlite-index-root-ordered-entry-at-cached [handle: rawptr, root-id: u64, index: int, row-count: int, page-size: int, page: ^[dynamic]int, page-start: ^int, page-end: ^int] -> [entry: int, ok: bool, error: string]
+  (when (or (< index 0)
+            (>= index row-count))
+    (return 0 false "sqlite index ordered root cached entry position out of range"))
+  (when (not (and (>= index page-start^)
+                  (< index page-end^)))
+    (let [next-page-start (* (/ index page-size) page-size)
+          [window _base page-ok page-error] (sqlite-index-root-ordered-window handle root-id next-page-start page-size)]
+      (when (not page-ok)
+        (return 0 false page-error))
+      (delete page^)
+      (set! page^ window)
+      (set! page-start^ next-page-start)
+      (set! page-end^ (min (+ next-page-start (count window)) row-count))))
+  (let [offset (- index page-start^)]
+    (when (or (< offset 0)
+              (>= offset (count page^)))
+      (return 0 false "sqlite index ordered root cached entry was outside loaded page"))
+    (return page^[offset] true "")))
+
+(defn sqlite-index-root-ordered-entry-at-shared-cache [handle: rawptr, root-id: u64, index: int, row-count: int, page-size: int, page-cache: ^SQLite-Index-Page-Cache, page: ^[dynamic]int, page-start: ^int, page-end: ^int] -> [entry: int, ok: bool, error: string]
+  (when (or (< index 0)
+            (>= index row-count))
+    (return 0 false "sqlite index ordered root shared-cache entry position out of range"))
+  (when (not (and (>= index page-start^)
+                  (< index page-end^)))
+    (let [next-page-start (* (/ index page-size) page-size)
+          [cached-page cached?] (sqlite-index-page-cache-find-retained page-cache^ root-id 0 next-page-start)]
+      (if cached?
+        (do
+          (delete page^)
+          (set! page^ (arr.into [dynamic]int (slice cached-page.entries 0)))
+          (set! page-start^ cached-page.start)
+          (set! page-end^ cached-page.end)
+          (release-sqlite-loaded-index-page! cached-page))
+        (let [[window _base page-ok page-error] (sqlite-index-root-ordered-window handle root-id next-page-start page-size)]
+          (when (not page-ok)
+            (return 0 false page-error))
+          (let [loaded-page (sqlite-loaded-index-page-from-entries window
+                                                                   next-page-start
+                                                                   (min (+ next-page-start (count window)) row-count))]
+            (sqlite-index-page-cache-store! page-cache root-id 0 next-page-start loaded-page)
+            (delete page^)
+            (set! page^ (arr.into [dynamic]int (slice loaded-page.entries 0)))
+            (set! page-start^ next-page-start)
+            (set! page-end^ (min (+ next-page-start (count loaded-page.entries)) row-count))
+            (release-sqlite-loaded-index-page! loaded-page))
+          ))))
+  (let [offset (- index page-start^)]
+    (when (or (< offset 0)
+              (>= offset (count page^)))
+      (return 0 false "sqlite index ordered root shared-cache entry was outside loaded page"))
+    (return page^[offset] true "")))
+
+(defn sqlite-loaded-index-page-with-owned-datom-entries [handle: rawptr, stmt: rawptr, owned-entries: [dynamic]int, start: int, end: int] -> [page: SQLite-Loaded-Index-Page, ok: bool, error: string]
+  (discard stmt)
+  (let [entry-count (count owned-entries)
+        entries (slice owned-entries 0)
+        datoms (make [dynamic]Datom 0 entry-count)
+        [ordinals entities attrs value-texts txs added batch-ok batch-error] (vev.sqlite-load-datoms-by-log-indexes-parts-raw handle entries)]
+    (defer (delete ordinals))
+    (defer (delete entities))
+    (let [moved-attrs (arr.repeat (count attrs) false)]
+      (defer (delete-owned-strings-array-with-moved attrs moved-attrs))
+      (defer (delete-owned-strings-array value-texts))
+      (defer (delete txs))
+      (defer (delete added))
+      (when (not batch-ok)
+        (delete owned-entries)
+        (delete-owned-datoms datoms)
+        (return (SQLite-Loaded-Index-Page {}) false batch-error))
+      (when (not (= (count ordinals) entry-count))
+        (delete owned-entries)
+        (delete-owned-datoms datoms)
+        (return (SQLite-Loaded-Index-Page {}) false "sqlite batch datom page did not return every requested log index"))
+      (for [_ index entries]
+        (when (or (not (= ordinals[index] index))
+                  (>= index (count entities))
+                  (>= index (count attrs))
+                  (>= index (count value-texts))
+                  (>= index (count txs))
+                  (>= index (count added)))
+          (delete owned-entries)
+          (delete-owned-datoms datoms)
+          (return (SQLite-Loaded-Index-Page {}) false "sqlite batch datom page returned rows out of order"))
+        (let [[value value-ok value-error] (value-from-owned-serial-text value-texts[index])]
+          (when (not value-ok)
+            (delete owned-entries)
+            (delete-owned-datoms datoms)
+            (return (SQLite-Loaded-Index-Page {}) false value-error))
+          (set! moved-attrs[index] true)
+          (arr.push! datoms (Datom {e: entities[index]
+                                    a: attrs[index]
+                                    v: value
+                                    tx: txs[index]
+                                    added: added[index]}))))
+      (return (sqlite-loaded-index-page-from-entries-and-datoms owned-entries datoms start end) true ""))))
+
+(defn sqlite-loaded-index-page-with-datoms [handle: rawptr, stmt: rawptr, entries: []int, start: int, end: int] -> [page: SQLite-Loaded-Index-Page, ok: bool, error: string]
+  (let [owned-entries (arr.into [dynamic]int entries)]
+    (sqlite-loaded-index-page-with-owned-datom-entries handle stmt owned-entries start end)))
+
+(defn sqlite-index-root-ordered-datom-at-shared-cache [handle: rawptr, stmt: rawptr, root-id: u64, index: int, row-count: int, page-size: int, page-cache: ^SQLite-Index-Page-Cache, page: ^[dynamic]int, page-start: ^int, page-end: ^int] -> [entry: int, datom: Datom, ok: bool, error: string]
+  (when (or (< index 0)
+            (>= index row-count))
+    (return 0 (Datom {}) false "sqlite index ordered root shared-cache datom position out of range"))
+  (let [next-page-start (* (/ index page-size) page-size)
+        page-row-end (min (+ next-page-start page-size) row-count)
+        [cached-page cached?] (sqlite-index-page-cache-find-retained page-cache^ root-id 0 next-page-start)]
+    (if cached?
+      (if cached-page.has-datoms
+        (do
+          (delete page^)
+          (set! page^ (arr.into [dynamic]int (slice cached-page.entries 0)))
+          (set! page-start^ cached-page.start)
+          (set! page-end^ cached-page.end)
+          (let [offset (- index cached-page.start)]
+            (when (or (< offset 0)
+                      (>= offset (count cached-page.entries))
+                      (>= offset (count cached-page.datoms)))
+              (release-sqlite-loaded-index-page! cached-page)
+              (return 0 (Datom {}) false "sqlite index ordered root shared-cache datom was outside loaded page"))
+            (let [entry cached-page.entries[offset]
+                  datom (datom-owned cached-page.datoms[offset])]
+              (release-sqlite-loaded-index-page! cached-page)
+              (return entry datom true ""))))
+        (let [[loaded-page loaded-ok loaded-error] (sqlite-loaded-index-page-with-datoms handle stmt (slice cached-page.entries 0) cached-page.start cached-page.end)]
+          (release-sqlite-loaded-index-page! cached-page)
+          (when (not loaded-ok)
+            (return 0 (Datom {}) false loaded-error))
+          (sqlite-index-page-cache-store! page-cache root-id 0 next-page-start loaded-page)
+          (delete page^)
+          (set! page^ (arr.into [dynamic]int (slice loaded-page.entries 0)))
+          (set! page-start^ loaded-page.start)
+          (set! page-end^ loaded-page.end)
+          (let [offset (- index loaded-page.start)]
+            (when (or (< offset 0)
+                      (>= offset (count loaded-page.entries))
+                      (>= offset (count loaded-page.datoms)))
+              (release-sqlite-loaded-index-page! loaded-page)
+              (return 0 (Datom {}) false "sqlite index ordered root loaded datom was outside loaded page"))
+            (let [entry loaded-page.entries[offset]
+                  datom (datom-owned loaded-page.datoms[offset])]
+              (release-sqlite-loaded-index-page! loaded-page)
+              (return entry datom true "")))))
+      (let [[window _base page-ok page-error] (sqlite-index-root-ordered-window handle root-id next-page-start page-size)]
+        (when (not page-ok)
+          (return 0 (Datom {}) false page-error))
+        (let [loaded-page-end (min (+ next-page-start (count window)) row-count)
+              [loaded-page loaded-ok loaded-error] (sqlite-loaded-index-page-with-owned-datom-entries handle stmt window next-page-start loaded-page-end)]
+          (when (not loaded-ok)
+            (return 0 (Datom {}) false loaded-error))
+          (sqlite-index-page-cache-store! page-cache root-id 0 next-page-start loaded-page)
+          (delete page^)
+          (set! page^ (arr.into [dynamic]int (slice loaded-page.entries 0)))
+          (set! page-start^ loaded-page.start)
+          (set! page-end^ loaded-page.end)
+          (let [offset (- index loaded-page.start)]
+            (when (or (< offset 0)
+                      (>= offset (count loaded-page.entries))
+                      (>= offset (count loaded-page.datoms)))
+              (release-sqlite-loaded-index-page! loaded-page)
+              (return 0 (Datom {}) false "sqlite index ordered root loaded datom was outside new page"))
+            (let [entry loaded-page.entries[offset]
+                  datom (datom-owned loaded-page.datoms[offset])]
+              (release-sqlite-loaded-index-page! loaded-page)
+              (return entry datom true ""))))))))
+
+(defn sqlite-index-root-ordered-entry-offset-at-retained-page-cache [handle: rawptr, stmt: rawptr, root-id: u64, index: int, row-count: int, page-size: int, page-cache: ^SQLite-Index-Page-Cache, current-page: ^SQLite-Loaded-Index-Page, current-page-valid: ^bool] -> [out-entry: int, out-offset: int, ok: bool, error: string]
+  (when (or (< index 0)
+            (>= index row-count))
+    (return 0 0 false "sqlite index ordered root retained-page datom position out of range"))
+  (when (and current-page-valid^
+             (>= index current-page^.start)
+             (< index current-page^.end)
+             current-page^.has-datoms)
+    (let [offset (- index current-page^.start)]
+      (when (or (< offset 0)
+                (>= offset (count current-page^.entries))
+                (>= offset (count current-page^.datoms)))
+        (return 0 0 false "sqlite index ordered root retained-page datom was outside loaded page"))
+      (return current-page^.entries[offset] offset true "")))
+  (when current-page-valid^
+    (release-sqlite-loaded-index-page! current-page^)
+    (set! current-page-valid^ false))
+  (let [next-page-start (* (/ index page-size) page-size)
+        [cached-page cached?] (sqlite-index-page-cache-find-retained page-cache^ root-id 0 next-page-start)]
+    (if cached?
+      (if cached-page.has-datoms
+        (do
+          (set! current-page^ cached-page)
+          (set! current-page-valid^ true))
+        (let [[loaded-page loaded-ok loaded-error] (sqlite-loaded-index-page-with-datoms handle stmt (slice cached-page.entries 0) cached-page.start cached-page.end)]
+          (release-sqlite-loaded-index-page! cached-page)
+          (when (not loaded-ok)
+            (return 0 0 false loaded-error))
+          (sqlite-index-page-cache-store! page-cache root-id 0 next-page-start loaded-page)
+          (set! current-page^ loaded-page)
+          (set! current-page-valid^ true)))
+      (let [[window _base page-ok page-error] (sqlite-index-root-ordered-window handle root-id next-page-start page-size)]
+        (when (not page-ok)
+          (return 0 0 false page-error))
+        (let [loaded-page-end (min (+ next-page-start (count window)) row-count)
+              [loaded-page loaded-ok loaded-error] (sqlite-loaded-index-page-with-owned-datom-entries handle stmt window next-page-start loaded-page-end)]
+          (when (not loaded-ok)
+            (return 0 0 false loaded-error))
+          (sqlite-index-page-cache-store! page-cache root-id 0 next-page-start loaded-page)
+          (set! current-page^ loaded-page)
+          (set! current-page-valid^ true)))))
+  (let [offset (- index current-page^.start)]
+    (when (or (not current-page-valid^)
+              (not current-page^.has-datoms)
+              (< offset 0)
+              (>= offset (count current-page^.entries))
+              (>= offset (count current-page^.datoms)))
+      (return 0 0 false "sqlite index ordered root retained-page datom was outside loaded page after load"))
+    (return current-page^.entries[offset] offset true "")))
+
+(defn sqlite-index-root-ordered-datom-at-retained-page-cache [handle: rawptr, stmt: rawptr, root-id: u64, index: int, row-count: int, page-size: int, page-cache: ^SQLite-Index-Page-Cache, current-page: ^SQLite-Loaded-Index-Page, current-page-valid: ^bool] -> [out-entry: int, datom: Datom, ok: bool, error: string]
+  (let [[found-entry found-offset offset-ok offset-error] (sqlite-index-root-ordered-entry-offset-at-retained-page-cache handle stmt root-id index row-count page-size page-cache current-page current-page-valid)]
+    (when (not offset-ok)
+      (return 0 (Datom {}) false offset-error))
+    (return found-entry (datom-owned current-page^.datoms[found-offset]) true "")))
+
+(defn sqlite-index-root-boundary-entry [handle: rawptr, root-id: u64, order: string, last?: bool] -> [entry: int, ok: bool, error: string]
+  (let [[row-count first-key _level info-ok info-error] (vev.sqlite-index-chunk-info-by-id-raw handle root-id)]
+    (when (not info-ok)
+      (return 0 false info-error))
+    (defer (delete first-key))
+    (when (= row-count 0)
+      (return 0 false "sqlite index root boundary requested for empty root"))
+    (let [[bound-first bound-last bounds-ok bounds-error] (vev.sqlite-index-chunk-bounds-by-id-raw handle root-id)]
+      (when (not bounds-ok)
+        (return 0 false bounds-error))
+      (let [bound-text (if last? bound-last bound-first)
+            [bound-entry bound-entry-ok] (parse-index-bound-entry bound-text)]
+        (delete bound-first)
+        (delete bound-last)
+        (when bound-entry-ok
+          (return bound-entry true ""))))
+    (when (not (sqlite-index-merge-root-key? first-key))
+      (return (sqlite-index-root-ordered-entry-at handle root-id (if last? (- (int row-count) 1) 0))))
+    (let [[child-count child-count-ok child-count-error] (vev.sqlite-index-chunk-child-count-raw handle root-id)]
+      (when (not child-count-ok)
+        (return 0 false child-count-error))
+      (let [found false
+            best-entry 0]
+        (for [ordinal (arr.range 0 (int child-count))]
+          (let [[child-root child-ok child-error] (vev.sqlite-index-child-chunk-id-raw handle root-id (i64 ordinal))]
+            (when (not child-ok)
+              (return 0 false child-error))
+            (let [[child-entry child-entry-ok child-entry-error] (sqlite-index-root-boundary-entry handle child-root order last?)]
+              (when (not child-entry-ok)
+                (return 0 false child-entry-error))
+              (if (not found)
+                (do
+                  (set! found true)
+                  (set! best-entry child-entry))
+                (let [[child-less less-ok less-error] (sqlite-index-root-entry-less? handle order child-entry best-entry)]
+                  (when (not less-ok)
+                    (return 0 false less-error))
+                  (when (if last? (not child-less) child-less)
+                    (set! best-entry child-entry)))))))
+        (if found
+          (return best-entry true "")
+          (return 0 false "sqlite merge root boundary had no children"))))))
+
+(defn sqlite-index-cursor-boundary-entry [cursor: ^SQLite-Index-Cursor, last?: bool] -> [entry: int, ok: bool, error: string]
+  (when (= cursor^.row-count 0)
+    (return 0 false "sqlite index cursor boundary requested for empty cursor"))
+  (when cursor^.root-is-manifest
+    (return (sqlite-index-cursor-at cursor (if last? (- cursor^.row-count 1) 0))))
+  (sqlite-index-root-boundary-entry cursor^.handle cursor^.root-id cursor^.order-text last?))
+
+(defn sqlite-index-merge-child-entry-at-cached [handle: rawptr, roots: []u64, counts: []int, child-index: int, position: int, page-size: int, page0: ^[dynamic]int, page-start0: ^int, page-end0: ^int, page1: ^[dynamic]int, page-start1: ^int, page-end1: ^int, page2: ^[dynamic]int, page-start2: ^int, page-end2: ^int, page3: ^[dynamic]int, page-start3: ^int, page-end3: ^int] -> [entry: int, ok: bool, error: string]
+  (cond
+    (= child-index 0)
+      (sqlite-index-root-ordered-entry-at-cached handle roots[child-index] position counts[child-index] page-size page0 page-start0 page-end0)
+    (= child-index 1)
+      (sqlite-index-root-ordered-entry-at-cached handle roots[child-index] position counts[child-index] page-size page1 page-start1 page-end1)
+    (= child-index 2)
+      (sqlite-index-root-ordered-entry-at-cached handle roots[child-index] position counts[child-index] page-size page2 page-start2 page-end2)
+    (= child-index 3)
+      (sqlite-index-root-ordered-entry-at-cached handle roots[child-index] position counts[child-index] page-size page3 page-start3 page-end3)
+    :else
+      (sqlite-index-root-ordered-entry-at handle roots[child-index] position)))
+
+(defn sqlite-index-merge-child-entry-and-datom-at-cached [cursor: ^SQLite-Index-Cursor, child-index: int, position: int] -> [entry: int, datom: Datom, ok: bool, error: string]
+  (when (or (< child-index 0)
+            (>= child-index (count cursor^.merge-roots))
+            (>= child-index (count cursor^.merge-counts))
+            (>= child-index (count cursor^.merge-loaded-pages))
+            (>= child-index (count cursor^.merge-loaded-page-valid)))
+    (return 0 (Datom {}) false "sqlite merge child index out of range"))
+  (sqlite-index-root-ordered-datom-at-retained-page-cache
+    cursor^.handle
+    cursor^.datom-stmt
+    cursor^.merge-roots[child-index]
+    position
+    cursor^.merge-counts[child-index]
+    cursor^.page-size
+    (addr cursor^.page-cache)
+    (addr cursor^.merge-loaded-pages[child-index])
+    (addr cursor^.merge-loaded-page-valid[child-index])))
+
+(defn sqlite-index-root-entry-less? [handle: rawptr, order: string, left: int, right: int] -> [less: bool, ok: bool, error: string]
+  (let [[left-text left-text-ok left-text-error] (vev.sqlite-load-datom-by-log-index-text-raw handle (i64 left))]
+    (when (not left-text-ok)
+      (return false false left-text-error))
+    (defer (delete left-text))
+    (let [[left-datom left-ok left-error] (datom-from-owned-serial-text left-text)]
+      (when (not left-ok)
+        (return false false left-error))
+      (defer (delete-owned-datom left-datom))
+      (let [[right-text right-text-ok right-text-error] (vev.sqlite-load-datom-by-log-index-text-raw handle (i64 right))]
+        (when (not right-text-ok)
+          (return false false right-text-error))
+        (defer (delete right-text))
+        (let [[right-datom right-ok right-error] (datom-from-owned-serial-text right-text)]
+          (when (not right-ok)
+            (return false false right-error))
+          (defer (delete-owned-datom right-datom))
+          (return (datom-less-order? left-datom right-datom order left right) true ""))))))
+
+(defn sqlite-load-datom-by-log-index-handle [handle: rawptr, log-index: int] -> [datom: Datom, ok: bool, error: string]
+  (let [[text loaded-ok loaded-error] (vev.sqlite-load-datom-by-log-index-text-raw handle (i64 log-index))]
+    (when (not loaded-ok)
+      (return (Datom {}) false loaded-error))
+    (defer (delete text))
+    (datom-from-owned-serial-text text)))
+
+(defn sqlite-load-datom-by-log-index-handle-stmt [handle: rawptr, stmt: rawptr, log-index: int] -> [datom: Datom, ok: bool, error: string]
+  (when (= stmt nil)
+    (return (sqlite-load-datom-by-log-index-handle handle log-index)))
+  (let [[entity attr value-text tx added loaded-ok loaded-error] (vev.sqlite-step-prepared-datom-by-log-index-parts-raw handle stmt (i64 log-index))]
+    (when (not loaded-ok)
+      (return (Datom {}) false loaded-error))
+    (defer (delete value-text))
+    (let [[value value-ok value-error] (value-from-owned-serial-text value-text)]
+      (when (not value-ok)
+        (delete attr)
+        (return (Datom {}) false value-error))
+      (return (Datom {e: entity a: attr v: value tx: tx added: added}) true ""))))
+
+(defn sqlite-load-datom-entity-by-log-index-handle-stmt [handle: rawptr, stmt: rawptr, log-index: int] -> [entity: u64, ok: bool, error: string]
+  (when (= stmt nil)
+    (let [[datom datom-ok datom-error] (sqlite-load-datom-by-log-index-handle handle log-index)]
+      (when (not datom-ok)
+        (return 0 false datom-error))
+      (let [entity datom.e]
+        (delete-owned-datom datom)
+        (return entity true ""))))
+  (vev.sqlite-step-prepared-datom-entity-by-log-index-raw handle stmt (i64 log-index)))
+
+(defn sqlite-load-datom-attr-by-log-index-handle-stmt [handle: rawptr, stmt: rawptr, log-index: int] -> [attr: string, ok: bool, error: string]
+  (when (= stmt nil)
+    (let [[datom datom-ok datom-error] (sqlite-load-datom-by-log-index-handle handle log-index)]
+      (when (not datom-ok)
+        (return "" false datom-error))
+      (let [attr (string-owned datom.a)]
+        (delete-owned-datom datom)
+        (return attr true ""))))
+  (vev.sqlite-step-prepared-datom-attr-by-log-index-raw handle stmt (i64 log-index)))
+
+(defn delete-active-datoms! [datoms: ^[dynamic]Datom, active: ^[dynamic]bool]
+  (for [index (arr.range 0 (count active^))]
+    (when active^[index]
+      (delete-owned-datom datoms^[index])
+      (set! active^[index] false))))
+
+(defn sqlite-index-root-entry-at [handle: rawptr, root-id: u64, order: string, index: int] -> [entry: int, ok: bool, error: string]
+  (let [[row-count first-key _level info-ok info-error] (vev.sqlite-index-chunk-info-by-id-raw handle root-id)]
+    (when (not info-ok)
+      (return 0 false info-error))
+    (defer (delete first-key))
+    (when (or (< index 0)
+              (>= index (int row-count)))
+      (return 0 false "sqlite index root entry position out of range"))
+    (when (not (sqlite-index-merge-root-key? first-key))
+      (return (sqlite-index-root-ordered-entry-at handle root-id index)))
+    (let [[child-count child-count-ok child-count-error] (vev.sqlite-index-chunk-child-count-raw handle root-id)]
+      (when (not child-count-ok)
+        (return 0 false child-count-error))
+      (let [roots (make [dynamic]u64) :defer
+            counts (make [dynamic]int) :defer
+            positions (make [dynamic]int) :defer]
+        (for [ordinal (arr.range 0 (int child-count))]
+          (let [[child-root child-ok child-error] (vev.sqlite-index-child-chunk-id-raw handle root-id (i64 ordinal))]
+            (when (not child-ok)
+              (return 0 false child-error))
+            (let [[child-count-value child-key _child-level child-info-ok child-info-error] (vev.sqlite-index-chunk-info-by-id-raw handle child-root)]
+              (when (not child-info-ok)
+                (return 0 false child-info-error))
+              (delete child-key)
+              (arr.push! roots child-root)
+              (arr.push! counts (int child-count-value))
+              (arr.push! positions 0))))
+        (let [produced 0]
+          (while true
+            (let [best-child -1
+                  best-entry 0]
+              (for [child-index (arr.range 0 (count roots))]
+                (when (< positions[child-index] counts[child-index])
+                  (let [[candidate candidate-ok candidate-error] (sqlite-index-root-entry-at handle roots[child-index] order positions[child-index])]
+                    (when (not candidate-ok)
+                      (return 0 false candidate-error))
+                    (if (= best-child -1)
+                      (do
+                        (set! best-child child-index)
+                        (set! best-entry candidate))
+                      (let [[candidate-less less-ok less-error] (sqlite-index-root-entry-less? handle order candidate best-entry)]
+                        (when (not less-ok)
+                          (return 0 false less-error))
+                        (when candidate-less
+                          (set! best-child child-index)
+                          (set! best-entry candidate)))))))
+              (when (= best-child -1)
+                (return 0 false "sqlite merge root entry was not found"))
+              (when (= produced index)
+                (return best-entry true ""))
+              (set! positions[best-child] (+ positions[best-child] 1))
+              (set! produced (+ produced 1)))))
+          (return 0 false "sqlite merge root entry loop exited unexpectedly")))))
+
+(defn sqlite-index-merge-root-child-runs-into! [handle: rawptr, root-id: u64, roots: ^[dynamic]u64, counts: ^[dynamic]int] -> [ok: bool, error: string]
+  (let [[child-count child-count-ok child-count-error] (vev.sqlite-index-chunk-child-count-raw handle root-id)]
+    (when (not child-count-ok)
+      (return false child-count-error))
+    (for [ordinal (arr.range 0 (int child-count))]
+      (let [[child-root child-ok child-error] (vev.sqlite-index-child-chunk-id-raw handle root-id (i64 ordinal))]
+        (when (not child-ok)
+          (return false child-error))
+        (let [[child-count-value child-key _child-level child-info-ok child-info-error] (vev.sqlite-index-chunk-info-by-id-raw handle child-root)]
+          (when (not child-info-ok)
+            (return false child-info-error))
+          (if (sqlite-index-merge-root-key? child-key)
+            (do
+              (delete child-key)
+              (let [[nested-ok nested-error] (sqlite-index-merge-root-child-runs-into! handle child-root roots counts)]
+                (when (not nested-ok)
+                  (return false nested-error))))
+            (do
+              (delete child-key)
+              (arr.push! roots^ child-root)
+              (arr.push! counts^ (int child-count-value)))))))
+    (return true "")))
+
+(defn sqlite-index-merge-root-child-runs [handle: rawptr, root-id: u64] -> [roots: [dynamic]u64, counts: [dynamic]int, ok: bool, error: string]
+  (let [run-roots (make [dynamic]u64)
+        run-counts (make [dynamic]int)
+        [runs-ok runs-error] (sqlite-index-merge-root-child-runs-into! handle root-id (addr run-roots) (addr run-counts))]
+    (if runs-ok
+      (return run-roots run-counts true "")
+      (do
+        (delete run-roots)
+        (delete run-counts)
+        (return (make [dynamic]u64) (make [dynamic]int) false runs-error)))))
+
+(defn sqlite-index-cursor-child-runs [cursor: ^SQLite-Index-Cursor] -> [roots: [dynamic]u64, counts: [dynamic]int, ok: bool, error: string]
+  (if cursor^.root-is-manifest
+    (sqlite-index-run-manifest-child-runs cursor^.handle cursor^.manifest-id)
+    (sqlite-index-merge-root-child-runs cursor^.handle cursor^.root-id)))
+
+(defn sqlite-index-cursor-init-merge-state! [cursor: ^SQLite-Index-Cursor] -> [ok: bool, error: string]
+  (when (= cursor^.datom-stmt nil)
+    (return false "sqlite merge index cursor was missing datom lookup statement"))
+  (sqlite-index-cursor-clear-merge-state! cursor)
+  (let [[roots counts runs-ok runs-error] (sqlite-index-cursor-child-runs cursor)]
+    (when (not runs-ok)
+      (delete roots)
+      (delete counts)
+      (return false runs-error))
+    (delete cursor^.merge-roots)
+    (delete cursor^.merge-counts)
+    (set! cursor^.merge-roots roots)
+    (set! cursor^.merge-counts counts)
+    (for [child-index (arr.range 0 (count cursor^.merge-roots))]
+      (arr.push! cursor^.merge-positions 0)
+      (arr.push! cursor^.merge-loaded-pages (SQLite-Loaded-Index-Page {}))
+      (arr.push! cursor^.merge-loaded-page-valid false)
+      (if (> cursor^.merge-counts[child-index] 0)
+        (let [[entry datom entry-ok entry-error] (sqlite-index-merge-child-entry-and-datom-at-cached cursor child-index 0)]
+          (when (not entry-ok)
+            (sqlite-index-cursor-clear-merge-state! cursor)
+            (return false entry-error))
+          (arr.push! cursor^.merge-current-datoms datom)
+          (arr.push! cursor^.merge-current-entries entry)
+          (arr.push! cursor^.merge-has-current true))
+        (do
+          (arr.push! cursor^.merge-current-datoms (Datom {}))
+          (arr.push! cursor^.merge-current-entries 0)
+          (arr.push! cursor^.merge-has-current false))))
+    (set! cursor^.merge-ready true)
+    (set! cursor^.merge-next-output 0)
+    (return true "")))
+
+(defn sqlite-index-cursor-produce-next-merge-entry! [cursor: ^SQLite-Index-Cursor] -> [entry: int, datom: Datom, ok: bool, error: string]
+  (let [best-child -1
+        best-entry 0]
+    (for [child-index (arr.range 0 (count cursor^.merge-roots))]
+      (when cursor^.merge-has-current[child-index]
+        (if (= best-child -1)
+          (do
+            (set! best-child child-index)
+            (set! best-entry cursor^.merge-current-entries[child-index]))
+          (let [candidate-less (datom-less-order? cursor^.merge-current-datoms[child-index] cursor^.merge-current-datoms[best-child] cursor^.order-text cursor^.merge-current-entries[child-index] best-entry)]
+            (when candidate-less
+              (set! best-child child-index)
+              (set! best-entry cursor^.merge-current-entries[child-index]))))))
+    (when (= best-child -1)
+      (return 0 (Datom {}) false "sqlite merge root page ended before expected row count"))
+    (set! cursor^.merge-positions[best-child] (+ cursor^.merge-positions[best-child] 1))
+    (let [out-datom cursor^.merge-current-datoms[best-child]]
+    (set! cursor^.merge-has-current[best-child] false)
+    (set! cursor^.merge-current-datoms[best-child] (Datom {}))
+    (if (< cursor^.merge-positions[best-child] cursor^.merge-counts[best-child])
+      (let [[next-entry next-datom next-ok next-error] (sqlite-index-merge-child-entry-and-datom-at-cached cursor best-child cursor^.merge-positions[best-child])]
+        (when (not next-ok)
+          (delete-owned-datom out-datom)
+          (return 0 (Datom {}) false next-error))
+        (set! cursor^.merge-current-datoms[best-child] next-datom)
+        (set! cursor^.merge-current-entries[best-child] next-entry)
+        (set! cursor^.merge-has-current[best-child] true))
+      (set! cursor^.merge-has-current[best-child] false))
+    (set! cursor^.merge-next-output (+ cursor^.merge-next-output 1))
+      (return best-entry out-datom true ""))))
+
+(defn sqlite-index-cursor-load-merge-page! [cursor: ^SQLite-Index-Cursor, page-start: int] -> [ok: bool, error: string]
+  (let [page-end (min (+ page-start cursor^.page-size) cursor^.row-count)
+        out (make [dynamic]int 0 (- page-end page-start))
+        out-datoms (make [dynamic]Datom 0 (- page-end page-start))]
+    (when (or (not cursor^.merge-ready)
+              (> cursor^.merge-next-output page-start))
+      (let [[init-ok init-error] (sqlite-index-cursor-init-merge-state! cursor)]
+        (when (not init-ok)
+          (delete out)
+          (delete-owned-datoms out-datoms)
+          (return false init-error))))
+    (while (< cursor^.merge-next-output page-start)
+      (let [[skipped-entry skipped-datom skipped-ok skipped-error] (sqlite-index-cursor-produce-next-merge-entry! cursor)]
+        (discard skipped-entry)
+        (delete-owned-datom skipped-datom)
+        (when (not skipped-ok)
+          (delete out)
+          (delete-owned-datoms out-datoms)
+          (return false skipped-error))))
+    (while (< cursor^.merge-next-output page-end)
+      (let [[entry datom entry-ok entry-error] (sqlite-index-cursor-produce-next-merge-entry! cursor)]
+        (when (not entry-ok)
+          (if (= entry-error "sqlite merge root page ended before expected row count")
+            (break)
+            (do
+              (delete out)
+              (delete-owned-datoms out-datoms)
+              (return false entry-error))))
+        (arr.push! out entry)
+        (arr.push! out-datoms datom)))
+    (let [loaded-page (sqlite-loaded-index-page-from-entries-and-datoms out out-datoms page-start (+ page-start (count out)))]
+      (sqlite-index-page-cache-store! (addr cursor^.page-cache) cursor^.root-id cursor^.manifest-id page-start loaded-page)
+      (release-sqlite-loaded-index-page! cursor^.page)
+      (set! cursor^.page loaded-page))
+    (return true "")))
+
+(defn sqlite-index-cursor-load-page! [cursor: ^SQLite-Index-Cursor, offset: int] -> [ok: bool, error: string]
+  (when (< offset 0)
+    (return false "sqlite index cursor offset was negative"))
+  (when (>= offset cursor^.row-count)
+    (release-sqlite-loaded-index-page! cursor^.page)
+    (set! cursor^.page (sqlite-loaded-index-page-empty cursor^.row-count))
+    (return true ""))
+  (when (and (>= offset cursor^.page.start)
+             (< offset cursor^.page.end))
+    (return true ""))
+  (let [page-start (* (/ offset cursor^.page-size) cursor^.page-size)]
+    (let [[cached-page cached?] (sqlite-index-page-cache-find-retained cursor^.page-cache cursor^.root-id cursor^.manifest-id page-start)]
+      (when cached?
+        (release-sqlite-loaded-index-page! cursor^.page)
+        (set! cursor^.page cached-page)
+        (return true "")))
+    (when (or cursor^.root-is-merge cursor^.root-is-manifest)
+      (return (sqlite-index-cursor-load-merge-page! cursor page-start)))
+    (let [[window loaded-ok loaded-error] (sqlite-index-cursor-load-direct-root-window cursor page-start)]
+      (when (not loaded-ok)
+        (return false loaded-error))
+      (let [page-end (min (+ page-start (count window)) cursor^.row-count)]
+        (let [loaded-page (sqlite-loaded-index-page-from-entries window page-start page-end)]
+          (sqlite-index-page-cache-store! (addr cursor^.page-cache) cursor^.root-id cursor^.manifest-id page-start loaded-page)
+          (release-sqlite-loaded-index-page! cursor^.page)
+          (set! cursor^.page loaded-page)))
+      (return true ""))))
+
+(defn sqlite-index-cursor-load-page-with-datoms! [cursor: ^SQLite-Index-Cursor, offset: int] -> [ok: bool, error: string]
+  (when (< offset 0)
+    (return false "sqlite index cursor offset was negative"))
+  (when (>= offset cursor^.row-count)
+    (release-sqlite-loaded-index-page! cursor^.page)
+    (set! cursor^.page (sqlite-loaded-index-page-empty cursor^.row-count))
+    (return true ""))
+  (when (and (>= offset cursor^.page.start)
+             (< offset cursor^.page.end)
+             cursor^.page.has-datoms)
+    (return true ""))
+  (let [page-start (* (/ offset cursor^.page-size) cursor^.page-size)]
+    (let [[cached-page cached?] (sqlite-index-page-cache-find-retained cursor^.page-cache cursor^.root-id cursor^.manifest-id page-start)]
+      (when cached?
+        (when cached-page.has-datoms
+          (release-sqlite-loaded-index-page! cursor^.page)
+          (set! cursor^.page cached-page)
+          (return true ""))
+        (release-sqlite-loaded-index-page! cached-page)))
+    (when (or cursor^.root-is-merge cursor^.root-is-manifest)
+      (let [[merge-ok merge-error] (sqlite-index-cursor-load-merge-page! cursor page-start)]
+        (return merge-ok merge-error)))
+    (when (not (and (>= offset cursor^.page.start)
+                    (< offset cursor^.page.end)))
+      (let [[page-ok page-error] (sqlite-index-cursor-load-page! cursor offset)]
+        (when (not page-ok)
+          (return false page-error))))
+    (let [[loaded-page loaded-ok loaded-error] (sqlite-loaded-index-page-with-datoms cursor^.handle cursor^.datom-stmt (slice cursor^.page.entries 0) cursor^.page.start cursor^.page.end)]
+      (when (not loaded-ok)
+        (return false loaded-error))
+      (sqlite-index-page-cache-store! (addr cursor^.page-cache) cursor^.root-id cursor^.manifest-id cursor^.page.start loaded-page)
+      (release-sqlite-loaded-index-page! cursor^.page)
+      (set! cursor^.page loaded-page)
+      (return true ""))))
+
+(defn sqlite-index-cursor-at [cursor: ^SQLite-Index-Cursor, index: int] -> [entry: int, ok: bool, error: string]
+  (when (or (< index 0)
+            (>= index cursor^.row-count))
+    (return 0 false "sqlite index cursor position out of range"))
+  (let [[page-ok page-error] (sqlite-index-cursor-load-page! cursor index)]
+    (when (not page-ok)
+      (return 0 false page-error))
+    (let [offset (- index cursor^.page.start)]
+      (when (or (< offset 0)
+                (>= offset (count cursor^.page.entries)))
+        (return 0 false "sqlite index cursor page did not contain requested position"))
+      (return cursor^.page.entries[offset] true ""))))
+
+(defn sqlite-index-cursor-datom-at [cursor: ^SQLite-Index-Cursor, index: int] -> [datom: Datom, ok: bool, error: string]
+  (when (or (< index 0)
+            (>= index cursor^.row-count))
+    (return (Datom {}) false "sqlite index cursor datom position out of range"))
+  (let [[page-ok page-error] (sqlite-index-cursor-load-page-with-datoms! cursor index)]
+    (when (not page-ok)
+      (return (Datom {}) false page-error))
+    (let [offset (- index cursor^.page.start)]
+      (when (or (< offset 0)
+                (>= offset (count cursor^.page.datoms)))
+        (return (Datom {}) false "sqlite index cursor datom page did not contain requested position"))
+      (return (datom-owned cursor^.page.datoms[offset]) true ""))))
+
+(defn sqlite-index-cursor-entry-offset-at [cursor: ^SQLite-Index-Cursor, index: int] -> [out-entry: int, out-offset: int, ok: bool, error: string]
+  (when (or (< index 0)
+            (>= index cursor^.row-count))
+    (return 0 0 false "sqlite index cursor datom position out of range"))
+  (let [[page-ok page-error] (sqlite-index-cursor-load-page-with-datoms! cursor index)]
+    (when (not page-ok)
+      (return 0 0 false page-error))
+    (let [offset (- index cursor^.page.start)]
+      (when (or (< offset 0)
+                (>= offset (count cursor^.page.entries)))
+        (return 0 0 false "sqlite index cursor page did not contain requested position"))
+      (let [loaded-entry cursor^.page.entries[offset]]
+        (when (or (< offset 0)
+                  (>= offset (count cursor^.page.datoms)))
+          (return 0 0 false "sqlite index cursor datom page did not contain requested position"))
+        (return loaded-entry offset true "")))))
+
+(defn sqlite-index-cursor-entry-and-datom-at [cursor: ^SQLite-Index-Cursor, index: int] -> [out-entry: int, datom: Datom, ok: bool, error: string]
+  (let [[found-entry found-offset offset-ok offset-error] (sqlite-index-cursor-entry-offset-at cursor index)]
+    (when (not offset-ok)
+      (return 0 (Datom {}) false offset-error))
+    (return found-entry (datom-owned cursor^.page.datoms[found-offset]) true "")))
+
+(defn sqlite-index-cursor-clear-merge-state! [cursor: ^SQLite-Index-Cursor]
+  (delete-active-datoms! (addr cursor^.merge-current-datoms) (addr cursor^.merge-has-current))
+  (delete cursor^.merge-roots)
+  (delete cursor^.merge-counts)
+  (delete cursor^.merge-positions)
+  (delete cursor^.merge-current-entries)
+  (delete cursor^.merge-current-datoms)
+  (delete cursor^.merge-has-current)
+  (for [loaded-page page-index cursor^.merge-loaded-pages]
+    (when cursor^.merge-loaded-page-valid[page-index]
+      (release-sqlite-loaded-index-page! loaded-page)))
+  (delete cursor^.merge-loaded-pages)
+  (delete cursor^.merge-loaded-page-valid)
+  (delete cursor^.merge-page0)
+  (delete cursor^.merge-page1)
+  (delete cursor^.merge-page2)
+  (delete cursor^.merge-page3)
+  (set! cursor^.merge-ready false)
+  (set! cursor^.merge-next-output 0)
+  (set! cursor^.merge-roots (make [dynamic]u64))
+  (set! cursor^.merge-counts (make [dynamic]int))
+  (set! cursor^.merge-positions (make [dynamic]int))
+  (set! cursor^.merge-current-entries (make [dynamic]int))
+  (set! cursor^.merge-current-datoms (make [dynamic]Datom))
+  (set! cursor^.merge-has-current (make [dynamic]bool))
+  (set! cursor^.merge-loaded-pages (make [dynamic]SQLite-Loaded-Index-Page))
+  (set! cursor^.merge-loaded-page-valid (make [dynamic]bool))
+  (set! cursor^.merge-page0 (make [dynamic]int))
+  (set! cursor^.merge-page-start0 -1)
+  (set! cursor^.merge-page-end0 -1)
+  (set! cursor^.merge-page1 (make [dynamic]int))
+  (set! cursor^.merge-page-start1 -1)
+  (set! cursor^.merge-page-end1 -1)
+  (set! cursor^.merge-page2 (make [dynamic]int))
+  (set! cursor^.merge-page-start2 -1)
+  (set! cursor^.merge-page-end2 -1)
+  (set! cursor^.merge-page3 (make [dynamic]int))
+  (set! cursor^.merge-page-start3 -1)
+  (set! cursor^.merge-page-end3 -1))
+
+(defn close-sqlite-index-cursor! [cursor: ^SQLite-Index-Cursor]
+  (sqlite-index-cursor-clear-merge-state! cursor)
+  (when (not (= cursor^.datom-stmt nil))
+    (vev.sqlite-finalize-stmt-raw cursor^.datom-stmt))
+  (when (not (= cursor^.entry-page-stmt nil))
+    (vev.sqlite-finalize-stmt-raw cursor^.entry-page-stmt))
+  (when cursor^.owns-handle
+    (vev.sqlite-close-live-raw cursor^.handle))
+  (delete cursor^.index-name)
+  (delete cursor^.root-first-key)
+  (delete cursor^.order-text)
+  (delete cursor^.direct-child-roots)
+  (delete cursor^.direct-child-counts)
+  (delete cursor^.entry-run-roots)
+  (delete cursor^.entry-run-bases)
+  (delete cursor^.entry-run-counts)
+  (delete cursor^.entry-run-entry-payloads)
+  (release-sqlite-loaded-index-page! cursor^.page)
+  (release-sqlite-index-page-cache! cursor^.page-cache)
+  (set! cursor^ (SQLite-Index-Cursor {})))
+
+(defn close-sqlite-index-cursor [cursor: SQLite-Index-Cursor]
+  (let [owned cursor]
+    (close-sqlite-index-cursor! (addr owned))))
+
+(defn sqlite-index-snapshot-cursor [snapshot: ^SQLite-Index-Snapshot, order: Public-Index-Order] -> ^SQLite-Index-Cursor
+  (cond
+    (= order .EAVT) (addr snapshot^.eavt)
+    (= order .AEVT) (addr snapshot^.aevt)
+    (= order .AVET) (addr snapshot^.avet)
+    :else (addr snapshot^.vaet)))
+
+(defn sqlite-index-snapshot-view [snapshot: ^SQLite-Index-Snapshot, order: Public-Index-Order] -> DB-Index-View
+  (db-index-view-from-sqlite-cursor order (sqlite-index-snapshot-cursor snapshot order)))
+
+(defn sqlite-index-snapshot-share-page-cache! [snapshot: ^SQLite-Index-Snapshot]
+  (let [cache (sqlite-index-page-cache-empty)]
+    (sqlite-index-cursor-use-page-cache! (addr snapshot^.eavt) cache)
+    (sqlite-index-cursor-use-page-cache! (addr snapshot^.aevt) cache)
+    (sqlite-index-cursor-use-page-cache! (addr snapshot^.avet) cache)
+    (sqlite-index-cursor-use-page-cache! (addr snapshot^.vaet) cache)
+    (release-sqlite-index-page-cache! cache)))
+
+(defn sqlite-index-snapshot-use-page-cache! [snapshot: ^SQLite-Index-Snapshot, cache: SQLite-Index-Page-Cache]
+  (sqlite-index-cursor-use-page-cache! (addr snapshot^.eavt) cache)
+  (sqlite-index-cursor-use-page-cache! (addr snapshot^.aevt) cache)
+  (sqlite-index-cursor-use-page-cache! (addr snapshot^.avet) cache)
+  (sqlite-index-cursor-use-page-cache! (addr snapshot^.vaet) cache))
+
+(defn sqlite-index-snapshot-page-cache-ref-count [snapshot: ^SQLite-Index-Snapshot] -> int
+  (sqlite-index-page-cache-ref-count snapshot^.eavt.page-cache))
+
+(defn sqlite-index-snapshot-page-cache-count [snapshot: ^SQLite-Index-Snapshot] -> int
+  (sqlite-index-page-cache-count snapshot^.eavt.page-cache))
+
+(defn sqlite-index-snapshot-page-cache-hit-count [snapshot: ^SQLite-Index-Snapshot] -> int
+  (sqlite-index-page-cache-hit-count snapshot^.eavt.page-cache))
+
+(defn sqlite-index-snapshot-page-cache-miss-count [snapshot: ^SQLite-Index-Snapshot] -> int
+  (sqlite-index-page-cache-miss-count snapshot^.eavt.page-cache))
+
+(defn sqlite-index-snapshot-datom-at-log-index [snapshot: ^SQLite-Index-Snapshot, log-index: int] -> [datom: Datom, ok: bool, error: string]
+  (let [[text loaded-ok loaded-error] (vev.sqlite-load-datom-by-log-index-text-raw snapshot^.handle (i64 log-index))]
+    (when (not loaded-ok)
+      (return (Datom {}) false loaded-error))
+    (defer (delete text))
+    (let [[value read-error read-ok] (edn.try-read text)]
+      (when (not read-ok)
+        (return (Datom {}) false read-error.message))
+      (let [doc (edn-doc-from-data value)]
+        (defer (delete doc.nodes))
+        (datom-from-edn-node doc doc.root)))))
+
+(defn sqlite-open-index-snapshot-handle [handle: rawptr, page-size: int] -> [snapshot: SQLite-Index-Snapshot, ok: bool, error: string]
+  (when (<= page-size 0)
+    (return (SQLite-Index-Snapshot {}) false "sqlite index snapshot page size must be positive"))
+  (let [[basis basis-ok basis-error] (vev.sqlite-latest-index-root-basis-raw handle)]
+    (when (not basis-ok)
+      (return (SQLite-Index-Snapshot {}) false basis-error))
+    (sqlite-open-index-snapshot-handle-at-basis handle basis page-size)))
+
+(defn sqlite-open-index-snapshot-handle-at-basis [handle: rawptr, basis-tx: u64, page-size: int] -> [snapshot: SQLite-Index-Snapshot, ok: bool, error: string]
+  (when (<= page-size 0)
+    (return (SQLite-Index-Snapshot {}) false "sqlite index snapshot page size must be positive"))
+  (let [[eavt eavt-ok eavt-error] (sqlite-open-index-cursor-handle-at-basis handle ":eavt" basis-tx page-size)]
+    (when (not eavt-ok)
+      (return (SQLite-Index-Snapshot {}) false eavt-error))
+    (let [[aevt aevt-ok aevt-error] (sqlite-open-index-cursor-handle-at-basis handle ":aevt" basis-tx page-size)]
+      (when (not aevt-ok)
+        (close-sqlite-index-cursor eavt)
+        (return (SQLite-Index-Snapshot {}) false aevt-error))
+      (let [[avet avet-ok avet-error] (sqlite-open-index-cursor-handle-at-basis handle ":avet" basis-tx page-size)]
+        (when (not avet-ok)
+          (close-sqlite-index-cursor eavt)
+          (close-sqlite-index-cursor aevt)
+          (return (SQLite-Index-Snapshot {}) false avet-error))
+        (let [[vaet vaet-ok vaet-error] (sqlite-open-index-cursor-handle-at-basis handle ":vaet" basis-tx page-size)]
+          (when (not vaet-ok)
+            (close-sqlite-index-cursor eavt)
+            (close-sqlite-index-cursor aevt)
+            (close-sqlite-index-cursor avet)
+            (return (SQLite-Index-Snapshot {}) false vaet-error))
+          (let [opened-indexes (SQLite-Index-Snapshot {handle: handle
+                                                       owns-handle: false
+                                                       page-size: page-size
+                                                       eavt: eavt
+                                                       aevt: aevt
+                                                       avet: avet
+                                                       vaet: vaet})]
+            (sqlite-index-snapshot-share-page-cache! (addr opened-indexes))
+            (return opened-indexes true "")))))))
+
+(defn sqlite-open-index-snapshot-handle-at-root-set [handle: rawptr, basis-tx: u64, roots: SQLite-Index-Root-Set, page-size: int] -> [snapshot: SQLite-Index-Snapshot, ok: bool, error: string]
+  (when (<= page-size 0)
+    (return (SQLite-Index-Snapshot {}) false "sqlite index snapshot page size must be positive"))
+  (let [[eavt eavt-ok eavt-error] (sqlite-open-index-cursor-handle-at-root-page handle ":eavt" basis-tx roots.eavt page-size)]
+    (when (not eavt-ok)
+      (return (SQLite-Index-Snapshot {}) false eavt-error))
+    (let [[aevt aevt-ok aevt-error] (sqlite-open-index-cursor-handle-at-root-page handle ":aevt" basis-tx roots.aevt page-size)]
+      (when (not aevt-ok)
+        (close-sqlite-index-cursor eavt)
+        (return (SQLite-Index-Snapshot {}) false aevt-error))
+      (let [[avet avet-ok avet-error] (sqlite-open-index-cursor-handle-at-root-page handle ":avet" basis-tx roots.avet page-size)]
+        (when (not avet-ok)
+          (close-sqlite-index-cursor eavt)
+          (close-sqlite-index-cursor aevt)
+          (return (SQLite-Index-Snapshot {}) false avet-error))
+        (let [[vaet vaet-ok vaet-error] (sqlite-open-index-cursor-handle-at-root-page handle ":vaet" basis-tx roots.vaet page-size)]
+          (when (not vaet-ok)
+            (close-sqlite-index-cursor eavt)
+            (close-sqlite-index-cursor aevt)
+            (close-sqlite-index-cursor avet)
+            (return (SQLite-Index-Snapshot {}) false vaet-error))
+          (let [opened-indexes (SQLite-Index-Snapshot {handle: handle
+                                                       owns-handle: false
+                                                       page-size: page-size
+                                                       eavt: eavt
+                                                       aevt: aevt
+                                                       avet: avet
+                                                       vaet: vaet})]
+            (sqlite-index-snapshot-share-page-cache! (addr opened-indexes))
+            (return opened-indexes true "")))))))
+
+(defn sqlite-conn-open-index-snapshot [store: ^SQLite-Conn, page-size: int] -> [snapshot: SQLite-Index-Snapshot, ok: bool, error: string]
+  (sqlite-open-index-snapshot-handle store^.handle page-size))
+
+(defn sqlite-open-index-snapshot [path: string, page-size: int] -> [snapshot: SQLite-Index-Snapshot, ok: bool, error: string]
+  (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
+    (when (not open-ok)
+      (return (SQLite-Index-Snapshot {}) false open-error))
+    (let [[opened-snapshot snapshot-ok snapshot-error] (sqlite-open-index-snapshot-handle handle page-size)]
+      (when (not snapshot-ok)
+        (vev.sqlite-close-live-raw handle)
+        (return opened-snapshot false snapshot-error))
+      (set! opened-snapshot.owns-handle true)
+      (return opened-snapshot true ""))))
+
+(defn close-sqlite-index-snapshot! [snapshot: ^SQLite-Index-Snapshot]
+  (close-sqlite-index-cursor! (addr snapshot^.eavt))
+  (close-sqlite-index-cursor! (addr snapshot^.aevt))
+  (close-sqlite-index-cursor! (addr snapshot^.avet))
+  (close-sqlite-index-cursor! (addr snapshot^.vaet))
+  (when snapshot^.owns-handle
+    (vev.sqlite-close-live-raw snapshot^.handle))
+  (set! snapshot^ (SQLite-Index-Snapshot {})))
+
+(defn close-sqlite-index-snapshot [snapshot: SQLite-Index-Snapshot]
+  (let [owned snapshot]
+    (close-sqlite-index-snapshot! (addr owned))))
