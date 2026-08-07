@@ -115,6 +115,7 @@ if [[ -n "${KVIST_REPO_DIR:-}" ]]; then
 else
   "$KVIST_BIN" compile "$ROOT/src/vev_abi/vev_abi.kvist" -o "$GENERATED_DIR/vev_abi.odin"
 fi
+cp "$ROOT/src/vev_abi/vev_abi_support.odin" "$GENERATED_DIR/vev_abi_support.odin"
 
 ODIN_BUILD_ARGS=(
   "$GENERATED_DIR"
