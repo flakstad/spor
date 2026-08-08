@@ -1,0 +1,870 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn query-relation-copy [rel: Query-Relation] -> Query-Relation
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        tuples (clone-bindings (slice rel.tuples 0))]
+    (Query-Relation {attrs: attrs
+                     attr-sources: attr-sources
+                     attr-index: (query-relation-attr-index (slice attrs 0))
+                     tuples: tuples
+                     typed-columns: (if rel.has-typed-columns
+                                      (clone-relation-columns (slice rel.typed-columns 0))
+                                      (make [dynamic]Relation-Column))
+                     typed-rows: rel.typed-rows
+                     has-typed-columns: rel.has-typed-columns})))
+
+(defn query-relation-predicate-can-run-typed? [rel: Query-Relation, predicate: Predicate, registry: []Native-Query-Fn] -> bool
+  (when (not rel.has-typed-columns)
+    (return false))
+  (let [row 0]
+    (while (< row rel.typed-rows)
+      (let [[_ ok] (typed-predicate-matches? rel row predicate registry)]
+        (when (not ok)
+          (return false)))
+      (set! row (+ row 1))))
+  true)
+
+(defn query-relation-filter-predicate [db: DB, rel: Query-Relation, predicate: Predicate, registry: []Native-Query-Fn] -> Query-Relation
+  (when (not (query-relation-predicate-can-run-typed? rel predicate registry))
+    (let [materialized (query-relation-materialized-bindings rel) :defer
+          bindings (bindings-after-predicate-with-db-and-fns db (slice materialized 0) predicate registry) :defer]
+      (return (query-relation-from-bindings-inheriting-sources (slice bindings 0) rel))))
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        builder (query-relation-builder (slice rel.attrs 0))
+        row 0]
+    (while (< row rel.typed-rows)
+      (let [[match _] (typed-predicate-matches? rel row predicate registry)]
+        (when match
+          (when (not (query-relation-builder-add-column-row! (addr builder) (slice rel.typed-columns 0) row))
+            (delete attrs)
+            (delete attr-sources)
+            (delete-query-relation-builder builder)
+            (return (query-relation-empty)))))
+      (set! row (+ row 1)))
+    (Query-Relation {attrs: attrs
+                     attr-sources: attr-sources
+                     attr-index: (query-relation-attr-index (slice attrs 0))
+                     tuples: builder.tuples
+                     typed-columns: builder.typed-columns
+                     typed-rows: builder.typed-rows
+                     has-typed-columns: true})))
+
+(defn query-relation-extend-function-out-binding-typed [rel: Query-Relation, function: Function-Clause, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        output-vars (make [dynamic]string) :defer
+        seen-output-vars (set.empty string) :defer]
+    (append-input-binding-vars-indexed! (addr output-vars) (addr seen-output-vars) function.out-binding)
+    (for [name output-vars]
+      (append-var-binding-attr! (addr attrs) (addr attr-sources) name ""))
+    (let [builder (query-relation-builder (slice attrs 0))
+          row 0]
+      (while (< row rel.typed-rows)
+        (let [[value value-ok] (typed-function-op-value rel row function registry)]
+          (when value-ok
+            (if (input-binding-contains-collection? function.out-binding)
+              (let [[produced-rows produced-ok] (typed-produced-value-rows-from-input-binding rel row function.out-binding value (slice output-vars 0))]
+                (when produced-ok
+                  (for [produced produced-rows]
+                    (when (not (query-relation-builder-add-column-row-with-values! (addr builder) (slice rel.typed-columns 0) row (slice produced.values 0)))
+                      (delete-typed-produced-values produced-rows)
+                      (delete attrs)
+                      (delete attr-sources)
+                      (delete-query-relation-builder builder)
+                      (return (query-relation-empty) false))))
+                (delete-typed-produced-values produced-rows))
+              (let [[produced produced-ok] (typed-produced-values-from-input-binding rel row function.out-binding value (slice output-vars 0))]
+                (when produced-ok
+                  (when (not (query-relation-builder-add-column-row-with-values! (addr builder) (slice rel.typed-columns 0) row (slice produced 0)))
+                    (delete produced)
+                    (delete attrs)
+                    (delete attr-sources)
+                    (delete-query-relation-builder builder)
+                    (return (query-relation-empty) false)))
+                (delete produced)))))
+        (set! row (+ row 1)))
+      (return (Query-Relation {attrs: attrs
+                               attr-sources: attr-sources
+                               attr-index: (query-relation-attr-index (slice attrs 0))
+                               tuples: builder.tuples
+                               typed-columns: builder.typed-columns
+                               typed-rows: builder.typed-rows
+                               has-typed-columns: builder.typed-ok}) true))))
+
+(defn db-read-source-query-relation-extend-function-out-binding-typed [source: DB-Read-Source, rel: Query-Relation, function: Function-Clause, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        output-vars (make [dynamic]string) :defer
+        seen-output-vars (set.empty string) :defer]
+    (append-input-binding-vars-indexed! (addr output-vars) (addr seen-output-vars) function.out-binding)
+    (for [name output-vars]
+      (append-var-binding-attr! (addr attrs) (addr attr-sources) name ""))
+    (let [builder (query-relation-builder (slice attrs 0))
+          row 0]
+      (while (< row rel.typed-rows)
+        (let [[value value-ok] (db-read-source-typed-function-op-value source rel row function registry)]
+          (when value-ok
+            (if (input-binding-contains-collection? function.out-binding)
+              (let [[produced-rows produced-ok] (typed-produced-value-rows-from-input-binding rel row function.out-binding value (slice output-vars 0))]
+                (when produced-ok
+                  (for [produced produced-rows]
+                    (when (not (query-relation-builder-add-column-row-with-values! (addr builder) (slice rel.typed-columns 0) row (slice produced.values 0)))
+                      (delete-typed-produced-values produced-rows)
+                      (delete attrs)
+                      (delete attr-sources)
+                      (delete-query-relation-builder builder)
+                      (return (query-relation-empty) false))))
+                (delete-typed-produced-values produced-rows))
+              (let [[produced produced-ok] (typed-produced-values-from-input-binding rel row function.out-binding value (slice output-vars 0))]
+                (when produced-ok
+                  (when (not (query-relation-builder-add-column-row-with-values! (addr builder) (slice rel.typed-columns 0) row (slice produced 0)))
+                    (delete produced)
+                    (delete attrs)
+                    (delete attr-sources)
+                    (delete-query-relation-builder builder)
+                    (return (query-relation-empty) false)))
+                (delete produced)))))
+        (set! row (+ row 1)))
+      (return (Query-Relation {attrs: attrs
+                               attr-sources: attr-sources
+                               attr-index: (query-relation-attr-index (slice attrs 0))
+                               tuples: builder.tuples
+                               typed-columns: builder.typed-columns
+                               typed-rows: builder.typed-rows
+                               has-typed-columns: builder.typed-ok}) true))))
+
+(defn db-read-source-query-relation-extend-fulltext-typed [source: DB-Read-Source, sources: []DB-Read-Named-Source, rel: Query-Relation, function: Function-Clause] -> [out: Query-Relation, ok: bool]
+  (when (not (= function.op "fulltext"))
+    (return (query-relation-empty) false))
+  (when (not rel.has-typed-columns)
+    (let [materialized (query-relation-materialized-bindings rel)
+          [bindings bindings-ok _] (db-read-source-bindings-after-fulltext-with-sources source sources (slice materialized 0) function)]
+      (delete materialized)
+      (when (not bindings-ok)
+        (db-read-source-delete-bindings-owned bindings)
+        (return (query-relation-empty) false))
+      (let [relation (query-relation-from-bindings-inheriting-sources (slice bindings 0) rel)]
+        (db-read-source-delete-bindings-owned bindings)
+        (return relation true))))
+  (let [[source-name source-name-ok] (fulltext-source-name function)]
+    (when (not source-name-ok)
+      (return (query-relation-empty) false))
+    (let [[read-source read-source-ok _] (db-read-source-for-name source sources source-name)]
+      (when (not read-source-ok)
+        (return (query-relation-empty) false))
+      (let [[attr attr-ok] (fulltext-attr-from-term function.terms[1])]
+        (when (not attr-ok)
+          (return (query-relation-empty) false))
+        (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+              attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+              output-binding (fulltext-output-row-binding function.out-binding)
+              output-vars (make [dynamic]string) :defer
+              seen-output-vars (set.empty string) :defer
+              row-width (fulltext-output-width function.out-binding)
+              [stream stream-ok _] (source-index-datom-stream read-source attr)]
+          (append-input-binding-vars-indexed! (addr output-vars) (addr seen-output-vars) output-binding)
+          (for [name output-vars]
+            (append-var-binding-attr! (addr attrs) (addr attr-sources) name ""))
+          (let [builder (query-relation-builder (slice attrs 0))]
+            (when (and (= read-source.kind .SQLite-Snapshot)
+                       (not read-source.sqlite-snapshot^.has-retractions))
+              (let [row 0]
+                (while (< row rel.typed-rows)
+                  (let [[search search-ok] (fulltext-search-from-typed-row rel row function)]
+                    (when search-ok
+                      (let [[candidates candidates-ok candidates-error] (sqlite-db-snapshot-attr-string-contains-datoms read-source.sqlite-snapshot attr search)]
+                        (when (not candidates-ok)
+                          (delete attrs)
+                          (delete attr-sources)
+                          (delete-query-relation-builder builder)
+                          (return (query-relation-empty) false))
+                        (for [candidate candidates]
+                          (when (and (= candidate.v.kind .String)
+                                     (fulltext-matches? search candidate.v.text))
+                            (let [row-value (db-read-source-fulltext-row-value candidate search row-width)]
+                              (let [[produced produced-ok] (typed-produced-values-from-input-binding rel row output-binding row-value (slice output-vars 0))]
+                                (when produced-ok
+                                  (when (not (query-relation-builder-add-column-row-with-values! (addr builder) (slice rel.typed-columns 0) row (slice produced 0)))
+                                    (delete produced)
+                                    (delete-owned-value row-value)
+                                    (delete-owned-datoms candidates)
+                                    (delete attrs)
+                                    (delete attr-sources)
+                                    (delete-query-relation-builder builder)
+                                    (return (query-relation-empty) false)))
+                                (delete produced))
+                              (delete-owned-value row-value))))
+                        (delete-owned-datoms candidates))))
+                  (set! row (+ row 1))))
+              (return (Query-Relation {attrs: attrs
+                                       attr-sources: attr-sources
+                                       attr-index: (query-relation-attr-index (slice attrs 0))
+                                       tuples: builder.tuples
+                                       typed-columns: builder.typed-columns
+                                       typed-rows: builder.typed-rows
+                                       has-typed-columns: builder.typed-ok}) true))
+            (when (not stream-ok)
+              (delete attrs)
+              (delete attr-sources)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false))
+            (while stream.has-current
+              (when (= stream.current.v.kind .String)
+                (let [row 0]
+                  (while (< row rel.typed-rows)
+                    (let [[search search-ok] (fulltext-search-from-typed-row rel row function)]
+                      (when (and search-ok
+                                 (fulltext-matches? search stream.current.v.text))
+                        (let [row-value (db-read-source-fulltext-row-value stream.current search row-width)]
+                          (let [[produced produced-ok] (typed-produced-values-from-input-binding rel row output-binding row-value (slice output-vars 0))]
+                            (when produced-ok
+                              (when (not (query-relation-builder-add-column-row-with-values! (addr builder) (slice rel.typed-columns 0) row (slice produced 0)))
+                                (delete produced)
+                                (delete-owned-value row-value)
+                                (delete-source-index-datom-stream stream)
+                                (delete attrs)
+                                (delete attr-sources)
+                                (delete-query-relation-builder builder)
+                                (return (query-relation-empty) false)))
+                            (delete produced))
+                          (delete-owned-value row-value))))
+                    (set! row (+ row 1)))))
+              (let [[advance-ok _] (advance-source-index-datom-stream! read-source (addr stream))]
+                (when (not advance-ok)
+                  (delete-source-index-datom-stream stream)
+                  (delete attrs)
+                  (delete attr-sources)
+                  (delete-query-relation-builder builder)
+                  (return (query-relation-empty) false))))
+            (delete-source-index-datom-stream stream)
+            (return (Query-Relation {attrs: attrs
+                                     attr-sources: attr-sources
+                                     attr-index: (query-relation-attr-index (slice attrs 0))
+                                     tuples: builder.tuples
+                                     typed-columns: builder.typed-columns
+                                     typed-rows: builder.typed-rows
+                                     has-typed-columns: builder.typed-ok}) true)))))))
+
+(defn db-read-source-query-relation-extend-function-typed [source: DB-Read-Source, rel: Query-Relation, function: Function-Clause, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (let [[op op-ok] (query-op-name function.op (Binding {}))]
+    (when (and op-ok (source-function-op? op))
+      (when (not rel.has-typed-columns)
+        (let [materialized (query-relation-materialized-bindings rel)
+              [bindings bindings-ok _] (db-read-source-bindings-after-function-with-source source (slice materialized 0) function)]
+          (when (not bindings-ok)
+            (delete materialized)
+            (db-read-source-delete-bindings-owned bindings)
+            (return (query-relation-empty) false))
+          (let [out (query-relation-from-bindings-inheriting-sources (slice bindings 0) rel)]
+            (delete materialized)
+            (db-read-source-delete-bindings-owned bindings)
+            (return out true))))
+      (when (not (= function.out-binding.kind .None))
+        (return (db-read-source-query-relation-extend-function-out-binding-typed source rel function registry)))
+      (when (or function.is-tuple (= function.out ""))
+        (return (query-relation-empty) false))
+      (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+            attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))]
+        (append-var-binding-attr! (addr attrs) (addr attr-sources) function.out "")
+        (let [builder (query-relation-builder (slice attrs 0))
+              row 0]
+          (while (< row rel.typed-rows)
+            (let [[value value-ok] (db-read-source-typed-function-op-value source rel row function registry)]
+              (when value-ok
+                (when (not (query-relation-builder-add-column-row-with-output-value! (addr builder) (slice attrs 0) (slice rel.typed-columns 0) row function.out value))
+                  (delete attrs)
+                  (delete attr-sources)
+                  (delete-query-relation-builder builder)
+                  (return (query-relation-empty) false))))
+            (set! row (+ row 1)))
+          (return (Query-Relation {attrs: attrs
+                                   attr-sources: attr-sources
+                                   attr-index: (query-relation-attr-index (slice attrs 0))
+                                   tuples: builder.tuples
+                                   typed-columns: builder.typed-columns
+                                   typed-rows: builder.typed-rows
+                                   has-typed-columns: builder.typed-ok}) true)))))
+  (query-relation-extend-function-typed rel function registry))
+
+(defn query-relation-extend-function-binding-typed [rel: Query-Relation, op: string, terms: []Term, binding: Input-Binding, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (when (not rel.has-typed-columns)
+    (return (query-relation-empty) false))
+  (let [function (Function-Clause {op: op
+                                   terms: terms
+                                   out-binding: binding})
+        [_ op-ok] (typed-function-op-name function registry)]
+    (when (not op-ok)
+      (return (query-relation-empty) false))
+    (query-relation-extend-function-out-binding-typed rel function registry)))
+
+(defn query-relation-extend-function-value-binding-typed [rel: Query-Relation, op: string, values: []Value, binding: Input-Binding, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (let [terms (make [dynamic]Term) :defer]
+    (for [value values]
+      (arr.push! terms (term-value value)))
+    (query-relation-extend-function-binding-typed rel op (slice terms 0) binding registry)))
+
+(defn query-relation-extend-function-typed [rel: Query-Relation, function: Function-Clause, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (when (not rel.has-typed-columns)
+    (return (query-relation-empty) false))
+  (let [[_ op-ok] (typed-function-op-name function registry)]
+    (when (not op-ok)
+      (return (query-relation-empty) false)))
+  (when (not (= function.out-binding.kind .None))
+    (return (query-relation-extend-function-out-binding-typed rel function registry)))
+  (when function.is-tuple
+    (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+          attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+          output-vars (make [dynamic]string) :defer]
+      (for [name function.out-vars]
+        (append-var-once! (addr output-vars) name))
+      (for [name output-vars]
+        (append-var-binding-attr! (addr attrs) (addr attr-sources) name ""))
+      (let [builder (query-relation-builder (slice attrs 0))
+            row 0]
+        (while (< row rel.typed-rows)
+          (let [[value value-ok] (typed-function-op-value rel row function registry)]
+            (when value-ok
+              (when (not (= value.kind .Vector))
+                (delete attrs)
+                (delete attr-sources)
+                (delete-query-relation-builder builder)
+                (return (query-relation-empty) false))
+              (let [[produced produced-ok] (typed-ground-produced-values rel row function.out-vars (slice value.items 0) (slice output-vars 0))]
+                (when produced-ok
+                  (when (not (query-relation-builder-add-column-row-with-values! (addr builder) (slice rel.typed-columns 0) row (slice produced 0)))
+                    (delete produced)
+                    (delete attrs)
+                    (delete attr-sources)
+                    (delete-query-relation-builder builder)
+                    (return (query-relation-empty) false)))
+                (delete produced))))
+          (set! row (+ row 1)))
+        (return (Query-Relation {attrs: attrs
+                                 attr-sources: attr-sources
+                                 attr-index: (query-relation-attr-index (slice attrs 0))
+                                 tuples: builder.tuples
+                                 typed-columns: builder.typed-columns
+                                 typed-rows: builder.typed-rows
+                                 has-typed-columns: builder.typed-ok}) true))))
+  (when (= function.out "")
+    (return (query-relation-empty) false))
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))]
+    (append-var-binding-attr! (addr attrs) (addr attr-sources) function.out "")
+    (let [builder (query-relation-builder (slice attrs 0))
+          row 0]
+      (while (< row rel.typed-rows)
+        (let [[value value-ok] (typed-function-op-value rel row function registry)]
+          (when value-ok
+            (when (query-relation-typed-row-var-agrees? rel row function.out value)
+              (when (not (query-relation-builder-add-column-row-with-output-value! (addr builder) (slice attrs 0) (slice rel.typed-columns 0) row function.out value))
+                (delete attrs)
+                (delete attr-sources)
+                (delete-query-relation-builder builder)
+                (return (query-relation-empty) false)))))
+        (set! row (+ row 1)))
+      (return (Query-Relation {attrs: attrs
+                               attr-sources: attr-sources
+                               attr-index: (query-relation-attr-index (slice attrs 0))
+                               tuples: builder.tuples
+                               typed-columns: builder.typed-columns
+                               typed-rows: builder.typed-rows
+                               has-typed-columns: builder.typed-ok}) true))))
+
+(defn query-relation-extend-function [rel: Query-Relation, function: Function-Clause, registry: []Native-Query-Fn] -> Query-Relation
+  (let [[typed typed-ok] (query-relation-extend-function-typed rel function registry)]
+    (when typed-ok
+      (return typed))
+    (delete-query-relation typed))
+  (let [materialized (query-relation-materialized-bindings rel) :defer
+        bindings (bindings-after-function-with-fns (slice materialized 0) function registry)
+        out (query-relation-from-bindings-inheriting-sources (slice bindings 0) rel)]
+    (delete bindings)
+    out))
+
+(defn plain-typed-branch-group? [group: Not-Group] -> bool
+  (when (= (count group.steps) 0)
+    (return false))
+  (for [step group.steps]
+    (when (not (or (= step.kind .Clause)
+                   (= step.kind .Predicate)
+                   (= step.kind .Function)
+                   (= step.kind .Ground)
+                   (= step.kind .RuleCall)
+                   (= step.kind .GetElse)
+                   (= step.kind .GetSome)
+                   (= step.kind .Not)))
+      (return false))
+    (when (and (= step.kind .Not)
+               (not (plain-typed-branch-group? group.not-groups[step.index])))
+      (return false)))
+  true)
+
+(defn branch-has-source-input? [query: Query, branch: Not-Group] -> bool
+  (let [index 0]
+    (while (< index (count branch.clauses))
+      (let [item branch.clauses[index]]
+        (when (and item.has-source
+                   (query-source-input? query item.source))
+          (return true)))
+      (set! index (+ index 1))))
+  (for [child branch.not-groups]
+    (when (branch-has-source-input? query child)
+      (return true)))
+  (for [call branch.rule-calls]
+    (when (and call.has-source
+               (query-source-input? query call.source))
+      (return true)))
+  false)
+
+(defn or-group-has-source-input? [query: Query, group: Or-Group] -> bool
+  (for [branch group.branches]
+    (when (branch-has-source-input? query branch)
+      (return true)))
+  false)
+
+(defn query-relation-apply-branch-local-step-typed [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, step: Query-Step, group: Not-Group, stats: ^Query-Stats, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (case step.kind
+    .Clause
+      (if (and group.clauses[step.index].has-source
+               (query-source-input? query group.clauses[step.index].source))
+        (query-relation-apply-source-input-clause-typed query inputs rel group.clauses[step.index])
+        (query-relation-apply-bound-db-clause-typed-scan-with-sources db sources rel group.clauses[step.index] stats))
+    .Predicate
+      (do
+        (when (not (query-relation-predicate-can-run-typed? rel group.predicates[step.index] registry))
+          (return (query-relation-empty) false))
+        (let [out (query-relation-filter-predicate db rel group.predicates[step.index] registry)]
+          (if out.has-typed-columns
+            (return out true)
+            (return out false))))
+    .Function
+      (query-relation-extend-function-typed rel group.function-clauses[step.index] registry)
+    .Ground
+      (query-relation-apply-ground-typed rel group.grounds[step.index])
+    .RuleCall
+      (let [cache (make [dynamic]Materialized-Rule-Cache-Entry)
+            next (query-relation-apply-rule-call db sources (slice query.rules 0) ([]Rule-Call-Plan []) rel group.rule-calls[step.index] -1 registry stats (addr cache))]
+        (delete cache)
+        (if next.has-typed-columns
+          (return next true)
+          (return next false)))
+    .GetElse
+      (let [get-else group.get-elses[step.index]]
+        (if get-else.has-source
+          (if (= get-else.source "$")
+            (query-relation-apply-get-else-typed db rel (unsourced-get-else get-else))
+            (let [[source-db source-ok] (source-db-lookup db sources get-else.source)]
+              (when (not source-ok)
+                (return (query-relation-empty) false))
+              (query-relation-apply-get-else-typed source-db rel (unsourced-get-else get-else))))
+          (query-relation-apply-get-else-typed db rel get-else)))
+    .GetSome
+      (let [get-some group.get-somes[step.index]]
+        (if get-some.has-source
+          (if (= get-some.source "$")
+            (query-relation-apply-get-some-typed db rel (unsourced-get-some get-some))
+            (let [[source-db source-ok] (source-db-lookup db sources get-some.source)]
+              (when (not source-ok)
+                (return (query-relation-empty) false))
+              (query-relation-apply-get-some-typed source-db rel (unsourced-get-some get-some))))
+          (query-relation-apply-get-some-typed db rel get-some)))
+    .Not
+      (query-relation-apply-not-typed db query inputs sources rel group.not-groups[step.index] registry)
+
+      (return (query-relation-empty) false)))
+
+(defn query-relation-apply-plain-branch-pipeline-typed [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, row: int, group: Not-Group, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (let [current (query-relation-empty)
+        current-ok false]
+    (if group.has-join
+      (let [[projected projected-ok] (query-relation-single-typed-row-projected rel row (slice group.join-vars 0))]
+        (set! current projected)
+        (set! current-ok projected-ok))
+      (let [[single single-ok] (query-relation-single-typed-row rel row)]
+        (set! current single)
+        (set! current-ok single-ok)))
+    (when (not current-ok)
+      (delete-query-relation current)
+      (return (query-relation-empty) false))
+    (let [stats (query-stats-empty)]
+      (for [step group.steps]
+        (let [[next next-ok] (query-relation-apply-branch-local-step-typed db query inputs sources current step group (addr stats) registry)]
+          (delete-query-relation current)
+          (when (not next-ok)
+            (delete-query-relation next)
+            (return (query-relation-empty) false))
+          (set! current next)
+          (when (= (query-relation-row-count current) 0)
+            (return current true))))
+      (return current true))))
+
+(defn typed-row-matches-plain-branch-group? [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, row: int, group: Not-Group, registry: []Native-Query-Fn] -> [matched: bool, ok: bool]
+  (let [[branch-rel branch-ok] (query-relation-apply-plain-branch-pipeline-typed db query inputs sources rel row group registry)]
+    (when (not branch-ok)
+      (delete-query-relation branch-rel)
+      (return false false))
+    (let [has-match (> (query-relation-row-count branch-rel) 0)]
+      (delete-query-relation branch-rel)
+      (return has-match true))))
+
+(defn query-relation-apply-not-existence-typed [db: DB, rel: Query-Relation, clause-value: Clause] -> [out: Query-Relation, ok: bool]
+  (when (not (and rel.has-typed-columns
+                  (not clause-value.has-source)
+                  (= clause-value.e.kind .Var)
+                  (query-relation-has-attr? rel clause-value.e.name)
+                  (= clause-value.a.kind .Value)
+                  (= clause-value.a.value.kind .Keyword)
+                  (= clause-value.v.kind .Wildcard)
+                  (or (= clause-value.tx-term.kind .Wildcard)
+                      (omitted-term? clause-value.tx-term))
+                  (or (= clause-value.op-term.kind .Wildcard)
+                      (omitted-term? clause-value.op-term))))
+    (return (query-relation-empty) false))
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        builder (query-relation-builder (slice rel.attrs 0))
+        row 0]
+    (while (< row rel.typed-rows)
+      (let [[entity entity-ok] (query-relation-resolve-typed-entity-term db rel row clause-value.e)]
+        (when (not (and entity-ok (= entity.kind .Entity)))
+          (delete attrs)
+          (delete attr-sources)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false))
+        (when (not (current-attr-exists? db entity.entity clause-value.a.value.text))
+          (when (not (query-relation-builder-add-column-row! (addr builder) (slice rel.typed-columns 0) row))
+            (delete attrs)
+            (delete attr-sources)
+            (delete-query-relation-builder builder)
+            (return (query-relation-empty) false))))
+      (set! row (+ row 1)))
+    (return (Query-Relation {attrs: attrs
+                             attr-sources: attr-sources
+                             attr-index: (query-relation-attr-index (slice attrs 0))
+                             tuples: builder.tuples
+                             typed-columns: builder.typed-columns
+                             typed-rows: builder.typed-rows
+                             has-typed-columns: builder.typed-ok}) true)))
+
+(defn query-relation-apply-not-existence-typed-with-sources [db: DB, sources: []DB-Source, rel: Query-Relation, clause-value: Clause] -> [out: Query-Relation, ok: bool]
+  (if clause-value.has-source
+    (let [[source-db source-ok] (source-db-lookup db sources clause-value.source)]
+      (when (not source-ok)
+        (return (query-relation-empty) false))
+      (query-relation-apply-not-existence-typed source-db rel (unsourced-clause clause-value)))
+    (query-relation-apply-not-existence-typed db rel clause-value)))
+
+(defn query-relation-apply-not-typed [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, group: Not-Group, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (when (not rel.has-typed-columns)
+    (return (query-relation-empty) false))
+  (when (and (not group.has-join)
+             (= (count group.clauses) 1)
+             (= (count group.predicates) 0)
+             (= (count group.function-clauses) 0)
+             (= (count group.grounds) 0)
+             (= (count group.get-elses) 0)
+             (= (count group.get-somes) 0)
+             (= (count group.not-groups) 0)
+             (not (branch-has-source-input? query group)))
+    (let [[existence existence-ok] (query-relation-apply-not-existence-typed-with-sources db sources rel group.clauses[0])]
+      (when existence-ok
+        (return existence true))
+      (delete-query-relation existence))
+    (let [clause group.clauses[0]]
+    (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+          attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+          builder (query-relation-builder (slice rel.attrs 0))
+          row 0]
+      (while (< row rel.typed-rows)
+        (let [[matched match-ok] (typed-row-matches-single-db-clause? db sources rel row clause)]
+          (when (not match-ok)
+            (delete attrs)
+            (delete attr-sources)
+            (delete-query-relation-builder builder)
+            (return (query-relation-empty) false))
+          (when (not matched)
+            (when (not (query-relation-builder-add-column-row! (addr builder) (slice rel.typed-columns 0) row))
+              (delete attrs)
+              (delete attr-sources)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false))))
+        (set! row (+ row 1)))
+      (return (Query-Relation {attrs: attrs
+                               attr-sources: attr-sources
+                               attr-index: (query-relation-attr-index (slice attrs 0))
+                               tuples: builder.tuples
+                               typed-columns: builder.typed-columns
+                               typed-rows: builder.typed-rows
+                               has-typed-columns: builder.typed-ok}) true))))
+  (when (plain-typed-branch-group? group)
+    (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+          attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+          builder (query-relation-builder (slice rel.attrs 0))
+          row 0]
+      (while (< row rel.typed-rows)
+        (let [[matched match-ok] (typed-row-matches-plain-branch-group? db query inputs sources rel row group registry)]
+          (when (not match-ok)
+            (delete attrs)
+            (delete attr-sources)
+            (delete-query-relation-builder builder)
+            (return (query-relation-empty) false))
+          (when (not matched)
+            (when (not (query-relation-builder-add-column-row! (addr builder) (slice rel.typed-columns 0) row))
+              (delete attrs)
+              (delete attr-sources)
+              (delete-query-relation-builder builder)
+              (return (query-relation-empty) false))))
+        (set! row (+ row 1)))
+      (return (Query-Relation {attrs: attrs
+                               attr-sources: attr-sources
+                               attr-index: (query-relation-attr-index (slice attrs 0))
+                               tuples: builder.tuples
+                               typed-columns: builder.typed-columns
+                               typed-rows: builder.typed-rows
+                               has-typed-columns: builder.typed-ok}) true)))
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        builder (query-relation-builder (slice rel.attrs 0))
+        row 0]
+    (while (< row rel.typed-rows)
+      (let [[binding binding-ok] (binding-from-query-relation-typed-row rel row)]
+        (when (not binding-ok)
+          (delete attrs)
+          (delete attr-sources)
+          (delete-query-relation-builder builder)
+          (return (query-relation-empty) false))
+        (when (not (binding-matches-not-group-with-rules-sources-and-fns? db (slice query.rules 0) sources group binding registry))
+          (when (not (query-relation-builder-add-column-row! (addr builder) (slice rel.typed-columns 0) row))
+            (delete binding.items)
+            (delete attrs)
+            (delete attr-sources)
+            (delete-query-relation-builder builder)
+            (return (query-relation-empty) false)))
+        (delete binding.items))
+      (set! row (+ row 1)))
+    (return (Query-Relation {attrs: attrs
+                             attr-sources: attr-sources
+                             attr-index: (query-relation-attr-index (slice attrs 0))
+                             tuples: builder.tuples
+                             typed-columns: builder.typed-columns
+                             typed-rows: builder.typed-rows
+                             has-typed-columns: true}) true)))
+
+(defn query-relation-apply-not [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, group: Not-Group, registry: []Native-Query-Fn] -> Query-Relation
+  (let [[typed typed-ok] (query-relation-apply-not-typed db query inputs sources rel group registry)]
+    (when typed-ok
+      (return typed))
+    (delete-query-relation typed))
+  (let [materialized (query-relation-materialized-bindings rel) :defer
+        bindings (make [dynamic]Binding)]
+    (for [tuple materialized]
+      (when (not (binding-matches-not-group-with-rules-sources-and-fns? db (slice query.rules 0) sources group tuple registry))
+        (arr.push! bindings tuple)))
+    (let [out (query-relation-from-bindings-inheriting-sources (slice bindings 0) rel)]
+      (delete bindings)
+      out)))
+
+(defn simple-db-clause-or-group? [group: Or-Group] -> bool
+  (when group.has-join
+    (return false))
+  (when (= (count group.branches) 0)
+    (return false))
+  (for [branch group.branches]
+    (when (or branch.has-join
+              (not (= (count branch.clauses) 1))
+              (> (count branch.predicates) 0)
+              (> (count branch.function-clauses) 0)
+              (> (count branch.grounds) 0)
+              (> (count branch.rule-calls) 0)
+              (> (count branch.get-elses) 0)
+              (> (count branch.get-somes) 0)
+              (> (count branch.not-groups) 0))
+      (return false)))
+  true)
+
+(defn plain-db-clause-or-group? [group: Or-Group] -> bool
+  (when group.has-join
+    (return false))
+  (when (= (count group.branches) 0)
+    (return false))
+  (let [branch-index 0]
+    (while (< branch-index (count group.branches))
+      (let [branch group.branches[branch-index]]
+        (when (not (plain-typed-branch-group? branch))
+          (return false)))
+      (set! branch-index (+ branch-index 1))))
+  true)
+
+(defn plain-typed-or-join-group? [group: Or-Group] -> bool
+  (when (not group.has-join)
+    (return false))
+  (when (= (count group.branches) 0)
+    (return false))
+  (for [branch group.branches]
+    (when (not (plain-typed-branch-group? branch))
+      (return false)))
+  true)
+
+(defn query-relation-apply-plain-or-branch-typed [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, row: int, branch: Not-Group, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (query-relation-apply-plain-branch-pipeline-typed db query inputs sources rel row branch registry))
+
+(defn append-typed-or-branch-row! [builder: ^Query-Relation-Builder, attrs: []string, db: DB, sources: []DB-Source, rel: Query-Relation, row: int, clause-value: Clause, stats: ^Query-Stats] -> [ok: bool, supported: bool]
+  (let [clause-db db
+        clause clause-value]
+    (when clause-value.has-source
+      (let [[source-db source-ok] (source-db-lookup db sources clause-value.source)]
+        (when (not source-ok)
+          (return false false))
+        (set! clause-db source-db)
+        (set! clause (unsourced-clause clause-value))))
+    (when (not (append-typed-bound-db-clause-scan-row! builder attrs clause-db rel row clause (all-datoms-current? clause-db) stats))
+      (return false true))
+    (return true true)))
+
+(defn query-relation-apply-or-typed [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, group: Or-Group, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
+  (when (not rel.has-typed-columns)
+    (return (query-relation-empty) false))
+  (let [attrs (arr.into [dynamic]string (slice rel.attrs 0))
+        attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
+        output-vars (make [dynamic]string) :defer]
+    (append-or-group-output-vars! (addr output-vars) group)
+    (for [name output-vars]
+      (append-var-binding-attr! (addr attrs) (addr attr-sources) name ""))
+    (when (and (simple-db-clause-or-group? group)
+               (not (or-group-has-source-input? query group)))
+      (let [builder (query-relation-builder (slice attrs 0))
+            stats (query-stats-empty)
+            row 0]
+        (while (< row rel.typed-rows)
+          (for [branch group.branches]
+            (let [[branch-ok branch-supported] (append-typed-or-branch-row! (addr builder) (slice attrs 0) db sources rel row branch.clauses[0] (addr stats))]
+              (when (not branch-supported)
+                (delete attrs)
+                (delete attr-sources)
+                (delete-query-relation-builder builder)
+                (return (query-relation-empty) false))
+              (when (not branch-ok)
+                (delete attrs)
+                (delete attr-sources)
+                (delete-query-relation-builder builder)
+                (return (query-relation-empty) false))))
+          (set! row (+ row 1)))
+        (return (Query-Relation {attrs: attrs
+                                 attr-sources: attr-sources
+                                 attr-index: (query-relation-attr-index (slice attrs 0))
+                                 tuples: builder.tuples
+                                 typed-columns: builder.typed-columns
+                                 typed-rows: builder.typed-rows
+                                 has-typed-columns: builder.typed-ok}) true)))
+    (when (plain-db-clause-or-group? group)
+      (let [builder (query-relation-builder (slice attrs 0))
+            row 0]
+        (while (< row rel.typed-rows)
+          (for [branch group.branches]
+            (let [[branch-rel branch-ok] (query-relation-apply-plain-or-branch-typed db query inputs sources rel row branch registry)]
+              (when (not branch-ok)
+                (delete-query-relation branch-rel)
+                (delete attrs)
+                (delete attr-sources)
+                (delete-query-relation-builder builder)
+                (return (query-relation-empty) false))
+              (let [branch-row 0]
+                (while (< branch-row (query-relation-row-count branch-rel))
+                  (when (not (query-relation-builder-add-relation-row-by-attrs! (addr builder) (slice attrs 0) branch-rel branch-row))
+                    (delete-query-relation branch-rel)
+                    (delete attrs)
+                    (delete attr-sources)
+                    (delete-query-relation-builder builder)
+                    (return (query-relation-empty) false))
+                  (set! branch-row (+ branch-row 1))))
+              (delete-query-relation branch-rel)))
+          (set! row (+ row 1)))
+        (return (Query-Relation {attrs: attrs
+                                 attr-sources: attr-sources
+                                 attr-index: (query-relation-attr-index (slice attrs 0))
+                                 tuples: builder.tuples
+                                 typed-columns: builder.typed-columns
+                                 typed-rows: builder.typed-rows
+                                 has-typed-columns: builder.typed-ok}) true)))
+    (when (plain-typed-or-join-group? group)
+      (let [builder (query-relation-builder (slice attrs 0))
+            row 0]
+        (while (< row rel.typed-rows)
+          (for [branch group.branches]
+            (let [[branch-rel branch-ok] (query-relation-apply-plain-or-branch-typed db query inputs sources rel row branch registry)]
+              (when (not branch-ok)
+                (delete-query-relation branch-rel)
+                (delete attrs)
+                (delete attr-sources)
+                (delete-query-relation-builder builder)
+                (return (query-relation-empty) false))
+              (let [branch-row 0]
+                (while (< branch-row (query-relation-row-count branch-rel))
+                  (when (not (query-relation-builder-add-relation-row-by-attrs! (addr builder) (slice attrs 0) branch-rel branch-row))
+                    (delete-query-relation branch-rel)
+                    (delete attrs)
+                    (delete attr-sources)
+                    (delete-query-relation-builder builder)
+                    (return (query-relation-empty) false))
+                  (set! branch-row (+ branch-row 1))))
+              (delete-query-relation branch-rel)))
+          (set! row (+ row 1)))
+        (return (Query-Relation {attrs: attrs
+                                 attr-sources: attr-sources
+                                 attr-index: (query-relation-attr-index (slice attrs 0))
+                                 tuples: builder.tuples
+                                 typed-columns: builder.typed-columns
+                                 typed-rows: builder.typed-rows
+                                 has-typed-columns: builder.typed-ok}) true)))
+    (let [typed-columns (relation-columns-for-attrs (slice attrs 0))
+          typed-rows 0
+          row 0]
+      (while (< row rel.typed-rows)
+        (let [[binding binding-ok] (binding-from-query-relation-typed-row rel row)]
+          (when (not binding-ok)
+            (delete attrs)
+            (delete attr-sources)
+            (delete-relation-columns typed-columns)
+            (return (query-relation-empty) false))
+          (for [branch group.branches]
+            (let [branch-bindings (bindings-after-or-branch-with-rules-sources-and-fns db (slice query.rules 0) sources group branch binding registry)]
+              (for [next branch-bindings]
+                (if (binding-can-add-to-relation-columns? (slice attrs 0) (slice typed-columns 0) next)
+                  (do
+                    (add-binding-to-relation-columns! (slice attrs 0) (addr typed-columns) next)
+                    (set! typed-rows (+ typed-rows 1)))
+                  (do
+                    (delete branch-bindings)
+                    (delete binding.items)
+                    (delete attrs)
+                    (delete attr-sources)
+                    (delete-relation-columns typed-columns)
+                    (return (query-relation-empty) false))))
+              (delete branch-bindings)))
+          (delete binding.items))
+        (set! row (+ row 1)))
+      (return (Query-Relation {attrs: attrs
+                               attr-sources: attr-sources
+                               attr-index: (query-relation-attr-index (slice attrs 0))
+                               tuples: (make [dynamic]Binding)
+                               typed-columns: typed-columns
+                               typed-rows: typed-rows
+                               has-typed-columns: true}) true))))
+
+(defn query-relation-apply-or [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, group: Or-Group, registry: []Native-Query-Fn] -> Query-Relation
+  (let [[typed typed-ok] (query-relation-apply-or-typed db query inputs sources rel group registry)]
+    (when typed-ok
+      (return typed))
+    (delete-query-relation typed))
+  (let [materialized (query-relation-materialized-bindings rel) :defer
+        bindings (bindings-after-or-group-step-with-fns db sources (slice materialized 0) group registry)
+        out (query-relation-from-bindings-inheriting-sources (slice bindings 0) rel)]
+    (delete bindings)
+    out))
+
