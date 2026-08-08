@@ -1,0 +1,775 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn string-owned [text: string] -> string
+  (let [[out err] (core-strings.clone text)]
+    (if (= err nil)
+      out
+      "")))
+
+(defn current-instant [] -> Value
+  (value-instant (/ (time.to-unix-nanoseconds (time.now)) 1000000)))
+
+(defn squuid-text [] -> string
+  (let [seconds (u64 (/ (time.to-unix-nanoseconds (time.now)) 1000000000))
+        random-most (rand.uint64)
+        least (rand.uint64)]
+    (string-owned
+      (fmt.tprintf "%08x-%04x-%04x-%04x-%012x"
+                   (% seconds (u64 4294967296))
+                   (% (/ random-most (u64 65536)) (u64 65536))
+                   (% random-most (u64 65536))
+                   (% (/ least (u64 281474976710656)) (u64 65536))
+                   (% least (u64 281474976710656))))))
+
+(defn squuid-value [] -> Value
+  (value-uuid (squuid-text)))
+
+(defn- hex-nibble [value: u8] -> [nibble: u64, ok: bool]
+  (cond
+    (and (>= value 48) (<= value 57))
+      (return (u64 (- value 48)) true)
+    (and (>= value 65) (<= value 70))
+      (return (u64 (+ 10 (- value 65))) true)
+    (and (>= value 97) (<= value 102))
+      (return (u64 (+ 10 (- value 97))) true)
+    :else
+      (return (u64 0) false)))
+
+(defn squuid-time-millis [value: string] -> [unix-millis: i64, ok: bool]
+  (when (< (count value) 8)
+    (return (i64 0) false))
+  (let [seconds (u64 0)]
+    (for [index (arr.range 0 8)]
+      (let [[nibble nibble-ok] (hex-nibble value[index])]
+        (when (not nibble-ok)
+          (return (i64 0) false))
+        (set! seconds (+ (* seconds 16) nibble))))
+    (return (i64 (* seconds 1000)) true)))
+
+(defn instant-text [unix-millis: i64] -> string
+  (let [[datetime ok] (time.time-to-datetime (time.unix 0 (* unix-millis 1000000)))]
+    (when (not ok)
+      (return ""))
+    (fmt.tprintf "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ"
+                 datetime.year
+                 datetime.month
+                 datetime.day
+                 datetime.hour
+                 datetime.minute
+                 datetime.second
+                 (/ datetime.nano 1000000))))
+
+(defn instant-from-text [text: string] -> [value: Value, ok: bool]
+  (let [normalized text]
+    (when (= (count text) 10)
+      (set! normalized (fmt.tprintf "%sT00:00:00Z" text)))
+    (let [[parsed consumed] (time.iso8601-to-time-utc normalized)]
+      (return (value-instant (/ (time.to-unix-nanoseconds parsed) 1000000))
+              (= consumed (count normalized))))))
+
+(defn string-clojure-count [text: string] -> int
+  (let [out 0
+        index 0
+        size (count text)]
+    (while (< index size)
+      (let [raw (int text[index])
+            byte (if (< raw 0) (+ raw 256) raw)]
+        (cond
+          (< byte 0x80)
+          (do
+            (set! out (+ out 1))
+            (set! index (+ index 1)))
+
+          (< byte 0xC0)
+          (set! index (+ index 1))
+
+          (< byte 0xE0)
+          (do
+            (set! out (+ out 1))
+            (set! index (+ index 2)))
+
+          (< byte 0xF0)
+          (do
+            (set! out (+ out 1))
+            (set! index (+ index 3)))
+
+          :else
+          (do
+            (set! out (+ out 2))
+            (set! index (+ index 4))))))
+    out))
+
+(defn value-owned [value: Value] -> Value
+  (case value.kind
+    .String (value-string (string-owned value.text))
+    .Keyword (value-keyword (string-owned value.text))
+    .Symbol (value-symbol (string-owned value.text))
+    .Uuid (value-uuid (string-owned value.text))
+    .Vector
+      (let [items (make [dynamic]Value 0 (count value.items))]
+        (for [item value.items]
+          (arr.push! items (value-owned item)))
+        (value-vector-owned items))
+    .Map
+      (let [items (make [dynamic]Value 0 (count value.items))]
+        (for [item value.items]
+          (arr.push! items (value-owned item)))
+        (value-map-owned items))
+    .Set
+      (let [items (make [dynamic]Value 0 (count value.items))]
+        (for [item value.items]
+          (arr.push! items (value-owned item)))
+        (value-set-owned items))
+     value))
+
+(defn datom-owned [datom: Datom] -> Datom
+  (Datom {e: datom.e
+          a: (string-owned datom.a)
+          v: (value-owned datom.v)
+          tx: datom.tx
+          added: datom.added}))
+
+(defn delete-owned-datom [datom: Datom]
+  (delete datom.a)
+  (delete-owned-value datom.v))
+
+(defn delete-owned-datoms [datoms: [dynamic]Datom]
+  (for [datom datoms]
+    (delete-owned-datom datom))
+  (delete datoms))
+
+(defn delete-resolved-tx [resolved: Resolved-Tx]
+  (for [op resolved.ops]
+    (when op.owned-attr
+      (delete op.a))
+    (when op.owned-value
+      (delete-owned-value op.v)))
+  (delete resolved.ops)
+  (delete resolved.tx-meta)
+  (delete-owned-tempids resolved.tempids))
+
+(defn delete-resolved-tx-after-tempids-moved [resolved: Resolved-Tx]
+  (for [op resolved.ops]
+    (when op.owned-attr
+      (delete op.a))
+    (when op.owned-value
+      (delete-owned-value op.v)))
+  (delete resolved.ops)
+  (delete resolved.tx-meta))
+
+(defn delete-owned-value [value: Value]
+  (case value.kind
+    .String (delete value.text)
+    .Keyword (delete value.text)
+    .Symbol (delete value.text)
+    .Uuid (delete value.text)
+    .Vector
+      (do
+        (for [item value.items]
+          (delete-owned-value item))
+        (delete value.items))
+    .Map
+      (do
+        (for [item value.items]
+          (delete-owned-value item))
+        (delete value.items))
+    .Set
+      (do
+        (for [item value.items]
+          (delete-owned-value item))
+        (delete value.items))
+     (do)))
+
+(defn delete-owned-pull-spec [spec: Pull-Spec]
+  (delete spec.a)
+  (when spec.has-default
+    (delete-owned-value spec.default-value))
+  (when spec.has-alias
+    (delete spec.alias))
+  (when spec.has-xform
+    (delete spec.xform))
+  (for [child spec.pattern]
+    (delete-owned-pull-spec child))
+  (delete spec.pattern))
+
+(defn delete-owned-query-input [input: Query-Input]
+  (case input.kind
+    .Scalar
+      (do
+        (delete-owned-value input.value)
+        (when input.has-lookup-ref
+          (delete input.lookup-attr)
+          (delete-owned-value input.lookup-value)))
+    .Collection
+      (do
+        (for [value input.values]
+          (delete-owned-value value))
+        (delete input.values))
+    .Relation
+      (do
+        (for [value input.values]
+          (delete-owned-value value))
+        (delete input.values))
+    .CollectionLookupRefs
+      (do
+        (for [attr input.lookup-attrs]
+          (delete attr))
+        (for [value input.lookup-values]
+          (delete-owned-value value))
+        (delete input.lookup-attrs)
+        (delete input.lookup-values))
+    .PullPattern
+      (do
+        (for [spec input.pattern]
+          (delete-owned-pull-spec spec))
+        (delete input.pattern))
+    (do)))
+
+(defn delete-owned-query-inputs [inputs: [dynamic]Query-Input]
+  (for [input inputs]
+    (delete-owned-query-input input))
+  (delete inputs))
+
+(defn delete-value-containers-shallow [value: Value]
+  (case value.kind
+    .Vector
+      (do
+        (for [item value.items]
+          (delete-value-containers-shallow item))
+        (delete value.items))
+    .Map
+      (do
+        (for [item value.items]
+          (delete-value-containers-shallow item))
+        (delete value.items))
+     (do)))
+
+(defn tx-data-owned [data: Tx-Data] -> Tx-Data
+  (Tx-Data {op: (string-owned data.op)
+            e: data.e
+            tempid: (string-owned data.tempid)
+            has-tempid: data.has-tempid
+            lookup-attr: (string-owned data.lookup-attr)
+            lookup-value: (value-owned data.lookup-value)
+            has-lookup-ref: data.has-lookup-ref
+            ident: (string-owned data.ident)
+            has-ident: data.has-ident
+            a: (string-owned data.a)
+            v: (value-owned data.v)
+            expected: (value-owned data.expected)
+            expected-lookup-attr: (string-owned data.expected-lookup-attr)
+            expected-lookup-value: (value-owned data.expected-lookup-value)
+            has-expected-lookup-ref: data.has-expected-lookup-ref
+            value-tempid: (string-owned data.value-tempid)
+            has-value-tempid: data.has-value-tempid
+            value-lookup-attr: (string-owned data.value-lookup-attr)
+            value-lookup-value: (value-owned data.value-lookup-value)
+            has-value-lookup-ref: data.has-value-lookup-ref
+            nested-map: (value-owned data.nested-map)
+            nested-tempid: (string-owned data.nested-tempid)
+            has-nested-map: data.has-nested-map
+            from-map-collection: data.from-map-collection
+            map-group: (string-owned data.map-group)}))
+
+(defn tx-data-slice-owned [tx-data: []Tx-Data] -> [dynamic]Tx-Data
+  (let [out (make [dynamic]Tx-Data 0 (count tx-data))]
+    (for [data tx-data]
+      (arr.push! out (tx-data-owned data)))
+    out))
+
+(defn delete-owned-tx-data-item [data: Tx-Data]
+  (delete data.op)
+  (delete data.tempid)
+  (delete data.lookup-attr)
+  (delete-owned-value data.lookup-value)
+  (delete data.ident)
+  (delete data.a)
+  (delete-owned-value data.v)
+  (delete-owned-value data.expected)
+  (delete data.expected-lookup-attr)
+  (delete-owned-value data.expected-lookup-value)
+  (delete data.value-tempid)
+  (delete data.value-lookup-attr)
+  (delete-owned-value data.value-lookup-value)
+  (delete-owned-value data.nested-map)
+  (delete data.nested-tempid)
+  (delete data.map-group))
+
+(defn delete-owned-tx-data [tx-data: [dynamic]Tx-Data]
+  (for [data tx-data]
+    (delete-owned-tx-data-item data))
+  (delete tx-data))
+
+(defn get-some-owned [clause: Get-Some] -> Get-Some
+  (let [out (Get-Some {source: clause.source
+                       has-source: clause.has-source
+                       e: clause.e
+                       attrs: (make [dynamic]string 0 (count clause.attrs))
+                       out-attr: clause.out-attr
+                       out-value: clause.out-value})]
+    (for [attr clause.attrs]
+      (arr.push! out.attrs attr))
+    out))
+
+(defn get-some-slice-owned [clauses: []Get-Some] -> [dynamic]Get-Some
+  (let [out (make [dynamic]Get-Some 0 (count clauses))]
+    (for [clause clauses]
+      (arr.push! out (get-some-owned clause)))
+    out))
+
+(defn delete-get-some [clause: Get-Some]
+  (delete clause.attrs))
+
+(defn delete-get-somes [clauses: [dynamic]Get-Some]
+  (for [clause clauses]
+    (delete-get-some clause))
+  (delete clauses))
+
+
+(defn query-with-rules [query: Query, rules: []Rule] -> Query
+  (let [out query]
+    (delete out.rules)
+    (delete-rule-call-plans out.rule-call-plans)
+    (let [owned-rules (arr.into [dynamic]Rule rules)]
+      (set! out.rules owned-rules))
+    (when (> (count rules) 0)
+      (set! out.has-rules-input true))
+    (set! out.rule-call-plans (make [dynamic]Rule-Call-Plan))
+    (return out)))
+
+(defn clone-query-shallow [query: Query] -> Query
+  (let [find (arr.into [dynamic]string (slice query.find 0))
+        with (arr.into [dynamic]string (slice query.with 0))
+        inputs (arr.into [dynamic]string (slice query.inputs 0))
+        collection-inputs (arr.into [dynamic]string (slice query.collection-inputs 0))
+        tuple-inputs (arr.into [dynamic]Tuple-Input (slice query.tuple-inputs 0))
+        relation-inputs (arr.into [dynamic]Relation-Input (slice query.relation-inputs 0))
+        input-specs (arr.into [dynamic]Query-Input-Spec (slice query.input-specs 0))
+        clauses (arr.into [dynamic]Clause (slice query.clauses 0))
+        predicates (arr.into [dynamic]Predicate (slice query.predicates 0))
+        function-clauses (arr.into [dynamic]Function-Clause (slice query.function-clauses 0))
+        rules (arr.into [dynamic]Rule (slice query.rules 0))
+        rule-calls (arr.into [dynamic]Rule-Call (slice query.rule-calls 0))
+        rule-call-plans (clone-rule-call-plans (slice query.rule-call-plans 0))
+        get-elses (arr.into [dynamic]Get-Else (slice query.get-elses 0))
+        get-somes (get-some-slice-owned (slice query.get-somes 0))
+        grounds (arr.into [dynamic]Ground (slice query.grounds 0))
+        not-groups (arr.into [dynamic]Not-Group (slice query.not-groups 0))
+        or-groups (arr.into [dynamic]Or-Group (slice query.or-groups 0))
+        where-steps (arr.into [dynamic]Query-Step (slice query.where-steps 0))
+        pulls (arr.into [dynamic]Pull-Find (slice query.pulls 0))
+        aggregates (arr.into [dynamic]Aggregate-Find (slice query.aggregates 0))
+        return-map-keys (arr.into [dynamic]string (slice query.return-map-keys 0))]
+    (Query {find: find
+            with: with
+            inputs: inputs
+            collection-inputs: collection-inputs
+            tuple-inputs: tuple-inputs
+            relation-inputs: relation-inputs
+            input-specs: input-specs
+            has-default-source-input: query.has-default-source-input
+            has-rules-input: query.has-rules-input
+            clauses: clauses
+            predicates: predicates
+            function-clauses: function-clauses
+            rules: rules
+            rule-calls: rule-calls
+            rule-call-plans: rule-call-plans
+            get-elses: get-elses
+            get-somes: get-somes
+            grounds: grounds
+            not-groups: not-groups
+            or-groups: or-groups
+            where-steps: where-steps
+            pulls: pulls
+            aggregates: aggregates
+            has-return-map: query.has-return-map
+            return-map-marker: query.return-map-marker
+            return-map-keys: return-map-keys})))
+
+(defn query-copy-with-rules [query: Query, rules: []Rule] -> Query
+  (query-with-rules (clone-query-shallow query) rules))
+
+(defn delete-query-shallow [query: Query]
+  (delete query.find)
+  (delete query.with)
+  (delete query.inputs)
+  (delete query.collection-inputs)
+  (delete query.tuple-inputs)
+  (delete query.relation-inputs)
+  (delete query.input-specs)
+  (delete query.clauses)
+  (delete query.predicates)
+  (delete query.function-clauses)
+  (delete query.rules)
+  (delete query.rule-calls)
+  (delete-rule-call-plans query.rule-call-plans)
+  (delete query.get-elses)
+  (delete-get-somes query.get-somes)
+  (delete query.grounds)
+  (delete query.not-groups)
+  (delete query.or-groups)
+  (delete query.where-steps)
+  (delete query.pulls)
+  (delete query.aggregates)
+  (delete query.return-map-keys))
+
+(defn delete-parser-get-else-defaults [clauses: []Get-Else]
+  ;; get-else defaults are parsed through edn-value-from-node and own their
+  ;; complete textual and compound payloads. Ordinary query terms continue to
+  ;; borrow atomic text from the retained EDN source.
+  (for [clause-value clauses]
+    (delete-owned-value clause-value.default-value)))
+
+(defn delete-parser-not-group-get-else-defaults [group: Not-Group]
+  (delete-parser-get-else-defaults (slice group.get-elses 0))
+  (for [nested group.not-groups]
+    (delete-parser-not-group-get-else-defaults nested)))
+
+(defn delete-parser-or-group-get-else-defaults [group: Or-Group]
+  (for [branch group.branches]
+    (delete-parser-not-group-get-else-defaults branch)))
+
+(defn delete-parser-rule-get-else-defaults [rule: Rule]
+  (delete-parser-get-else-defaults (slice rule.get-elses 0))
+  (for [group rule.not-groups]
+    (delete-parser-not-group-get-else-defaults group))
+  (for [group rule.or-groups]
+    (delete-parser-or-group-get-else-defaults group)))
+
+(defn delete-not-group-containers [group: Not-Group]
+  (for [predicate group.predicates]
+    (delete predicate.terms))
+  (for [function group.function-clauses]
+    (delete function.terms)
+    (delete function.out-vars)
+    (delete-input-binding-shallow function.out-binding))
+  (for [ground group.grounds]
+    (delete ground.tuple-vars)
+    (delete-input-binding-shallow ground.binding))
+  (for [call group.rule-calls]
+    (delete call.args))
+  (for [nested group.not-groups]
+    (delete-not-group-containers nested))
+  (delete group.clauses)
+  (delete group.predicates)
+  (delete group.function-clauses)
+  (delete group.get-elses)
+  (delete-get-somes group.get-somes)
+  (delete group.grounds)
+  (delete group.rule-calls)
+  (delete group.not-groups)
+  (delete group.steps)
+  (delete group.join-vars))
+
+(defn delete-or-group-containers [group: Or-Group]
+  (for [branch group.branches]
+    (delete-not-group-containers branch))
+  (delete group.branches)
+  (delete group.join-vars))
+
+(defn delete-rule-containers [rule: Rule]
+  (for [predicate rule.predicates]
+    (delete predicate.terms))
+  (for [function rule.function-clauses]
+    (delete function.terms)
+    (delete function.out-vars)
+    (delete-input-binding-shallow function.out-binding))
+  (for [ground rule.grounds]
+    (delete ground.tuple-vars)
+    (delete-input-binding-shallow ground.binding))
+  (for [call rule.rule-calls]
+    (delete call.args))
+  (for [group rule.not-groups]
+    (delete-not-group-containers group))
+  (for [group rule.or-groups]
+    (delete-or-group-containers group))
+  (delete rule.params)
+  (delete rule.clauses)
+  (delete rule.predicates)
+  (delete rule.function-clauses)
+  (delete rule.get-elses)
+  (delete-get-somes rule.get-somes)
+  (delete rule.grounds)
+  (delete rule.rule-calls)
+  (delete rule.not-groups)
+  (delete rule.or-groups)
+  (delete rule.body-steps))
+
+(defn delete-prepared-query-shallow [prepared: Prepared-Query]
+  (for [predicate prepared.query.predicates]
+    (delete predicate.terms))
+  (for [function prepared.query.function-clauses]
+    (delete function.terms)
+    (delete function.out-vars)
+    (delete-input-binding-shallow function.out-binding))
+  (for [rule prepared.query.rules]
+    (delete-parser-rule-get-else-defaults rule)
+    (delete-rule-containers rule))
+  (delete-parser-get-else-defaults (slice prepared.query.get-elses 0))
+  (for [group prepared.query.not-groups]
+    (delete-parser-not-group-get-else-defaults group)
+    (delete-not-group-containers group))
+  (for [group prepared.query.or-groups]
+    (delete-parser-or-group-get-else-defaults group)
+    (delete-or-group-containers group))
+  (for [aggregate prepared.query.aggregates]
+    (delete aggregate.args))
+  (delete-query-shallow prepared.query)
+  ;; Embedded Data fields are managed by Kvist. This explicit cleanup owns
+  ;; only the query engine's native containers and parser-owned Value payloads.
+  )
+
+(defn delete-input-binding-shallow [binding: Input-Binding]
+  (for [item binding.items]
+    (delete-input-binding-shallow item))
+  (delete binding.items))
+
+(defn delete-prepared-binding-shallow [prepared: Prepared-Binding]
+  (delete-input-binding-shallow prepared.binding)
+  )
+
+(defn delete-prepared-in-shallow [prepared: Prepared-In]
+  (for [binding prepared.bindings]
+    (delete-input-binding-shallow binding))
+  (delete prepared.bindings))
+
+(defn delete-prepared-with-shallow [prepared: Prepared-With]
+  (delete prepared.vars))
+
+(defn delete-prepared-clause-shallow [prepared: Prepared-Clause]
+  (delete-parser-get-else-defaults (slice prepared.get-elses 0))
+  (for [group prepared.not-groups]
+    (delete-parser-not-group-get-else-defaults group))
+  (for [group prepared.or-groups]
+    (delete-parser-or-group-get-else-defaults group))
+  (delete prepared.clauses)
+  (delete prepared.predicates)
+  (delete prepared.function-clauses)
+  (delete prepared.rule-calls)
+  (delete prepared.get-elses)
+  (delete-get-somes prepared.get-somes)
+  (delete prepared.grounds)
+  (delete prepared.not-groups)
+  (delete prepared.or-groups)
+  (delete prepared.where-steps))
+
+(defn delete-prepared-rules-shallow [prepared: Prepared-Rules]
+  (for [rule prepared.rules]
+    (delete-parser-rule-get-else-defaults rule)
+    (delete-rule-containers rule))
+  (delete prepared.rules))
+
+(defn delete-prepared-rules-after-rules-transferred [prepared: Prepared-Rules]
+  ;; query-with-rules copies the outer rule array while transferring ownership
+  ;; of the rules' nested parser values to the receiving prepared query.
+  (delete prepared.rules))
+
+(defn delete-pull-spec-containers-shallow [specs: []Pull-Spec]
+  (for [spec specs]
+    (delete-pull-spec-containers-shallow (slice spec.pattern 0))
+    (delete spec.pattern)))
+
+(defn delete-prepared-pull-pattern-shallow [prepared: Prepared-Pull-Pattern]
+  (delete-pull-spec-containers-shallow (slice prepared.pattern 0))
+  (delete prepared.pattern))
+
+(defn delete-prepared-tx-data-shallow [prepared: Prepared-Tx-Data]
+  (delete-owned-tx-data prepared.tx-data))
+
+(defn delete-tx-report-shallow [report: Tx-Report]
+  (when report.ok
+    (delete-owned-db report.db-before)
+    (when report.owns-db-after
+      (delete-owned-db report.db-after)))
+  (delete report.error)
+  (delete report.tx-data)
+  (delete-owned-tx-meta report.tx-meta)
+  (delete-owned-tempids report.tempids)
+  (delete-tx-publish-plan report.publish-plan))
+
+(defn delete-live-tx-report-shallow [report: Tx-Report]
+  ;; Kept as a source-compatible name for callers that know they transacted a
+  ;; live connection. Ownership is carried by the report, so both cleanup
+  ;; entry points are now equally safe.
+  (delete-tx-report-shallow report))
+
+(defn clone-datoms [datoms: [dynamic]Datom] -> [dynamic]Datom
+  (arr.into [dynamic]Datom (slice datoms 0)))
+
+(defn db [conn: ^Conn] -> DB
+  (clone-db conn^.db))
+
+(defn clone-tx-meta [meta: []Tx-Meta] -> [dynamic]Tx-Meta
+  (let [out (make [dynamic]Tx-Meta 0 (count meta))]
+    (for [item meta]
+      (arr.push! out
+        (Tx-Meta {a: (string-owned item.a)
+                  v: (value-owned item.v)})))
+    out))
+
+(defn delete-owned-tx-meta [meta: [dynamic]Tx-Meta]
+  (for [item meta]
+    (delete item.a)
+    (delete-owned-value item.v))
+  (delete meta))
+
+(defn clone-tx-report [report: Tx-Report] -> Tx-Report
+  (let [tx-data (arr.into [dynamic]Datom (slice report.tx-data 0))
+        tx-meta (clone-tx-meta (slice report.tx-meta 0))
+        tempids (clone-tempids-owned (slice report.tempids 0))]
+    (Tx-Report {ok: report.ok
+                error: (string-owned report.error)
+                db-before: (clone-db report.db-before)
+                db-after: (clone-db report.db-after)
+                owns-db-after: true
+                tx-data: tx-data
+                tx: report.tx
+                tx-meta: tx-meta
+                tempids: tempids
+                datom-start-index: report.datom-start-index
+                append-only: report.append-only
+                new-entities-after-existing: report.new-entities-after-existing
+                publish-plan: (clone-tx-publish-plan report.publish-plan)})))
+
+(defn listen! [conn: ^Conn, name: string, reports: ^[dynamic]Tx-Report] -> bool
+  (for [listener index conn^.listeners]
+    (when (= listener.name name)
+      (set! conn^.listeners[index] (Tx-Listener {name: name reports: reports}))
+      (return true)))
+  (arr.push! conn^.listeners (Tx-Listener {name: name reports: reports}))
+  true)
+
+(defn unlisten! [conn: ^Conn, name: string] -> bool
+  (for [listener index conn^.listeners]
+    (when (= listener.name name)
+      (arr.remove-ordered-at! conn^.listeners index)
+      (return true)))
+  false)
+
+(defn notify-listeners! [conn: ^Conn, report: Tx-Report]
+  (for [listener conn^.listeners]
+    (arr.push! listener.reports^ (clone-tx-report report))))
+
+(defn query-context-singleton [] -> Query-Context
+  (let [rels (make [dynamic]Query-Relation)]
+    (arr.push! rels (query-relation-singleton))
+    (Query-Context {rels: rels})))
+
+(defn delete-query-context [ctx: Query-Context]
+  (for [rel ctx.rels]
+    (delete-query-relation rel))
+  (delete ctx.rels))
+
+(defn delete-pull-attrs-shallow [attrs: [dynamic]Pull-Attr]
+  (for [pulled attrs]
+    (delete-pull-attrs-shallow pulled.attrs))
+  (delete attrs))
+
+(defn delete-pull-attrs-owned-values [attrs: [dynamic]Pull-Attr]
+  (for [pulled attrs]
+    (when pulled.a-owned
+      (delete pulled.a))
+    (delete-owned-value pulled.v)
+    (delete-pull-attrs-owned-values pulled.attrs))
+  (delete attrs))
+
+(defn delete-pull-attr-shallow-owned-key [pulled: Pull-Attr]
+  (when pulled.a-owned
+    (delete pulled.a))
+  (for [child pulled.attrs]
+    (delete-pull-attr-shallow-owned-key child))
+  (delete pulled.attrs))
+
+(defn delete-pull-attr-owned-values [pulled: Pull-Attr]
+  (when pulled.a-owned
+    (delete pulled.a))
+  (delete-owned-value pulled.v)
+  (for [child pulled.attrs]
+    (delete-pull-attr-owned-values child))
+  (delete pulled.attrs))
+
+(defn delete-pull-result-shallow [result: Pull-Result]
+  (delete-pull-attrs-shallow result.attrs))
+
+(defn delete-pull-result-owned-values [result: Pull-Result]
+  (delete-pull-attrs-owned-values result.attrs))
+
+(defn delete-result-rows-shallow [rows: [dynamic]Result-Row]
+  (for [row rows]
+    (delete row.values)
+    (for [pull row.pulls]
+      (delete-pull-result-shallow pull))
+    (delete row.pulls))
+  (delete rows))
+
+(defn delete-result-set-shallow [result: Result-Set]
+  (delete-result-rows-shallow result.rows))
+
+(defn delete-result-rows-owned-values [rows: [dynamic]Result-Row]
+  (for [row rows]
+    (for [value row.values]
+      (delete-owned-value value))
+    (delete row.values)
+    (for [pull row.pulls]
+      (delete-pull-result-owned-values pull))
+    (delete row.pulls))
+  (delete rows))
+
+(defn delete-result-set-owned-values [result: Result-Set]
+  (delete-result-rows-owned-values result.rows))
+
+(defn pull-attr-owned [pulled: Pull-Attr] -> Pull-Attr
+  (let [children (make [dynamic]Pull-Attr 0 (count pulled.attrs))]
+    (for [child pulled.attrs]
+      (arr.push! children (pull-attr-owned child)))
+    (Pull-Attr {a: (string-owned pulled.a)
+                a-owned: true
+                key-kind: pulled.key-kind
+                v: (value-owned pulled.v)
+                attrs: children
+                has-explicit-pattern: pulled.has-explicit-pattern})))
+
+(defn pull-result-owned [result: Pull-Result] -> Pull-Result
+  (let [attrs (make [dynamic]Pull-Attr 0 (count result.attrs))]
+    (for [pulled result.attrs]
+      (arr.push! attrs (pull-attr-owned pulled)))
+    (Pull-Result {e: result.e attrs: attrs})))
+
+(defn result-row-owned [row: Result-Row] -> Result-Row
+  (let [values (make [dynamic]Value 0 (count row.values))
+        pulls (make [dynamic]Pull-Result 0 (count row.pulls))]
+    (for [value row.values]
+      (arr.push! values (value-owned value)))
+    (for [pull row.pulls]
+      (arr.push! pulls (pull-result-owned pull)))
+    (Result-Row {values: values pulls: pulls})))
+
+(defn result-set-owned [result: Result-Set] -> Result-Set
+  (let [rows (make [dynamic]Result-Row 0 (count result.rows))]
+    (for [row result.rows]
+      (arr.push! rows (result-row-owned row)))
+    (Result-Set {ok: result.ok error: result.error rows: rows})))
+
+(defn query-result-shallow [result: Result-Set] -> Query-Result
+  (Query-Result {result: result ownsValues: false}))
+
+(defn query-result-owned-values [result: Result-Set] -> Query-Result
+  (Query-Result {result: result ownsValues: true}))
+
+(defn query-result-owns-values? [result: Query-Result] -> bool
+  result.ownsValues)
+
+(defn delete-query-result [result: Query-Result]
+  (if (query-result-owns-values? result)
+    (delete-result-set-owned-values result.result)
+    (delete-result-set-shallow result.result)))
+
+(defn delete-profiled-result-set-shallow [profiled: Profiled-Result-Set]
+  (delete-result-set-shallow profiled.result))
+
+(defn delete-profiled-result-set-owned-values [profiled: Profiled-Result-Set]
+  (delete-result-set-owned-values profiled.result))
