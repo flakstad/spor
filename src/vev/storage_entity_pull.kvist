@@ -1,0 +1,397 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn store-db-entity [snapshot: ^Store-DB, entity-id: u64] -> [entity: Store-Entity, ok: bool, error: string]
+  (when (and (= snapshot^.kind .Filtered)
+             snapshot^.filter-history)
+    (return (Store-Entity {}) false "history DB values do not support entity views"))
+  (let [[source source-ok source-error] (store-db-read-source snapshot)]
+    (when (not source-ok)
+      (return (Store-Entity {}) false source-error))
+    (let [[_ _ exists range-ok range-error] (db-read-source-eavt-entity-range source entity-id)]
+      (when (not range-ok)
+        (return (Store-Entity {}) false range-error))
+      (return (Store-Entity {db: (retain-store-db snapshot^) e: entity-id found: exists}) true ""))))
+
+(defn store-db-entity-lookup-ref [snapshot: ^Store-DB, attr: string, lookup-value: Value] -> [entity: Store-Entity, ok: bool, error: string]
+  (let [[source source-ok source-error] (store-db-read-source snapshot)]
+    (when (not source-ok)
+      (return (Store-Entity {}) false source-error))
+    (let [[entity-id entity-ok lookup-error] (db-read-source-resolve-lookup-ref source attr lookup-value)]
+      (when (not entity-ok)
+        (if (= lookup-error "")
+          (return (Store-Entity {db: (retain-store-db snapshot^) e: 0 found: false}) true "")
+          (return (Store-Entity {}) false lookup-error)))
+      (store-db-entity snapshot entity-id))))
+
+(defn store-db-entity-ident [snapshot: ^Store-DB, ident: string] -> [entity: Store-Entity, ok: bool, error: string]
+  (let [[source source-ok source-error] (store-db-read-source snapshot)]
+    (when (not source-ok)
+      (return (Store-Entity {}) false source-error))
+    (let [[entity-id entity-ok ident-error] (db-read-source-schema-entity-for-attr source ident)]
+      (when (not entity-ok)
+        (if (= ident-error "")
+          (return (Store-Entity {db: (retain-store-db snapshot^) e: 0 found: false}) true "")
+          (return (Store-Entity {}) false ident-error)))
+      (store-db-entity snapshot entity-id))))
+
+(defn store-public-index-order [order: string] -> [value: Public-Index-Order, ok: bool]
+  (cond
+    (= order ":eavt") (return .EAVT true)
+    (= order ":aevt") (return .AEVT true)
+    (= order ":avet") (return .AVET true)
+    (= order ":vaet") (return .VAET true))
+  (return .EAVT false))
+
+(defn store-db-resolve-index-args [source: DB-Read-Source, args: []Index-Arg] -> [values: [dynamic]Value, ok: bool, error: string]
+  (let [out (make [dynamic]Value 0 (count args))]
+    (for [arg args]
+      (if arg.has-lookup-ref
+        (let [[entity entity-ok entity-error] (db-read-source-resolve-lookup-ref source arg.lookup-attr arg.lookup-value)]
+          (when (not entity-ok)
+            (delete out)
+            (return (make [dynamic]Value) false entity-error))
+          (arr.push! out (value-entity entity)))
+        (arr.push! out arg.value)))
+    (return out true "")))
+
+(defn store-index-attribute-position [order: Public-Index-Order, value-count: int] -> int
+  (let [position
+        (if (or (= order .EAVT) (= order .VAET))
+          1
+          0)]
+    (if (< position value-count) position -1)))
+
+(defn store-db-index-datoms [snapshot: ^Store-DB, mode: int, order-text: string, args: []Index-Arg] -> [datoms: [dynamic]Datom, ok: bool, error: string]
+  (let [[order order-ok] (store-public-index-order order-text)]
+    (when (not order-ok)
+      (return (make [dynamic]Datom) false "index must be :eavt, :aevt, :avet, or :vaet"))
+    (let [[source source-ok source-error] (store-db-read-source snapshot)]
+      (when (not source-ok)
+        (return (make [dynamic]Datom) false source-error))
+      (let [[values values-ok values-error] (store-db-resolve-index-args source args)]
+        (when (not values-ok)
+          (return (make [dynamic]Datom) false values-error))
+        (defer (delete values))
+        (let [attr-position (store-index-attribute-position order (count values))
+              resolved-attr-owned false]
+          (when (and (>= attr-position 0)
+                     (or (= values[attr-position].kind .Entity)
+                         (= values[attr-position].kind .Int)))
+            (let [[resolved resolved-ok resolved-error]
+                  (db-read-source-resolve-attribute-value
+                    source values[attr-position])]
+              (when (not resolved-ok)
+                (return (make [dynamic]Datom) false resolved-error))
+              (set! values[attr-position] resolved)
+              (set! resolved-attr-owned true)))
+          (defer
+            (when resolved-attr-owned
+              (delete-owned-value values[attr-position])))
+        (let [all (make [dynamic]Datom)
+              [scan-ok scan-error] (db-read-source-append-index-datoms! (addr all) source order ([]Value []))]
+          (when (not scan-ok)
+            (delete-owned-datoms all)
+            (return (make [dynamic]Datom) false scan-error))
+          (defer (delete-owned-datoms all))
+          (let [indexes (sorted-datom-order-indexes (slice all 0) order)
+                out (make [dynamic]Datom)]
+            (defer (delete indexes))
+            (if (= mode 2)
+              (let [position (- (count indexes) 1)]
+                (while (>= position 0)
+                  (let [datom all[indexes[position]]
+                        compare (datom-index-compare-values datom order-text (slice values 0))]
+                    (when (<= compare 0)
+                      (arr.push! out (datom-owned datom))))
+                  (set! position (- position 1))))
+              (for [index indexes]
+                (let [datom all[index]
+                      compare (datom-index-compare-values datom order-text (slice values 0))
+                      include (if (= mode 1)
+                                (>= compare 0)
+                                (= compare 0))]
+                  (when include
+                    (arr.push! out (datom-owned datom))))))
+            (return out true ""))))))))
+
+(defn store-db-index-range-datoms [snapshot: ^Store-DB, attr: string, start: Index-Arg, has-start: bool, end: Index-Arg, has-end: bool] -> [datoms: [dynamic]Datom, ok: bool, error: string]
+  (let [[source source-ok source-error] (store-db-read-source snapshot)]
+    (when (not source-ok)
+      (return (make [dynamic]Datom) false source-error))
+    (let [args (make [dynamic]Index-Arg)]
+      (defer (delete args))
+      (when has-start
+        (arr.push! args start))
+      (when has-end
+        (arr.push! args end))
+      (let [[values values-ok values-error] (store-db-resolve-index-args source (slice args 0))]
+        (when (not values-ok)
+          (return (make [dynamic]Datom) false values-error))
+        (defer (delete values))
+        (let [all (make [dynamic]Datom)
+              [scan-ok scan-error] (db-read-source-append-index-datoms! (addr all) source .AVET ([]Value [(value-keyword attr)]))]
+          (when (not scan-ok)
+            (delete-owned-datoms all)
+            (return (make [dynamic]Datom) false scan-error))
+          (defer (delete-owned-datoms all))
+          (let [indexes (sorted-datom-order-indexes (slice all 0) .AVET)
+                out (make [dynamic]Datom)]
+            (defer (delete indexes))
+            (for [index indexes]
+              (let [datom all[index]
+                    after-start (or (not has-start)
+                                    (>= (index-position-compare datom.v values[0]) 0))
+                    end-index (if has-start 1 0)
+                    before-end (or (not has-end)
+                                   (< (index-position-compare datom.v values[end-index]) 0))]
+                (when (and after-start before-end)
+                  (arr.push! out (datom-owned datom)))))
+            (return out true "")))))))
+
+(defn store-entity-id [entity: Store-Entity] -> u64
+  entity.e)
+
+(defn store-entity-found? [entity: Store-Entity] -> bool
+  entity.found)
+
+(defn store-entity-values [entity: ^Store-Entity, attr: string] -> [values: [dynamic]Value, ok: bool, error: string]
+  (let [out (make [dynamic]Value)]
+    (when (not entity^.found)
+      (return out true ""))
+    (when (= attr ":db/id")
+      (arr.push! out (value-entity entity^.e))
+      (return out true ""))
+    (let [[source source-ok source-error] (store-db-read-source (addr entity^.db))]
+      (when (not source-ok)
+        (delete out)
+        (return (make [dynamic]Value) false source-error))
+      (if (reverse-attr? attr)
+        (let [forward-attr (forward-attr-for-reverse attr)
+              [datoms datoms-ok datoms-error] (db-read-source-datoms-by-reverse-entity-attr source entity^.e forward-attr)]
+          (when (not datoms-ok)
+            (delete out)
+            (return (make [dynamic]Value) false datoms-error))
+          (for [datom datoms]
+            (arr.push! out (value-entity datom.e)))
+          (delete-owned-datoms datoms)
+          (return out true ""))
+        (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity^.e attr)]
+          (when (not datoms-ok)
+            (delete out)
+            (return (make [dynamic]Value) false datoms-error))
+          (for [datom datoms]
+            (arr.push! out (value-owned datom.v)))
+          (delete-owned-datoms datoms)
+          (return out true ""))))))
+
+(defn store-entity-first-value [entity: ^Store-Entity, attr: string] -> [value: Value, ok: bool, error: string]
+  (let [[values values-ok values-error] (store-entity-values entity attr)]
+    (when (not values-ok)
+      (return (Value {}) false values-error))
+    (when (= (count values) 0)
+      (delete values)
+      (return (Value {}) false ""))
+    (let [out (value-owned values[0])]
+      (for [value values]
+        (delete-owned-value value))
+      (delete values)
+      (return out true ""))))
+
+(defn store-entity-first-value-kw [entity: ^Store-Entity, attr: keyword] -> [value: Value, ok: bool, error: string]
+  (store-entity-first-value entity (keyword-text attr)))
+
+(defn store-entity-get [entity: ^Store-Entity, attr: string] -> Value
+  (let [[value value-ok _] (store-entity-first-value entity attr)]
+    (if value-ok
+      value
+      (value-nil))))
+
+(defn store-entity-get-kw [entity: ^Store-Entity, attr: keyword] -> Value
+  (store-entity-get entity (keyword-text attr)))
+
+(defn store-entity-contains? [entity: ^Store-Entity, attr: string] -> bool
+  (let [[value value-ok _] (store-entity-first-value entity attr)]
+    (when value-ok
+      (delete-owned-value value))
+    value-ok))
+
+(defn store-entity-attr-flags [entity: ^Store-Entity, attr: string] -> [flags: int, ok: bool, error: string]
+  ;; Bit 0: ref, bit 1: cardinality-many, bit 2: component.
+  (when (reverse-attr? attr)
+    (return 3 true ""))
+  (let [[source source-ok source-error] (store-db-read-source (addr entity^.db))]
+    (when (not source-ok)
+      (return 0 false source-error))
+    (let [[ref ref-ok ref-error] (db-read-source-schema-ref? source attr)]
+      (when (not ref-ok)
+        (return 0 false ref-error))
+      (let [[many many-ok many-error] (db-read-source-schema-cardinality-many? source attr)]
+        (when (not many-ok)
+          (return 0 false many-error))
+        (let [[component component-ok component-error] (db-read-source-schema-component? source attr)]
+          (when (not component-ok)
+            (return 0 false component-error))
+          (return (+ (if ref 1 0)
+                     (if many 2 0)
+                     (if component 4 0))
+                  true
+                  ""))))))
+
+(defn store-entity-ref [entity: ^Store-Entity, attr: string] -> [ref: Store-Entity, ok: bool, error: string]
+  (let [[value value-ok value-error] (store-entity-first-value entity attr)]
+    (when (not value-ok)
+      (if (= value-error "")
+        (return (Store-Entity {db: (retain-store-db entity^.db) e: 0 found: false}) true "")
+        (return (Store-Entity {}) false value-error)))
+    (defer (delete-owned-value value))
+    (when (not (= value.kind .Entity))
+      (return (Store-Entity {db: (retain-store-db entity^.db) e: 0 found: false}) true ""))
+    (store-db-entity (addr entity^.db) value.entity)))
+
+(defn store-entity-ref-kw [entity: ^Store-Entity, attr: keyword] -> [ref: Store-Entity, ok: bool, error: string]
+  (store-entity-ref entity (keyword-text attr)))
+
+(defn store-entity-refs [entity: ^Store-Entity, attr: string] -> [refs: [dynamic]Store-Entity, ok: bool, error: string]
+  (let [out (make [dynamic]Store-Entity)
+        [values values-ok values-error] (store-entity-values entity attr)]
+    (when (not values-ok)
+      (return out false values-error))
+    (for [value values]
+      (when (= value.kind .Entity)
+        (let [[ref ref-ok ref-error] (store-db-entity (addr entity^.db) value.entity)]
+          (when (not ref-ok)
+            (for [existing out]
+              (close-store-entity existing))
+            (delete out)
+            (for [existing-value values]
+              (delete-owned-value existing-value))
+            (delete values)
+            (return (make [dynamic]Store-Entity) false ref-error))
+          (when ref.found
+            (arr.push! out ref)))))
+    (for [value values]
+      (delete-owned-value value))
+    (delete values)
+    (return out true "")))
+
+(defn store-entity-refs-kw [entity: ^Store-Entity, attr: keyword] -> [refs: [dynamic]Store-Entity, ok: bool, error: string]
+  (store-entity-refs entity (keyword-text attr)))
+
+(defn close-store-entities [entities: [dynamic]Store-Entity]
+  (for [entity entities]
+    (close-store-entity entity))
+  (delete entities))
+
+(defn touch-store-entity [entity: ^Store-Entity] -> [value: Value, ok: bool, error: string]
+  (if entity^.found
+    (pull-store-db-value-text (addr entity^.db) "[*]" entity^.e)
+    (return (value-map ([]Value [])) true "")))
+
+(defn pull-store-db-value-pattern [snapshot: ^Store-DB, pattern: []Pull-Spec, entity: u64] -> [value: Value, ok: bool, error: string]
+  (let [[source source-ok source-error] (store-db-read-source snapshot)]
+    (when (not source-ok)
+      (return (Value {}) false source-error))
+    (let [[pull pull-ok pull-error] (db-read-source-pull-result-for-pattern source entity pattern)]
+      (when (not pull-ok)
+        (return (Value {}) false pull-error))
+      (let [[rendered rendered-ok rendered-error] (db-read-source-pull-result-value source pull)]
+        (delete-pull-result-owned-values pull)
+        (return rendered rendered-ok rendered-error)))))
+
+(defn pull-store-db-value-prepared [snapshot: ^Store-DB, prepared: Prepared-Pull-Pattern, entity: u64] -> [value: Value, ok: bool, error: string]
+  (when (not prepared.ok)
+    (return (Value {}) false prepared.error))
+  (pull-store-db-value-pattern snapshot (slice prepared.pattern 0) entity))
+
+(defn pull-store-db-value-text [snapshot: ^Store-DB, pattern-text: string, entity: u64] -> [value: Value, ok: bool, error: string]
+  (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
+    (pull-store-db-value-prepared snapshot prepared entity)))
+
+(defn pull-store-db-lookup-ref-value-pattern [snapshot: ^Store-DB, pattern: []Pull-Spec, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
+  (let [[source source-ok source-error] (store-db-read-source snapshot)]
+    (when (not source-ok)
+      (return (Value {}) false source-error))
+    (let [[entity entity-ok lookup-error] (db-read-source-resolve-lookup-ref source attr lookup-value)]
+      (when (not entity-ok)
+        (if (= lookup-error "")
+          (return (value-nil) true "")
+          (return (Value {}) false lookup-error)))
+      (pull-store-db-value-pattern snapshot pattern entity))))
+
+(defn pull-store-db-lookup-ref-value-prepared [snapshot: ^Store-DB, prepared: Prepared-Pull-Pattern, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
+  (when (not prepared.ok)
+    (return (Value {}) false prepared.error))
+  (pull-store-db-lookup-ref-value-pattern snapshot (slice prepared.pattern 0) attr lookup-value))
+
+(defn pull-store-db-lookup-ref-value-text [snapshot: ^Store-DB, pattern-text: string, attr: string, lookup-value: Value] -> [value: Value, ok: bool, error: string]
+  (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
+    (pull-store-db-lookup-ref-value-prepared snapshot prepared attr lookup-value)))
+
+(defn pull-many-store-db-value-pattern [snapshot: ^Store-DB, pattern: []Pull-Spec, entities: []u64] -> [value: Value, ok: bool, error: string]
+  (let [[source source-ok source-error] (store-db-read-source snapshot)]
+    (when (not source-ok)
+      (return (Value {}) false source-error))
+    (let [pulls (make [dynamic]Pull-Result 0 (count entities))]
+      (for [entity entities]
+        (let [[pull pull-ok pull-error] (db-read-source-pull-result-for-pattern source entity pattern)]
+          (when (not pull-ok)
+            (for [existing pulls]
+              (delete-pull-result-owned-values existing))
+            (delete pulls)
+            (return (Value {}) false pull-error))
+          (arr.push! pulls pull)))
+      (let [[rendered rendered-ok rendered-error] (db-read-source-pull-many-results-value source (slice pulls 0))]
+        (for [pull pulls]
+          (delete-pull-result-owned-values pull))
+        (delete pulls)
+        (return rendered rendered-ok rendered-error)))))
+
+(defn pull-many-store-db-value-prepared [snapshot: ^Store-DB, prepared: Prepared-Pull-Pattern, entities: []u64] -> [value: Value, ok: bool, error: string]
+  (when (not prepared.ok)
+    (return (Value {}) false prepared.error))
+  (pull-many-store-db-value-pattern snapshot (slice prepared.pattern 0) entities))
+
+(defn pull-many-store-db-value-text [snapshot: ^Store-DB, pattern-text: string, entities: []u64] -> [value: Value, ok: bool, error: string]
+  (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
+    (pull-many-store-db-value-prepared snapshot prepared entities)))
+
+(defn pull-many-store-db-lookup-refs-value-prepared [snapshot: ^Store-DB, prepared: Prepared-Pull-Pattern, attrs: []string, lookup-values: []Value] -> [value: Value, ok: bool, error: string]
+  (when (not prepared.ok)
+    (return (Value {}) false prepared.error))
+  (let [[source source-ok source-error] (store-db-read-source snapshot)]
+    (when (not source-ok)
+      (return (Value {}) false source-error))
+    (let [pulls (make [dynamic]Pull-Result 0 (count lookup-values))]
+      (for [lookup-value index lookup-values]
+        (let [[entity entity-ok lookup-error] (db-read-source-resolve-lookup-ref source attrs[index] lookup-value)]
+          (if entity-ok
+            (let [[pull pull-ok pull-error] (db-read-source-pull-result-for-pattern source entity (slice prepared.pattern 0))]
+              (when (not pull-ok)
+                (for [existing pulls]
+                  (delete-pull-result-owned-values existing))
+                (delete pulls)
+                (return (Value {}) false pull-error))
+              (arr.push! pulls pull))
+            (if (= lookup-error "")
+              (arr.push! pulls (Pull-Result {e: 0 attrs: (make [dynamic]Pull-Attr)}))
+              (do
+                (for [existing pulls]
+                  (delete-pull-result-owned-values existing))
+                (delete pulls)
+                (return (Value {}) false lookup-error))))))
+      (let [[rendered rendered-ok rendered-error] (db-read-source-pull-many-results-value source (slice pulls 0))]
+        (for [pull pulls]
+          (delete-pull-result-owned-values pull))
+        (delete pulls)
+        (return rendered rendered-ok rendered-error)))))
+
+(defn pull-many-store-db-lookup-refs-value-text [snapshot: ^Store-DB, pattern-text: string, attrs: []string, lookup-values: []Value] -> [value: Value, ok: bool, error: string]
+  (let [prepared (prepare-pull-pattern-text pattern-text)]
+    (defer (delete-prepared-pull-pattern-shallow prepared))
+    (pull-many-store-db-lookup-refs-value-prepared snapshot prepared attrs lookup-values)))
