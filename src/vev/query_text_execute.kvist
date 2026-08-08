@@ -1,0 +1,748 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev)
+
+(defn q-prepared [db: DB, prepared: Prepared-Query] -> Result-Set
+  (let [db-alias db]
+    (q-prepared-db-read-source (resident-db-read-source (addr db-alias)) prepared)))
+
+(defn q-result-prepared [db: DB, prepared: Prepared-Query] -> Query-Result
+  (let [db-alias db]
+    (query-result-owned-copy (q-result-prepared-db-read-source (resident-db-read-source (addr db-alias)) prepared))))
+
+(defn q-prepared-db-read-source-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (if prepared.ok
+    (db-read-source-q-query-with-sources-inputs-and-fns source sources prepared.query inputs registry)
+    (result-set-error prepared.error)))
+
+(defn q-prepared-db-read-source-profiled-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Profiled-Result-Set
+  (if prepared.ok
+    (let [[typed-result typed-stats typed-used] (db-read-source-q-query-relation-value-typed-with-sources-inputs-and-fns source sources prepared.query inputs registry)]
+      (when typed-used
+        (set! typed-stats.clauses (query-logical-clause-count prepared.query))
+        (when (and (> (count inputs) 0)
+                   (= typed-stats.input-bindings 0))
+          (let [[input-binding-count input-binding-ok] (db-read-source-query-input-binding-count source prepared.query inputs)]
+            (when input-binding-ok
+              (set! typed-stats.input-bindings input-binding-count))))
+        (return (profiled-result-set typed-result typed-stats)))
+      (delete-result-rows-owned-values typed-result.rows)
+      (let [result (db-read-source-q-query-with-sources-inputs-and-fns source sources prepared.query inputs registry)
+            stats (db-read-source-query-profile-stats-with-source-inputs-and-fns source sources prepared.query inputs result registry)]
+        (profiled-result-set result stats)))
+    (profiled-result-set (result-set-error prepared.error) (query-stats-empty))))
+
+(defn q-prepared-db-read-source [source: DB-Read-Source, prepared: Prepared-Query] -> Result-Set
+  (q-prepared-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-prepared-db-read-source-profiled [source: DB-Read-Source, prepared: Prepared-Query] -> Profiled-Result-Set
+  (q-prepared-db-read-source-profiled-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-prepared-db-read-source-profiled-with-inputs [source: DB-Read-Source, prepared: Prepared-Query, inputs: []Query-Input] -> Profiled-Result-Set
+  (q-prepared-db-read-source-profiled-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared inputs ([]Native-Query-Fn [])))
+
+(defn q-prepared-db-read-source-profiled-with-rules-and-fns [source: DB-Read-Source, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input, registry: []Native-Query-Fn] -> Profiled-Result-Set
+  (cond
+    (not prepared.ok) (profiled-result-set (result-set-error prepared.error) (query-stats-empty))
+    (not prepared-rules.ok) (profiled-result-set (result-set-error prepared-rules.error) (query-stats-empty))
+    :else (let [query-value (query-with-rule-call-plans (query-copy-with-rules prepared.query (slice prepared-rules.rules 0)))
+                prepared-value (Prepared-Query {ok: true error: "" query: query-value})
+                profiled (q-prepared-db-read-source-profiled-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared-value inputs registry)]
+            (delete-query-shallow query-value)
+            profiled)))
+
+(defn q-prepared-db-read-source-profiled-with-rules [source: DB-Read-Source, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input] -> Profiled-Result-Set
+  (q-prepared-db-read-source-profiled-with-rules-and-fns source prepared prepared-rules inputs ([]Native-Query-Fn [])))
+
+(defn q-prepared-db-read-source-with-fns [source: DB-Read-Source, prepared: Prepared-Query, registry: []Native-Query-Fn] -> Result-Set
+  (q-prepared-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared ([]Query-Input []) registry))
+
+(defn q-prepared-db-read-source-with-inputs [source: DB-Read-Source, prepared: Prepared-Query, inputs: []Query-Input] -> Result-Set
+  (q-prepared-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared inputs ([]Native-Query-Fn [])))
+
+(defn q-prepared-db-read-source-with-inputs-and-fns [source: DB-Read-Source, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (q-prepared-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared inputs registry))
+
+(defn q-prepared-db-read-source-with-sources [source: DB-Read-Source, sources: []DB-Read-Named-Source, prepared: Prepared-Query] -> Result-Set
+  (q-prepared-db-read-source-with-sources-inputs-and-fns source sources prepared ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-prepared-db-read-source-with-sources-and-inputs [source: DB-Read-Source, sources: []DB-Read-Named-Source, prepared: Prepared-Query, inputs: []Query-Input] -> Result-Set
+  (q-prepared-db-read-source-with-sources-inputs-and-fns source sources prepared inputs ([]Native-Query-Fn [])))
+
+(defn q-prepared-db-read-source-with-sources-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, prepared: Prepared-Query, registry: []Native-Query-Fn] -> Result-Set
+  (q-prepared-db-read-source-with-sources-inputs-and-fns source sources prepared ([]Query-Input []) registry))
+
+(defn query-source-plain-clause-var? [query-value: Query, name: string] -> bool
+  (let [index 0]
+    (while (< index (count query-value.clauses))
+      (let [clause-value query-value.clauses[index]]
+        (when (not clause-value.has-source)
+          (when (and (= clause-value.e.kind .Var) (= clause-value.e.name name))
+            (return true))
+          (when (and (= clause-value.a.kind .Var) (= clause-value.a.name name))
+            (return true))
+          (when (and (= clause-value.v.kind .Var) (= clause-value.v.name name))
+            (return true))
+          (when (and (= clause-value.tx-term.kind .Var) (= clause-value.tx-term.name name))
+            (return true))
+          (when (and (= clause-value.op-term.kind .Var) (= clause-value.op-term.name name))
+            (return true))))
+      (set! index (+ index 1))))
+  false)
+
+(defn query-source-result-shallow-safe? [query-value: Query] -> bool
+  (when (or (> (count query-value.pulls) 0)
+            (> (count query-value.aggregates) 0)
+            (> (count query-value.function-clauses) 0)
+            (> (count query-value.grounds) 0)
+            (> (count query-value.get-elses) 0)
+            (> (count query-value.get-somes) 0)
+            (> (count query-value.rule-calls) 0)
+            (> (count query-value.rules) 0))
+    (return false))
+  (for [name query-value.find]
+    (when (not (query-source-plain-clause-var? query-value name))
+      (return false)))
+  (for [name query-value.with]
+    (when (not (query-source-plain-clause-var? query-value name))
+      (return false)))
+  true)
+
+(defn query-result-db-read-source-query-result [query-value: Query, result: Result-Set] -> Query-Result
+  (cond
+    (not result.ok) (query-result-owned-values result)
+    (query-source-result-shallow-safe? query-value) (query-result-shallow result)
+    :else (query-result-owned-values result)))
+
+(defn query-result-db-read-source-query-result-owned [query-value: Query, result: Result-Set] -> Query-Result
+  (cond
+    (not result.ok) (query-result-owned-values result)
+    (query-source-result-shallow-safe? query-value)
+      (let [owned (query-result-owned-values (result-set-owned result))]
+        (delete-result-set-shallow result)
+        owned)
+    :else (query-result-owned-values result)))
+
+(defn query-result-db-read-source-result [result: Result-Set] -> Query-Result
+  (if result.ok
+    (query-result-shallow result)
+    (query-result-owned-values result)))
+
+(defn q-result-prepared-db-read-source-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Query-Result
+  (if prepared.ok
+    (query-result-db-read-source-query-result prepared.query (db-read-source-q-query-with-sources-inputs-and-fns source sources prepared.query inputs registry))
+    (query-result-owned-values (result-set-error prepared.error))))
+
+(defn q-result-prepared-db-read-source-owned-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Query-Result
+  (if prepared.ok
+    (query-result-db-read-source-query-result-owned prepared.query (db-read-source-q-query-with-sources-inputs-and-fns source sources prepared.query inputs registry))
+    (query-result-owned-values (result-set-error prepared.error))))
+
+(defn q-result-prepared-db-read-source [source: DB-Read-Source, prepared: Prepared-Query] -> Query-Result
+  (q-result-prepared-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-result-prepared-db-read-source-owned [source: DB-Read-Source, prepared: Prepared-Query] -> Query-Result
+  (q-result-prepared-db-read-source-owned-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-result-prepared-db-read-source-with-inputs [source: DB-Read-Source, prepared: Prepared-Query, inputs: []Query-Input] -> Query-Result
+  (q-result-prepared-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared inputs ([]Native-Query-Fn [])))
+
+(defn q-result-prepared-db-read-source-owned-with-inputs [source: DB-Read-Source, prepared: Prepared-Query, inputs: []Query-Input] -> Query-Result
+  (q-result-prepared-db-read-source-owned-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared inputs ([]Native-Query-Fn [])))
+
+(defn q-result-prepared-db-read-source-with-sources [source: DB-Read-Source, sources: []DB-Read-Named-Source, prepared: Prepared-Query] -> Query-Result
+  (q-result-prepared-db-read-source-with-sources-inputs-and-fns source sources prepared ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-prepared-db-read-source-with-rules-and-fns [source: DB-Read-Source, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (cond
+    (not prepared.ok) (result-set-error prepared.error)
+    (not prepared-rules.ok) (result-set-error prepared-rules.error)
+    :else (let [query-value (query-with-rule-call-plans (query-copy-with-rules prepared.query (slice prepared-rules.rules 0)))
+                result (db-read-source-q-query-with-inputs-and-fns source query-value inputs registry)]
+            (delete-query-shallow query-value)
+            result)))
+
+(defn q-prepared-db-read-source-with-rules [source: DB-Read-Source, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input] -> Result-Set
+  (q-prepared-db-read-source-with-rules-and-fns source prepared prepared-rules inputs ([]Native-Query-Fn [])))
+
+(defn q-result-prepared-db-read-source-with-rules-and-fns [source: DB-Read-Source, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input, registry: []Native-Query-Fn] -> Query-Result
+  (cond
+    (not prepared.ok) (query-result-owned-values (result-set-error prepared.error))
+    (not prepared-rules.ok) (query-result-owned-values (result-set-error prepared-rules.error))
+    :else (let [query-value (query-with-rule-call-plans (query-copy-with-rules prepared.query (slice prepared-rules.rules 0)))
+                result (db-read-source-q-query-with-inputs-and-fns source query-value inputs registry)
+                out (query-result-db-read-source-query-result query-value result)]
+            (delete-query-shallow query-value)
+            out)))
+
+(defn q-result-prepared-db-read-source-with-rules [source: DB-Read-Source, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input] -> Query-Result
+  (q-result-prepared-db-read-source-with-rules-and-fns source prepared prepared-rules inputs ([]Native-Query-Fn [])))
+
+(defn q-text-db-read-source [source: DB-Read-Source, text: string] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (q-prepared-db-read-source source prepared)))
+
+(defn q-text-db-read-source-with-fns [source: DB-Read-Source, text: string, registry: []Native-Query-Fn] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (q-prepared-db-read-source-with-fns source prepared registry)))
+
+(defn q-text-db-read-source-with-inputs [source: DB-Read-Source, text: string, inputs: []Query-Input] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (q-prepared-db-read-source-with-inputs source prepared inputs)))
+
+(defn q-text-db-read-source-with-inputs-and-fns [source: DB-Read-Source, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (q-prepared-db-read-source-with-inputs-and-fns source prepared inputs registry)))
+
+(defn q-text-db-read-source-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (q-prepared-db-read-source-with-sources-inputs-and-fns source sources prepared inputs registry)))
+
+(defn q-text-db-read-source-profiled-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Profiled-Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (q-prepared-db-read-source-profiled-with-sources-inputs-and-fns source sources prepared inputs registry)))
+
+(defn q-text-db-read-source-profiled [source: DB-Read-Source, text: string] -> Profiled-Result-Set
+  (q-text-db-read-source-profiled-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) text ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-text-db-read-source-profiled-with-inputs [source: DB-Read-Source, text: string, inputs: []Query-Input] -> Profiled-Result-Set
+  (q-text-db-read-source-profiled-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) text inputs ([]Native-Query-Fn [])))
+
+(defn q-text-db-read-source-with-sources [source: DB-Read-Source, sources: []DB-Read-Named-Source, text: string] -> Result-Set
+  (q-text-db-read-source-with-sources-inputs-and-fns source sources text ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-text-db-read-source-with-sources-and-inputs [source: DB-Read-Source, sources: []DB-Read-Named-Source, text: string, inputs: []Query-Input] -> Result-Set
+  (q-text-db-read-source-with-sources-inputs-and-fns source sources text inputs ([]Native-Query-Fn [])))
+
+(defn q-text-db-read-source-with-sources-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, text: string, registry: []Native-Query-Fn] -> Result-Set
+  (q-text-db-read-source-with-sources-inputs-and-fns source sources text ([]Query-Input []) registry))
+
+(defn q-text-db-read-source-with-input-text [source: DB-Read-Source, text: string, inputs-text: string] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (when (not prepared.ok)
+      (return (result-set-error prepared.error)))
+    (let [[inputs input-ok input-error] (parse-query-inputs-text-for-query prepared.query inputs-text)]
+      (when (not input-ok)
+        (return (result-set-error input-error)))
+      (let [result (q-prepared-db-read-source-with-inputs source prepared (slice inputs 0))]
+        (delete-owned-query-inputs inputs)
+        result))))
+
+(defn q-text-db-read-source-profiled-with-input-text [source: DB-Read-Source, text: string, inputs-text: string] -> Profiled-Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (when (not prepared.ok)
+      (return (profiled-result-set (result-set-error prepared.error) (query-stats-empty))))
+    (let [[inputs input-ok input-error] (parse-query-inputs-text-for-query prepared.query inputs-text)]
+      (when (not input-ok)
+        (return (profiled-result-set (result-set-error input-error) (query-stats-empty))))
+      (let [profiled (q-prepared-db-read-source-profiled-with-inputs source prepared (slice inputs 0))]
+        (delete-owned-query-inputs inputs)
+        profiled))))
+
+(defn q-text-db-read-source-with-input-text-and-fns [source: DB-Read-Source, text: string, inputs-text: string, registry: []Native-Query-Fn] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (when (not prepared.ok)
+      (return (result-set-error prepared.error)))
+    (let [[inputs input-ok input-error] (parse-query-inputs-text-for-query prepared.query inputs-text)]
+      (when (not input-ok)
+        (return (result-set-error input-error)))
+      (let [result (q-prepared-db-read-source-with-inputs-and-fns source prepared (slice inputs 0) registry)]
+        (delete-owned-query-inputs inputs)
+        result))))
+
+(defn q-result-text-db-read-source [source: DB-Read-Source, text: string] -> Query-Result
+  (q-result-text-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) text ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-result-text-db-read-source-with-fns [source: DB-Read-Source, text: string, registry: []Native-Query-Fn] -> Query-Result
+  (q-result-text-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) text ([]Query-Input []) registry))
+
+(defn q-result-text-db-read-source-with-inputs [source: DB-Read-Source, text: string, inputs: []Query-Input] -> Query-Result
+  (q-result-text-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) text inputs ([]Native-Query-Fn [])))
+
+(defn q-result-text-db-read-source-with-inputs-and-fns [source: DB-Read-Source, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Query-Result
+  (q-result-text-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) text inputs registry))
+
+(defn q-result-text-db-read-source-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Query-Result
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (q-result-prepared-db-read-source-with-sources-inputs-and-fns source sources prepared inputs registry)))
+
+(defn q-result-text-db-read-source-owned-with-sources-inputs-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Query-Result
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (q-result-prepared-db-read-source-owned-with-sources-inputs-and-fns source sources prepared inputs registry)))
+
+(defn q-result-text-db-read-source-owned [source: DB-Read-Source, text: string] -> Query-Result
+  (q-result-text-db-read-source-owned-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) text ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-result-text-db-read-source-with-sources [source: DB-Read-Source, sources: []DB-Read-Named-Source, text: string] -> Query-Result
+  (q-result-text-db-read-source-with-sources-inputs-and-fns source sources text ([]Query-Input []) ([]Native-Query-Fn [])))
+
+(defn q-result-text-db-read-source-with-sources-and-inputs [source: DB-Read-Source, sources: []DB-Read-Named-Source, text: string, inputs: []Query-Input] -> Query-Result
+  (q-result-text-db-read-source-with-sources-inputs-and-fns source sources text inputs ([]Native-Query-Fn [])))
+
+(defn q-result-text-db-read-source-with-sources-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, text: string, registry: []Native-Query-Fn] -> Query-Result
+  (q-result-text-db-read-source-with-sources-inputs-and-fns source sources text ([]Query-Input []) registry))
+
+(defn q-result-text-db-read-source-with-input-text [source: DB-Read-Source, text: string, inputs-text: string] -> Query-Result
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (when (not prepared.ok)
+      (return (query-result-owned-values (result-set-error prepared.error))))
+    (let [[inputs input-ok input-error] (parse-query-inputs-text-for-query prepared.query inputs-text)]
+      (when (not input-ok)
+        (return (query-result-owned-values (result-set-error input-error))))
+      (let [out (q-result-prepared-db-read-source-with-inputs source prepared (slice inputs 0))]
+        (delete-owned-query-inputs inputs)
+        out))))
+
+(defn q-result-text-db-read-source-owned-with-input-text [source: DB-Read-Source, text: string, inputs-text: string] -> Query-Result
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (when (not prepared.ok)
+      (return (query-result-owned-values (result-set-error prepared.error))))
+    (let [[inputs input-ok input-error] (parse-query-inputs-text-for-query prepared.query inputs-text)]
+      (when (not input-ok)
+        (return (query-result-owned-values (result-set-error input-error))))
+      (let [out (q-result-prepared-db-read-source-owned-with-inputs source prepared (slice inputs 0))]
+        (delete-owned-query-inputs inputs)
+        out))))
+
+(defn q-result-text-db-read-source-with-input-text-and-fns [source: DB-Read-Source, text: string, inputs-text: string, registry: []Native-Query-Fn] -> Query-Result
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (when (not prepared.ok)
+      (return (query-result-owned-values (result-set-error prepared.error))))
+    (let [[inputs input-ok input-error] (parse-query-inputs-text-for-query prepared.query inputs-text)]
+      (when (not input-ok)
+        (return (query-result-owned-values (result-set-error input-error))))
+      (let [out (q-result-prepared-db-read-source-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared (slice inputs 0) registry)]
+        (delete-owned-query-inputs inputs)
+        out))))
+
+(defn q-prepared-value [db: DB, prepared: Prepared-Query] -> Value
+  (result-set-value db (q-prepared db prepared)))
+
+(defn q-prepared-with-fns [db: DB, prepared: Prepared-Query, registry: []Native-Query-Fn] -> Result-Set
+  (let [db-alias db]
+    (q-prepared-db-read-source-with-fns (resident-db-read-source (addr db-alias)) prepared registry)))
+
+(defn q-prepared-value-with-fns [db: DB, prepared: Prepared-Query, registry: []Native-Query-Fn] -> Value
+  (result-set-value db (q-prepared-with-fns db prepared registry)))
+
+(defn q-prepared-with-inputs [db: DB, prepared: Prepared-Query, inputs: []Query-Input] -> Result-Set
+  (let [db-alias db]
+    (q-prepared-db-read-source-with-inputs (resident-db-read-source (addr db-alias)) prepared inputs)))
+
+(defn q-prepared-value-with-inputs [db: DB, prepared: Prepared-Query, inputs: []Query-Input] -> Value
+  (result-set-value db (q-prepared-with-inputs db prepared inputs)))
+
+(defn q-prepared-with-inputs-and-fns [db: DB, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (let [db-alias db]
+    (q-prepared-db-read-source-with-inputs-and-fns (resident-db-read-source (addr db-alias)) prepared inputs registry)))
+
+(defn q-result-prepared-with-fns [db: DB, prepared: Prepared-Query, registry: []Native-Query-Fn] -> Query-Result
+  (let [db-alias db]
+    (query-result-owned-copy
+      (q-result-prepared-db-read-source-with-sources-inputs-and-fns (resident-db-read-source (addr db-alias)) ([]DB-Read-Named-Source []) prepared ([]Query-Input []) registry))))
+
+(defn q-result-prepared-with-inputs [db: DB, prepared: Prepared-Query, inputs: []Query-Input] -> Query-Result
+  (let [db-alias db]
+    (query-result-owned-copy (q-result-prepared-db-read-source-with-inputs (resident-db-read-source (addr db-alias)) prepared inputs))))
+
+(defn q-result-prepared-with-inputs-and-fns [db: DB, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Query-Result
+  (let [db-alias db]
+    (query-result-owned-copy
+      (q-result-prepared-db-read-source-with-sources-inputs-and-fns (resident-db-read-source (addr db-alias)) ([]DB-Read-Named-Source []) prepared inputs registry))))
+
+(defn q-prepared-value-with-inputs-and-fns [db: DB, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Value
+  (result-set-value db (q-prepared-with-inputs-and-fns db prepared inputs registry)))
+
+(defn q-prepared-profiled-with-inputs-and-fns [db: DB, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Profiled-Result-Set
+  (let [db-alias db]
+    (q-prepared-db-read-source-profiled-with-sources-inputs-and-fns
+      (resident-db-read-source (addr db-alias))
+      ([]DB-Read-Named-Source [])
+      prepared
+      inputs
+      registry)))
+
+(defn q-prepared-profiled-with-inputs [db: DB, prepared: Prepared-Query, inputs: []Query-Input] -> Profiled-Result-Set
+  (q-prepared-profiled-with-inputs-and-fns db prepared inputs ([]Native-Query-Fn [])))
+
+(defn q-prepared-profiled [db: DB, prepared: Prepared-Query] -> Profiled-Result-Set
+  (q-prepared-profiled-with-inputs db prepared ([]Query-Input [])))
+
+(defn q-prepared-profiled-value-with-inputs-and-fns [db: DB, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Value
+  (profiled-result-set-value db (q-prepared-profiled-with-inputs-and-fns db prepared inputs registry)))
+
+(defn q-prepared-profiled-value-with-inputs [db: DB, prepared: Prepared-Query, inputs: []Query-Input] -> Value
+  (q-prepared-profiled-value-with-inputs-and-fns db prepared inputs ([]Native-Query-Fn [])))
+
+(defn q-prepared-profiled-value [db: DB, prepared: Prepared-Query] -> Value
+  (q-prepared-profiled-value-with-inputs db prepared ([]Query-Input [])))
+
+(defn q-prepared-with-rules [db: DB, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input] -> Result-Set
+  (let [db-alias db]
+    (q-prepared-db-read-source-with-rules-and-fns
+      (resident-db-read-source (addr db-alias))
+      prepared
+      prepared-rules
+      inputs
+      ([]Native-Query-Fn []))))
+
+(defn q-prepared-value-with-rules [db: DB, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input] -> Value
+  (result-set-value db (q-prepared-with-rules db prepared prepared-rules inputs)))
+
+(defn q-prepared-with-rules-and-fns [db: DB, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (let [db-alias db]
+    (q-prepared-db-read-source-with-rules-and-fns
+      (resident-db-read-source (addr db-alias))
+      prepared
+      prepared-rules
+      inputs
+      registry)))
+
+(defn q-prepared-value-with-rules-and-fns [db: DB, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input, registry: []Native-Query-Fn] -> Value
+  (result-set-value db (q-prepared-with-rules-and-fns db prepared prepared-rules inputs registry)))
+
+(defn q-prepared-profiled-with-rules-and-fns [db: DB, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input, registry: []Native-Query-Fn] -> Profiled-Result-Set
+  (cond
+    (not prepared.ok) (profiled-result-set (result-set-error prepared.error) (query-stats-empty))
+    (not prepared-rules.ok) (profiled-result-set (result-set-error prepared-rules.error) (query-stats-empty))
+    :else (let [query-value (query-with-rule-call-plans (query-copy-with-rules prepared.query (slice prepared-rules.rules 0)))
+                result (q-query-profiled-with-sources-and-fns db query-value inputs ([]DB-Source []) registry)]
+            (delete-query-shallow query-value)
+            result)))
+
+(defn q-prepared-profiled-with-rules [db: DB, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input] -> Profiled-Result-Set
+  (q-prepared-profiled-with-rules-and-fns db prepared prepared-rules inputs ([]Native-Query-Fn [])))
+
+(defn q-prepared-profiled-value-with-rules-and-fns [db: DB, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input, registry: []Native-Query-Fn] -> Value
+  (profiled-result-set-value db (q-prepared-profiled-with-rules-and-fns db prepared prepared-rules inputs registry)))
+
+(defn q-prepared-profiled-value-with-rules [db: DB, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input] -> Value
+  (q-prepared-profiled-value-with-rules-and-fns db prepared prepared-rules inputs ([]Native-Query-Fn [])))
+
+(defn q-prepared-with-sources [db: DB, prepared: Prepared-Query, inputs: []Query-Input, sources: []DB-Source] -> Result-Set
+  (if prepared.ok
+    (let [db-alias db
+          source-db-aliases (make [dynamic]DB 0 (count sources)) :defer
+          read-sources (make [dynamic]DB-Read-Named-Source 0 (count sources)) :defer
+          _ (append-db-read-named-sources-from-db-sources! (addr read-sources) (addr source-db-aliases) sources)]
+      (db-read-source-q-query-with-sources-inputs-and-fns
+        (resident-db-read-source (addr db-alias))
+        (slice read-sources 0)
+        prepared.query
+        inputs
+        ([]Native-Query-Fn [])))
+    (result-set-error prepared.error)))
+
+(defn q-prepared-value-with-sources [db: DB, prepared: Prepared-Query, inputs: []Query-Input, sources: []DB-Source] -> Value
+  (result-set-value db (q-prepared-with-sources db prepared inputs sources)))
+
+(defn q-prepared-with-sources-and-fns [db: DB, prepared: Prepared-Query, inputs: []Query-Input, sources: []DB-Source, registry: []Native-Query-Fn] -> Result-Set
+  (if prepared.ok
+    (let [db-alias db
+          source-db-aliases (make [dynamic]DB 0 (count sources)) :defer
+          read-sources (make [dynamic]DB-Read-Named-Source 0 (count sources)) :defer
+          _ (append-db-read-named-sources-from-db-sources! (addr read-sources) (addr source-db-aliases) sources)]
+      (db-read-source-q-query-with-sources-inputs-and-fns
+        (resident-db-read-source (addr db-alias))
+        (slice read-sources 0)
+        prepared.query
+        inputs
+        registry))
+    (result-set-error prepared.error)))
+
+(defn q-prepared-value-with-sources-and-fns [db: DB, prepared: Prepared-Query, inputs: []Query-Input, sources: []DB-Source, registry: []Native-Query-Fn] -> Value
+  (result-set-value db (q-prepared-with-sources-and-fns db prepared inputs sources registry)))
+
+(defn q-prepared-relation-db [rows: Value, prepared: Prepared-Query] -> Result-Set
+  (if prepared.ok
+    (q-query-relation-db rows prepared.query ([]Query-Input []))
+    (result-set-error prepared.error)))
+
+(defn q-prepared-relation-db-with-inputs [rows: Value, prepared: Prepared-Query, inputs: []Query-Input] -> Result-Set
+  (if prepared.ok
+    (q-query-relation-db rows prepared.query inputs)
+    (result-set-error prepared.error)))
+
+(defn q-prepared-relation-db-with-fns [rows: Value, prepared: Prepared-Query, registry: []Native-Query-Fn] -> Result-Set
+  (if prepared.ok
+    (q-query-relation-db-with-fns rows prepared.query ([]Query-Input []) registry)
+    (result-set-error prepared.error)))
+
+(defn q-prepared-relation-db-with-inputs-and-fns [rows: Value, prepared: Prepared-Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (if prepared.ok
+    (q-query-relation-db-with-fns rows prepared.query inputs registry)
+    (result-set-error prepared.error)))
+
+(defn q-prepared-relation-db-with-rules [rows: Value, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input] -> Result-Set
+  (cond
+    (not prepared.ok) (result-set-error prepared.error)
+    (not prepared-rules.ok) (result-set-error prepared-rules.error)
+    :else (let [query-value (query-with-rule-call-plans (query-copy-with-rules prepared.query (slice prepared-rules.rules 0)))
+                result (q-query-relation-db rows query-value inputs)]
+            (delete-query-shallow query-value)
+            result)))
+
+(defn q-prepared-relation-db-with-rules-and-fns [rows: Value, prepared: Prepared-Query, prepared-rules: Prepared-Rules, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (cond
+    (not prepared.ok) (result-set-error prepared.error)
+    (not prepared-rules.ok) (result-set-error prepared-rules.error)
+    :else (let [query-value (query-with-rule-call-plans (query-copy-with-rules prepared.query (slice prepared-rules.rules 0)))
+                result (q-query-relation-db-with-fns rows query-value inputs registry)]
+            (delete-query-shallow query-value)
+            result)))
+
+(defn q-text [db: DB, text: string] -> Result-Set
+  (let [db-alias db]
+    (q-text-db-read-source (resident-db-read-source (addr db-alias)) text)))
+
+(defn q-text-value [db: DB, text: string] -> Value
+  (result-set-value db (q-text db text)))
+
+(defn q-text-with-fns [db: DB, text: string, registry: []Native-Query-Fn] -> Result-Set
+  (let [db-alias db]
+    (q-text-db-read-source-with-fns (resident-db-read-source (addr db-alias)) text registry)))
+
+(defn q-text-value-with-fns [db: DB, text: string, registry: []Native-Query-Fn] -> Value
+  (result-set-value db (q-text-with-fns db text registry)))
+
+(defn q-text-with-inputs [db: DB, text: string, inputs: []Query-Input] -> Result-Set
+  (let [db-alias db]
+    (q-text-db-read-source-with-inputs (resident-db-read-source (addr db-alias)) text inputs)))
+
+(defn q-text-value-with-inputs [db: DB, text: string, inputs: []Query-Input] -> Value
+  (result-set-value db (q-text-with-inputs db text inputs)))
+
+(defn q-text-with-inputs-and-fns [db: DB, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (let [db-alias db]
+    (q-text-db-read-source-with-inputs-and-fns (resident-db-read-source (addr db-alias)) text inputs registry)))
+
+(defn q-result-text [db: DB, text: string] -> Query-Result
+  (let [db-alias db]
+    (query-result-owned-copy (q-result-text-db-read-source (resident-db-read-source (addr db-alias)) text))))
+
+(defn q-result-text-with-fns [db: DB, text: string, registry: []Native-Query-Fn] -> Query-Result
+  (let [db-alias db]
+    (query-result-owned-copy (q-result-text-db-read-source-with-fns (resident-db-read-source (addr db-alias)) text registry))))
+
+(defn q-result-text-with-inputs [db: DB, text: string, inputs: []Query-Input] -> Query-Result
+  (let [db-alias db]
+    (query-result-owned-copy (q-result-text-db-read-source-with-inputs (resident-db-read-source (addr db-alias)) text inputs))))
+
+(defn q-result-text-with-inputs-and-fns [db: DB, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Query-Result
+  (let [db-alias db]
+    (query-result-owned-copy (q-result-text-db-read-source-with-inputs-and-fns (resident-db-read-source (addr db-alias)) text inputs registry))))
+
+(defn q-text-value-with-inputs-and-fns [db: DB, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Value
+  (result-set-value db (q-text-with-inputs-and-fns db text inputs registry)))
+
+(defn q-text-profiled-with-inputs-and-fns [db: DB, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Profiled-Result-Set
+  (let [db-alias db]
+    (q-text-db-read-source-profiled-with-sources-inputs-and-fns
+      (resident-db-read-source (addr db-alias))
+      ([]DB-Read-Named-Source [])
+      text
+      inputs
+      registry)))
+
+(defn q-text-profiled-with-inputs [db: DB, text: string, inputs: []Query-Input] -> Profiled-Result-Set
+  (q-text-profiled-with-inputs-and-fns db text inputs ([]Native-Query-Fn [])))
+
+(defn q-text-profiled [db: DB, text: string] -> Profiled-Result-Set
+  (q-text-profiled-with-inputs db text ([]Query-Input [])))
+
+(defn q-text-profiled-value-with-inputs-and-fns [db: DB, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Value
+  (profiled-result-set-value db (q-text-profiled-with-inputs-and-fns db text inputs registry)))
+
+(defn q-text-profiled-value-with-inputs [db: DB, text: string, inputs: []Query-Input] -> Value
+  (q-text-profiled-value-with-inputs-and-fns db text inputs ([]Native-Query-Fn [])))
+
+(defn q-text-profiled-value [db: DB, text: string] -> Value
+  (q-text-profiled-value-with-inputs db text ([]Query-Input [])))
+
+(defn q-text-relation-db [rows: Value, text: string] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (q-query-relation-db rows prepared.query ([]Query-Input []))
+      (result-set-error prepared.error))))
+
+(defn q-text-relation-db-with-inputs [rows: Value, text: string, inputs: []Query-Input] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (q-query-relation-db rows prepared.query inputs)
+      (result-set-error prepared.error))))
+
+(defn q-text-relation-db-with-fns [rows: Value, text: string, registry: []Native-Query-Fn] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (q-query-relation-db-with-fns rows prepared.query ([]Query-Input []) registry)
+      (result-set-error prepared.error))))
+
+(defn q-text-relation-db-with-inputs-and-fns [rows: Value, text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (let [prepared (prepare-query-text text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (q-query-relation-db-with-fns rows prepared.query inputs registry)
+      (result-set-error prepared.error))))
+
+(defn q-text-with-sources [db: DB, text: string, inputs: []Query-Input, sources: []DB-Source] -> Result-Set
+  (let [prepared (prepare-query-text-with-sources text sources)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (let [db-alias db
+            source-db-aliases (make [dynamic]DB 0 (count sources)) :defer
+            read-sources (make [dynamic]DB-Read-Named-Source 0 (count sources)) :defer
+            _ (append-db-read-named-sources-from-db-sources! (addr read-sources) (addr source-db-aliases) sources)]
+        (db-read-source-q-query-with-sources-inputs-and-fns
+          (resident-db-read-source (addr db-alias))
+          (slice read-sources 0)
+          prepared.query
+          inputs
+          ([]Native-Query-Fn [])))
+      (result-set-error prepared.error))))
+
+(defn q-text-profiled-with-sources-and-fns [db: DB, text: string, inputs: []Query-Input, sources: []DB-Source, registry: []Native-Query-Fn] -> Profiled-Result-Set
+  (let [prepared (prepare-query-text-with-sources text sources)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (q-query-profiled-with-sources-and-fns db prepared.query inputs sources registry)
+      (profiled-result-set (result-set-error prepared.error) (query-stats-empty)))))
+
+(defn q-text-profiled-with-sources [db: DB, text: string, inputs: []Query-Input, sources: []DB-Source] -> Profiled-Result-Set
+  (q-text-profiled-with-sources-and-fns db text inputs sources ([]Native-Query-Fn [])))
+
+(defn q-text-value-with-sources [db: DB, text: string, inputs: []Query-Input, sources: []DB-Source] -> Value
+  (result-set-value db (q-text-with-sources db text inputs sources)))
+
+(defn q-text-with-sources-and-fns [db: DB, text: string, inputs: []Query-Input, sources: []DB-Source, registry: []Native-Query-Fn] -> Result-Set
+  (let [prepared (prepare-query-text-with-sources text sources)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (let [db-alias db
+            source-db-aliases (make [dynamic]DB 0 (count sources)) :defer
+            read-sources (make [dynamic]DB-Read-Named-Source 0 (count sources)) :defer
+            _ (append-db-read-named-sources-from-db-sources! (addr read-sources) (addr source-db-aliases) sources)]
+        (db-read-source-q-query-with-sources-inputs-and-fns
+          (resident-db-read-source (addr db-alias))
+          (slice read-sources 0)
+          prepared.query
+          inputs
+          registry))
+      (result-set-error prepared.error))))
+
+(defn q-text-value-with-sources-and-fns [db: DB, text: string, inputs: []Query-Input, sources: []DB-Source, registry: []Native-Query-Fn] -> Value
+  (result-set-value db (q-text-with-sources-and-fns db text inputs sources registry)))
+
+(defn q-text-with-rules [db: DB, text: string, rules-text: string, inputs: []Query-Input] -> Result-Set
+  (let [prepared (prepare-query-text-with-rules text rules-text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (let [db-alias db]
+        (db-read-source-q-query-with-inputs-and-fns
+          (resident-db-read-source (addr db-alias))
+          prepared.query
+          inputs
+          ([]Native-Query-Fn [])))
+      (result-set-error prepared.error))))
+
+(defn q-text-value-with-rules [db: DB, text: string, rules-text: string, inputs: []Query-Input] -> Value
+  (result-set-value db (q-text-with-rules db text rules-text inputs)))
+
+(defn q-text-with-rules-and-fns [db: DB, text: string, rules-text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (let [prepared (prepare-query-text-with-rules text rules-text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (let [db-alias db]
+        (db-read-source-q-query-with-inputs-and-fns
+          (resident-db-read-source (addr db-alias))
+          prepared.query
+          inputs
+          registry))
+      (result-set-error prepared.error))))
+
+(defn q-text-value-with-rules-and-fns [db: DB, text: string, rules-text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Value
+  (result-set-value db (q-text-with-rules-and-fns db text rules-text inputs registry)))
+
+(defn q-text-profiled-with-rules-and-fns [db: DB, text: string, rules-text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Profiled-Result-Set
+  (let [prepared (prepare-query-text-with-rules text rules-text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (q-query-profiled-with-sources-and-fns db prepared.query inputs ([]DB-Source []) registry)
+      (profiled-result-set (result-set-error prepared.error) (query-stats-empty)))))
+
+(defn q-text-profiled-with-rules [db: DB, text: string, rules-text: string, inputs: []Query-Input] -> Profiled-Result-Set
+  (q-text-profiled-with-rules-and-fns db text rules-text inputs ([]Native-Query-Fn [])))
+
+(defn q-text-profiled-value-with-rules-and-fns [db: DB, text: string, rules-text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Value
+  (profiled-result-set-value db (q-text-profiled-with-rules-and-fns db text rules-text inputs registry)))
+
+(defn q-text-profiled-value-with-rules [db: DB, text: string, rules-text: string, inputs: []Query-Input] -> Value
+  (q-text-profiled-value-with-rules-and-fns db text rules-text inputs ([]Native-Query-Fn [])))
+
+(defn q-text-relation-db-with-rules [rows: Value, text: string, rules-text: string, inputs: []Query-Input] -> Result-Set
+  (let [prepared (prepare-query-text-with-rules text rules-text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (q-query-relation-db rows prepared.query inputs)
+      (result-set-error prepared.error))))
+
+(defn q-text-relation-db-with-rules-and-fns [rows: Value, text: string, rules-text: string, inputs: []Query-Input, registry: []Native-Query-Fn] -> Result-Set
+  (let [prepared (prepare-query-text-with-rules text rules-text)]
+    (defer (delete-prepared-query-shallow prepared))
+    (if prepared.ok
+      (q-query-relation-db-with-fns rows prepared.query inputs registry)
+      (result-set-error prepared.error))))
+
+(defn q-text-scalar [db: DB, text: string] -> [value: Value, ok: bool]
+  (return (result-scalar (q-text db text))))
+
+(defn q-text-scalar-with-inputs [db: DB, text: string, inputs: []Query-Input] -> [value: Value, ok: bool]
+  (return (result-scalar (q-text-with-inputs db text inputs))))
+
+(defn q-text-collection [db: DB, text: string] -> [dynamic]Value
+  (return (result-collection (q-text db text))))
+
+(defn q-text-collection-with-inputs [db: DB, text: string, inputs: []Query-Input] -> [dynamic]Value
+  (return (result-collection (q-text-with-inputs db text inputs))))
+
+(defn q-text-tuple [db: DB, text: string] -> [dynamic]Value
+  (return (result-tuple (q-text db text))))
+
+(defn q-text-tuple-with-inputs [db: DB, text: string, inputs: []Query-Input] -> [dynamic]Value
+  (return (result-tuple (q-text-with-inputs db text inputs))))
+
+(defn q-text-pull-scalar [db: DB, text: string] -> [pull: Pull-Result, ok: bool]
+  (return (result-pull-scalar (q-text db text))))
+
+(defn q-text-pull-scalar-with-inputs [db: DB, text: string, inputs: []Query-Input] -> [pull: Pull-Result, ok: bool]
+  (return (result-pull-scalar (q-text-with-inputs db text inputs))))
+
+(defn q-text-pull-collection [db: DB, text: string] -> [dynamic]Pull-Result
+  (return (result-pull-collection (q-text db text))))
+
+(defn q-text-pull-collection-with-inputs [db: DB, text: string, inputs: []Query-Input] -> [dynamic]Pull-Result
+  (return (result-pull-collection (q-text-with-inputs db text inputs))))
+
+(defn q-text-row-tuple [db: DB, text: string] -> Result-Row
+  (return (result-row-tuple (q-text db text))))
+
+(defn q-text-row-tuple-with-inputs [db: DB, text: string, inputs: []Query-Input] -> Result-Row
+  (return (result-row-tuple (q-text-with-inputs db text inputs))))
+
