@@ -87,7 +87,9 @@ ODIN_ARGS=(
 )
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    WINDOWS_LINKER_FLAGS=("/STACK:67108864")
+    # Match the practical stack available on Unix. The Windows default (1 MiB)
+    # is insufficient for composed durable exec requests.
+    WINDOWS_LINKER_FLAGS=("/STACK:8388608")
     if [[ -n "$SQLITE_LIB_DIR" ]]; then
       SQLITE_WINDOWS_DIR="$(cygpath -w "$SQLITE_LIB_DIR")"
       WINDOWS_LINKER_FLAGS+=("/LIBPATH:$SQLITE_WINDOWS_DIR")
