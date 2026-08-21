@@ -273,7 +273,10 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.1
 done
 case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) taskkill.exe //PID "$watch_pid" //T //F >/dev/null 2>&1 || true ;;
+  MINGW*|MSYS*|CYGWIN*)
+    kill -KILL "$watch_pid" 2>/dev/null ||
+      taskkill.exe //IM vevdb.exe //T //F >/dev/null 2>&1 || true
+    ;;
   *) kill -INT "$watch_pid" 2>/dev/null || true ;;
 esac
 wait "$watch_pid" 2>/dev/null || true
