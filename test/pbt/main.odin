@@ -200,6 +200,48 @@ main :: proc() {
 			description = "generated multi-operation transactions apply atomically and in order across resident, SQLite, and reopen",
 			tags = BATCH_MODEL_TAGS[:],
 		},
+		{
+			name = "conditional transactions preserve atomicity",
+			property = transaction_cas_property,
+			description = "generated successful and stale CAS transactions preserve state, coordinates, and exact logs across backends and reopen",
+			tags = CAS_MODEL_TAGS[:],
+		},
+		{
+			name = "lookup refs agree across backends",
+			property = transaction_lookup_property,
+			description = "generated lookup-ref updates, retractions, missing refs, and identity upserts preserve state, coordinates, and exact logs",
+			tags = LOOKUP_MODEL_TAGS[:],
+		},
+		{
+			name = "identity upserts allocate stable entities",
+			property = identity_allocation_property,
+			description = "generated identity upserts allocate once, resolve tempids consistently, and preserve exact state and logs across backends and reopen",
+			tags = IDENTITY_ALLOCATION_TAGS[:],
+		},
+		{
+			name = "identity conflicts roll back atomically",
+			property = identity_conflict_property,
+			description = "generated multi-identity upserts either merge consistently or roll back preceding work without changing coordinates or logs",
+			tags = IDENTITY_CONFLICT_TAGS[:],
+		},
+		{
+			name = "tempid upserts are order independent",
+			property = tempid_order_property,
+			description = "generated permutations of same-transaction tempid upserts converge on one entity with isomorphic state, consistent reports, exact logs, and reopen results",
+			tags = TEMPID_ORDER_TAGS[:],
+		},
+		{
+			name = "tuple tempid upserts are order independent",
+			property = tempid_tuple_order_property,
+			description = "generated component permutations converge through tuple identities with stable allocation, state parity, backend-specific exact logs, and reopen results",
+			tags = TEMPID_TUPLE_ORDER_TAGS[:],
+		},
+		{
+			name = "tuple map updates preserve atomic grouping",
+			property = tuple_update_property,
+			description = "generated vector updates roll back on tuple intermediate conflicts while equivalent map updates commit atomically with exact state, logs, and reopen results",
+			tags = TUPLE_UPDATE_TAGS[:],
+		},
 	}
 
 	pbt.run_cli(properties[:], os.args[1:], {

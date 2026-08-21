@@ -1393,6 +1393,30 @@
           (return value value-ok value-error)))))
   (return (Value {}) false ""))
 
+(defn shared-write-state-resolved-local-tuple-tempid-entity [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, attrs: []string, values: []Value, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, declared-schema?: bool = true, resolve-index: (ptr Source-Tx-Resolve-Index) = nil] -> [e: u64, ok: bool, conflict: bool, error: string]
+  (let [found: u64 0
+        has-found false]
+    (for [candidate tx-data]
+      (when (and candidate.has-tempid
+                 (not (= candidate.tempid tempid)))
+        (let [[entity entity-ok] (resolved-tempid-lookup tempid-index candidate.tempid)]
+          (when entity-ok
+            (let [matches true]
+              (for [attr index attrs]
+                (let [[candidate-value value-ok value-error]
+                        (shared-write-state-source-simple-tempid-component-value state source tx-data candidate.tempid attr tempid-index tempids next-e declared-schema? resolve-index)]
+                  (when (not (= value-error ""))
+                    (return 0 false false value-error))
+                  (when (or (not value-ok)
+                            (not (value-equal? candidate-value values[index])))
+                    (set! matches false))))
+              (when matches
+                (when (and has-found (not (= found entity)))
+                  (return found false true ""))
+                (set! found entity)
+                (set! has-found true)))))))
+    (return found has-found false "")))
+
 (defn shared-write-state-source-simple-tempid-tuple-upsert-entity [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, declared-schema?: bool = true, resolve-index: (ptr Source-Tx-Resolve-Index) = nil] -> [e: u64, ok: bool, conflict: bool, error: string]
   (let [found: u64 0
         has-found false
@@ -1425,11 +1449,27 @@
                   (set! complete false))))
             (when complete
               (let [tuple-value (value-vector (slice items 0))
-                    [entity entity-ok lookup-error] (db-read-source-resolve-lookup-ref source schema.attr tuple-value)]
+                    [persisted-entity persisted-ok lookup-error] (db-read-source-resolve-lookup-ref source schema.attr tuple-value)
+                    entity persisted-entity
+                    entity-ok persisted-ok]
                 (when (not (= lookup-error ""))
                   (shared-write-state-delete-source-tuple-schemas schemas)
                   (delete items)
                   (return found false false lookup-error))
+                (when (not entity-ok)
+                  (let [[local-entity local-ok local-conflict local-error]
+                          (shared-write-state-resolved-local-tuple-tempid-entity state source tx-data tempid (slice schema.attrs 0) (slice items 0) tempid-index tempids next-e declared-schema? resolve-index)]
+                    (when (not (= local-error ""))
+                      (shared-write-state-delete-source-tuple-schemas schemas)
+                      (delete items)
+                      (return found false false local-error))
+                    (when local-conflict
+                      (shared-write-state-delete-source-tuple-schemas schemas)
+                      (delete items)
+                      (return found false true ""))
+                    (when local-ok
+                      (set! entity local-entity)
+                      (set! entity-ok true))))
                 (when entity-ok
                   (when (and has-found
                              (not (= found entity)))
@@ -1528,6 +1568,8 @@
       (return out true true ""))))
 
 (defn shared-write-state-remove-source-derived-tuple-adds! [ops: ^[dynamic]Tx-Op, entity: u64, attr: string, map-group: string]
+  (when (= (count map-group) 0)
+    (return))
   (let [index (- (count ops^) 1)]
     (while (>= index 0)
       (let [op ops^[index]]

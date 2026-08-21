@@ -371,7 +371,31 @@
       (return true)))
   false)
 
-(defn tempid-tuple-upsert-entity [db: DB, tx-data: []Tx-Data, tempid: string] -> [e: u64, ok: bool, conflict: bool]
+(defn resolved-local-tuple-tempid-entity [db: DB, tx-data: []Tx-Data, tempid-index: (ptr (map string u64)), tempid: string, attrs: []string, values: []Value] -> [e: u64, ok: bool, conflict: bool]
+  (when (= tempid-index nil)
+    (return 0 false false))
+  (let [found: u64 0
+        has-found false]
+    (for [candidate tx-data]
+      (when (and candidate.has-tempid
+                 (not (= candidate.tempid tempid)))
+        (let [[entity entity-ok] (resolved-tempid-lookup tempid-index candidate.tempid)]
+          (when entity-ok
+            (let [matches true]
+              (for [attr index attrs]
+                (let [[candidate-value value-ok]
+                        (tempid-tuple-component-value db tx-data candidate.tempid attr)]
+                  (when (or (not value-ok)
+                            (not (value-equal? candidate-value values[index])))
+                    (set! matches false))))
+              (when matches
+                (when (and has-found (not (= found entity)))
+                  (return found false true))
+                (set! found entity)
+                (set! has-found true)))))))
+    (return found has-found false)))
+
+(defn tempid-tuple-upsert-entity [db: DB, tx-data: []Tx-Data, tempid: string, tempid-index: (ptr (map string u64)) = nil] -> [e: u64, ok: bool, conflict: bool]
   (let [found: u64 0
         has-found false
         seen (make [dynamic]string)]
@@ -396,7 +420,19 @@
                     (set! complete false))))
               (when complete
                 (let [tuple-value (value-vector (slice items 0))
-                      [entity entity-ok] (resolve-lookup-ref db schema.attr tuple-value)]
+                      [persisted-entity persisted-ok] (resolve-lookup-ref db schema.attr tuple-value)
+                      entity persisted-entity
+                      entity-ok persisted-ok]
+                  (when (not entity-ok)
+                    (let [[local-entity local-ok local-conflict]
+                            (resolved-local-tuple-tempid-entity db tx-data tempid-index tempid (slice schema.attrs 0) (slice items 0))]
+                      (when local-conflict
+                        (delete items)
+                        (delete schema.attrs)
+                        (return found false true))
+                      (when local-ok
+                        (set! entity local-entity)
+                        (set! entity-ok true))))
                   (when entity-ok
                     (when (and has-found (not (= found entity)))
                       (delete items)
@@ -408,7 +444,27 @@
           (delete schema.attrs))))
     (return found has-found false)))
 
-(defn tempid-upsert-entity [db: DB, tx-data: []Tx-Data, tempid: string] -> [e: u64, ok: bool, conflict: bool]
+(defn resolved-local-unique-tempid-entity [db: DB, tx-data: []Tx-Data, tempid-index: (ptr (map string u64)), tempid: string, attr: string, value: Value] -> [e: u64, ok: bool, conflict: bool]
+  (when (= tempid-index nil)
+    (return 0 false false))
+  (let [found: u64 0
+        has-found false]
+    (for [candidate tx-data]
+      (when (and candidate.has-tempid
+                 (not (= candidate.tempid tempid))
+                 (= candidate.op ":db/add")
+                 (= candidate.a attr))
+        (let [[candidate-value value-ok _] (resolve-tx-data-value db candidate)]
+          (when (and value-ok (value-equal? candidate-value value))
+            (let [[entity entity-ok] (resolved-tempid-lookup tempid-index candidate.tempid)]
+              (when entity-ok
+                (when (and has-found (not (= found entity)))
+                  (return found false true))
+                (set! found entity)
+                (set! has-found true)))))))
+    (return found has-found false)))
+
+(defn tempid-upsert-entity [db: DB, tx-data: []Tx-Data, tempid: string, tempid-index: (ptr (map string u64)) = nil] -> [e: u64, ok: bool, conflict: bool]
   (let [found: u64 0
         has-found false]
     (for [data tx-data]
@@ -418,13 +474,23 @@
                  (schema-unique-identity? db data.a))
         (let [[value value-ok _] (resolve-tx-data-value db data)]
           (when value-ok
-            (let [[entity entity-ok] (resolve-lookup-ref db data.a value)]
+            (let [[persisted-entity persisted-ok] (resolve-lookup-ref db data.a value)
+                  entity persisted-entity
+                  entity-ok persisted-ok]
+              (when (not entity-ok)
+                (let [[local-entity local-ok local-conflict]
+                        (resolved-local-unique-tempid-entity db tx-data tempid-index tempid data.a value)]
+                  (when local-conflict
+                    (return found false true))
+                  (when local-ok
+                    (set! entity local-entity)
+                    (set! entity-ok true))))
               (when entity-ok
                 (when (and has-found (not (= found entity)))
                   (return found false true))
                 (set! found entity)
                 (set! has-found true)))))))
-    (let [[tuple-e tuple-ok tuple-conflict] (tempid-tuple-upsert-entity db tx-data tempid)]
+    (let [[tuple-e tuple-ok tuple-conflict] (tempid-tuple-upsert-entity db tx-data tempid tempid-index)]
       (when tuple-conflict
         (return found false true))
       (when tuple-ok
@@ -526,7 +592,7 @@
               (if resolved-ok
                 (set! entity resolved)
                 (let [[upsert upsert-ok upsert-conflict]
-                        (tempid-upsert-entity db tx-data candidate.tempid)]
+                        (tempid-upsert-entity db tx-data candidate.tempid tempid-index)]
                   (when upsert-conflict
                     (return 0 false "conflicting upsert"))
                   (if upsert-ok
@@ -1099,7 +1165,7 @@
                       (set! e target)))
                   (set! e existing)))
               (do
-                (let [[upsert-e upsert-ok upsert-conflict] (tempid-upsert-entity current-db (slice pending 0) data.tempid)]
+                (let [[upsert-e upsert-ok upsert-conflict] (tempid-upsert-entity current-db (slice pending 0) data.tempid (addr tempid-index))]
                   (when upsert-conflict
                     (return (Resolved-Tx {ok: false
                                           error: "conflicting upsert"
@@ -1312,7 +1378,7 @@
               (let [[existing ok] (resolved-tempid-lookup (addr tempid-index) value-tempid)]
               (if ok
                 (set! v (value-entity existing))
-                (let [[upsert-e upsert-ok upsert-conflict] (tempid-upsert-entity current-db (slice pending 0) value-tempid)]
+                (let [[upsert-e upsert-ok upsert-conflict] (tempid-upsert-entity current-db (slice pending 0) value-tempid (addr tempid-index))]
                   (when upsert-conflict
                     (return (Resolved-Tx {ok: false
                                           error: "conflicting upsert"

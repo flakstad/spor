@@ -4381,6 +4381,55 @@
         (vev.delete-store-tx-report report))
       (vev.close-store reopened))))
 
+(t.deftest sqlite-store-report-direct-write-classifies-tuple-update-conflict
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.store-report-direct-tuple-update-conflict.sqlite")
+  (let [path "tmp.vev.store-report-direct-tuple-update-conflict.sqlite"
+        [store opened-ok opened-error] (vev.open-store path)
+        schema (vev.transact-store-text
+                 (addr store)
+                 "[{:db/id 100 :db/ident :tuple/identity :db/valueType :db.type/tuple :db/tupleAttrs [:tuple/left :tuple/right] :db/unique :db.unique/identity}]")
+        first (vev.transact-store-text (addr store) "[{:db/id 1 :tuple/left \"old-left\" :tuple/right \"old-right\"}]")
+        second (vev.transact-store-text (addr store) "[{:db/id 2 :tuple/left \"new-left\" :tuple/right \"old-right\"}]")
+        third (vev.transact-store-text (addr store) "[{:db/id 3 :tuple/left \"old-left\" :tuple/right \"new-right\"}]")
+        conflict (vev.transact-store-report-text
+                   (addr store)
+                   "[[:db/add 1 :tuple/left \"new-left\"] [:db/add 1 :tuple/right \"new-right\"]]")
+        unchanged (vev.q-result-store-text
+                    (addr store)
+                    "[:find ?left ?right :where [1 :tuple/left ?left] [1 :tuple/right ?right]]")
+        grouped (vev.transact-store-report-text
+                  (addr store)
+                  "[{:db/id 1 :tuple/left \"new-left\" :tuple/right \"new-right\"}]")
+        changed (vev.q-result-store-text
+                  (addr store)
+                  "[:find ?left ?right :where [1 :tuple/left ?left] [1 :tuple/right ?right]]")]
+    (defer (remove-sqlite-files path))
+    (t.is opened-ok)
+    (t.is (= opened-error ""))
+    (t.is schema.ok schema.error)
+    (t.is first.ok first.error)
+    (t.is second.ok second.error)
+    (t.is third.ok third.error)
+    (t.is (not conflict.ok))
+    (t.is (= conflict.error "schema unique conflict"))
+    (t.is unchanged.result.ok unchanged.result.error)
+    (t.is (= (count unchanged.result.rows) 1))
+    (t.is (result-has-string-string-row? unchanged.result "old-left" "old-right"))
+    (t.is grouped.ok grouped.error)
+    (t.is changed.result.ok changed.result.error)
+    (t.is (= (count changed.result.rows) 1))
+    (t.is (result-has-string-string-row? changed.result "new-left" "new-right"))
+    (vev.delete-live-tx-report-shallow schema)
+    (vev.delete-live-tx-report-shallow first)
+    (vev.delete-live-tx-report-shallow second)
+    (vev.delete-live-tx-report-shallow third)
+    (vev.delete-store-tx-report conflict)
+    (vev.delete-query-result unchanged)
+    (vev.delete-store-tx-report grouped)
+    (vev.delete-query-result changed)
+    (vev.close-store store)))
+
 (t.deftest sqlite-store-db-with-text-keeps-source-overlay-next-db
   (defer (free_all context.allocator))
   (remove-sqlite-files "tmp.vev.store-db-with.sqlite")

@@ -270,13 +270,44 @@
       (delete unique-kind)
       (return is-identity true ""))))
 
+(defn source-overlay-schema-tuple? [source: DB-Read-Source, ops: []Tx-Op, attr: string] -> [tuple: bool, ok: bool, error: string]
+  (let [[attrs attrs-ok attrs-error] (db-read-source-schema-tuple-attrs source attr)]
+    (when (not attrs-ok)
+      (return false false attrs-error))
+    (let [has-source-attrs (> (count attrs) 0)]
+      (for [item attrs]
+        (delete item))
+      (delete attrs)
+      (when has-source-attrs
+        (return true true ""))))
+  (let [[overlay-e overlay-ok] (overlay-ops-schema-entity-for-attr ops attr)
+        schema-e overlay-e
+        schema-ok overlay-ok]
+    (when (not schema-ok)
+      (let [[source-e source-ok source-error] (db-read-source-schema-entity-for-attr source attr)]
+        (when (not source-ok)
+          (return false (= source-error "") source-error))
+        (set! schema-e source-e)
+        (set! schema-ok true)))
+    (for [candidate ops]
+      (when (and (= candidate.kind .Add)
+                 (= candidate.e schema-e)
+                 (= candidate.a ":db/tupleAttrs")
+                 (= candidate.v.kind .Vector)
+                 (> (count candidate.v.items) 0))
+        (return true true ""))))
+  (return false true ""))
+
 (defn source-overlay-unique-error [source: DB-Read-Source, ops: []Tx-Op, op: Tx-Op] -> [error-text: string, ok: bool]
   (let [[identity identity-ok identity-error] (source-overlay-schema-unique-identity? source ops op.a)]
     (when (not identity-ok)
       (return identity-error false))
-    (if (and identity (not op.tuple-identity))
-      (return "conflicting upsert" true)
-      (return "schema unique conflict" true))))
+    (let [[tuple tuple-ok tuple-error] (source-overlay-schema-tuple? source ops op.a)]
+      (when (not tuple-ok)
+        (return tuple-error false))
+      (if (and identity (not tuple) (not op.tuple-identity))
+        (return "conflicting upsert" true)
+        (return "schema unique conflict" true)))))
 
 (defn source-overlay-existing-unique-conflict? [source: DB-Read-Source, op: Tx-Op] -> [conflict: bool, ok: bool, error: string]
   (let [[stream stream-ok stream-error] (source-avet-attr-value-stream source op.a op.v)]
@@ -706,27 +737,21 @@
       (when (and has-prior info.unique)
         (source-overlay-batch-remove-unique! batch out^[prior-index]))
     (when info.unique
-        (when (not (source-overlay-batch-add-unique! batch op))
-          (when (not (= cardinality-key ""))
-            (delete cardinality-key))
-          (return false
-            (if (and (= info.unique-kind ":db.unique/identity")
-                     (not op.tuple-identity))
-              "conflicting upsert"
-              "schema unique conflict")))
+      (when (not (source-overlay-batch-add-unique! batch op))
+        (when (not (= cardinality-key ""))
+          (delete cardinality-key))
+        (let [[error-text error-ok] (source-overlay-unique-error source (slice out^ 0) op)]
+          (return false (if error-ok error-text "schema unique conflict"))))
       (let [[conflict conflict-ok conflict-error] (source-overlay-existing-unique-conflict? source op)]
         (when (not conflict-ok)
-            (when (not (= cardinality-key ""))
-              (delete cardinality-key))
+          (when (not (= cardinality-key ""))
+            (delete cardinality-key))
           (return false conflict-error))
         (when conflict
-            (when (not (= cardinality-key ""))
-              (delete cardinality-key))
-            (return false
-              (if (and (= info.unique-kind ":db.unique/identity")
-                       (not op.tuple-identity))
-                "conflicting upsert"
-                "schema unique conflict")))))
+          (when (not (= cardinality-key ""))
+            (delete cardinality-key))
+          (let [[error-text error-ok] (source-overlay-unique-error source (slice out^ 0) op)]
+            (return false (if error-ok error-text "schema unique conflict"))))))
       (if has-prior
         (do
           (delete-owned-tx-op-fields out^[prior-index])

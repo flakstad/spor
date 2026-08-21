@@ -590,7 +590,10 @@ transaction_model_tx_range_invariant :: proc(
 		return pbt.error(fmt.tprintf("could not retain %s transaction log", backend))
 	}
 	defer vev.close(&log_value)
-	current_basis := ctx.transaction_basis[ctx.transaction_count - 1]
+	current_basis := checkpoint_basis
+	if ctx.transaction_count > 0 {
+		current_basis = ctx.transaction_basis[ctx.transaction_count - 1]
+	}
 	transactions, range_ok := vev.tx_range_coordinates(
 		&log_value,
 		checkpoint_basis + 1,
