@@ -58,6 +58,7 @@ EOF
   esac
   kvist compile smoke.kvist -o "$PACKAGE_ROOT/smoke.odin" >/dev/null
   if [[ -n "${WINDOWS_GENERATED:-}" ]]; then
+    sed -i -E '/^import / s#\\\\#/#g' "$PACKAGE_ROOT/smoke.odin"
     COLLECTION_ARGS=()
     while IFS= read -r drive; do
       COLLECTION_ARGS+=("-collection:$drive=$drive:/")
