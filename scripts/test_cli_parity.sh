@@ -196,27 +196,40 @@ case "$relation_result" in *'"Ivan"'*) ;; *) exit 1 ;; esac
 case "$relation_result" in *'"Petr"'*) exit 1 ;; esac
 
 ALT_DB_EDN="${TMP_DIR#"$ROOT"/}/alternate.db"
-alternate_result="$($CLI exec --memory \
+alternate_tx="$($CLI exec --memory \
   "{:steps [{:id :tx :op :transact :store \"$ALT_DB_EDN\"
-             :tx [{:db/id 1 :source/name \"alternate\"}]}
-            {:id :q :op :query :db [:ref :tx :db-after]
+             :tx [{:db/id 1 :source/name \"alternate\"}]}]
+    :return [:ref :tx]}")"
+case "$alternate_tx" in *':db-before'*':db-after'*) ;; *) exit 1 ;; esac
+
+alternate_query="$($CLI exec --memory \
+  "{:steps [{:id :db :op :db :store \"$ALT_DB_EDN\"}
+            {:id :q :op :query :db [:ref :db]
              :query [:find ?name . :where [1 :source/name ?name]]}]
     :return [:ref :q]}")"
-test "$alternate_result" = '"alternate"'
+test "$alternate_query" = '"alternate"'
+
+alternate_result="$($CLI exec --memory \
+  "{:steps [{:id :tx :op :transact :store \"$ALT_DB_EDN\"
+             :tx [{:db/id 2 :source/name \"composed\"}]}
+            {:id :q :op :query :db [:ref :tx :db-after]
+             :query [:find ?name . :where [2 :source/name ?name]]}]
+    :return [:ref :q]}")"
+test "$alternate_result" = '"composed"'
 
 alternate_db="$($CLI exec --memory \
   "{:steps [{:id :db :op :db :store \"$ALT_DB_EDN\"}]
     :return [:ref :db]}")"
-case "$alternate_db" in *':basis-t 1'*) ;; *) exit 1 ;; esac
+case "$alternate_db" in *':basis-t 2'*) ;; *) exit 1 ;; esac
 
 alternate_reopened="$($CLI exec --memory \
   "{:steps [{:id :tx :op :transact :store \"$ALT_DB_EDN\"
-             :tx [{:db/id 2 :source/name \"reopened\"}]}
+             :tx [{:db/id 3 :source/name \"reopened\"}]}
             {:id :db :op :db :store \"$ALT_DB_EDN\"}
             {:id :q :op :query :db [:ref :db]
-             :query [:find ?name . :where [2 :source/name ?name]]}]
+             :query [:find ?name . :where [3 :source/name ?name]]}]
     :return {:answer [:ref :q] :tx-db [:ref :tx :db-after]}}")"
-case "$alternate_reopened" in *':answer "reopened"'*':basis-t 2'*) ;; *) exit 1 ;; esac
+case "$alternate_reopened" in *':answer "reopened"'*':basis-t 3'*) ;; *) exit 1 ;; esac
 
 alternate_maintenance="$($CLI exec --memory \
   "{:steps [{:id :info :op :index-info :store \"$ALT_DB_EDN\" :index :eavt}
