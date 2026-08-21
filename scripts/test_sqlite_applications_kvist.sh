@@ -11,7 +11,7 @@ BIN="$BUILD_DIR/sqlite-applications-smoke"
 case "$(uname -s)" in
   Darwin) LIB_NAME="libvev.dylib" ;;
   Linux) LIB_NAME="libvev.so" ;;
-  MINGW*|MSYS*|CYGWIN*) LIB_NAME="vev.dll" ;;
+  MINGW*|MSYS*|CYGWIN*) LIB_NAME="vev.dll"; BIN="$BIN.exe" ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
