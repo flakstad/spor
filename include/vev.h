@@ -127,6 +127,11 @@ const char *vev_connection_error(vev_connection_t conn);
 const char *vev_connection_backend(vev_connection_t conn);
 const char *vev_connection_path(vev_connection_t conn);
 unsigned long long vev_connection_basis_t(vev_connection_t conn);
+/* Creates a consistent snapshot at a path which must not already exist.
+ * Returns an allocated empty string on success and writes the snapshot's exact
+ * basis to basis_out. Returns an allocated diagnostic on failure. Free the
+ * returned string with vev_string_free in both cases. */
+const char *vev_connection_backup(vev_connection_t conn, const char *destination_path, unsigned long long *basis_out);
 unsigned long long vev_connection_tx_count(vev_connection_t conn);
 bool vev_connection_ensure_resident(vev_connection_t conn);
 vev_u64_array_t vev_connection_tx_ids(vev_connection_t conn);

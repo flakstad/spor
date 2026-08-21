@@ -354,6 +354,10 @@
       (panic "could not read Vev DB basis"))
     value))
 
+(defn backup [conn: Conn, destination-path: string] -> [basis-t: u64, ok: bool, error: string]
+  (let [state (conn-state conn)]
+    (native.backup (addr state^.connection) destination-path)))
+
 (defn next-t [db-value: DB] -> u64
   (let [state (db-state db-value)
         [value ok] (native.next-t (addr state^.database))]

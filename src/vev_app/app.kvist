@@ -103,6 +103,12 @@
     (defer (sync.mutex-unlock state^.lock))
     (vev.ensure-store-resident! (addr state^.store))))
 
+(defn backup [conn: Conn, destination-path: string] -> [basis-t: u64, ok: bool, error: string]
+  (let [state (conn-state conn)]
+    (sync.mutex-lock state^.lock)
+    (defer (sync.mutex-unlock state^.lock))
+    (vev.backup-store! (addr state^.store) destination-path)))
+
 (defn- db-ptr [db: DB] -> ^vev.Store-DB
   (let [state (transmute ^DB-State (rawptr db))]
     (addr state^.db)))

@@ -812,7 +812,6 @@
         order-text (public-index-order-text order)]
     (when (and (not source.filter-has-as-of)
                (not source.filter-has-since)
-               (not source.filter-history)
                (not (db-read-source-has-inline-overlay? source))
                (sqlite-merge-index-view? view))
       (let [[stream stream-ok stream-error] (source-index-datom-stream-for-sqlite-sequential-values source order values view)]

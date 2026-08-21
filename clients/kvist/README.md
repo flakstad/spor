@@ -37,6 +37,16 @@ transactions and survive closing and reopening the file.
 `db-before` and `db-after` values are cheap retained snapshot handles, not
 eager copies of the database.
 
+Create a consistent durable backup without copying SQLite/WAL files directly:
+
+```clojure
+(let [[basis ok error] (d.backup conn "backup.vev")]
+  ...)
+```
+
+The destination must be new. `basis` identifies exactly the committed Vev
+generation in the independently openable result.
+
 General SQLite access is a separate package in the same bundle:
 
 ```clojure

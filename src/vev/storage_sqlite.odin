@@ -5,6 +5,7 @@ package vev
 
 import c "core:c"
 import "core:fmt"
+import "core:os"
 import "core:strings"
 
 sqlite_attr_serializable_text :: proc(attr: string) -> string {
@@ -37,8 +38,11 @@ when ODIN_OS == .Windows {
 
 SQLite3 :: struct {}
 SQLite3_Stmt :: struct {}
+SQLite3_Backup :: struct {}
 
 SQLITE_OK :: c.int(0)
+SQLITE_BUSY :: c.int(5)
+SQLITE_LOCKED :: c.int(6)
 SQLITE_ROW :: c.int(100)
 SQLITE_DONE :: c.int(101)
 SQLITE_TRANSIENT :: rawptr(~uintptr(0))
@@ -89,6 +93,10 @@ foreign sqlite {
     sqlite3_libversion :: proc() -> cstring ---
     sqlite3_sourceid :: proc() -> cstring ---
     sqlite3_compileoption_used :: proc(option: cstring) -> c.int ---
+    sqlite3_backup_init :: proc(destination: ^SQLite3, destination_name: cstring, source: ^SQLite3, source_name: cstring) -> ^SQLite3_Backup ---
+    sqlite3_backup_step :: proc(backup: ^SQLite3_Backup, pages: c.int) -> c.int ---
+    sqlite3_backup_finish :: proc(backup: ^SQLite3_Backup) -> c.int ---
+    sqlite3_sleep :: proc(milliseconds: c.int) -> c.int ---
 }
 
 SQLITE_OPEN_READONLY :: c.int(0x00000001)
@@ -99,6 +107,96 @@ SQLITE_OPEN_MEMORY :: c.int(0x00000080)
 SQLITE_OPEN_NOMUTEX :: c.int(0x00008000)
 SQLITE_OPEN_FULLMUTEX :: c.int(0x00010000)
 SQLITE_UTF8 :: u8(1)
+
+// sqlite_backup_vev_store_raw creates a transactionally consistent copy of a
+// live Vev store, including commits which still reside in SQLite's WAL. The
+// destination must not exist: callers never risk silently replacing a store.
+// The returned basis is read from the completed destination rather than the
+// source connection, so it describes exactly the copied transaction log even
+// if another writer commits while the online backup is running.
+sqlite_backup_vev_store_raw :: proc(handle: rawptr, destination_path: string) -> (u64, bool, string) {
+    if handle == nil {
+        return 0, false, "sqlite handle was nil"
+    }
+    if destination_path == "" {
+        return 0, false, "snapshot destination path was empty"
+    }
+    reserved_file, reserve_error := os.open(
+        destination_path,
+        {.Read, .Write, .Create, .Excl},
+        os.Permissions_Default_File,
+    )
+    if reserve_error != nil {
+        return 0, false, "could not reserve snapshot destination; it may already exist"
+    }
+    _ = os.close(reserved_file)
+
+    wal_path := fmt.tprintf("%s-wal", destination_path)
+    shm_path := fmt.tprintf("%s-shm", destination_path)
+
+    destination: ^SQLite3
+    path_c, path_c_ok := sqlite_cstring(destination_path)
+    if !path_c_ok {
+        return 0, false, "failed to allocate snapshot destination path"
+    }
+    defer delete(path_c)
+    if sqlite3_open_v2(path_c, &destination, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) != SQLITE_OK {
+        error := sqlite_error_text(destination, "sqlite snapshot destination open failed")
+        if destination != nil {
+            _ = sqlite3_close_v2(destination)
+        }
+        _ = os.remove(destination_path)
+        return 0, false, error
+    }
+
+    succeeded := false
+    defer {
+        _ = sqlite3_close_v2(destination)
+        if !succeeded {
+            _ = os.remove(destination_path)
+            _ = os.remove(wal_path)
+            _ = os.remove(shm_path)
+        }
+    }
+
+    backup := sqlite3_backup_init(destination, cstring("main"), (^SQLite3)(handle), cstring("main"))
+    if backup == nil {
+        return 0, false, sqlite_error_text(destination, "sqlite snapshot initialization failed")
+    }
+    step_rc := sqlite3_backup_step(backup, -1)
+    retries := 0
+    for (step_rc == SQLITE_BUSY || step_rc == SQLITE_LOCKED) && retries < 500 {
+        _ = sqlite3_sleep(10)
+        retries += 1
+        step_rc = sqlite3_backup_step(backup, -1)
+    }
+    finish_rc := sqlite3_backup_finish(backup)
+    if step_rc != SQLITE_DONE {
+        return 0, false, sqlite_error_text(destination, "sqlite snapshot copy failed")
+    }
+    if finish_rc != SQLITE_OK {
+        return 0, false, sqlite_error_text(destination, "sqlite snapshot finalization failed")
+    }
+    if !sqlite_app_is_vev_store(destination) {
+        return 0, false, "completed snapshot was not a Vev store"
+    }
+
+    basis_stmt: ^SQLite3_Stmt
+    // Public basis coordinates are transaction ordinals. vev_transactions.tx
+    // contains the transaction entity ID in the reserved transaction
+    // partition and must never leak through this API.
+    basis_sql := cstring("SELECT COUNT(*) FROM vev_transactions")
+    if sqlite3_prepare_v2(destination, basis_sql, -1, &basis_stmt, nil) != SQLITE_OK {
+        return 0, false, sqlite_error_text(destination, "sqlite snapshot basis prepare failed")
+    }
+    defer _ = sqlite3_finalize(basis_stmt)
+    if sqlite3_step(basis_stmt) != SQLITE_ROW {
+        return 0, false, sqlite_error_text(destination, "sqlite snapshot basis read failed")
+    }
+    basis := u64(sqlite3_column_int64(basis_stmt, 0))
+    succeeded = true
+    return basis, true, ""
+}
 
 sqlite_app_is_vev_store :: proc(db: ^SQLite3) -> bool {
     table_stmt: ^SQLite3_Stmt

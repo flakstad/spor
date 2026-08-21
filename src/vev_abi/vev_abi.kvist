@@ -2067,6 +2067,20 @@
   (abi-sqlite-conn-basis-t (rawptr conn)))
 
 @export
+(defn vev_connection_backup :abi "c" [conn: Vev-Connection, destination-path: cstring, basis-out: ^u64] -> cstring
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr conn) nil) (= destination-path nil) (= basis-out nil))
+    (return (c-string-owned "invalid durable connection, destination path, or basis output")))
+  (let [path (text-from-c destination-path)
+        [basis ok error] (vev.sqlite-conn-backup! (sqlite-conn-ptr (connection-as-sqlite conn)) path)]
+    (delete path)
+    (if ok
+      (do
+        (set! basis-out^ basis)
+        (c-string-owned ""))
+      (c-string-owned error))))
+
+@export
 (defn vev_connection_tx_count :abi "c" [conn: Vev-Connection] -> u64
   (odin "context = runtime.default_context()")
   (when (= (rawptr conn) nil)

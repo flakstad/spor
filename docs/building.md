@@ -80,6 +80,16 @@ scripts/smoke_cli.sh
 `smoke_clients.sh` builds the native library first. Missing optional language
 toolchains are skipped.
 
+Run the property-based checks:
+
+```sh
+scripts/test_pbt.sh --text
+```
+
+The script uses a sibling `../pbt` checkout by default. Set `VEV_PBT_ROOT` to
+another checkout when needed. CI checks out the exact revision recorded in
+`PBT_REVISION`.
+
 Run all package checks only when every client toolchain is installed:
 
 ```sh

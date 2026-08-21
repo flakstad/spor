@@ -60,6 +60,20 @@ jobs:
         working-directory: kvist
         run: git checkout --detach "$(cat ../vev/KVIST_REVISION)"
 
+      - name: Read pinned PBT revision
+        if: matrix.platform == 'linux-x86_64'
+        id: pbt-revision
+        working-directory: vev
+        run: echo "revision=$(cat PBT_REVISION)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out pinned PBT
+        if: matrix.platform == 'linux-x86_64'
+        uses: actions/checkout@v4
+        with:
+          repository: flakstad/pbt
+          ref: ${{ steps.pbt-revision.outputs.revision }}
+          path: pbt
+
       - name: Install Odin
         uses: laytan/setup-odin@v2.12.2
         with:
@@ -141,6 +155,14 @@ jobs:
           KVIST_BIN: ${{ runner.os == 'Windows' && 'kvist.exe' || 'kvist' }}
           VEV_EXPECT_PLATFORM: ${{ matrix.platform }}
         run: scripts/build_release.sh
+
+      - name: Property-test Vev
+        if: matrix.platform == 'linux-x86_64'
+        working-directory: vev
+        env:
+          VEV_PBT_ROOT: ${{ github.workspace }}/pbt
+          VEV_SKIP_NATIVE_BUILD: "1"
+        run: scripts/test_pbt.sh --text
 
       - name: Upload verified platform release
         uses: actions/upload-artifact@v4

@@ -9,6 +9,8 @@
 
 (def app-test-path "/tmp/vev-app-durable-test.sqlite")
 (def concurrent-app-test-path "/tmp/vev-app-concurrent-test.sqlite")
+(def backup-source-test-path "/tmp/vev-app-backup-source.sqlite")
+(def backup-destination-test-path "/tmp/vev-app-backup-destination.sqlite")
 
 (defstruct Concurrent-Reader {
   conn: d.Conn
@@ -79,6 +81,69 @@
   (os.remove concurrent-app-test-path)
   (os.remove "/tmp/vev-app-concurrent-test.sqlite-wal")
   (os.remove "/tmp/vev-app-concurrent-test.sqlite-shm"))
+
+(defn remove-backup-test-dbs []
+  (os.remove backup-source-test-path)
+  (os.remove (fmt.tprintf "%s-wal" backup-source-test-path))
+  (os.remove (fmt.tprintf "%s-shm" backup-source-test-path))
+  (os.remove backup-destination-test-path)
+  (os.remove (fmt.tprintf "%s-wal" backup-destination-test-path))
+  (os.remove (fmt.tprintf "%s-shm" backup-destination-test-path)))
+
+(def backup-value-query
+  '[:find ?value .
+    :in $ ?id
+    :where [?entity :backup/id ?id]
+           [?entity :backup/value ?value]])
+
+(test.deftest durable-backup-is-an-exact-independent-snapshot
+  (remove-backup-test-dbs)
+  (let [source (d.connect backup-source-test-path)]
+    (d.transact source
+      '[[:db/add 10 :db/ident :backup/id]
+        [:db/add 10 :db/valueType :db.type/string]
+        [:db/add 10 :db/unique :db.unique/identity]
+        [:db/add 11 :db/ident :backup/value]
+        [:db/add 11 :db/valueType :db.type/string]])
+    (d.transact source
+      '[{:db/id "before" :backup/id "before" :backup/value "in snapshot"}])
+    ;; Exercise the same resident connection mode used by Ro. The storage
+    ;; snapshot must still be taken from the committed SQLite generation.
+    (test.is (d.ensure-resident! source))
+    (let [[snapshot-basis snapshot-ok snapshot-error]
+            (d.backup source backup-destination-test-path)]
+      (test.is snapshot-ok snapshot-error)
+      (d.transact source
+        '[{:db/id "after" :backup/id "after" :backup/value "source only"}])
+      (let [snapshot (d.connect backup-destination-test-path)
+            snapshot-db (d.db snapshot)]
+        (test.is (= (d.basis-t snapshot-db) snapshot-basis))
+        (test.is (= (kdata.string (d.q backup-value-query snapshot-db "before")) "in snapshot"))
+        (test.is (kdata.nil? (d.q backup-value-query snapshot-db "after")))
+        (d.close snapshot-db)
+        ;; A snapshot is a normal Vev store, not a frozen export.
+        (d.transact snapshot
+          '[{:db/id "independent" :backup/id "independent" :backup/value "snapshot only"}])
+        (d.close snapshot))
+      ;; Refusing an existing destination must leave the first snapshot intact.
+      (let [[_basis overwrite-ok _overwrite-error]
+              (d.backup source backup-destination-test-path)]
+        (test.is (not overwrite-ok)))
+      (let [source-db (d.db source)]
+        (test.is (kdata.nil? (d.q backup-value-query source-db "independent")))
+        (test.is (= (kdata.string (d.q backup-value-query source-db "after")) "source only"))
+        (d.close source-db)))
+    (d.close source))
+  ;; Reopen after both writers have closed, proving that no live cache is part
+  ;; of the result contract.
+  (let [snapshot (d.connect backup-destination-test-path)
+        snapshot-db (d.db snapshot)]
+    (test.is (= (kdata.string (d.q backup-value-query snapshot-db "before")) "in snapshot"))
+    (test.is (= (kdata.string (d.q backup-value-query snapshot-db "independent")) "snapshot only"))
+    (test.is (kdata.nil? (d.q backup-value-query snapshot-db "after")))
+    (d.close snapshot-db)
+    (d.close snapshot))
+  (remove-backup-test-dbs))
 
 (test.deftest durable-app-query-input-joins-through-ref
   (remove-app-test-db)

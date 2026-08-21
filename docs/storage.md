@@ -40,6 +40,28 @@ migrations, or issue SQL.
 VevDB stores datoms, transaction metadata, and persistent EAVT, AEVT, AVET, and
 VAET index roots. Reads use immutable snapshots backed by those indexes.
 
+### Consistent storage backups
+
+Use `backup` on a durable connection to create an independently openable Vev
+store at a new path:
+
+```clojure
+(let [[basis ok error] (d.backup conn "backup.vev")]
+  ...)
+```
+
+This is a storage backup, distinct from an immutable in-process DB value. Vev
+uses SQLite's online-backup protocol, so committed data in the WAL is included
+and concurrent readers remain valid. The destination must not already exist;
+Vev never silently replaces it. On success, `basis` is the public transaction
+coordinate contained in the completed destination—not an estimate taken from
+the source before copying.
+
+The result is a normal writable Vev store. A backup system should independently
+open it, verify its application metadata, and add its own manifest and checksum
+before considering a backup complete. Application caches and external files are
+outside this storage operation.
+
 Long-lived latency-sensitive applications can explicitly call
 `ensure-resident!` after connecting. That connection then retains the current
 immutable datoms and indexes in memory, so repeated queries and transaction

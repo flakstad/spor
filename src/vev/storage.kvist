@@ -607,6 +607,11 @@
       (return (if (= next-tx 0) 0 (- next-tx 1)) true "")))
   (vev.sqlite-latest-index-root-basis-raw store^.handle))
 
+(defn sqlite-conn-backup! [store: ^SQLite-Conn, destination-path: string] -> [basis-t: u64, ok: bool, error: string]
+  (when (= store nil)
+    (return 0 false "sqlite connection was nil"))
+  (vev.sqlite-backup-vev-store-raw store^.handle destination-path))
+
 (defn sqlite-conn-tx-count [store: ^SQLite-Conn] -> [tx-count: u64, ok: bool, error: string]
   (vev.sqlite-tx-count-raw store^.handle))
 
@@ -2274,6 +2279,12 @@
         (return ok error))
     .Shared (return true "")
      (return false "store is not open")))
+
+(defn backup-store! [store: ^Store-Conn, destination-path: string] -> [basis-t: u64, ok: bool, error: string]
+  (case store^.kind
+    .SQLite (sqlite-conn-backup! (addr store^.sqlite) destination-path)
+    .Shared (return 0 false "an in-memory Vev store has no durable storage snapshot")
+     (return 0 false "store is not open")))
 
 (defn store-db [store: ^Store-Conn] -> [snapshot: Store-DB, ok: bool, error: string]
   (case store^.kind

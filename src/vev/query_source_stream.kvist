@@ -58,7 +58,12 @@
 
 (defn db-read-source-all-index-entries-current? [source: DB-Read-Source] -> bool
   (and (= source.kind .SQLite-Snapshot)
-       (not source.sqlite-snapshot^.has-retractions)))
+       ;; A history database exposes assertions and retractions as first-class
+       ;; datoms. Nothing needs the current-fact resolution used by an ordinary
+       ;; database, so sequential index pages can be consumed directly even
+       ;; when the durable log contains retractions.
+       (or source.filter-history
+           (not source.sqlite-snapshot^.has-retractions))))
 
 (defn load-source-index-datom-stream-current-from-sqlite-run-ranges! [source: DB-Read-Source, stream: ^Source-Index-Datom-Stream] -> [ok: bool, error: string]
   (while (< stream^.run-index (count stream^.run-roots))

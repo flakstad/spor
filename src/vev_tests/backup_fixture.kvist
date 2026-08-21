@@ -1,0 +1,76 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import fmt "core:fmt")
+(import os "core:os")
+(import kdata "kvist:data")
+(import d "../../clients/kvist/vev")
+
+(def value-query
+  '[:find ?value .
+    :in $ ?id
+    :where [?entity :backup/id ?id]
+           [?entity :backup/value ?value]])
+
+(defn fail! [message: string]
+  (fmt.eprintln message)
+  (os.exit 1))
+
+(defn value-equals? [conn: d.Conn, id: string, expected: string] -> bool
+  (let [db (d.db conn) :defer-with d.close]
+    (let [value: Data (d.q value-query db id)]
+      (and (kdata.string? value) (= (kdata.string value) expected)))))
+
+(defn value-missing? [conn: d.Conn, id: string] -> bool
+  (let [db (d.db conn) :defer-with d.close]
+    (kdata.nil? (d.q value-query db id))))
+
+(defn main []
+  (when (< (count os.args) 4)
+    (fail! "usage: backup-fixture <create|verify-snapshot|verify-source> <source> <snapshot>"))
+  (let [mode os.args[1]
+        source-path os.args[2]
+        snapshot-path os.args[3]]
+    (cond
+      (= mode "create")
+        (let [source (d.connect source-path) :defer-with d.close]
+          (let [schema (d.transact source
+                         '[[:db/add 10 :db/ident :backup/id]
+                           [:db/add 10 :db/valueType :db.type/string]
+                           [:db/add 10 :db/unique :db.unique/identity]
+                           [:db/add 11 :db/ident :backup/value]
+                           [:db/add 11 :db/valueType :db.type/string]])]
+            (defer (d.close (addr schema)))
+            (when (not schema.ok) (fail! schema.error)))
+          (let [created (d.transact source
+                          '[{:db/id "before" :backup/id "before" :backup/value "in snapshot"}])]
+            (defer (d.close (addr created)))
+            (when (not created.ok) (fail! created.error)))
+          (when (not (d.ensure-resident! source))
+            (fail! "could not enable resident execution"))
+          (let [[basis ok error] (d.backup source snapshot-path)]
+            (when (not ok)
+              (fail! error))
+            (when (not (= basis 2))
+              (fail! (fmt.tprintf "expected snapshot basis 2, got %d" basis))))
+          (let [created (d.transact source
+                          '[{:db/id "after" :backup/id "after" :backup/value "source only"}])]
+            (defer (d.close (addr created)))
+            (when (not created.ok) (fail! created.error))))
+      (= mode "verify-snapshot")
+        (let [snapshot (d.connect snapshot-path) :defer-with d.close]
+          (when (or (not (value-equals? snapshot "before" "in snapshot"))
+                    (not (value-missing? snapshot "after")))
+            (fail! "separate process did not observe the exact snapshot generation"))
+          (let [created (d.transact snapshot
+                          '[{:db/id "independent" :backup/id "independent" :backup/value "snapshot only"}])]
+            (defer (d.close (addr created)))
+            (when (not created.ok) (fail! created.error))))
+      (= mode "verify-source")
+        (let [source (d.connect source-path) :defer-with d.close]
+          (when (or (not (value-equals? source "after" "source only"))
+                    (not (value-missing? source "independent")))
+            (fail! "snapshot writes leaked back into the source store")))
+      :else (fail! "unknown backup fixture mode"))))

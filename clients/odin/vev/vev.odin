@@ -25,6 +25,7 @@ API :: struct {
 	connection_ok: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_ok"`,
 	connection_error: proc "c" (conn: rawptr) -> cstring `dynlib:"vev_connection_error"`,
 	connection_basis_t: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_basis_t"`,
+	connection_backup: proc "c" (conn: rawptr, destination_path: cstring, basis_out: ^u64) -> cstring `dynlib:"vev_connection_backup"`,
 	connection_tx_count: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_tx_count"`,
 	connection_ensure_resident: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_ensure_resident"`,
 	connection_tx_ids: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_tx_ids"`,
@@ -236,6 +237,7 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.connection_ok == nil ||
 	   library.api.connection_error == nil ||
 	   library.api.connection_basis_t == nil ||
+	   library.api.connection_backup == nil ||
 	   library.api.connection_tx_count == nil ||
 	   library.api.connection_ensure_resident == nil ||
 	   library.api.connection_tx_ids == nil ||
@@ -470,6 +472,29 @@ connection_basis_t :: proc(connection: ^Durable_Connection) -> (t: u64, ok: bool
 		return 0, false
 	}
 	return connection.library.api.connection_basis_t(connection.handle), true
+}
+
+// backup creates a consistent, independently openable durable store at a new
+// path. It never overwrites an existing destination. The returned basis is the
+// exact latest committed transaction contained in that snapshot.
+backup :: proc(
+	connection: ^Durable_Connection,
+	destination_path: string,
+	allocator := context.allocator,
+) -> (basis_t: u64, ok: bool, error: string) {
+	if connection == nil || connection.handle == nil {
+		return 0, false, strings.clone("invalid durable connection", allocator)
+	}
+	path_text := strings.clone_to_cstring(destination_path, context.temp_allocator)
+	native_error := connection.library.api.connection_backup(connection.handle, path_text, &basis_t)
+	if native_error == nil {
+		return 0, false, strings.clone("Vev snapshot returned no result", allocator)
+	}
+	defer connection.library.api.string_free(native_error)
+	if len(string(native_error)) > 0 {
+		return 0, false, strings.clone(string(native_error), allocator)
+	}
+	return basis_t, true, strings.clone("", allocator)
 }
 
 connection_tx_count :: proc(connection: ^Durable_Connection) -> (count: u64, ok: bool) {
