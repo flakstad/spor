@@ -195,12 +195,12 @@ relation_result="$($CLI exec --memory \
 case "$relation_result" in *'"Ivan"'*) ;; *) exit 1 ;; esac
 case "$relation_result" in *'"Petr"'*) exit 1 ;; esac
 
-ALT_DB="$TMP_DIR/alternate.db"
-ALT_DB_EDN="$ALT_DB"
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) ALT_DB_EDN="$(cygpath -m "$ALT_DB")" ;;
-esac
-alternate_result="$($CLI exec --memory \
+ALT_DB_EDN="alternate.db"
+run_alternate_exec() {
+  (cd "$TMP_DIR" && "$CLI" exec --memory "$1")
+}
+
+alternate_result="$(run_alternate_exec \
   "{:steps [{:id :tx :op :transact :store \"$ALT_DB_EDN\"
              :tx [{:db/id 1 :source/name \"alternate\"}]}
             {:id :q :op :query :db [:ref :tx :db-after]
@@ -208,12 +208,12 @@ alternate_result="$($CLI exec --memory \
     :return [:ref :q]}")"
 test "$alternate_result" = '"alternate"'
 
-alternate_db="$($CLI exec --memory \
+alternate_db="$(run_alternate_exec \
   "{:steps [{:id :db :op :db :store \"$ALT_DB_EDN\"}]
     :return [:ref :db]}")"
 case "$alternate_db" in *':basis-t 1'*) ;; *) exit 1 ;; esac
 
-alternate_reopened="$($CLI exec --memory \
+alternate_reopened="$(run_alternate_exec \
   "{:steps [{:id :tx :op :transact :store \"$ALT_DB_EDN\"
              :tx [{:db/id 2 :source/name \"reopened\"}]}
             {:id :db :op :db :store \"$ALT_DB_EDN\"}
@@ -222,7 +222,7 @@ alternate_reopened="$($CLI exec --memory \
     :return {:answer [:ref :q] :tx-db [:ref :tx :db-after]}}")"
 case "$alternate_reopened" in *':answer "reopened"'*':basis-t 2'*) ;; *) exit 1 ;; esac
 
-alternate_maintenance="$($CLI exec --memory \
+alternate_maintenance="$(run_alternate_exec \
   "{:steps [{:id :info :op :index-info :store \"$ALT_DB_EDN\" :index :eavt}
             {:id :maintain :op :maintain-indexes :store \"$ALT_DB_EDN\"
              :max-steps 0}]
