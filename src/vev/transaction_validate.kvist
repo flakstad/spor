@@ -711,6 +711,13 @@
           (return (failed-tx-apply-result ":db/txInstant must be monotonic")))))
     (when (not has-explicit-tx-instant)
       (arr.push! expanded-ops (tx-add tx ":db/txInstant" tx-instant)))
+    ;; Validate the submitted operations before cardinality-one compaction can
+    ;; discard an earlier write.  Every asserted value must satisfy the schema,
+    ;; even when a later operation replaces it in the final transaction state.
+    (let [[valid error] (validate-ops before (slice expanded-ops 0))]
+      (when (not valid)
+        (delete expanded-ops)
+        (return (failed-tx-apply-result error))))
     (let [
         expanded-schema-changed (ops-modify-validation-schema? (slice expanded-ops 0))
         ordered-append-only-ok (and (not expanded-schema-changed)

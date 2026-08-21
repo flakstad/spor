@@ -10,10 +10,14 @@
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
     (when (not source-ok)
       (return (Store-Entity {}) false source-error))
-    (let [[_ _ exists range-ok range-error] (db-read-source-eavt-entity-range source entity-id)]
-      (when (not range-ok)
-        (return (Store-Entity {}) false range-error))
-      (return (Store-Entity {db: (retain-store-db snapshot^) e: entity-id found: exists}) true ""))))
+    ;; Overlay entities may exist only in pending ops (or may have been fully
+    ;; retracted there), so the base EAVT range alone is not authoritative.
+    (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity source entity-id)]
+      (when (not datoms-ok)
+        (return (Store-Entity {}) false datoms-error))
+      (let [exists (> (count datoms) 0)]
+        (delete-owned-datoms datoms)
+        (return (Store-Entity {db: (retain-store-db snapshot^) e: entity-id found: exists}) true "")))))
 
 (defn store-db-entity-lookup-ref [snapshot: ^Store-DB, attr: string, lookup-value: Value] -> [entity: Store-Entity, ok: bool, error: string]
   (let [[source source-ok source-error] (store-db-read-source snapshot)]

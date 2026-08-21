@@ -743,6 +743,9 @@
   (let [ref-value (value-entity entity)
         values ([]Value [ref-value])
         view (db-read-source-index-view source .VAET)
+        ;; The source index lookup may include ordinary integers that compare
+        ;; numerically with the entity id. Keep the broad index range, then
+        ;; require an exact Entity value below before retracting a fact.
         [low low-ok low-error] (db-read-source-lower-bound-values source view values)]
     (when (not low-ok)
       (return false low-error))
@@ -758,7 +761,9 @@
             (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
               (when (not datom-ok)
                 (return false datom-error))
-              (shared-write-state-push-owned-retract-op-once! ops datom.e datom.a datom.v)
+              (when (and (= datom.v.kind .Entity)
+                         (= datom.v.entity entity))
+                (shared-write-state-push-owned-retract-op-once! ops datom.e datom.a datom.v))
               (delete-owned-datom datom)))))))
   (return true ""))
 

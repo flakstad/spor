@@ -10148,6 +10148,36 @@
     (t.is (= (count current-email.rows) 1))
     (t.is (= current-email.rows[0].values[0].text "ada2@example.com"))))
 
+(t.deftest schema-validates-cardinality-one-values-before-compaction
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        _ (vev.transact
+            (addr conn)
+            [[:db/add 100 :db/ident :user/age]
+             [:db/add 100 :db/valueType :db.type/long]
+             [:db/add 1 :user/age 37]])
+        source conn.db
+        report (vev.with-tx-data
+                 source
+                 ([]vev.Tx-Data
+                   [(vev.add 1 ":user/age" (vev.value-string "invalid"))
+                    (vev.add 1 ":user/age" (vev.value-int 38))]))
+        source-ages (vev.q-collection source
+                      [:find [?age ...]
+                       :where
+                       [1 :user/age ?age]])
+        after-ages (vev.q-collection report.db-after
+                     [:find [?age ...]
+                      :where
+                      [1 :user/age ?age]])]
+    (t.is (not report.ok))
+    (t.is (= report.error "schema value type mismatch"))
+    (t.is (= (count report.tx-data) 0))
+    (t.is (= (count source-ages) 1))
+    (t.is (= source-ages[0].int-value 37))
+    (t.is (= (count after-ages) 1))
+    (t.is (= after-ages[0].int-value 37))))
+
 (t.deftest datascript-unique-value-does-not-upsert
   (defer (free_all context.allocator))
   (let [conn (vev.create-conn)

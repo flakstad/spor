@@ -183,6 +183,30 @@ main :: proc() {
 			tags = SNAPSHOT_TAGS[:],
 		},
 		{
+			name = "with-report preserves hypothetical snapshots",
+			property = with_report_property,
+			description = "generated hypothetical replacements, many-value toggles, entity retractions, and tempid creation preserve source state while before/after report DBs agree with the model",
+			tags = WITH_REPORT_TAGS[:],
+		},
+		{
+			name = "with-report batches preserve operation order",
+			property = with_report_batch_property,
+			description = "ordered hypothetical batches agree with the transaction model while source and before snapshots remain unchanged across resident, durable, and reopen paths",
+			tags = WITH_REPORT_BATCH_TAGS[:],
+		},
+		{
+			name = "with-report tempid batches are order independent",
+			property = with_report_tempid_order_property,
+			description = "permuted hypothetical tempid declarations and forward references converge on the same linked entity across resident and durable snapshots",
+			tags = WITH_REPORT_TEMPID_ORDER_TAGS[:],
+		},
+		{
+			name = "with-report invalid batches preserve atomic snapshots",
+			property = with_report_failure_property,
+			description = "generated type, CAS, and uniqueness errors roll back the entire hypothetical batch across resident and durable snapshots",
+			tags = WITH_REPORT_FAILURE_TAGS[:],
+		},
+		{
 			name = "resident transactions agree with model",
 			property = transaction_model_property,
 			description = "generated add and retract sequences agree with an independent cardinality model",
