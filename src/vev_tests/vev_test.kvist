@@ -10178,6 +10178,32 @@
     (t.is (= (count after-ages) 1))
     (t.is (= after-ages[0].int-value 37))))
 
+(t.deftest schema-allows-existing-fact-noop-after-value-type-change
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        _ (vev.transact
+            (addr conn)
+            [[:db/add 100 :db/ident :typed/value]
+             [:db/add 100 :db/valueType :db.type/string]
+             [:db/add 1 :typed/value "existing"]])
+        schema (vev.transact
+                 (addr conn)
+                 [[:db/add 100 :db/valueType :db.type/long]])
+        report (vev.with-tx-data
+                 conn.db
+                 ([]vev.Tx-Data
+                   [(vev.add 1 ":typed/value" (vev.value-string "existing"))]))
+        values (vev.q-collection report.db-after
+                 [:find [?value ...]
+                  :where
+                  [1 :typed/value ?value]])]
+    (t.is schema.ok)
+    (t.is report.ok)
+    (t.is (= (count report.tx-data) 1))
+    (t.is (= report.tx-data[0].a ":db/txInstant"))
+    (t.is (= (count values) 1))
+    (t.is (= values[0].text "existing"))))
+
 (t.deftest datascript-unique-value-does-not-upsert
   (defer (free_all context.allocator))
   (let [conn (vev.create-conn)

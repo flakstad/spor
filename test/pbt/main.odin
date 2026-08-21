@@ -231,6 +231,18 @@ main :: proc() {
 			tags = CAS_MODEL_TAGS[:],
 		},
 		{
+			name = "explicit transaction instants preserve metadata atomicity",
+			property = transaction_instant_property,
+			description = "generated older, equal, and newer explicit transaction instants preserve metadata, snapshots, time-filtered views, transaction ranges, backend parity, and reopen state",
+			tags = TRANSACTION_INSTANT_TAGS[:],
+		},
+		{
+			name = "durable backups fork exact independent histories",
+			property = backup_model_property,
+			description = "generated durable histories back up at an exact checkpoint, reject overwrite, and evolve independently across source, snapshot, logs, and reopen",
+			tags = BACKUP_MODEL_TAGS[:],
+		},
+		{
 			name = "lookup refs agree across backends",
 			property = transaction_lookup_property,
 			description = "generated lookup-ref updates, retractions, missing refs, and identity upserts preserve state, coordinates, and exact logs",

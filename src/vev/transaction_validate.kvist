@@ -508,6 +508,19 @@
         (arr.push! out op)))
     out))
 
+(defn compact-fact-noops-for-validation [before: DB, ops: []Tx-Op] -> [dynamic]Tx-Op
+  (let [out (make [dynamic]Tx-Op 0 (count ops))]
+    (for [op ops]
+      (let [[touched prior-current] (prior-op-fact-state (slice out 0) op)
+            current (if touched
+                      prior-current
+                      (current-op-value-exists-in-log? before.datoms op))]
+        (when (or (and (= op.kind .Add) current)
+                  (and (= op.kind .Retract) (not current)))
+          (continue))
+        (arr.push! out op)))
+    out))
+
 (defn ops-contain-derived? [ops: []Tx-Op] -> bool
   (for [op ops]
     (when op.derived
@@ -711,10 +724,13 @@
           (return (failed-tx-apply-result ":db/txInstant must be monotonic")))))
     (when (not has-explicit-tx-instant)
       (arr.push! expanded-ops (tx-add tx ":db/txInstant" tx-instant)))
-    ;; Validate the submitted operations before cardinality-one compaction can
-    ;; discard an earlier write.  Every asserted value must satisfy the schema,
-    ;; even when a later operation replaces it in the final transaction state.
-    (let [[valid error] (validate-ops before (slice expanded-ops 0))]
+    ;; Remove exact fact-level no-ops, then validate before cardinality-one
+    ;; compaction can discard an earlier write.  Existing facts remain legal
+    ;; no-ops after schema evolution, while every effective assertion must
+    ;; satisfy the schema even when a later operation replaces it.
+    (let [validation-ops (compact-fact-noops-for-validation before (slice expanded-ops 0))
+          [valid error] (validate-ops before (slice validation-ops 0))]
+      (delete validation-ops)
       (when (not valid)
         (delete expanded-ops)
         (return (failed-tx-apply-result error))))
