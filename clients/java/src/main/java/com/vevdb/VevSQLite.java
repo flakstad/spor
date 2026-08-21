@@ -290,28 +290,28 @@ public final class VevSQLite implements AutoCloseable {
     }
 
     public Connection open(String path) throws Throwable {
-        return open(Path.of(path));
-    }
-
-    public Connection open(Path path) throws Throwable {
         requireOpen();
         try (Arena local = Arena.ofConfined()) {
             return checkedConnection((MemorySegment) open.invoke(
-                local.allocateFrom(path.toString())));
+                local.allocateFrom(path)));
         }
+    }
+
+    public Connection open(Path path) throws Throwable {
+        return open(path.toString());
     }
 
     public Connection open(String path, int flags) throws Throwable {
-        return open(Path.of(path), flags);
-    }
-
-    public Connection open(Path path, int flags) throws Throwable {
         requireOpen();
         try (Arena local = Arena.ofConfined()) {
             return checkedConnection((MemorySegment) openV2.invoke(
-                local.allocateFrom(path.toString()),
+                local.allocateFrom(path),
                 flags));
         }
+    }
+
+    public Connection open(Path path, int flags) throws Throwable {
+        return open(path.toString(), flags);
     }
 
     public String version() throws Throwable {

@@ -30,6 +30,12 @@
     (string? value) (Path/of value (make-array String 0))
     :else (throw (ex-info "expected SQLite database path" {:value value}))))
 
+(defn- database-path-text [value]
+  (cond
+    (instance? Path value) (.toString ^Path value)
+    (string? value) value
+    :else (throw (ex-info "expected SQLite database path" {:value value}))))
+
 (defn- sqlite-exception [^VevSQLite$SQLiteException error]
   (ex-info (.getMessage error)
            {:code (.code error)
@@ -62,7 +68,7 @@
         mode (:mode options :read-write-create)]
     (try
       (let [native (.open engine
-                          (path database-path)
+                          ^String (database-path-text database-path)
                           (open-flags mode))]
         (try
           (when-let [milliseconds (:busy-timeout-ms options)]
