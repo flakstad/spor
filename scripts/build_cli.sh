@@ -87,10 +87,12 @@ ODIN_ARGS=(
 )
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
+    WINDOWS_LINKER_FLAGS=("/STACK:67108864")
     if [[ -n "$SQLITE_LIB_DIR" ]]; then
       SQLITE_WINDOWS_DIR="$(cygpath -w "$SQLITE_LIB_DIR")"
-      ODIN_ARGS+=("-extra-linker-flags:/LIBPATH:$SQLITE_WINDOWS_DIR")
+      WINDOWS_LINKER_FLAGS+=("/LIBPATH:$SQLITE_WINDOWS_DIR")
     fi
+    ODIN_ARGS+=("-extra-linker-flags:${WINDOWS_LINKER_FLAGS[*]}")
     ;;
   *)
     if [[ -n "$SQLITE_LIB_DIR" ]]; then
