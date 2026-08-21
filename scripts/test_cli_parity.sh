@@ -196,26 +196,36 @@ case "$relation_result" in *'"Ivan"'*) ;; *) exit 1 ;; esac
 case "$relation_result" in *'"Petr"'*) exit 1 ;; esac
 
 ALT_DB_EDN="${TMP_DIR#"$ROOT"/}/alternate.db"
-alternate_tx="$($CLI exec --memory \
+run_alternate_exec() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) timeout 60 "$CLI" exec --memory "$1" ;;
+    *) "$CLI" exec --memory "$1" ;;
+  esac
+}
+
+alternate_tx="$(run_alternate_exec \
   "{:steps [{:id :tx :op :transact :store \"$ALT_DB_EDN\"
              :tx [{:db/id 1 :source/name \"alternate\"}]}]
     :return [:ref :tx]}")"
 case "$alternate_tx" in *':db-before'*':db-after'*) ;; *) exit 1 ;; esac
+echo "cli-parity-stage=alternate-tx" >&2
 
-alternate_query="$($CLI exec --memory \
+alternate_query="$(run_alternate_exec \
   "{:steps [{:id :db :op :db :store \"$ALT_DB_EDN\"}
             {:id :q :op :query :db [:ref :db]
              :query [:find ?name . :where [1 :source/name ?name]]}]
     :return [:ref :q]}")"
 test "$alternate_query" = '"alternate"'
+echo "cli-parity-stage=alternate-query" >&2
 
-alternate_result="$($CLI exec --memory \
+alternate_result="$(run_alternate_exec \
   "{:steps [{:id :tx :op :transact :store \"$ALT_DB_EDN\"
              :tx [{:db/id 2 :source/name \"composed\"}]}
             {:id :q :op :query :db [:ref :tx :db-after]
              :query [:find ?name . :where [2 :source/name ?name]]}]
     :return [:ref :q]}")"
 test "$alternate_result" = '"composed"'
+echo "cli-parity-stage=alternate-composed" >&2
 
 alternate_db="$($CLI exec --memory \
   "{:steps [{:id :db :op :db :store \"$ALT_DB_EDN\"}]
@@ -237,6 +247,7 @@ alternate_maintenance="$($CLI exec --memory \
              :max-steps 0}]
     :return {:info [:ref :info] :maintenance [:ref :maintain]}}")"
 case "$alternate_maintenance" in *':index :eavt'*':steps 0'*) ;; *) exit 1 ;; esac
+echo "cli-parity-stage=alternate-complete" >&2
 
 if "$CLI" query "$DB" not-edn >"$TMP_DIR/error.out" 2>"$TMP_DIR/error.err"; then
   exit 1
