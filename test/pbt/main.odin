@@ -257,8 +257,50 @@ main :: proc() {
 		{
 			name = "datalog joins agree with relation model",
 			property = query_join_property,
-			description = "generated joins, predicates, clause permutations, and empty relations agree with an independent model across resident, durable, and reopen",
+			description = "generated text and prepared joins, inputs, predicates, clause permutations, and empty relations agree with an independent model across resident, durable, and reopen",
 			tags = QUERY_JOIN_TAGS[:],
+		},
+		{
+			name = "datalog aggregates agree with grouped model",
+			property = query_aggregate_property,
+			description = "generated grouped aggregates over duplicates, mutations, filters, and clause permutations agree with an independent model across resident, durable, and reopen",
+			tags = QUERY_AGGREGATE_TAGS[:],
+		},
+		{
+			name = "datalog logic agrees with set model",
+			property = query_logic_property,
+			description = "generated or, not, or-join, and not-join queries agree with bitset algebra across resident, durable, mutations, and reopen",
+			tags = QUERY_LOGIC_TAGS[:],
+		},
+		{
+			name = "recursive rules agree with graph closure",
+			property = query_recursive_property,
+			description = "generated cyclic graphs and edge mutations agree with an independent transitive-closure model across resident, durable, and reopen",
+			tags = QUERY_RECURSIVE_TAGS[:],
+		},
+		{
+			name = "pull agrees with nested entity model",
+			property = pull_model_property,
+			description = "direct, many, and Datalog pull agree with generated scalar, cardinality-many, and nested-reference state across resident, durable, mutations, and reopen",
+			tags = PULL_MODEL_TAGS[:],
+		},
+		{
+			name = "datom indexes agree with ordered model",
+			property = index_read_property,
+			description = "generated scalar, cardinality-many, and reference facts preserve exact EAVT, AEVT, AVET, VAET, and index-range ordering across resident, durable, mutations, and reopen",
+			tags = INDEX_READ_TAGS[:],
+		},
+		{
+			name = "index pull agrees with paged walk model",
+			property = index_pull_property,
+			description = "generated AVET and AEVT walks preserve forward and reverse ordering, duplicate targets, offset, limit, mutations, backend parity, and reopen",
+			tags = INDEX_PULL_TAGS[:],
+		},
+		{
+			name = "entity views agree with fact model",
+			property = entity_view_property,
+			description = "entity lookup, get, values, reverse refs, touch, schema entities, and attribute metadata agree with generated state across resident, durable, mutations, and reopen",
+			tags = ENTITY_VIEW_TAGS[:],
 		},
 		{
 			name = "unique schema evolution follows statechart",

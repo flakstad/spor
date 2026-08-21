@@ -59,6 +59,7 @@
              (not source.filter-has-since)
              (not source.filter-history)
              (= (count sources) 0)
+             (= (count query-value.pulls) 0)
              (not (db-read-source-query-has-source-inputs? query-value))
              (not (query-has-source-function? query-value)))
     (return (q-query-with-inputs-and-fns source.db^ query-value inputs registry)))
@@ -98,9 +99,10 @@
     visible))
 
 (defn public-index-datom-visible? [db: DB, order: Public-Index-Order, datom: Datom] -> bool
-  (if (= order .AVET)
-    (public-avet-attr? db datom.a)
-    true))
+  (cond
+    (= order .AVET) (public-avet-attr? db datom.a)
+    (= order .VAET) (= datom.v.kind .Entity)
+    :else true))
 
 (defn index-arg-attr [db: DB, arg: Index-Arg] -> [attr: string, ok: bool]
   (let [[value value-ok] (index-arg-value db arg)]
@@ -313,9 +315,18 @@
       (set! i (+ i 1)))))
 
 (defn append-retract-entity-ops! [ops: ^[dynamic]Tx-Op, db: DB, entity: u64]
-  (let [seen (set.empty u64)]
-    (defer (delete seen))
-    (append-retract-entity-ops-seen! ops db entity (addr seen))))
+  (let [seen (set.empty u64)
+        expanded (make [dynamic]Tx-Op)]
+    (defer
+      (do
+        (delete seen)
+        (delete expanded)))
+    ;; Deduplicate only within this retractEntity expansion. An identical
+    ;; retract earlier in the transaction may have been followed by an add,
+    ;; so suppressing this later retract would violate transaction order.
+    (append-retract-entity-ops-seen! (addr expanded) db entity (addr seen))
+    (for [op expanded]
+      (arr.push! ops^ op))))
 
 (defn append-retract-attr-ops-seen! [ops: ^[dynamic]Tx-Op, db: DB, entity: u64, attr: string, seen: (ptr (map u64 (struct {})))]
   (let [view (db-index-view db .EAVT)
@@ -333,10 +344,16 @@
       (set! i (+ i 1)))))
 
 (defn append-retract-attr-ops! [ops: ^[dynamic]Tx-Op, db: DB, entity: u64, attr: string]
-  (let [seen (set.empty u64)]
-    (defer (delete seen))
+  (let [seen (set.empty u64)
+        expanded (make [dynamic]Tx-Op)]
+    (defer
+      (do
+        (delete seen)
+        (delete expanded)))
     (set.add! seen entity)
-    (append-retract-attr-ops-seen! ops db entity attr (addr seen))))
+    (append-retract-attr-ops-seen! (addr expanded) db entity attr (addr seen))
+    (for [op expanded]
+      (arr.push! ops^ op))))
 
 (defn schema-entity-for-attr [db: DB, attr: string] -> [e: u64, ok: bool]
   (let [value (value-keyword attr)

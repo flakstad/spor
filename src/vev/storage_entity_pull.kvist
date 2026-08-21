@@ -104,7 +104,9 @@
                 (while (>= position 0)
                   (let [datom all[indexes[position]]
                         compare (datom-index-compare-values datom order-text (slice values 0))]
-                    (when (<= compare 0)
+                    (when (and (<= compare 0)
+                               (or (not (= order .VAET))
+                                   (= datom.v.kind .Entity)))
                       (arr.push! out (datom-owned datom))))
                   (set! position (- position 1))))
               (for [index indexes]
@@ -113,7 +115,9 @@
                       include (if (= mode 1)
                                 (>= compare 0)
                                 (= compare 0))]
-                  (when include
+                  (when (and include
+                             (or (not (= order .VAET))
+                                 (= datom.v.kind .Entity)))
                     (arr.push! out (datom-owned datom))))))
             (return out true ""))))))))
 
@@ -189,7 +193,7 @@
                                     (>= (index-position-compare datom.v values[0]) 0))
                     end-index (if has-start 1 0)
                     before-end (or (not has-end)
-                                   (< (index-position-compare datom.v values[end-index]) 0))]
+                                   (<= (index-position-compare datom.v values[end-index]) 0))]
                 (when (and after-start before-end)
                   (arr.push! out (datom-owned datom)))))
             (return out true "")))))))
@@ -217,16 +221,18 @@
           (when (not datoms-ok)
             (delete out)
             (return (make [dynamic]Value) false datoms-error))
-          (for [datom datoms]
-            (arr.push! out (value-entity datom.e)))
+          (let [indexes (sorted-datom-order-indexes (slice datoms 0) .VAET) :defer]
+            (for [index indexes]
+              (arr.push! out (value-entity datoms[index].e))))
           (delete-owned-datoms datoms)
           (return out true ""))
         (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity^.e attr)]
           (when (not datoms-ok)
             (delete out)
             (return (make [dynamic]Value) false datoms-error))
-          (for [datom datoms]
-            (arr.push! out (value-owned datom.v)))
+          (let [indexes (sorted-datom-order-indexes (slice datoms 0) .EAVT) :defer]
+            (for [index indexes]
+              (arr.push! out (value-owned datoms[index].v))))
           (delete-owned-datoms datoms)
           (return out true ""))))))
 

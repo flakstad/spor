@@ -733,6 +733,12 @@
       (delete op.a)
       (delete-owned-value op.v))))
 
+(defn shared-write-state-push-owned-retract-op! [ops: ^[dynamic]Tx-Op, entity: u64, attr: string, value: Value]
+  (let [op (tx-retract entity (string-owned attr) (value-owned value))]
+    (set! op.owned-attr true)
+    (set! op.owned-value true)
+    (arr.push! ops^ op)))
+
 (defn shared-write-state-append-incoming-retract-ops! [ops: ^[dynamic]Tx-Op, source: DB-Read-Source, entity: u64] -> [ok: bool, error: string]
   (let [ref-value (value-entity entity)
         values ([]Value [ref-value])
@@ -793,7 +799,10 @@
       (let [op ops^[index]]
         (when (and (= op.kind .Add)
                    (= op.e entity))
-          (shared-write-state-push-owned-retract-op-once! ops entity op.a op.v))))
+          ;; Preserve operation order when the same fact was retracted before
+          ;; being re-added earlier in this transaction. Deduplicating this
+          ;; final retract against the earlier one would leave the add live.
+          (shared-write-state-push-owned-retract-op! ops entity op.a op.v))))
     (return true "")))
 
 (defn shared-write-state-append-retract-attr-ops! [ops: ^[dynamic]Tx-Op, source: DB-Read-Source, entity: u64, attr: string] -> [ok: bool, error: string]
@@ -822,7 +831,7 @@
         (when (and (= op.kind .Add)
                    (= op.e entity)
                    (= op.a attr))
-          (shared-write-state-push-owned-retract-op-once! ops entity attr op.v))))
+          (shared-write-state-push-owned-retract-op! ops entity attr op.v))))
   (return true "")))
 
 (defn shared-write-state-tx-adds-attr? [tx-data: []Tx-Data, attr: string] -> bool

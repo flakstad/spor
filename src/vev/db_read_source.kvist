@@ -623,10 +623,15 @@
       (if (< actual.entity right)
         -1
         (if (> actual.entity right) 1 0)))
-    (if (and (= actual.kind .Keyword)
-             (or (= expected.kind .Keyword) (= expected.kind .String)))
-      (strings.compare actual.text expected.text)
-      (value-compare actual expected))))
+    (if (and (= actual.kind .Int) (= expected.kind .Entity))
+      (let [left (u64 actual.int-value)]
+        (if (< left expected.entity)
+          -1
+          (if (> left expected.entity) 1 0)))
+      (if (and (= actual.kind .Keyword)
+               (or (= expected.kind .Keyword) (= expected.kind .String)))
+        (strings.compare actual.text expected.text)
+        (value-compare actual expected)))))
 
 (defn datom-matches-index-values? [datom: Datom, order: string, values: []Value] -> bool
   (for [value position values]
@@ -704,6 +709,34 @@
         (let [compare (datom-index-compare-values datom order values)]
           (delete-owned-datom datom)
           (if (<= compare 0)
+            (set! low (+ mid 1))
+            (set! high mid)))))
+    (return low true "")))
+
+(defn datom-index-compare-values-strict [datom: Datom, order: string, values: []Value] -> int
+  (for [value position values]
+    (let [actual (datom-index-position-value datom order position)
+          compare (if (and (= actual.kind .Keyword)
+                           (or (= value.kind .Keyword) (= value.kind .String)))
+                    (strings.compare actual.text value.text)
+                    (value-compare actual value))]
+      (when (not (= compare 0))
+        (return compare))))
+  0)
+
+(defn db-read-source-strict-bound-values [source: DB-Read-Source, view: DB-Index-View, values: []Value, upper: bool] -> [position: int, ok: bool, error: string]
+  (let [order (public-index-order-text view.order)
+        low 0
+        high (db-index-view-count view)]
+    (while (< low high)
+      (let [mid (/ (+ low high) 2)
+            entry (db-index-view-at view mid)
+            [datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
+        (when (not datom-ok)
+          (return low false datom-error))
+        (let [compare (datom-index-compare-values-strict datom order values)]
+          (delete-owned-datom datom)
+          (if (if upper (<= compare 0) (< compare 0))
             (set! low (+ mid 1))
             (set! high mid)))))
     (return low true "")))
@@ -1055,12 +1088,41 @@
 (defn db-read-source-datoms-by-reverse-entity-attr [source: DB-Read-Source, entity: u64, attr: string] -> [datoms: [dynamic]Datom, ok: bool, error: string]
   (let [out (make [dynamic]Datom)
         values ([]Value [(value-entity entity) (value-keyword attr)])
-        [scan-ok scan-error] (db-read-source-append-index-datoms! (addr out) source .VAET values)]
-    (if scan-ok
-      (return out true "")
-      (do
-        (delete-owned-datoms out)
-        (return (make [dynamic]Datom) false scan-error)))))
+        view (db-read-source-index-view source .VAET)
+        ;; Public index comparisons allow integer/entity numeric coercion.
+        ;; Internal reverse reads need strict bounds so equal numeric payloads
+        ;; of different kinds cannot select a disjoint VAET range.
+        [low low-ok low-error] (db-read-source-strict-bound-values source view values false)]
+    (when (not low-ok)
+      (delete out)
+      (return (make [dynamic]Datom) false low-error))
+    (let [[high high-ok high-error] (db-read-source-strict-bound-values source view values true)]
+      (when (not high-ok)
+        (delete out)
+        (return (make [dynamic]Datom) false high-error))
+      (for [pos (arr.range low high)]
+        (let [entry (db-index-view-at view pos)
+              [current current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
+          (when (not current-ok)
+            (delete-owned-datoms out)
+            (return (make [dynamic]Datom) false current-error))
+          (when current
+            (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
+              (when (not datom-ok)
+                (delete-owned-datoms out)
+                (return (make [dynamic]Datom) false datom-error))
+              (arr.push! out datom)))))
+      (when (db-read-source-has-inline-overlay? source)
+        (db-read-source-apply-inline-overlay! (addr out) source .VAET values))
+      (let [filtered (make [dynamic]Datom)]
+        (for [datom out]
+          (if (and (= datom.a attr)
+                   (= datom.v.kind .Entity)
+                   (= datom.v.entity entity))
+            (arr.push! filtered datom)
+            (delete-owned-datom datom)))
+        (delete out)
+        (return filtered true "")))))
 
 (defn db-read-source-pull-attrs-value [source: DB-Read-Source, entity: u64, attrs: []string] -> [value: Value, ok: bool, error: string]
   (let [items (make [dynamic]Value)]

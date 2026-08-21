@@ -9,7 +9,7 @@ import "core:strings"
 import pbt "pbt:pbt"
 import vev "../../clients/odin/vev"
 
-QUERY_JOIN_TAGS := [?]string{"core", "query", "datalog", "model", "durable", "differential", "join", "predicate", "permutation", "reopen"}
+QUERY_JOIN_TAGS := [?]string{"core", "query", "datalog", "prepared", "model", "durable", "differential", "join", "predicate", "permutation", "reopen"}
 QUERY_JOIN_MAX_ENTITIES :: 12
 
 QUERY_JOIN_SCHEMA :: `[
@@ -101,6 +101,16 @@ query_join_property :: proc(t: ^pbt.T) -> pbt.Result {
 	}
 	canonical := query_join_edn(t, scenario, 0)
 	permuted := query_join_edn(t, scenario, scenario.permutation_index)
+	canonical_prepared, canonical_prepared_ok := vev.prepare(&library, canonical)
+	if !canonical_prepared_ok {
+		return pbt.error(fmt.tprintf("could not prepare canonical query: %s", canonical))
+	}
+	defer vev.close(&canonical_prepared)
+	permuted_prepared, permuted_prepared_ok := vev.prepare(&library, permuted)
+	if !permuted_prepared_ok {
+		return pbt.error(fmt.tprintf("could not prepare permuted query: %s", permuted))
+	}
+	defer vev.close(&permuted_prepared)
 	pbt.note(t, fmt.tprintf(
 		"query-model entities=%d expected=%d canonical=%s permuted=%s",
 		scenario.entity_count,
@@ -108,16 +118,16 @@ query_join_property :: proc(t: ^pbt.T) -> pbt.Result {
 		canonical,
 		permuted,
 	))
-	if result := query_join_connection_check(t, &resident, scenario, canonical, "resident canonical"); result.status != .Pass {
+	if result := query_join_connection_check(t, &resident, &canonical_prepared, scenario, canonical, "resident canonical"); result.status != .Pass {
 		return result
 	}
-	if result := query_join_connection_check(t, &resident, scenario, permuted, "resident permuted"); result.status != .Pass {
+	if result := query_join_connection_check(t, &resident, &permuted_prepared, scenario, permuted, "resident permuted"); result.status != .Pass {
 		return result
 	}
-	if result := query_join_connection_check(t, &durable, scenario, canonical, "durable canonical"); result.status != .Pass {
+	if result := query_join_connection_check(t, &durable, &canonical_prepared, scenario, canonical, "durable canonical"); result.status != .Pass {
 		return result
 	}
-	if result := query_join_connection_check(t, &durable, scenario, permuted, "durable permuted"); result.status != .Pass {
+	if result := query_join_connection_check(t, &durable, &permuted_prepared, scenario, permuted, "durable permuted"); result.status != .Pass {
 		return result
 	}
 	basis_after, basis_after_ok := tempid_order_basis(&durable)
@@ -138,10 +148,10 @@ query_join_property :: proc(t: ^pbt.T) -> pbt.Result {
 	if !reopened_ok {
 		return pbt.error("could not reopen query-model durable connection")
 	}
-	if result := query_join_connection_check(t, &durable, scenario, canonical, "durable reopened canonical"); result.status != .Pass {
+	if result := query_join_connection_check(t, &durable, &canonical_prepared, scenario, canonical, "durable reopened canonical"); result.status != .Pass {
 		return result
 	}
-	if result := query_join_connection_check(t, &durable, scenario, permuted, "durable reopened permuted"); result.status != .Pass {
+	if result := query_join_connection_check(t, &durable, &permuted_prepared, scenario, permuted, "durable reopened permuted"); result.status != .Pass {
 		return result
 	}
 	reopened_basis, reopened_basis_ok := tempid_order_basis(&durable)
@@ -226,6 +236,7 @@ query_join_permutation :: proc(index: int) -> [5]int {
 query_join_connection_check :: proc(
 	t: ^pbt.T,
 	connection: ^$Connection,
+	prepared: ^vev.Prepared_Query,
 	scenario: Query_Join_Case,
 	query: string,
 	backend: string,
@@ -235,23 +246,42 @@ query_join_connection_check :: proc(
 		return pbt.error(fmt.tprintf("could not retain %s query database", backend))
 	}
 	defer vev.close(&database)
-	return query_join_database_check(t, &database, scenario, query, backend)
+	return query_join_database_check(t, &database, prepared, scenario, query, backend)
 }
 
 query_join_database_check :: proc(
 	t: ^pbt.T,
 	database: ^vev.DB,
+	prepared: ^vev.Prepared_Query,
 	scenario: Query_Join_Case,
 	query: string,
 	backend: string,
 ) -> pbt.Result {
 	inputs := fmt.tprintf(`["tag-%d"]`, scenario.selected_tag)
-	result, query_ok := vev.query(database, query, inputs)
+	text_result, query_ok := vev.query(database, query, inputs)
 	if !query_ok {
 		return pbt.fail(fmt.tprintf("%s query failed: %s", backend, query))
 	}
-	defer vev.close(&result)
-	relation, relation_ok := vev.value(&result)
+	defer vev.close(&text_result)
+	if result := query_join_result_check(t, &text_result, scenario, query, fmt.tprintf("%s text", backend)); result.status != .Pass {
+		return result
+	}
+
+	prepared_result, prepared_query_ok := vev.query_db_prepared(database, prepared, inputs)
+	if !prepared_query_ok {
+		return pbt.fail(fmt.tprintf("%s prepared query failed: %s", backend, query))
+	}
+	defer vev.close(&prepared_result)
+	return query_join_result_check(t, &prepared_result, scenario, query, fmt.tprintf("%s prepared", backend))
+}
+
+query_join_result_check :: proc(
+	t: ^pbt.T,
+	result: ^vev.Data,
+	scenario: Query_Join_Case,
+	query, backend: string,
+) -> pbt.Result {
+	relation, relation_ok := vev.value(result)
 	if !relation_ok {
 		return pbt.error(fmt.tprintf("%s query relation unavailable", backend))
 	}

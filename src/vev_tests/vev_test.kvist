@@ -5250,6 +5250,39 @@
     (t.is (= range-bounded[1].v.entity 3))
     (t.is (= range-bounded[2].v.entity 3))))
 
+(t.deftest vaet-public-index-excludes-non-reference-values
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        _ (vev.transact
+            (addr conn)
+            [[:db/add 1 :score 2]
+             [:db/add 2 :link (vev.value-entity 2)]
+             [:db/add 3 :score 3]])
+        exact (vev.datoms conn.db :vaet 2)
+        all (vev.datoms conn.db :vaet)
+        seek (vev.seek-datoms conn.db :vaet 2)
+        rseek (vev.rseek-datoms conn.db :vaet 2)]
+    (t.is (= (count exact) 1))
+    (t.is (= exact[0].e 2))
+    (t.is (= exact[0].a ":link"))
+    (t.is (= exact[0].v.kind .Entity))
+    (t.is (= exact[0].v.entity 2))
+    (t.is (= (count all) 1))
+    (t.is (= (count seek) 1))
+    (t.is (= (count rseek) 1))))
+
+(t.deftest vaet-public-order-sorts-entity-before-transaction
+  (defer (free_all context.allocator))
+  (let [datoms ([dynamic]vev.Datom
+                 [(vev.datom-tx 4 ":link" (vev.value-entity 1) 5 true)
+                  (vev.datom-tx 1 ":link" (vev.value-entity 1) 6 true)])
+        indexes (vev.sorted-datom-order-indexes (slice datoms 0) .VAET)]
+    (t.is (= (count indexes) 2))
+    (t.is (= indexes[0] 1))
+    (t.is (= indexes[1] 0))
+    (vev.delete-owned-datoms datoms)
+    (delete indexes)))
+
 (t.deftest datascript-index-api-subset
   (defer (free_all context.allocator))
   (let [conn (vev.create-conn)
@@ -9552,6 +9585,38 @@
       (t.is (= (count result.rows) 1))
       (t.is (= result.rows[0].values[0].entity 2))
       (t.is (= result.rows[0].values[1].text "Grace"))))
+
+(t.deftest retract-entity-wins-after-same-transaction-retract-and-readd
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        _ (vev.transact (addr conn) [[:db/add 4 :item/name "grace"]])
+        report (vev.transact
+                 (addr conn)
+                 [[:db/retract 4 :item/name "grace"]
+                  [:db/add 4 :item/name "grace"]
+                  [:db/retractEntity 4]])
+        names (vev.q-collection report.db-after
+                [:find [?name ...]
+                 :where
+                 [4 :item/name ?name]])]
+    (t.is report.ok)
+    (t.is (= (count names) 0))))
+
+(t.deftest retract-attribute-wins-after-same-transaction-retract-and-readd
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        _ (vev.transact (addr conn) [[:db/add 4 :item/name "grace"]])
+        report (vev.transact
+                 (addr conn)
+                 [[:db/retract 4 :item/name "grace"]
+                  [:db/add 4 :item/name "grace"]
+                  [:db.fn/retractAttribute 4 :item/name]])
+        names (vev.q-collection report.db-after
+                [:find [?name ...]
+                 :where
+                 [4 :item/name ?name]])]
+    (t.is report.ok)
+    (t.is (= (count names) 0))))
 
 (t.deftest transact-data-supports-db-fn-retract-entity
   (defer (free_all context.allocator))
@@ -14586,6 +14651,33 @@
       (t.is (= pulled.attrs[0].attrs[0].v.text "Grace"))
       (t.is (= (count result.rows) 1))
       (t.is (= result.rows[0].pulls[0].attrs[0].attrs[0].v.text "Grace"))))
+
+(t.deftest resident-source-query-pull-stops-self-reference-and-owns-result
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        _ (vev.transact
+            (addr conn)
+            [[:db/add 100 :db/ident :pull/name]
+             [:db/add 100 :db/valueType :db.type/string]
+             [:db/add 101 :db/ident :pull/friend]
+             [:db/add 101 :db/valueType :db.type/ref]
+             [:db/add 1 :pull/name "node-1"]
+             [:db/add 1 :pull/friend (vev.value-entity 1)]])
+        db-alias conn.db
+        source (vev.resident-db-read-source (addr db-alias))
+        prepared (vev.prepare-query-text
+                   "[:find ?e (pull ?e [:pull/name {:pull/friend [:pull/name]}]) :where [?e :pull/name ?name]]")
+        result (vev.q-result-prepared-db-read-source source prepared)]
+    (defer (vev.delete-prepared-query-shallow prepared))
+    (defer (vev.delete-query-result result))
+    (t.is result.result.ok)
+    (t.is (= (count result.result.rows) 1))
+    (t.is (= (count result.result.rows[0].pulls) 1))
+    (let [friend result.result.rows[0].pulls[0].attrs[1]]
+      (t.is (= friend.a ":pull/friend"))
+      (t.is (= (count friend.attrs) 1))
+      (t.is (= friend.attrs[0].a ":db/id"))
+      (t.is (= friend.attrs[0].v.entity 1)))))
 
 (t.deftest pull-supports-multiple-nested-map-entries
   (defer (free_all context.allocator))

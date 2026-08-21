@@ -38,6 +38,54 @@
     (vev.delete-live-tx-report-shallow seed)
     (return true "")))
 
+(t.deftest sqlite-source-public-vaet-orders-later-reference-by-entity
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.source-public-vaet-order.sqlite"]
+    (remove-storage-with-sqlite-files path)
+    (defer (remove-storage-with-sqlite-files path))
+    (let [[store opened-ok opened-error] (vev.open-store path)
+          schema (vev.transact-store-report-text
+                   (addr store)
+                   "[{:db/id 100 :db/ident :item/score :db/valueType :db.type/long :db/cardinality :db.cardinality/one :db/index true}
+                     {:db/id 101 :db/ident :item/tag :db/valueType :db.type/long :db/cardinality :db.cardinality/many :db/index true}
+                     {:db/id 102 :db/ident :item/link :db/valueType :db.type/ref :db/cardinality :db.cardinality/many}]")
+          seed (vev.transact-store-report-text
+                 (addr store)
+                 "[[:db/add 1 :item/score 0] [:db/add 1 :item/link 2]
+                    [:db/add 2 :item/score 0]
+                    [:db/add 3 :item/score 0] [:db/add 3 :item/link 2] [:db/add 3 :item/link 4]
+                    [:db/add 4 :item/score 6] [:db/add 4 :item/link 1] [:db/add 4 :item/link 4]]")
+          later (vev.transact-store-report-text
+                  (addr store) "[[:db/add 1 :item/link 1]]")
+          [snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))
+          args ([1]vev.Index-Arg [(vev.Index-Arg {value: (vev.value-int 1)})])
+          [datoms datoms-ok datoms-error]
+            (vev.store-db-index-datoms (addr snapshot) 0 ":vaet" (slice args 0))
+          bound (vev.Index-Arg {value: (vev.value-int 0)})
+          [range range-ok range-error]
+            (vev.store-db-index-range-datoms (addr snapshot) ":item/score" bound true bound true)]
+      (t.is opened-ok opened-error)
+      (t.is schema.ok schema.error)
+      (t.is seed.ok seed.error)
+      (t.is later.ok later.error)
+      (t.is snapshot-ok snapshot-error)
+      (t.is datoms-ok datoms-error)
+      (t.is (= (count datoms) 2))
+      (t.is (= datoms[0].e 1))
+      (t.is (= datoms[1].e 4))
+      (t.is range-ok range-error)
+      (t.is (= (count range) 3))
+      (t.is (= range[0].e 1))
+      (t.is (= range[1].e 2))
+      (t.is (= range[2].e 3))
+      (vev.delete-owned-datoms datoms)
+      (vev.delete-owned-datoms range)
+      (vev.close-store-db snapshot)
+      (vev.delete-store-tx-report schema)
+      (vev.delete-store-tx-report seed)
+      (vev.delete-store-tx-report later)
+      (vev.close-store store))))
+
 (t.deftest sqlite-source-store-initial-schema-tempid-maps
   (defer (free_all context.allocator))
   (remove-storage-with-sqlite-files "tmp.vev.initial-schema-tempid-maps.sqlite")

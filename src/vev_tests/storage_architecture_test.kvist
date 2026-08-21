@@ -2035,7 +2035,7 @@
         [store opened-ok opened-error] (vev.open-store path)
         seed (vev.transact-store-report-text
                (addr store)
-               "[{:db/id 100 :db/ident :user/email :db/unique :db.unique/identity} {:db/id 101 :db/ident :user/friend :db/valueType :db.type/ref :db/cardinality :db.cardinality/many} {:db/id 1 :user/name \"Ada\" :user/email \"ada@example.com\" :user/friend [2 3]} {:db/id 2 :user/name \"Grace\" :user/email \"grace@example.com\"} {:db/id 3 :user/name \"Barbara\" :user/email \"barbara@example.com\"}]")]
+               "[{:db/id 100 :db/ident :user/email :db/unique :db.unique/identity} {:db/id 101 :db/ident :user/friend :db/valueType :db.type/ref :db/cardinality :db.cardinality/many} {:db/id 1 :user/name \"Ada\" :user/email \"ada@example.com\" :user/rank 2 :user/friend [2 3]} {:db/id 2 :user/name \"Grace\" :user/email \"grace@example.com\"} {:db/id 3 :user/name \"Barbara\" :user/email \"barbara@example.com\"}]")]
     (defer (remove-sqlite-files path))
     (t.is opened-ok)
     (t.is (= opened-error ""))
@@ -2086,6 +2086,10 @@
         (t.is touched-name-ok)
         (t.is (= touched-name.kind .String))
         (t.is (= touched-name.text "Ada")))
+      (let [[touched-friends touched-friends-ok] (vev.map-get-value touched (vev.value-keyword ":user/friend"))]
+        (t.is touched-friends-ok)
+        (t.is (= touched-friends.kind .Vector))
+        (t.is (= (count touched-friends.items) 2)))
       (t.is (not (vev.store-resident-db-available? (addr store))))
       (vev.delete-owned-value name-value)
       (vev.delete-owned-value friend-name)
