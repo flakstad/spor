@@ -5,11 +5,14 @@ package main
 
 import "core:fmt"
 import "core:strings"
+import "core:sync"
+import "core:thread"
 
 import pbt "pbt:pbt"
 import vev "../../clients/odin/vev"
 
 BACKUP_MODEL_TAGS := [?]string{"core", "durable", "backup", "snapshot", "transaction", "log", "atomic", "reopen", "model"}
+CONCURRENT_BACKUP_TAGS := [?]string{"core", "durable", "backup", "snapshot", "transaction", "multi-connection", "concurrent", "race", "atomic", "log", "reopen", "linearizable", "model"}
 BACKUP_MAX_ENTITIES :: 6
 BACKUP_VALUE_COUNT :: 8
 BACKUP_SCHEMA :: `[
@@ -24,6 +27,173 @@ Backup_Case :: struct {
 	snapshot_entity: int,
 	snapshot_score: int,
 	reverse_seed:   bool,
+}
+
+Concurrent_Backup_Worker :: struct {
+	connection: ^vev.Durable_Connection,
+	barrier:    ^sync.Barrier,
+	destination: string,
+	basis:      u64,
+	ok:         bool,
+	error:      string,
+}
+
+Concurrent_Backup_Write_Worker :: struct {
+	connection: ^vev.Durable_Connection,
+	barrier:    ^sync.Barrier,
+	tx:         string,
+	committed:  bool,
+	report:     string,
+}
+
+concurrent_backup_property :: proc(t: ^pbt.T) -> pbt.Result {
+	writer_resident := pbt.draw(t, pbt.boolean())
+	backup_started_first := pbt.draw(t, pbt.boolean())
+	new_score := pbt.draw(t, pbt.int_range(2, BACKUP_VALUE_COUNT))
+	pbt.cover(t, writer_resident, 35, "concurrent-backup-resident-writer")
+	pbt.cover(t, backup_started_first, 35, "concurrent-backup-started-first")
+
+	source_path, source_path_ok := transaction_model_temp_path(t)
+	if !source_path_ok {return pbt.error("could not allocate concurrent-backup source path")}
+	defer transaction_model_remove_store(source_path)
+	backup_path, backup_path_ok := transaction_model_temp_path(t)
+	if !backup_path_ok {return pbt.error("could not allocate concurrent-backup destination path")}
+	defer transaction_model_remove_store(backup_path)
+	seed, seed_ok := vev.connect(&library, source_path)
+	if !seed_ok {return pbt.error("could not create concurrent-backup source")}
+	setup := [?]string{BACKUP_SCHEMA, `[{:db/id 1 :backup/score 1}]`}
+	for tx in setup {
+		report, ok := vev.transact(&seed, tx, t.value_allocator)
+		if !ok || !strings.contains(report, ":ok true") {
+			vev.close(&seed)
+			return pbt.error(fmt.tprintf("could not initialize concurrent backup: %s", report))
+		}
+	}
+	vev.close(&seed)
+
+	backup_connection, backup_connection_ok := vev.connect(&library, source_path)
+	if !backup_connection_ok {return pbt.error("could not open concurrent-backup reader")}
+	defer vev.close(&backup_connection)
+	writer, writer_ok := vev.connect(&library, source_path)
+	if !writer_ok {return pbt.error("could not open concurrent-backup writer")}
+	defer vev.close(&writer)
+	if writer_resident && !vev.ensure_resident(&writer) {
+		return pbt.error("could not make concurrent-backup writer resident")
+	}
+	checkpoint, checkpoint_ok := vev.db(&backup_connection)
+	if !checkpoint_ok {return pbt.error("could not retain pre-backup checkpoint")}
+	defer vev.close(&checkpoint)
+
+	barrier: sync.Barrier
+	sync.barrier_init(&barrier, 2)
+	write_tx := fmt.tprintf(`[[:db/add 1 :backup/score %d]]`, new_score)
+	backup_worker := Concurrent_Backup_Worker{
+		connection = &backup_connection,
+		barrier = &barrier,
+		destination = backup_path,
+	}
+	write_worker := Concurrent_Backup_Write_Worker{
+		connection = &writer,
+		barrier = &barrier,
+		tx = write_tx,
+	}
+	backup_thread: ^thread.Thread
+	write_thread: ^thread.Thread
+	if backup_started_first {
+		backup_thread = thread.create_and_start_with_poly_data(&backup_worker, concurrent_backup_worker_run)
+		if backup_thread == nil {return pbt.error("could not start concurrent backup worker")}
+		write_thread = thread.create_and_start_with_poly_data(&write_worker, concurrent_backup_write_worker_run)
+	} else {
+		write_thread = thread.create_and_start_with_poly_data(&write_worker, concurrent_backup_write_worker_run)
+		if write_thread == nil {return pbt.error("could not start concurrent backup writer")}
+		backup_thread = thread.create_and_start_with_poly_data(&backup_worker, concurrent_backup_worker_run)
+	}
+	if backup_thread == nil || write_thread == nil {return pbt.error("could not start concurrent backup race")}
+	thread.join(backup_thread)
+	thread.join(write_thread)
+	thread.destroy(backup_thread)
+	thread.destroy(write_thread)
+	defer delete(backup_worker.error)
+	defer delete(write_worker.report)
+	if !backup_worker.ok || backup_worker.error != "" || !write_worker.committed {
+		return pbt.fail(fmt.tprintf(
+			"concurrent backup operation failed: backup=%v/%s writer=%v/%s",
+			backup_worker.ok,
+			backup_worker.error,
+			write_worker.committed,
+			write_worker.report,
+		))
+	}
+	if backup_worker.basis != 2 && backup_worker.basis != 3 {
+		return pbt.fail(fmt.tprintf("concurrent backup returned impossible basis: %d", backup_worker.basis))
+	}
+	pbt.cover(t, backup_worker.basis == 2, 0, "concurrent-backup-before-write")
+	pbt.cover(t, backup_worker.basis == 3, 0, "concurrent-backup-after-write")
+
+	if result := concurrent_backup_score_check(t, &checkpoint, 2, 1, "retained pre-backup checkpoint"); result.status != .Pass {
+		return result
+	}
+	backup_store, backup_store_ok := vev.connect(&library, backup_path)
+	if !backup_store_ok {return pbt.error("could not open concurrent backup")}
+	defer vev.close(&backup_store)
+	backup_db, backup_db_ok := vev.db(&backup_store)
+	if !backup_db_ok {return pbt.error("could not retain concurrent backup database")}
+	defer vev.close(&backup_db)
+	expected_backup_score := 1
+	if backup_worker.basis == 3 {expected_backup_score = new_score}
+	if result := concurrent_backup_score_check(t, &backup_db, backup_worker.basis, expected_backup_score, "concurrent backup"); result.status != .Pass {
+		return result
+	}
+
+	vev.close(&writer)
+	writer, writer_ok = vev.connect(&library, source_path)
+	if !writer_ok {return pbt.error("could not reopen concurrent-backup source")}
+	source_db, source_db_ok := vev.db(&writer)
+	if !source_db_ok {return pbt.error("could not retain reopened concurrent-backup source")}
+	defer vev.close(&source_db)
+	if result := concurrent_backup_score_check(t, &source_db, 3, new_score, "reopened concurrent-backup source"); result.status != .Pass {
+		return result
+	}
+	source_ids, source_ids_ok := vev.connection_tx_ids(&writer, t.value_allocator)
+	backup_ids, backup_ids_ok := vev.connection_tx_ids(&backup_store, t.value_allocator)
+	if !source_ids_ok || !backup_ids_ok || len(source_ids) != 3 || len(backup_ids) != int(backup_worker.basis) ||
+	   !backup_tx_ids_prefix(backup_ids[:], source_ids[:]) {
+		return pbt.fail(fmt.tprintf("concurrent backup transaction log was not an exact prefix: basis=%d ids=%v/%v", backup_worker.basis, backup_ids, source_ids))
+	}
+	return concurrent_backup_score_check(t, &checkpoint, 2, 1, "checkpoint after concurrent backup reopen")
+}
+
+concurrent_backup_worker_run :: proc(worker: ^Concurrent_Backup_Worker) {
+	sync.barrier_wait(worker.barrier)
+	basis, ok, error := vev.backup(worker.connection, worker.destination)
+	worker.basis = basis
+	worker.ok = ok
+	worker.error = strings.clone(error)
+	delete(error)
+}
+
+concurrent_backup_write_worker_run :: proc(worker: ^Concurrent_Backup_Write_Worker) {
+	sync.barrier_wait(worker.barrier)
+	report, committed := vev.transact(worker.connection, worker.tx)
+	worker.committed = committed
+	worker.report = strings.clone(report)
+	delete(report)
+}
+
+concurrent_backup_score_check :: proc(t: ^pbt.T, database: ^vev.DB, expected_basis: u64, expected_score: int, label: string) -> pbt.Result {
+	basis, basis_ok := vev.basis_t(database)
+	if !basis_ok || basis != expected_basis {
+		return pbt.fail(fmt.tprintf("%s basis: expected=%d actual=%d", label, expected_basis, basis))
+	}
+	result, query_ok := vev.query(database, "[:find ?score . :where [1 :backup/score ?score]]")
+	if !query_ok {return pbt.error(fmt.tprintf("%s score query failed", label))}
+	value, value_ok := vev.value(&result)
+	actual, actual_ok := vev.as_int(value)
+	vev.close(&result)
+	if !value_ok || !actual_ok || actual != i64(expected_score) {
+		return pbt.fail(fmt.tprintf("%s score: expected=%d actual=%d", label, expected_score, actual))
+	}
+	return pbt.pass()
 }
 
 backup_model_property :: proc(t: ^pbt.T) -> pbt.Result {

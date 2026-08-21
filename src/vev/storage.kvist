@@ -703,7 +703,7 @@
           (arr.push! out entry)))
       (return out true ""))))
 
-(defn sqlite-conn-compact-indexes! [store: ^SQLite-Conn] -> [compacted: bool, ok: bool, error: string]
+(defn- sqlite-conn-compact-indexes-open-tx! [store: ^SQLite-Conn] -> [compacted: bool, ok: bool, error: string]
   (when store^.source-only
     (return false false "SQLite source connection is read-only; open a writable SQLite connection to compact indexes"))
   (let [[basis basis-ok basis-error] (vev.sqlite-latest-index-root-basis-raw store^.handle)]
@@ -733,6 +733,23 @@
               (defer (sqlite-index-write-stmts-close stmts))
               (let [[root-ok root-error] (persist-index-root-sqlite-handle-from-indexes-with-stmts store^.handle (addr stmts) basis (slice eavt 0) (slice aevt 0) (slice avet 0) (slice vaet 0))]
                 (return root-ok root-ok root-error)))))))))
+
+(defn sqlite-conn-compact-indexes! [store: ^SQLite-Conn] -> [compacted: bool, ok: bool, error: string]
+  (when store^.source-only
+    (return false false "SQLite source connection is read-only; open a writable SQLite connection to compact indexes"))
+  (let [[begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
+    (when (not begin-ok)
+      (return false false begin-error)))
+  (let [[did-compact compact-ok compact-error] (sqlite-conn-compact-indexes-open-tx! store)]
+    (when (not compact-ok)
+      (vev.sqlite-rollback-raw store^.handle)
+      (return did-compact false compact-error))
+    (let [[commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
+      (when (not commit-ok)
+        (vev.sqlite-rollback-raw store^.handle)
+        (return false false commit-error))
+      (sqlite-conn-invalidate-current-root-cache! store)
+      (return did-compact true ""))))
 
 (defn sqlite-maintain-queued-index-root-step! [handle: rawptr] -> [handled: bool, compacted: bool, ok: bool, error: string]
   (let [[task-id task-index task-basis task-root has-task task-ok task-error] (vev.sqlite-next-index-maintenance-raw handle)]
@@ -799,7 +816,7 @@
             (return avet-compacted avet-ok avet-error))
           (sqlite-maintain-latest-index-root-step! handle basis ":vaet")))))
 
-(defn sqlite-conn-maintain-indexes-step! [store: ^SQLite-Conn] -> [compacted: bool, ok: bool, error: string]
+(defn- sqlite-conn-maintain-indexes-step-open-tx! [store: ^SQLite-Conn] -> [compacted: bool, ok: bool, error: string]
   (when store^.source-only
     (return false false "SQLite source connection is read-only; open a writable SQLite connection to maintain indexes"))
   (let [[handled queued-compacted queued-ok queued-error] (sqlite-maintain-queued-index-root-step! store^.handle)]
@@ -812,7 +829,24 @@
         (return false false basis-error)))
     (sqlite-maintain-latest-index-roots-scan-step! store^.handle basis)))
 
-(defn sqlite-conn-maintain-indexes! [store: ^SQLite-Conn, max-steps: int] -> [steps: int, compacted: bool, ok: bool, error: string]
+(defn sqlite-conn-maintain-indexes-step! [store: ^SQLite-Conn] -> [compacted: bool, ok: bool, error: string]
+  (when store^.source-only
+    (return false false "SQLite source connection is read-only; open a writable SQLite connection to maintain indexes"))
+  (let [[begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
+    (when (not begin-ok)
+      (return false false begin-error)))
+  (let [[did-compact maintenance-ok maintenance-error] (sqlite-conn-maintain-indexes-step-open-tx! store)]
+    (when (not maintenance-ok)
+      (vev.sqlite-rollback-raw store^.handle)
+      (return did-compact false maintenance-error))
+    (let [[commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
+      (when (not commit-ok)
+        (vev.sqlite-rollback-raw store^.handle)
+        (return false false commit-error))
+      (sqlite-conn-invalidate-current-root-cache! store)
+      (return did-compact true ""))))
+
+(defn- sqlite-conn-maintain-indexes-open-tx! [store: ^SQLite-Conn, max-steps: int] -> [steps: int, compacted: bool, ok: bool, error: string]
   (when store^.source-only
     (return 0 false false "SQLite source connection is read-only; open a writable SQLite connection to maintain indexes"))
   (let [limit (max 1 max-steps)
@@ -840,7 +874,24 @@
           (set! any-compacted true))))
     (return step-count any-compacted true "")))
 
-(defn sqlite-conn-maintain-indexes-foreground! [store: ^SQLite-Conn, max-steps: int, row-budget: int] -> [steps: int, compacted: bool, ok: bool, error: string]
+(defn sqlite-conn-maintain-indexes! [store: ^SQLite-Conn, max-steps: int] -> [steps: int, compacted: bool, ok: bool, error: string]
+  (when store^.source-only
+    (return 0 false false "SQLite source connection is read-only; open a writable SQLite connection to maintain indexes"))
+  (let [[begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
+    (when (not begin-ok)
+      (return 0 false false begin-error)))
+  (let [[completed-steps did-compact maintenance-ok maintenance-error] (sqlite-conn-maintain-indexes-open-tx! store max-steps)]
+    (when (not maintenance-ok)
+      (vev.sqlite-rollback-raw store^.handle)
+      (return completed-steps did-compact false maintenance-error))
+    (let [[commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
+      (when (not commit-ok)
+        (vev.sqlite-rollback-raw store^.handle)
+        (return completed-steps false false commit-error))
+      (sqlite-conn-invalidate-current-root-cache! store)
+      (return completed-steps did-compact true ""))))
+
+(defn- sqlite-conn-maintain-indexes-foreground-open-tx! [store: ^SQLite-Conn, max-steps: int, row-budget: int] -> [steps: int, compacted: bool, ok: bool, error: string]
   (when store^.source-only
     (return 0 false false "SQLite source connection is read-only; open a writable SQLite connection to maintain indexes"))
   (let [limit (max 1 max-steps)
@@ -901,6 +952,23 @@
               (continue))))
         (return step-count any-compacted true "")))
     (return step-count any-compacted true "")))
+
+(defn sqlite-conn-maintain-indexes-foreground! [store: ^SQLite-Conn, max-steps: int, row-budget: int] -> [steps: int, compacted: bool, ok: bool, error: string]
+  (when store^.source-only
+    (return 0 false false "SQLite source connection is read-only; open a writable SQLite connection to maintain indexes"))
+  (let [[begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
+    (when (not begin-ok)
+      (return 0 false false begin-error)))
+  (let [[completed-steps did-compact maintenance-ok maintenance-error] (sqlite-conn-maintain-indexes-foreground-open-tx! store max-steps row-budget)]
+    (when (not maintenance-ok)
+      (vev.sqlite-rollback-raw store^.handle)
+      (return completed-steps did-compact false maintenance-error))
+    (let [[commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
+      (when (not commit-ok)
+        (vev.sqlite-rollback-raw store^.handle)
+        (return completed-steps false false commit-error))
+      (sqlite-conn-invalidate-current-root-cache! store)
+      (return completed-steps did-compact true ""))))
 
 (defn sqlite-conn-maintain-indexes-to-target! [store: ^SQLite-Conn, max-steps: int, target-pending: u64] -> [steps: int, compacted: bool, pending: u64, ok: bool, error: string]
   (when store^.source-only

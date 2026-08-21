@@ -243,6 +243,12 @@ main :: proc() {
 			tags = BACKUP_MODEL_TAGS[:],
 		},
 		{
+			name = "concurrent backups capture an exact commit prefix",
+			property = concurrent_backup_property,
+			description = "generated backups racing source-backed and resident commits contain exactly the complete history before or after the commit, with matching basis, values, transaction IDs, immutable checkpoints, and reopen state",
+			tags = CONCURRENT_BACKUP_TAGS[:],
+		},
+		{
 			name = "lookup refs agree across backends",
 			property = transaction_lookup_property,
 			description = "generated lookup-ref updates, retractions, missing refs, and identity upserts preserve state, coordinates, and exact logs",
@@ -351,6 +357,36 @@ main :: proc() {
 			tags = CONCURRENT_CONNECTION_TAGS[:],
 		},
 		{
+			name = "concurrent transaction reports form one serial history",
+			property = concurrent_report_property,
+			description = "generated rich reports from synchronized source-backed and resident writers expose immutable before/after snapshots that compose into exactly one committed order",
+			tags = CONCURRENT_REPORT_TAGS[:],
+		},
+		{
+			name = "concurrent snapshots observe one complete commit generation",
+			property = concurrent_snapshot_property,
+			description = "generated snapshot-open races against source-backed and resident commits observe exactly the complete database before or after the commit and remain immutable through reopen",
+			tags = CONCURRENT_SNAPSHOT_TAGS[:],
+		},
+		{
+			name = "concurrent snapshots survive index-root republication",
+			property = concurrent_snapshot_maintenance_property,
+			description = "generated snapshot-open races against full compaction preserve a coherent root row, complete index contents, the logical basis, immutability, and reopen state",
+			tags = CONCURRENT_SNAPSHOT_MAINTENANCE_TAGS[:],
+		},
+		{
+			name = "concurrent conflicting writers are linearizable",
+			property = concurrent_conflict_property,
+			description = "generated synchronized CAS, uniqueness, and same-entity replacement races admit exactly a valid sequential history with atomic losers, immutable checkpoints, exact coordinates, logs, and reopen state",
+			tags = CONCURRENT_CONFLICT_TAGS[:],
+		},
+		{
+			name = "concurrent index maintenance preserves writer history",
+			property = concurrent_maintenance_property,
+			description = "generated compaction and bounded-maintenance races against source-backed and resident writers preserve every commit, snapshots, exact coordinates, logs, and reopen state",
+			tags = CONCURRENT_MAINTENANCE_TAGS[:],
+		},
+		{
 			name = "index pull agrees with paged walk model",
 			property = index_pull_property,
 			description = "generated AVET and AEVT walks preserve forward and reverse ordering, duplicate targets, offset, limit, mutations, backend parity, and reopen",
@@ -369,10 +405,22 @@ main :: proc() {
 			tags = SCHEMA_UNIQUE_TAGS[:],
 		},
 		{
+			name = "concurrent unique schema evolution is linearizable",
+			property = concurrent_schema_property,
+			description = "generated uniqueness activation races against conflicting data writes across source-backed and resident connections commit exactly one side and atomically roll back the loser",
+			tags = CONCURRENT_SCHEMA_TAGS[:],
+		},
+		{
 			name = "cardinality schema evolution follows statechart",
 			property = schema_cardinality_property,
 			description = "generated one/many schema transitions and writes preserve modeled values, rollback, backend parity, transaction coordinates, and reopen state",
 			tags = SCHEMA_CARDINALITY_TAGS[:],
+		},
+		{
+			name = "concurrent cardinality schema evolution is linearizable",
+			property = concurrent_cardinality_schema_property,
+			description = "generated cardinality many-to-one races against value additions across source-backed and resident connections preserve both legal commits and exactly one sequentially valid value set",
+			tags = CONCURRENT_CARDINALITY_SCHEMA_TAGS[:],
 		},
 		{
 			name = "value type schema evolution follows statechart",
@@ -385,6 +433,12 @@ main :: proc() {
 			property = schema_component_property,
 			description = "generated component enable/disable transitions preserve modeled cascade behavior, schema validation, rollback, backend parity, transaction coordinates, and reopen state",
 			tags = SCHEMA_COMPONENT_TAGS[:],
+		},
+		{
+			name = "concurrent component schema evolution is linearizable",
+			property = concurrent_component_schema_property,
+			description = "generated component-enable races against parent retraction across source-backed and resident connections preserve both commits and cascade the child exactly when schema commits first",
+			tags = CONCURRENT_COMPONENT_SCHEMA_TAGS[:],
 		},
 		{
 			name = "index schema evolution follows statechart",
