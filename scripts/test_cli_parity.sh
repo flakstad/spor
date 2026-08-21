@@ -13,7 +13,7 @@ if [[ ! -x "$CLI" ]]; then
   "$ROOT/scripts/build_cli.sh" >/dev/null
 fi
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vevdb-cli-parity.XXXXXX")"
+TMP_DIR="$(mktemp -d "$ROOT/build/vevdb-cli-parity.XXXXXX")"
 DB="$TMP_DIR/example.db"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -195,12 +195,8 @@ relation_result="$($CLI exec --memory \
 case "$relation_result" in *'"Ivan"'*) ;; *) exit 1 ;; esac
 case "$relation_result" in *'"Petr"'*) exit 1 ;; esac
 
-ALT_DB_EDN="alternate.db"
-run_alternate_exec() {
-  (cd "$TMP_DIR" && "$CLI" exec --memory "$1")
-}
-
-alternate_result="$(run_alternate_exec \
+ALT_DB_EDN="${TMP_DIR#"$ROOT"/}/alternate.db"
+alternate_result="$($CLI exec --memory \
   "{:steps [{:id :tx :op :transact :store \"$ALT_DB_EDN\"
              :tx [{:db/id 1 :source/name \"alternate\"}]}
             {:id :q :op :query :db [:ref :tx :db-after]
@@ -208,12 +204,12 @@ alternate_result="$(run_alternate_exec \
     :return [:ref :q]}")"
 test "$alternate_result" = '"alternate"'
 
-alternate_db="$(run_alternate_exec \
+alternate_db="$($CLI exec --memory \
   "{:steps [{:id :db :op :db :store \"$ALT_DB_EDN\"}]
     :return [:ref :db]}")"
 case "$alternate_db" in *':basis-t 1'*) ;; *) exit 1 ;; esac
 
-alternate_reopened="$(run_alternate_exec \
+alternate_reopened="$($CLI exec --memory \
   "{:steps [{:id :tx :op :transact :store \"$ALT_DB_EDN\"
              :tx [{:db/id 2 :source/name \"reopened\"}]}
             {:id :db :op :db :store \"$ALT_DB_EDN\"}
@@ -222,7 +218,7 @@ alternate_reopened="$(run_alternate_exec \
     :return {:answer [:ref :q] :tx-db [:ref :tx :db-after]}}")"
 case "$alternate_reopened" in *':answer "reopened"'*':basis-t 2'*) ;; *) exit 1 ;; esac
 
-alternate_maintenance="$(run_alternate_exec \
+alternate_maintenance="$($CLI exec --memory \
   "{:steps [{:id :info :op :index-info :store \"$ALT_DB_EDN\" :index :eavt}
             {:id :maintain :op :maintain-indexes :store \"$ALT_DB_EDN\"
              :max-steps 0}]
