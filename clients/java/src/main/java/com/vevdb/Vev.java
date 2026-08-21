@@ -35,7 +35,7 @@ import java.util.concurrent.CompletableFuture;
 public final class Vev implements AutoCloseable {
     private static final Linker LINKER = Linker.nativeLinker();
     private static final Cleaner CLEANER = Cleaner.create();
-    public static final int ABI_VERSION = 1;
+    public static final int ABI_VERSION = 2;
     public static final int COLUMN_ENTITY = 1;
     public static final int COLUMN_STRING = 2;
     public static final int COLUMN_INT = 3;

@@ -13,6 +13,7 @@
    {:name try-connect :disposition :implicit}
    {:name connect :disposition :implicit}
    {:name close-conn :disposition :implicit}
+   {:name backup :disposition :command}
    {:name compact-indexes! :disposition :command :cli compact-indexes}
    {:name ensure-resident! :disposition :command :cli ensure-resident}
    {:name maintain-indexes! :disposition :command :cli maintain-indexes}
