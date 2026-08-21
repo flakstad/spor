@@ -117,10 +117,53 @@
                     (arr.push! out (datom-owned datom))))))
             (return out true ""))))))))
 
+(defn store-db-source-public-avet-attr? [source: DB-Read-Source, attr: string] -> [visible: bool, ok: bool, error: string]
+  (let [[idents idents-ok idents-error]
+          (db-read-source-datoms-by-attr source ":db/ident")]
+    (when (not idents-ok)
+      (return false false idents-error))
+    (let [has-schema (> (count idents) 0)]
+      (delete-owned-datoms idents)
+      (when (not has-schema)
+        (return true true ""))))
+  (let [[indexed indexed-ok indexed-error]
+          (db-read-source-schema-bool? source attr ":db/index")]
+    (when (not indexed-ok)
+      (return false false indexed-error))
+    (when indexed
+      (return true true "")))
+  (let [[unique unique-ok unique-error]
+          (db-read-source-schema-unique? source attr)]
+    (when (not unique-ok)
+      (return false false unique-error))
+    (when unique
+      (return true true "")))
+  (let [[ref ref-ok ref-error]
+          (db-read-source-schema-ref? source attr)]
+    (when (not ref-ok)
+      (return false false ref-error))
+    (when ref
+      (return true true "")))
+  (let [[tuple-attrs tuple-ok tuple-error]
+          (db-read-source-schema-tuple-attrs source attr)]
+    (when (not tuple-ok)
+      (return false false tuple-error))
+    (let [tuple-visible (> (count tuple-attrs) 0)]
+      (for [tuple-attr tuple-attrs]
+        (delete tuple-attr))
+      (delete tuple-attrs)
+      (return tuple-visible true ""))))
+
 (defn store-db-index-range-datoms [snapshot: ^Store-DB, attr: string, start: Index-Arg, has-start: bool, end: Index-Arg, has-end: bool] -> [datoms: [dynamic]Datom, ok: bool, error: string]
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
     (when (not source-ok)
       (return (make [dynamic]Datom) false source-error))
+    (let [[visible visible-ok visible-error]
+            (store-db-source-public-avet-attr? source attr)]
+      (when (not visible-ok)
+        (return (make [dynamic]Datom) false visible-error))
+      (when (not visible)
+        (return (make [dynamic]Datom) true "")))
     (let [args (make [dynamic]Index-Arg)]
       (defer (delete args))
       (when has-start

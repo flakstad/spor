@@ -74,6 +74,20 @@ jobs:
           ref: ${{ steps.pbt-revision.outputs.revision }}
           path: pbt
 
+      - name: Read pinned statecharts revision
+        if: matrix.platform == 'linux-x86_64'
+        id: statecharts-revision
+        working-directory: vev
+        run: echo "revision=$(cat STATECHARTS_REVISION)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out pinned statecharts
+        if: matrix.platform == 'linux-x86_64'
+        uses: actions/checkout@v4
+        with:
+          repository: flakstad/statecharts
+          ref: ${{ steps.statecharts-revision.outputs.revision }}
+          path: statecharts
+
       - name: Install Odin
         uses: laytan/setup-odin@v2.12.2
         with:
@@ -161,6 +175,7 @@ jobs:
         working-directory: vev
         env:
           VEV_PBT_ROOT: ${{ github.workspace }}/pbt
+          VEV_STATECHARTS_ROOT: ${{ github.workspace }}/statecharts
           VEV_SKIP_NATIVE_BUILD: "1"
         run: scripts/test_pbt.sh --text
 

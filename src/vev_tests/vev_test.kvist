@@ -9692,6 +9692,37 @@
     (t.is (not report.ok))
     (t.is (= report.error "invalid component schema"))))
 
+(t.deftest component-schema-stays-ref-when-value-type-is-replaced
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        schema (vev.transact
+                 (addr conn)
+                 [[:db/add 100 :db/ident :profile]
+                  [:db/add 100 :db/valueType :db.type/ref]
+                  [:db/add 100 :db/isComponent true]
+                  [:db/add 101 :db/ident :marker]
+                  [:db/add 101 :db/valueType :db.type/string]])
+        before-tx conn.next-tx
+        report (vev.transact
+                 (addr conn)
+                 [[:db/add 1 :marker "must-rollback"]
+                  [:db/add 100 :db/valueType :db.type/string]])
+        marker (vev.q report.db-after
+                 [:find ?value
+                  :where
+                  [1 :marker ?value]])
+        value-type (vev.q report.db-after
+                     [:find ?kind
+                      :where
+                      [100 :db/valueType ?kind]])]
+    (t.is schema.ok schema.error)
+    (t.is (not report.ok))
+    (t.is (= report.error "invalid component schema"))
+    (t.is (= conn.next-tx before-tx))
+    (t.is (= (count marker.rows) 0))
+    (t.is (= (count value-type.rows) 1))
+    (t.is (= value-type.rows[0].values[0].text ":db.type/ref"))))
+
 (t.deftest datascript-schema-booleans-require-bool-subset
   (defer (free_all context.allocator))
   (let [component-conn (vev.create-conn)
@@ -14623,6 +14654,34 @@
     (t.is report.ok report.error)
     (t.is (= (count report.tx-data) 1))
     (t.is (= report.tx-data[0].a ":db/txInstant"))
+    (t.is (= (count result.rows) 0))))
+
+(t.deftest same-transaction-replacement-then-retract-removes-prior-cardinality-one-value
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        schema (vev.transact
+                 (addr conn)
+                 [{:db/id 100
+                   :db/ident :user/name
+                   :db/valueType :db.type/string
+                   :db/cardinality :db.cardinality/one}])
+        seed (vev.transact (addr conn) [[:db/add 1 :user/name "Grace"]])
+        report (vev.transact
+                 (addr conn)
+                 [[:db/add 1 :user/name "Ada"]
+                  [:db/retract 1 :user/name "Ada"]])
+        result (vev.q report.db-after
+                 [:find ?name
+                  :where [1 :user/name ?name]])]
+    (t.is schema.ok schema.error)
+    (t.is seed.ok seed.error)
+    (t.is report.ok report.error)
+    (t.is (= (count report.tx-data) 2))
+    (t.is (= report.tx-data[0].e 1))
+    (t.is (= report.tx-data[0].a ":user/name"))
+    (t.is (= report.tx-data[0].v.text "Grace"))
+    (t.is (not report.tx-data[0].added))
+    (t.is (= report.tx-data[1].a ":db/txInstant"))
     (t.is (= (count result.rows) 0))))
 
 (t.deftest same-transaction-cardinality-one-additions-report-only-final-value

@@ -242,6 +242,54 @@ main :: proc() {
 			description = "generated vector updates roll back on tuple intermediate conflicts while equivalent map updates commit atomically with exact state, logs, and reopen results",
 			tags = TUPLE_UPDATE_TAGS[:],
 		},
+		{
+			name = "component lifecycle follows statechart",
+			property = component_lifecycle_property,
+			description = "generated component lifecycle transitions preserve cascade semantics, exact logs, backend parity, and reopen state",
+			tags = COMPONENT_LIFECYCLE_TAGS[:],
+		},
+		{
+			name = "component trees cascade transitively",
+			property = component_tree_property,
+			description = "generated cardinality-many component trees retract exactly the selected subtree across resident, durable, logs, and reopen",
+			tags = COMPONENT_TREE_TAGS[:],
+		},
+		{
+			name = "datalog joins agree with relation model",
+			property = query_join_property,
+			description = "generated joins, predicates, clause permutations, and empty relations agree with an independent model across resident, durable, and reopen",
+			tags = QUERY_JOIN_TAGS[:],
+		},
+		{
+			name = "unique schema evolution follows statechart",
+			property = schema_unique_property,
+			description = "generated unique-schema transitions and data conflicts preserve atomic rollback, exact logs, backend parity, and reopen state",
+			tags = SCHEMA_UNIQUE_TAGS[:],
+		},
+		{
+			name = "cardinality schema evolution follows statechart",
+			property = schema_cardinality_property,
+			description = "generated one/many schema transitions and writes preserve modeled values, rollback, backend parity, transaction coordinates, and reopen state",
+			tags = SCHEMA_CARDINALITY_TAGS[:],
+		},
+		{
+			name = "value type schema evolution follows statechart",
+			property = schema_value_type_property,
+			description = "generated string/long schema transitions and typed writes preserve modeled values, rollback, backend parity, transaction coordinates, and reopen state",
+			tags = SCHEMA_VALUE_TYPE_TAGS[:],
+		},
+		{
+			name = "component schema evolution follows statechart",
+			property = schema_component_property,
+			description = "generated component enable/disable transitions preserve modeled cascade behavior, schema validation, rollback, backend parity, transaction coordinates, and reopen state",
+			tags = SCHEMA_COMPONENT_TAGS[:],
+		},
+		{
+			name = "index schema evolution follows statechart",
+			property = schema_index_property,
+			description = "generated index enable/disable transitions and writes preserve modeled AVET visibility, schema validation, rollback, backend parity, transaction coordinates, and reopen state",
+			tags = SCHEMA_INDEX_TAGS[:],
+		},
 	}
 
 	pbt.run_cli(properties[:], os.args[1:], {

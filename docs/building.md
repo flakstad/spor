@@ -86,9 +86,9 @@ Run the property-based checks:
 scripts/test_pbt.sh --text
 ```
 
-The script uses a sibling `../pbt` checkout by default. Set `VEV_PBT_ROOT` to
-another checkout when needed. CI checks out the exact revision recorded in
-`PBT_REVISION`.
+The script uses sibling `../pbt` and `../statecharts` checkouts by default. Set
+`VEV_PBT_ROOT` and `VEV_STATECHARTS_ROOT` to use other checkouts. CI checks out
+the exact revisions recorded in `PBT_REVISION` and `STATECHARTS_REVISION`.
 
 Run all package checks only when every client toolchain is installed:
 

@@ -24,6 +24,7 @@ Tuple_Update_Expected :: struct {
 	new_right:      string,
 	left_first:     bool,
 	map_left_first: bool,
+	schema_reverse: bool,
 }
 
 tuple_update_property :: proc(t: ^pbt.T) -> pbt.Result {
@@ -35,11 +36,14 @@ tuple_update_property :: proc(t: ^pbt.T) -> pbt.Result {
 		new_right = fmt.tprintf("%s-right-new", stem),
 		left_first = pbt.draw(t, pbt.boolean()),
 		map_left_first = pbt.draw(t, pbt.boolean()),
+		schema_reverse = pbt.draw(t, pbt.boolean()),
 	}
 	pbt.cover(t, expected.left_first, 35, "tuple-vector-left-first")
 	pbt.cover(t, !expected.left_first, 35, "tuple-vector-right-first")
 	pbt.cover(t, expected.map_left_first == expected.left_first, 35, "tuple-map-same-order")
 	pbt.cover(t, expected.map_left_first != expected.left_first, 35, "tuple-map-reversed-order")
+	pbt.cover(t, expected.schema_reverse, 35, "tuple-schema-reverse-order")
+	pbt.cover(t, !expected.schema_reverse, 35, "tuple-schema-forward-order")
 
 	resident, resident_ok := vev.create_conn(&library)
 	if !resident_ok {
@@ -70,6 +74,12 @@ tuple_update_property :: proc(t: ^pbt.T) -> pbt.Result {
 		return result
 	}
 	if result := tuple_update_backend_check(t, &durable, expected, vector_tx, map_tx, "durable", true); result.status != .Pass {
+		return result
+	}
+	if result := tuple_update_schema_rollback_checks(t, &resident, expected, "resident", false); result.status != .Pass {
+		return result
+	}
+	if result := tuple_update_schema_rollback_checks(t, &durable, expected, "durable", true); result.status != .Pass {
 		return result
 	}
 	count_before_reopen, count_ok := vev.connection_tx_count(&durable)
@@ -211,6 +221,92 @@ tuple_update_backend_check :: proc(
 		return result
 	}
 	return tuple_update_log_invariant(t, connection, expected, basis_before, basis_after, label)
+}
+
+tuple_update_schema_rollback_checks :: proc(
+	t: ^pbt.T,
+	connection: ^$Connection,
+	expected: Tuple_Update_Expected,
+	label: string,
+	durable: bool,
+) -> pbt.Result {
+	for step in 0 ..< 4 {
+		case_index := step
+		if expected.schema_reverse {
+			case_index = 3 - step
+		}
+		name, tx := tuple_update_schema_case(case_index)
+		basis_before, basis_before_ok := tempid_order_basis(connection)
+		if !basis_before_ok {
+			return pbt.error(fmt.tprintf("could not read %s tuple-schema basis", label))
+		}
+		report, call_ok := vev.transact(connection, tx, t.value_allocator)
+		pbt.note(t, fmt.tprintf("%s tuple-schema %s tx=%s report=%s", label, name, tx, report))
+		committed := strings.contains(report, ":ok true")
+		if call_ok == durable || committed || !strings.contains(report, "invalid tuple schema") {
+			return pbt.fail(fmt.tprintf(
+				"%s tuple-schema %s did not roll back: call-ok=%v report=%s",
+				label,
+				name,
+				call_ok,
+				report,
+			))
+		}
+		basis_after, basis_after_ok := tempid_order_basis(connection)
+		if !basis_after_ok || basis_after != basis_before {
+			return pbt.fail(fmt.tprintf(
+				"%s tuple-schema %s changed basis: before=%d after=%d",
+				label,
+				name,
+				basis_before,
+				basis_after,
+			))
+		}
+		if result := tuple_update_state_invariant(t, connection, expected, fmt.tprintf("%s after %s", label, name)); result.status != .Pass {
+			return result
+		}
+		if result := tuple_update_marker_absent(t, connection, fmt.tprintf("%s after %s", label, name)); result.status != .Pass {
+			return result
+		}
+		pbt.record_event(t, "tuple-schema", name, "rolled-back", label)
+	}
+	return pbt.pass()
+}
+
+tuple_update_schema_case :: proc(index: int) -> (name, tx: string) {
+	switch index {
+	case 0:
+		return "non-vector-attrs", `[[:db/add 99 :tuple/marker "must-rollback"] [:db/add 102 :db/tupleAttrs :tuple/left]]`
+	case 1:
+		return "non-tuple-type", `[[:db/add 99 :tuple/marker "must-rollback"] [:db/add 102 :db/valueType :db.type/string]]`
+	case 2:
+		return "many-target", `[[:db/add 99 :tuple/marker "must-rollback"] [:db/add 102 :db/cardinality :db.cardinality/many]]`
+	case 3:
+		return "many-component", `[[:db/add 99 :tuple/marker "must-rollback"] [:db/add 100 :db/cardinality :db.cardinality/many]]`
+	}
+	return "unknown", "[]"
+}
+
+tuple_update_marker_absent :: proc(
+	t: ^pbt.T,
+	connection: ^$Connection,
+	label: string,
+) -> pbt.Result {
+	database, database_ok := vev.db(connection)
+	if !database_ok {
+		return pbt.error(fmt.tprintf("could not retain %s tuple-schema database", label))
+	}
+	defer vev.close(&database)
+	markers, markers_ok := vev.query(&database, `[:find ?marker :where [99 :tuple/marker ?marker]]`)
+	if !markers_ok {
+		return pbt.error(fmt.tprintf("%s tuple-schema marker query failed", label))
+	}
+	defer vev.close(&markers)
+	markers_value, markers_value_ok := vev.value(&markers)
+	if !markers_value_ok || vev.item_count(markers_value) != 0 {
+		return pbt.fail(fmt.tprintf("%s tuple-schema rollback marker survived", label))
+	}
+	return pbt.pass()
 }
 
 tuple_update_seed_invariant :: proc(

@@ -3390,6 +3390,257 @@
         (vev.delete-store-tx-report report))
       (vev.close-store reopened))))
 
+(t.deftest sqlite-store-report-direct-write-rejects-invalid-schema-keyword-atomically
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.store-report-direct-invalid-schema-keyword.sqlite")
+  (let [path "tmp.vev.store-report-direct-invalid-schema-keyword.sqlite"
+        [store opened-ok opened-error] (vev.open-store path)
+        seed
+          (vev.transact-store-text
+            (addr store)
+            "[{:db/id 100 :db/ident :item/value :db/valueType :db.type/string :db/cardinality :db.cardinality/one} {:db/id 101 :db/ident :item/marker :db/valueType :db.type/string} [:db/add 1 :item/value \"before\"]]")]
+    (defer (remove-sqlite-files path))
+    (t.is opened-ok)
+    (t.is (= opened-error ""))
+    (t.is seed.ok seed.error)
+    (vev.delete-live-tx-report-shallow seed)
+    (vev.close-store store)
+    (let [[reopened reopened-ok reopened-error] (vev.open-store path)]
+      (t.is reopened-ok)
+      (t.is (= reopened-error ""))
+      (t.is (not (vev.store-resident-db-available? (addr reopened))))
+      (let [[tx-count-before tx-count-before-ok tx-count-before-error]
+              (vev.store-tx-count (addr reopened))
+            report
+              (vev.transact-store-report-text
+                (addr reopened)
+                "[[:db/add 2 :item/marker \"must-rollback\"] [:db/add 100 :db/cardinality :db.cardinality/sometimes]]")
+            [tx-count-after tx-count-after-ok tx-count-after-error]
+              (vev.store-tx-count (addr reopened))
+            marker-result
+              (vev.q-result-store-text
+                (addr reopened)
+                "[:find ?marker :where [2 :item/marker ?marker]]")
+            cardinality-result
+              (vev.q-result-store-text
+                (addr reopened)
+                "[:find ?kind :where [100 :db/cardinality ?kind]]")]
+        (t.is tx-count-before-ok tx-count-before-error)
+        (t.is (not report.ok))
+        (t.is (= report.error "invalid schema keyword value"))
+        (t.is (sqlite-durable-store-db? report.db-before))
+        (t.is (sqlite-durable-store-db? report.db-after))
+        (t.is (not (vev.store-resident-db-available? (addr reopened))))
+        (t.is tx-count-after-ok tx-count-after-error)
+        (t.is (= tx-count-after tx-count-before))
+        (t.is marker-result.result.ok marker-result.result.error)
+        (t.is (= (count marker-result.result.rows) 0))
+        (t.is cardinality-result.result.ok cardinality-result.result.error)
+        (t.is (= (count cardinality-result.result.rows) 1))
+        (t.is (= cardinality-result.result.rows[0].values[0].text ":db.cardinality/one"))
+        (vev.delete-query-result marker-result)
+        (vev.delete-query-result cardinality-result)
+        (vev.delete-store-tx-report report))
+      (vev.close-store reopened))))
+
+(t.deftest sqlite-store-report-direct-write-rejects-invalid-component-schema-atomically
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.store-report-direct-invalid-component-schema.sqlite")
+  (let [path "tmp.vev.store-report-direct-invalid-component-schema.sqlite"
+        [store opened-ok opened-error] (vev.open-store path)
+        seed
+          (vev.transact-store-text
+            (addr store)
+            "[{:db/id 100 :db/ident :item/child :db/valueType :db.type/ref :db/isComponent true} {:db/id 101 :db/ident :item/marker :db/valueType :db.type/string}]")]
+    (defer (remove-sqlite-files path))
+    (t.is opened-ok)
+    (t.is (= opened-error ""))
+    (t.is seed.ok seed.error)
+    (vev.delete-live-tx-report-shallow seed)
+    (vev.close-store store)
+    (let [[reopened reopened-ok reopened-error] (vev.open-store path)]
+      (t.is reopened-ok)
+      (t.is (= reopened-error ""))
+      (t.is (not (vev.store-resident-db-available? (addr reopened))))
+      (let [[tx-count-before tx-count-before-ok tx-count-before-error]
+              (vev.store-tx-count (addr reopened))
+            bool-report
+              (vev.transact-store-report-text
+                (addr reopened)
+                "[[:db/add 2 :item/marker \"must-rollback\"] [:db/add 100 :db/isComponent \"true\"]]")
+            non-ref-report
+              (vev.transact-store-report-text
+                (addr reopened)
+                "[[:db/add 3 :item/marker \"must-rollback\"] [:db/add 100 :db/valueType :db.type/string]]")
+            [tx-count-after tx-count-after-ok tx-count-after-error]
+              (vev.store-tx-count (addr reopened))
+            marker-result
+              (vev.q-result-store-text
+                (addr reopened)
+                "[:find ?marker :where [?entity :item/marker ?marker]]")
+            type-result
+              (vev.q-result-store-text
+                (addr reopened)
+                "[:find ?kind :where [100 :db/valueType ?kind]]")
+            component-result
+              (vev.q-result-store-text
+                (addr reopened)
+                "[:find ?component :where [100 :db/isComponent ?component]]")]
+        (t.is tx-count-before-ok tx-count-before-error)
+        (t.is (not bool-report.ok))
+        (t.is (= bool-report.error "schema boolean value must be boolean"))
+        (t.is (sqlite-durable-store-db? bool-report.db-before))
+        (t.is (sqlite-durable-store-db? bool-report.db-after))
+        (t.is (not non-ref-report.ok))
+        (t.is (= non-ref-report.error "invalid component schema"))
+        (t.is (sqlite-durable-store-db? non-ref-report.db-before))
+        (t.is (sqlite-durable-store-db? non-ref-report.db-after))
+        (t.is (not (vev.store-resident-db-available? (addr reopened))))
+        (t.is tx-count-after-ok tx-count-after-error)
+        (t.is (= tx-count-after tx-count-before))
+        (t.is marker-result.result.ok marker-result.result.error)
+        (t.is (= (count marker-result.result.rows) 0))
+        (t.is type-result.result.ok type-result.result.error)
+        (t.is (= (count type-result.result.rows) 1))
+        (t.is (= type-result.result.rows[0].values[0].text ":db.type/ref"))
+        (t.is component-result.result.ok component-result.result.error)
+        (t.is (= (count component-result.result.rows) 1))
+        (t.is (= component-result.result.rows[0].values[0].kind .Bool))
+        (t.is component-result.result.rows[0].values[0].bool-value)
+        (vev.delete-query-result marker-result)
+        (vev.delete-query-result type-result)
+        (vev.delete-query-result component-result)
+        (vev.delete-store-tx-report bool-report)
+        (vev.delete-store-tx-report non-ref-report))
+      (vev.close-store reopened))))
+
+(t.deftest sqlite-store-report-direct-write-rejects-invalid-tuple-schema-atomically
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.store-report-direct-invalid-tuple-schema.sqlite")
+  (let [path "tmp.vev.store-report-direct-invalid-tuple-schema.sqlite"
+        [store opened-ok opened-error] (vev.open-store path)
+        seed
+          (vev.transact-store-text
+            (addr store)
+            "[{:db/id 100 :db/ident :tuple/left :db/valueType :db.type/string :db/cardinality :db.cardinality/one} {:db/id 101 :db/ident :tuple/right :db/valueType :db.type/string :db/cardinality :db.cardinality/one} {:db/id 102 :db/ident :tuple/identity :db/valueType :db.type/tuple :db/tupleAttrs [:tuple/left :tuple/right] :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}]")]
+    (defer (remove-sqlite-files path))
+    (t.is opened-ok)
+    (t.is (= opened-error ""))
+    (t.is seed.ok seed.error)
+    (vev.delete-live-tx-report-shallow seed)
+    (vev.close-store store)
+    (let [[reopened reopened-ok reopened-error] (vev.open-store path)]
+      (t.is reopened-ok)
+      (t.is (= reopened-error ""))
+      (t.is (not (vev.store-resident-db-available? (addr reopened))))
+      (let [[tx-count-before tx-count-before-ok tx-count-before-error]
+              (vev.store-tx-count (addr reopened))
+            non-vector-report
+              (vev.transact-store-report-text
+                (addr reopened)
+                "[[:db/add 99 :tuple/marker \"must-rollback\"] [:db/add 102 :db/tupleAttrs :tuple/left]]")
+            non-tuple-report
+              (vev.transact-store-report-text
+                (addr reopened)
+                "[[:db/add 99 :tuple/marker \"must-rollback\"] [:db/add 102 :db/valueType :db.type/string]]")
+            many-target-report
+              (vev.transact-store-report-text
+                (addr reopened)
+                "[[:db/add 99 :tuple/marker \"must-rollback\"] [:db/add 102 :db/cardinality :db.cardinality/many]]")
+            many-component-report
+              (vev.transact-store-report-text
+                (addr reopened)
+                "[[:db/add 99 :tuple/marker \"must-rollback\"] [:db/add 100 :db/cardinality :db.cardinality/many]]")
+            [tx-count-after tx-count-after-ok tx-count-after-error]
+              (vev.store-tx-count (addr reopened))
+            marker-result
+              (vev.q-result-store-text
+                (addr reopened)
+                "[:find ?marker :where [99 :tuple/marker ?marker]]")
+            type-result
+              (vev.q-result-store-text
+                (addr reopened)
+                "[:find ?kind :where [102 :db/valueType ?kind]]")
+            cardinality-result
+              (vev.q-result-store-text
+                (addr reopened)
+                "[:find ?entity ?kind :where [?entity :db/cardinality ?kind]]")]
+        (t.is tx-count-before-ok tx-count-before-error)
+        (for [report ([]vev.Store-Tx-Report [non-vector-report non-tuple-report many-target-report many-component-report])]
+          (t.is (not report.ok))
+          (t.is (= report.error "invalid tuple schema"))
+          (t.is (sqlite-durable-store-db? report.db-before))
+          (t.is (sqlite-durable-store-db? report.db-after)))
+        (t.is (not (vev.store-resident-db-available? (addr reopened))))
+        (t.is tx-count-after-ok tx-count-after-error)
+        (t.is (= tx-count-after tx-count-before))
+        (t.is marker-result.result.ok marker-result.result.error)
+        (t.is (= (count marker-result.result.rows) 0))
+        (t.is type-result.result.ok type-result.result.error)
+        (t.is (= (count type-result.result.rows) 1))
+        (t.is (= type-result.result.rows[0].values[0].text ":db.type/tuple"))
+        (t.is cardinality-result.result.ok cardinality-result.result.error)
+        (t.is (= (count cardinality-result.result.rows) 3))
+        (for [row cardinality-result.result.rows]
+          (t.is (= row.values[1].text ":db.cardinality/one")))
+        (vev.delete-query-result marker-result)
+        (vev.delete-query-result type-result)
+        (vev.delete-query-result cardinality-result)
+        (vev.delete-store-tx-report non-vector-report)
+        (vev.delete-store-tx-report non-tuple-report)
+        (vev.delete-store-tx-report many-target-report)
+        (vev.delete-store-tx-report many-component-report))
+      (vev.close-store reopened))))
+
+(t.deftest sqlite-store-index-range-follows-index-schema-evolution
+  (defer (free_all context.allocator))
+  (remove-sqlite-files "tmp.vev.store-index-range-schema.sqlite")
+  (let [path "tmp.vev.store-index-range-schema.sqlite"
+        [store opened-ok opened-error] (vev.open-store path)
+        seed
+          (vev.transact-store-text
+            (addr store)
+            "[{:db/id 100 :db/ident :item/value :db/valueType :db.type/string :db/index false} [:db/add 1 :item/value \"a\"] [:db/add 2 :item/value \"b\"] [:db/add 3 :item/value \"c\"]]")]
+    (defer (remove-sqlite-files path))
+    (t.is opened-ok)
+    (t.is (= opened-error ""))
+    (t.is seed.ok seed.error)
+    (vev.delete-live-tx-report-shallow seed)
+    (let [[off-db off-db-ok off-db-error] (vev.store-db (addr store))
+          [off off-ok off-error]
+            (vev.store-db-index-range-datoms
+              (addr off-db) ":item/value" (vev.Index-Arg {}) false (vev.Index-Arg {}) false)]
+      (t.is off-db-ok off-db-error)
+      (t.is off-ok off-error)
+      (t.is (= (count off) 0))
+      (vev.delete-owned-datoms off)
+      (vev.close-store-db! (addr off-db)))
+    (let [enable (vev.transact-store-text (addr store) "[[:db/add 100 :db/index true]]")]
+      (t.is enable.ok enable.error)
+      (vev.delete-live-tx-report-shallow enable))
+    (let [[on-db on-db-ok on-db-error] (vev.store-db (addr store))
+          [on on-ok on-error]
+            (vev.store-db-index-range-datoms
+              (addr on-db) ":item/value" (vev.Index-Arg {}) false (vev.Index-Arg {}) false)]
+      (t.is on-db-ok on-db-error)
+      (t.is on-ok on-error)
+      (t.is (= (count on) 3))
+      (vev.delete-owned-datoms on)
+      (vev.close-store-db! (addr on-db)))
+    (let [disable (vev.transact-store-text (addr store) "[[:db/add 100 :db/index false]]")]
+      (t.is disable.ok disable.error)
+      (vev.delete-live-tx-report-shallow disable))
+    (let [[off-db off-db-ok off-db-error] (vev.store-db (addr store))
+          [off off-ok off-error]
+            (vev.store-db-index-range-datoms
+              (addr off-db) ":item/value" (vev.Index-Arg {}) false (vev.Index-Arg {}) false)]
+      (t.is off-db-ok off-db-error)
+      (t.is off-ok off-error)
+      (t.is (= (count off) 0))
+      (vev.delete-owned-datoms off)
+      (vev.close-store-db! (addr off-db)))
+    (vev.close-store store)))
+
 (t.deftest sqlite-store-report-parse-failure-stays-storage-neutral
   (defer (free_all context.allocator))
   (remove-sqlite-files "tmp.vev.store-report-parse-failure.sqlite")
@@ -3951,6 +4202,24 @@
         (t.is (= (count result.result.rows) 0))
         (vev.delete-query-result result)
         (vev.delete-store-tx-report cancelled))
+      (let [cancelled-replacement
+              (vev.transact-store-report-text
+                (addr reopened)
+                "[[:db/add 1 :user/name \"Ada\"] [:db/retract 1 :user/name \"Ada\"]]")
+            result
+              (vev.q-result-store-text
+                (addr reopened)
+                "[:find ?name :where [1 :user/name ?name]]")]
+        (t.is cancelled-replacement.ok cancelled-replacement.error)
+        (t.is (= (count cancelled-replacement.tx-data) 2))
+        (t.is (= cancelled-replacement.tx-data[0].e 1))
+        (t.is (= cancelled-replacement.tx-data[0].a ":user/name"))
+        (t.is (= cancelled-replacement.tx-data[0].v.text "Grace"))
+        (t.is (not cancelled-replacement.tx-data[0].added))
+        (t.is result.result.ok result.result.error)
+        (t.is (= (count result.result.rows) 0))
+        (vev.delete-query-result result)
+        (vev.delete-store-tx-report cancelled-replacement))
       (let [retracted-attr (vev.transact-store-report-text
                              (addr reopened)
                              "[[:db/add 3 :user/name \"Hedy\"] [:db.fn/retractAttribute 3 :user/name]]")

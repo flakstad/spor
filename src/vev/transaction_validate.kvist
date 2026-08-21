@@ -106,8 +106,13 @@
 (defn validate-ops [before: DB, ops: []Tx-Op] -> [ok: bool, error: string]
   (when (not (ops-require-incremental-validation? before ops))
     (return (validate-ops-batch-against-before before ops)))
-  (let [scratch-datoms (clone-datoms before.datoms)]
-    (defer (delete scratch-datoms))
+  (let [scratch-datoms (clone-datoms before.datoms)
+        validation-tx-data (make [dynamic]Datom)
+        seen-ea (set.empty string)]
+    (defer (do
+             (delete-owned-datoms validation-tx-data)
+             (delete seen-ea)
+             (delete scratch-datoms)))
     (for [op ops]
       (let [[entity-ok entity-error] (validate-op-entity-ids op)]
         (when (not entity-ok)
@@ -121,12 +126,22 @@
           (when (and (schema-unique? scratch op.a)
                      (unique-conflict? scratch op))
             (return false "schema unique conflict"))))
+      (when (= op.kind .Add)
+        (append-cardinality-one-retractions-conservative!
+          before
+          seen-ea
+          (addr scratch-datoms)
+          (addr validation-tx-data)
+          op
+          0))
       (arr.push! scratch-datoms
         (Datom {e: op.e
                 a: op.a
                 v: op.v
                 tx: 0
-                added: (= op.kind .Add)})))
+                added: (= op.kind .Add)}))
+      (when (= op.kind .Add)
+        (set.add! seen-ea (entity-attr-key op.e op.a))))
     (validate-final-schema (slice scratch-datoms 0))))
 
 (defn failed-tx-report [db: DB, error: string] -> Tx-Report
@@ -456,6 +471,12 @@
           (arr.remove-ordered-at! ops^ index)))
       (set! index (- index 1)))))
 
+(defn preserve-before-cardinality-one-retraction! [before: DB, ops: ^[dynamic]Tx-Op, op: Tx-Op]
+  (let [[before-value before-ok] (latest-attr-value before op.e op.a)]
+    (when (and before-ok
+               (not (value-equal? before-value op.v)))
+      (push-tx-op-once! ops (tx-retract op.e op.a before-value)))))
+
 (defn compact-transaction-ops [before: DB, ops: []Tx-Op] -> [dynamic]Tx-Op
   (let [out (make [dynamic]Tx-Op 0 (count ops))]
     (for [op ops]
@@ -468,7 +489,12 @@
           (do
             (when touched
               (when current
-                (remove-prior-op-fact-kind! (addr out) op .Add))
+                (remove-prior-op-fact-kind! (addr out) op .Add)
+                ;; Adding a replacement retracts the prior cardinality-one
+                ;; value.  If that replacement is then retracted in the same
+                ;; transaction, retain the net retraction of the prior value.
+                (when (schema-cardinality-one? before op.a)
+                  (preserve-before-cardinality-one-retraction! before (addr out) op)))
               (continue))
             (when (not (current-op-value-exists-in-log? before.datoms op))
               (continue)))
