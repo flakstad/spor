@@ -665,8 +665,10 @@
             (arr.push! after-datoms (datom-owned datom))
             (arr.push! tx-data (datom-owned datom))))
         (for [op compacted-ops]
-          (let [apply-op (or (= op.kind .Add)
-                             (current-op-value-exists-in-log? (slice after-datoms 0) op))]
+          (let [value-exists (current-op-value-exists-in-log? (slice after-datoms 0) op)
+                apply-op (if (= op.kind .Add)
+                           (not value-exists)
+                           value-exists)]
             (when apply-op
               (if schema-changed
                 (append-cardinality-one-retractions-conservative! before seen-ea (addr after-datoms) (addr tx-data) op tx)

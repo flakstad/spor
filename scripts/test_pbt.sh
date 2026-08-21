@@ -40,6 +40,7 @@ trap cleanup EXIT
 RUNNER="$TMP_DIR/vev-pbt$EXE_SUFFIX"
 "$ODIN_BIN" build "$ROOT/test/pbt" \
   -collection:pbt="$PBT_ROOT" \
+  -no-threaded-checker \
   -out:"$RUNNER"
 
 VEV_LIB="$LIB_PATH" "$RUNNER" "$@"

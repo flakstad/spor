@@ -3907,6 +3907,12 @@
         (vev.delete-query-result age-result)
         (vev.delete-query-result name-result)
         (vev.delete-store-tx-report report))
+      (let [missing (vev.transact-store-report-text (addr reopened) "[[:db/retract 1 :user/age 99]]")]
+        (t.is missing.ok missing.error)
+        (t.is (= (count missing.tx-data) 1))
+        (t.is (= missing.tx-data[0].e missing.tx))
+        (t.is (= missing.tx-data[0].a ":db/txInstant"))
+        (vev.delete-store-tx-report missing))
       (vev.close-store reopened))))
 
 (t.deftest sqlite-store-report-direct-write-cancels-retract-then-add-same-fact

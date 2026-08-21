@@ -9439,6 +9439,22 @@
     (t.is (= (count employed) 1))
     (t.is employed[0].bool-value)))
 
+(t.deftest datascript-add-existing-fact-is-idempotent
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        first (vev.transact (addr conn) [[:db/add 1 :name "Ivan"]])
+        second (vev.transact (addr conn) [[:db/add 1 :name "Ivan"]])
+        history-count 0]
+    (for [datom second.db-after.datoms]
+      (when (and (= datom.e 1)
+                 (= datom.a ":name"))
+        (mut! history-count += 1)))
+    (t.is first.ok)
+    (t.is second.ok)
+    (t.is (= (count second.tx-data) 1))
+    (t.is (= second.tx-data[0].a ":db/txInstant"))
+    (t.is (= history-count 1))))
+
 (t.deftest datascript-retract-int-does-not-match-float-subset
   (defer (free_all context.allocator))
   (let [conn (vev.create-conn)

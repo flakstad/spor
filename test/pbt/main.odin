@@ -21,11 +21,23 @@ Query_Name_Result :: struct {
 }
 
 query_name :: proc(t: ^pbt.T, database: ^vev.DB, entity: u64) -> Query_Name_Result {
-	inputs := fmt.tprintf("[%d]", entity)
+	return query_name_attr(t, database, entity, ":user/name")
+}
+
+query_name_attr :: proc(
+	t: ^pbt.T,
+	database: ^vev.DB,
+	entity: u64,
+	attribute: string,
+) -> Query_Name_Result {
+	query := fmt.tprintf(
+		`[:find ?name . :where [%d %s ?name]]`,
+		entity,
+		attribute,
+	)
 	result, query_ok := vev.query(
 		database,
-		`[:find ?name . :in $ ?e :where [?e :user/name ?name]]`,
-		inputs,
+		query,
 	)
 	if !query_ok {
 		return {}
@@ -169,6 +181,18 @@ main :: proc() {
 			property = db_with_preserves_source_snapshot,
 			description = "a hypothetical database and a later live transaction cannot mutate retained snapshots",
 			tags = SNAPSHOT_TAGS[:],
+		},
+		{
+			name = "resident transactions agree with model",
+			property = transaction_model_property,
+			description = "generated add and retract sequences agree with an independent cardinality model",
+			tags = TRANSACTION_MODEL_TAGS[:],
+		},
+		{
+			name = "resident and durable transactions agree",
+			property = transaction_differential_property,
+			description = "generated transactions preserve snapshots, time filters, history, and exact transaction-log ranges across backends and reopen",
+			tags = DIFFERENTIAL_MODEL_TAGS[:],
 		},
 	}
 

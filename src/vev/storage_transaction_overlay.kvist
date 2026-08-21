@@ -439,6 +439,17 @@
   (return true ""))
 
 (defn append-source-overlay-op! [out: ^[dynamic]Tx-Op, source: DB-Read-Source, op: Tx-Op] -> [ok: bool, error: string]
+  (when (= op.kind .Retract)
+    (let [[touched current] (source-overlay-prior-fact-state (slice out^ 0) op)]
+      (when touched
+        (when (not current)
+          (return true "")))
+      (when (not touched)
+        (let [[exists exists-ok exists-error] (source-overlay-existing-current-fact? source op)]
+          (when (not exists-ok)
+            (return false exists-error))
+          (when (not exists)
+            (return true ""))))))
   (when (= op.kind .Add)
     (let [[touched current] (source-overlay-prior-fact-state (slice out^ 0) op)]
       (when current
