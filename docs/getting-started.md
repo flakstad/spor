@@ -25,7 +25,7 @@ exit status.
 ## Clojure
 
 ```clojure
-{:deps {com.vevdb/vev-clj {:mvn/version "0.2.3"}}}
+{:deps {com.vevdb/vev-clj {:mvn/version "0.3.0"}}}
 ```
 
 ```clojure

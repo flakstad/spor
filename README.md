@@ -62,7 +62,7 @@ prepared operations.
 Add the package:
 
 ```clojure
-{:deps {com.vevdb/vev-clj {:mvn/version "0.2.3"}}}
+{:deps {com.vevdb/vev-clj {:mvn/version "0.3.0"}}}
 ```
 
 Use `vev.core`, conventionally aliased as `d`:
