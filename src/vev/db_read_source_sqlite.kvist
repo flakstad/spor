@@ -180,7 +180,7 @@
       (arr.push! upper-values end-value))
     (let [low (lower-bound-index-view-values db view (slice lower-values 0))
           high (if has-end
-                 (upper-bound-index-view-values db view (slice upper-values 0))
+                 (lower-bound-index-view-values db view (slice upper-values 0))
                  (upper-bound-index-view-values db view ([]Value [(value-keyword attr)])))
           i low]
       (while (< i high)

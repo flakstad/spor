@@ -434,7 +434,7 @@ index_read_expected_range :: proc(
 		if scenario.has_range_start && value < scenario.range_start {
 			continue
 		}
-		if scenario.has_range_end && value > scenario.range_end {
+		if scenario.has_range_end && value >= scenario.range_end {
 			continue
 		}
 		for entity in 1 ..= scenario.entity_count {
@@ -481,7 +481,7 @@ index_read_range_count :: proc(
 	for entity in 0 ..< scenario.entity_count {
 		value := scores[entity]
 		if (!scenario.has_range_start || value >= scenario.range_start) &&
-		   (!scenario.has_range_end || value <= scenario.range_end) {
+		   (!scenario.has_range_end || value < scenario.range_end) {
 			count += 1
 		}
 	}

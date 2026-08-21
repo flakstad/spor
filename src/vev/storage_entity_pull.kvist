@@ -197,7 +197,7 @@
                                     (>= (index-position-compare datom.v values[0]) 0))
                     end-index (if has-start 1 0)
                     before-end (or (not has-end)
-                                   (<= (index-position-compare datom.v values[end-index]) 0))]
+                                   (< (index-position-compare datom.v values[end-index]) 0))]
                 (when (and after-start before-end)
                   (arr.push! out (datom-owned datom)))))
             (return out true "")))))))
