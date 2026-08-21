@@ -16,6 +16,19 @@ case "$(uname -s)" in
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
 
+CLJ_JAVA_OUT="$JAVA_OUT"
+CLJ_SOURCE="$ROOT/clients/clojure/src"
+LIB_PATH="$ROOT/build/lib/$LIB_NAME"
+RUN_DB="$DB"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    CLJ_JAVA_OUT="$(cygpath -m "$CLJ_JAVA_OUT")"
+    CLJ_SOURCE="$(cygpath -m "$CLJ_SOURCE")"
+    LIB_PATH="$(cygpath -m "$LIB_PATH")"
+    RUN_DB="$(cygpath -m "$RUN_DB")"
+    ;;
+esac
+
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25 2>/dev/null || true)}"
 if [[ -z "$JAVA_HOME" ]]; then
   echo "Java 25 is required" >&2
@@ -38,8 +51,8 @@ JAVA_HOME="$JAVA_HOME" \
 PATH="$JAVA_HOME/bin:$PATH" \
 clojure \
   -J--enable-native-access=ALL-UNNAMED \
-  -Sdeps "{:paths [\"$JAVA_OUT\" \"$ROOT/clients/clojure/src\"]}" \
+  -Sdeps "{:paths [\"$CLJ_JAVA_OUT\" \"$CLJ_SOURCE\"]}" \
   -M \
   "$ROOT/examples/clojure/sqlite_applications.clj" \
-  "$ROOT/build/lib/$LIB_NAME" \
-  "$DB"
+  "$LIB_PATH" \
+  "$RUN_DB"
