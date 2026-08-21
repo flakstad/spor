@@ -783,12 +783,22 @@
   (return true ""))
 
 (defn shared-write-state-append-retract-entity-ops! [ops: ^[dynamic]Tx-Op, source: DB-Read-Source, entity: u64] -> [ok: bool, error: string]
-  (let [seen (set.empty u64)]
+  (let [prior-count (count ops^)
+        seen (set.empty u64)]
     (defer (delete seen))
-    (shared-write-state-append-retract-entity-ops-seen! ops source entity (addr seen))))
+    (let [[source-ok source-error] (shared-write-state-append-retract-entity-ops-seen! ops source entity (addr seen))]
+      (when (not source-ok)
+        (return false source-error)))
+    (for [index (arr.range 0 prior-count)]
+      (let [op ops^[index]]
+        (when (and (= op.kind .Add)
+                   (= op.e entity))
+          (shared-write-state-push-owned-retract-op-once! ops entity op.a op.v))))
+    (return true "")))
 
 (defn shared-write-state-append-retract-attr-ops! [ops: ^[dynamic]Tx-Op, source: DB-Read-Source, entity: u64, attr: string] -> [ok: bool, error: string]
-  (let [seen (set.empty u64)]
+  (let [prior-count (count ops^)
+        seen (set.empty u64)]
     (defer (delete seen))
     (set.add! seen entity)
     (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity attr)]
@@ -807,6 +817,12 @@
                   (return false child-error))))))
         (shared-write-state-push-owned-retract-op-once! ops entity attr datom.v))
       (delete-owned-datoms datoms))
+    (for [index (arr.range 0 prior-count)]
+      (let [op ops^[index]]
+        (when (and (= op.kind .Add)
+                   (= op.e entity)
+                   (= op.a attr))
+          (shared-write-state-push-owned-retract-op-once! ops entity attr op.v))))
   (return true "")))
 
 (defn shared-write-state-tx-adds-attr? [tx-data: []Tx-Data, attr: string] -> bool

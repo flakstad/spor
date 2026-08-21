@@ -68,12 +68,13 @@
       (return false stream-error))
     (while stream.has-current
       (when (not (value-equal? stream.current.v op.v))
-        (arr.push! out^ (Tx-Op {kind: .Retract
+        (let [candidate (Tx-Op {kind: .Retract
                                 e: stream.current.e
-                                a: (string-owned stream.current.a)
-                                owned-attr: true
-                                v: (value-owned stream.current.v)
-                                owned-value: true})))
+                                a: stream.current.a
+                                v: stream.current.v})
+              [touched current] (source-overlay-prior-fact-state (slice out^ 0) candidate)]
+          (when (not (and touched (not current)))
+            (arr.push! out^ (tx-op-owned candidate)))))
       (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
         (when (not advance-ok)
           (delete-source-index-datom-stream stream)
@@ -345,6 +346,37 @@
           (arr.remove-ordered-at! ops^ index)))
       (set! index (- index 1)))))
 
+(defn remove-source-overlay-prior-fact-additions! [ops: ^[dynamic]Tx-Op, op: Tx-Op]
+  (let [index (- (count ops^) 1)]
+    (while (>= index 0)
+      (let [prior ops^[index]]
+        (when (and (= prior.kind .Add)
+                   (source-overlay-fact-matches? prior op))
+          (when prior.owned-attr
+            (delete prior.a))
+          (when prior.owned-value
+            (delete-owned-value prior.v))
+          (when (not (= prior.map-group ""))
+            (delete prior.map-group))
+          (arr.remove-ordered-at! ops^ index)))
+      (set! index (- index 1)))))
+
+(defn remove-source-overlay-prior-cardinality-one-additions! [ops: ^[dynamic]Tx-Op, op: Tx-Op]
+  (let [index (- (count ops^) 1)]
+    (while (>= index 0)
+      (let [prior ops^[index]]
+        (when (and (= prior.kind .Add)
+                   (= prior.e op.e)
+                   (= prior.a op.a))
+          (when prior.owned-attr
+            (delete prior.a))
+          (when prior.owned-value
+            (delete-owned-value prior.v))
+          (when (not (= prior.map-group ""))
+            (delete prior.map-group))
+          (arr.remove-ordered-at! ops^ index)))
+      (set! index (- index 1)))))
+
 (defn validate-source-overlay-unique-attr [source: DB-Read-Source, ops: []Tx-Op, attr: string] -> [ok: bool, error: string]
   (let [seen (mmap.empty string u64)
         [stream source-ok source-error] (source-index-datom-stream source attr)]
@@ -442,8 +474,9 @@
   (when (= op.kind .Retract)
     (let [[touched current] (source-overlay-prior-fact-state (slice out^ 0) op)]
       (when touched
-        (when (not current)
-          (return true "")))
+        (when current
+          (remove-source-overlay-prior-fact-additions! out op))
+        (return true ""))
       (when (not touched)
         (let [[exists exists-ok exists-error] (source-overlay-existing-current-fact? source op)]
           (when (not exists-ok)
@@ -451,6 +484,12 @@
           (when (not exists)
             (return true ""))))))
   (when (= op.kind .Add)
+    (let [[many many-ok many-error] (db-read-source-schema-cardinality-many? source op.a)]
+      (when (not many-ok)
+        (return false many-error))
+      (when (and (not many)
+                 (not (overlay-ops-declare-cardinality-many? (slice out^ 0) op.a)))
+        (remove-source-overlay-prior-cardinality-one-additions! out op)))
     (let [[touched current] (source-overlay-prior-fact-state (slice out^ 0) op)]
       (when current
         (return true ""))

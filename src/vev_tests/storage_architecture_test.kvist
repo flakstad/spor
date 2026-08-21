@@ -3913,6 +3913,64 @@
         (t.is (= missing.tx-data[0].e missing.tx))
         (t.is (= missing.tx-data[0].a ":db/txInstant"))
         (vev.delete-store-tx-report missing))
+      (let [restored (vev.transact-store-report-text
+                       (addr reopened)
+                       "[[:db/add 1 :user/name \"Grace\"] [:db/add 1 :user/name \"Ada\"]]")
+            result (vev.q-result-store-text (addr reopened) "[:find ?name :where [1 :user/name ?name]]")]
+        (t.is restored.ok restored.error)
+        (t.is (= (count restored.tx-data) 1))
+        (t.is (= restored.tx-data[0].a ":db/txInstant"))
+        (t.is result.result.ok result.result.error)
+        (t.is (= (count result.result.rows) 1))
+        (t.is (result-has-string-row? result.result "Ada"))
+        (vev.delete-query-result result)
+        (vev.delete-store-tx-report restored))
+      (let [replaced-once (vev.transact-store-report-text
+                            (addr reopened)
+                            "[[:db/add 1 :user/name \"Grace\"] [:db/add 1 :user/name \"Grace\"]]")
+            result (vev.q-result-store-text (addr reopened) "[:find ?name :where [1 :user/name ?name]]")]
+        (t.is replaced-once.ok replaced-once.error)
+        (t.is (= (count replaced-once.tx-data) 3))
+        (t.is (not replaced-once.tx-data[0].added))
+        (t.is (= replaced-once.tx-data[0].v.text "Ada"))
+        (t.is replaced-once.tx-data[1].added)
+        (t.is (= replaced-once.tx-data[1].v.text "Grace"))
+        (t.is result.result.ok result.result.error)
+        (t.is (= (count result.result.rows) 1))
+        (t.is (result-has-string-row? result.result "Grace"))
+        (vev.delete-query-result result)
+        (vev.delete-store-tx-report replaced-once))
+      (let [cancelled (vev.transact-store-report-text
+                        (addr reopened)
+                        "[[:db/add 2 :user/name \"Grace\"] [:db/retract 2 :user/name \"Grace\"]]")
+            result (vev.q-result-store-text (addr reopened) "[:find ?name :where [2 :user/name ?name]]")]
+        (t.is cancelled.ok cancelled.error)
+        (t.is (= (count cancelled.tx-data) 1))
+        (t.is (= cancelled.tx-data[0].a ":db/txInstant"))
+        (t.is result.result.ok result.result.error)
+        (t.is (= (count result.result.rows) 0))
+        (vev.delete-query-result result)
+        (vev.delete-store-tx-report cancelled))
+      (let [retracted-attr (vev.transact-store-report-text
+                             (addr reopened)
+                             "[[:db/add 3 :user/name \"Hedy\"] [:db.fn/retractAttribute 3 :user/name]]")
+            result (vev.q-result-store-text (addr reopened) "[:find ?name :where [3 :user/name ?name]]")]
+        (t.is retracted-attr.ok retracted-attr.error)
+        (t.is (= (count retracted-attr.tx-data) 1))
+        (t.is result.result.ok result.result.error)
+        (t.is (= (count result.result.rows) 0))
+        (vev.delete-query-result result)
+        (vev.delete-store-tx-report retracted-attr))
+      (let [retracted-entity (vev.transact-store-report-text
+                               (addr reopened)
+                               "[[:db/add 4 :user/name \"Barbara\"] [:db/retractEntity 4]]")
+            result (vev.q-result-store-text (addr reopened) "[:find ?name :where [4 :user/name ?name]]")]
+        (t.is retracted-entity.ok retracted-entity.error)
+        (t.is (= (count retracted-entity.tx-data) 1))
+        (t.is result.result.ok result.result.error)
+        (t.is (= (count result.result.rows) 0))
+        (vev.delete-query-result result)
+        (vev.delete-store-tx-report retracted-entity))
       (vev.close-store reopened))))
 
 (t.deftest sqlite-store-report-direct-write-cancels-retract-then-add-same-fact

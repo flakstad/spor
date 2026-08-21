@@ -8971,9 +8971,10 @@
                   [:db/add 1 :user/name "Ada"]
                   [:db/retract 1 :user/name "Ada"]])
         results (vev.q-strings report.db-after (vev.query-name-by-email "ada@example.com"))]
-    (t.is (= (count report.tx-data) 4))
-    (t.is (= report.tx-data[0].added true))
-    (t.is (= report.tx-data[2].added false))
+    (t.is (= (count report.tx-data) 2))
+    (t.is (= report.tx-data[0].a ":user/email"))
+    (t.is report.tx-data[0].added)
+    (t.is (= report.tx-data[1].a ":db/txInstant"))
     (t.is (= (count results) 0))))
 
 (t.deftest datascript-transact-skips-nil-items
@@ -14537,6 +14538,56 @@
     (t.is (= (count retract-report.db-after.datoms) 5))
     (t.is (= (count retract-report.db-after.current) 3))
     (t.is (= retract-report.tx-data[0].added false))))
+
+(t.deftest same-transaction-add-then-retract-is-a-net-no-op
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        report (vev.transact
+                 (addr conn)
+                 [[:db/add 1 :user/name "Ada"]
+                  [:db.fn/retractEntity 1]])
+        result (vev.q report.db-after
+                 [:find ?name
+                  :where [1 :user/name ?name]])]
+    (t.is report.ok report.error)
+    (t.is (= (count report.tx-data) 1))
+    (t.is (= report.tx-data[0].a ":db/txInstant"))
+    (t.is (= (count result.rows) 0))))
+
+(t.deftest same-transaction-cardinality-one-additions-report-only-final-value
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)
+        schema (vev.transact
+                 (addr conn)
+                 [{:db/id 100
+                   :db/ident :user/name
+                   :db/valueType :db.type/string
+                   :db/cardinality :db.cardinality/one}])
+        report (vev.transact
+                 (addr conn)
+                 [[:db/add 1 :user/name "Ada"]
+                  [:db/add 1 :user/name "Grace"]])]
+    (t.is schema.ok schema.error)
+    (t.is report.ok report.error)
+    (t.is (= (count report.tx-data) 2))
+    (t.is (= report.tx-data[0].e 1))
+    (t.is (= report.tx-data[0].a ":user/name"))
+    (t.is (= report.tx-data[0].v.text "Grace"))
+    (t.is report.tx-data[0].added)
+    (t.is (= report.tx-data[1].a ":db/txInstant"))
+    (let [restored (vev.transact
+                     (addr conn)
+                     [[:db.fn/retractAttribute 1 :user/name]
+                      [:db/add 1 :user/name "Barbara"]
+                      [:db.fn/retractAttribute 1 :user/name]
+                      [:db/add 1 :user/name "Ada"]])]
+      (t.is restored.ok restored.error)
+      (t.is (= (count restored.tx-data) 3))
+      (t.is (not restored.tx-data[0].added))
+      (t.is (= restored.tx-data[0].v.text "Grace"))
+      (t.is restored.tx-data[1].added)
+      (t.is (= restored.tx-data[1].v.text "Ada"))
+      (t.is (= restored.tx-data[2].a ":db/txInstant")))))
 
 (t.deftest readd-after-retract-makes-fact-current-once
   (defer (free_all context.allocator))

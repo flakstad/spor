@@ -102,20 +102,18 @@
               (delete text)
               (vev.delete-store-tx-report report))
             (inc! index)))
-        ;; Multiple replacements in one logical transaction can emit
-        ;; byte-for-byte identical retraction datoms at the same tx. Every
-        ;; persisted index still needs a deterministic total order so its run
-        ;; cursor matches a canonical rebuild after reopening.
+        ;; Multiple replacements in one logical transaction collapse to the
+        ;; final cardinality-one value and emit the original retraction once.
         (let [multi
-                (vev.transact-store-report-text
+              (vev.transact-store-report-text
                   (addr store)
                   "[[:db/add 1 :item/name \"value-251\"] [:db/add 1 :item/name \"value-252\"]]")
-              duplicate-retractions 0]
+              retraction-count 0]
           (t.is multi.ok multi.error)
           (for [datom multi.tx-data]
             (when (not datom.added)
-              (inc! duplicate-retractions)))
-          (t.is (>= duplicate-retractions 2))
+              (inc! retraction-count)))
+          (t.is (= retraction-count 1))
           (vev.delete-store-tx-report multi))
         (let [before-result
                 (vev.q-result-store-db-text

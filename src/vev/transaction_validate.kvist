@@ -276,13 +276,18 @@
                 datom before.datoms[datom-index]]
             (when (and (datom-current-at? before datom-index)
                        (not (value-equal? datom.v op.v)))
-              (let [retract (Datom {e: datom.e
-                                    a: datom.a
-                                    v: datom.v
-                                    tx: tx
-                                    added: false})]
-                (arr.push! after-datoms^ (datom-owned retract))
-                (arr.push! tx-data^ (datom-owned retract))))))))))
+              (let [existing (Tx-Op {kind: .Retract
+                                     e: datom.e
+                                     a: datom.a
+                                     v: datom.v})]
+                (when (current-op-value-exists-in-log? (slice after-datoms^ 0) existing)
+                  (let [retract (Datom {e: datom.e
+                                        a: datom.a
+                                        v: datom.v
+                                        tx: tx
+                                        added: false})]
+                    (arr.push! after-datoms^ (datom-owned retract))
+                    (arr.push! tx-data^ (datom-owned retract))))))))))))
 
 (defn append-cardinality-one-retractions-conservative! [before: DB, seen-ea: (map string (struct {})), after-datoms: ^[dynamic]Datom, tx-data: ^[dynamic]Datom, op: Tx-Op, tx: u64]
   (when (not (= op.kind .Add))
@@ -330,21 +335,6 @@
         (when (and (datom-current-at? db datom-index)
                    (value-equal? datom.v op.v))
           (return true)))))
-  false)
-
-(defn same-add-op-fact? [left: Tx-Op, right: Tx-Op] -> bool
-  (and (= left.kind .Add)
-       (= right.kind .Add)
-       (= left.e right.e)
-       (= left.a right.a)
-       (value-equal? left.v right.v)))
-
-(defn prior-add-op-fact-exists? [ops: []Tx-Op, index: int, op: Tx-Op] -> bool
-  (let [prior 0]
-    (while (< prior index)
-      (when (same-add-op-fact? ops[prior] op)
-        (return true))
-      (set! prior (+ prior 1))))
   false)
 
 (defn compact-redundant-add-ops [ops: []Tx-Op] -> [dynamic]Tx-Op
@@ -433,10 +423,70 @@
           (set.add! current-facts fact-key)))))
   true)
 
-(defn compact-redundant-add-ops-with-ordered [ops: []Tx-Op, ordered-append-only-ok: bool] -> [dynamic]Tx-Op
-  (if ordered-append-only-ok
-    (arr.into [dynamic]Tx-Op ops)
-    (compact-redundant-add-ops ops)))
+(defn same-op-fact? [left: Tx-Op, right: Tx-Op] -> bool
+  (and (= left.e right.e)
+       (= left.a right.a)
+       (value-equal? left.v right.v)))
+
+(defn prior-op-fact-state [ops: []Tx-Op, op: Tx-Op] -> [touched: bool, current: bool]
+  (let [index (- (count ops) 1)]
+    (while (>= index 0)
+      (let [prior ops[index]]
+        (when (same-op-fact? prior op)
+          (return true (= prior.kind .Add))))
+      (set! index (- index 1))))
+  (return false false))
+
+(defn remove-prior-op-fact-kind! [ops: ^[dynamic]Tx-Op, op: Tx-Op, kind: Tx-Op-Kind]
+  (let [index (- (count ops^) 1)]
+    (while (>= index 0)
+      (let [prior ops^[index]]
+        (when (and (= prior.kind kind)
+                   (same-op-fact? prior op))
+          (arr.remove-ordered-at! ops^ index)))
+      (set! index (- index 1)))))
+
+(defn remove-prior-cardinality-one-adds! [ops: ^[dynamic]Tx-Op, op: Tx-Op]
+  (let [index (- (count ops^) 1)]
+    (while (>= index 0)
+      (let [prior ops^[index]]
+        (when (and (= prior.kind .Add)
+                   (= prior.e op.e)
+                   (= prior.a op.a))
+          (arr.remove-ordered-at! ops^ index)))
+      (set! index (- index 1)))))
+
+(defn compact-transaction-ops [before: DB, ops: []Tx-Op] -> [dynamic]Tx-Op
+  (let [out (make [dynamic]Tx-Op 0 (count ops))]
+    (for [op ops]
+      (when (and (= op.kind .Add)
+                 (schema-cardinality-one? before op.a)
+                 (not (overlay-ops-declare-cardinality-many? ops op.a)))
+        (remove-prior-cardinality-one-adds! (addr out) op))
+      (let [[touched current] (prior-op-fact-state (slice out 0) op)]
+        (if (= op.kind .Retract)
+          (do
+            (when touched
+              (when current
+                (remove-prior-op-fact-kind! (addr out) op .Add))
+              (continue))
+            (when (not (current-op-value-exists-in-log? before.datoms op))
+              (continue)))
+          (do
+            (when touched
+              (when current
+                (continue))
+              (remove-prior-op-fact-kind! (addr out) op .Retract))
+            (when (current-op-value-exists-in-log? before.datoms op)
+              (continue))))
+        (arr.push! out op)))
+    out))
+
+(defn ops-contain-derived? [ops: []Tx-Op] -> bool
+  (for [op ops]
+    (when op.derived
+      (return true)))
+  false)
 
 (defn append-only-ops-eligible? [before: DB, ops: []Tx-Op] -> bool
   (when (append-only-ordered-new-entity-ops-eligible? before ops)
@@ -639,7 +689,12 @@
         expanded-schema-changed (ops-modify-validation-schema? (slice expanded-ops 0))
         ordered-append-only-ok (and (not expanded-schema-changed)
                                     (append-only-ordered-new-entity-ops-eligible? before (slice expanded-ops 0)))
-        compacted-ops (compact-redundant-add-ops-with-ordered (slice expanded-ops 0) ordered-append-only-ok)
+        compacted-ops (if ordered-append-only-ok
+                        (arr.into [dynamic]Tx-Op (slice expanded-ops 0))
+                        (if (or expanded-schema-changed
+                                (ops-contain-derived? (slice expanded-ops 0)))
+                          (compact-redundant-add-ops (slice expanded-ops 0))
+                          (compact-transaction-ops before (slice expanded-ops 0))))
         tx-data (make [dynamic]Datom 0 (count compacted-ops))
         seen-ea (set.empty string)
         start-index (count before.datoms)

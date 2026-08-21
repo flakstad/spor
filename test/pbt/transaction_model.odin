@@ -13,7 +13,7 @@ import vev "../../clients/odin/vev"
 MODEL_ENTITY_COUNT :: 4
 MODEL_VALUE_COUNT :: 4
 MODEL_TRANSACTION_COUNT :: 12
-MODEL_LOG_DATOM_COUNT :: MODEL_TRANSACTION_COUNT * (MODEL_VALUE_COUNT + 1)
+MODEL_LOG_DATOM_COUNT :: MODEL_TRANSACTION_COUNT * (MODEL_VALUE_COUNT + 1) * 4
 
 MODEL_NAMES := [?]string{"ada", "grace", "barbara", "hedy"}
 MODEL_TAGS := [?]string{"red", "green", "blue", "gold"}
@@ -909,39 +909,43 @@ transaction_model_run :: proc(
 }
 
 transaction_model_command_edn :: proc(command: Model_Command) -> string {
+	return fmt.tprintf("[%s]", transaction_model_command_form_edn(command))
+}
+
+transaction_model_command_form_edn :: proc(command: Model_Command) -> string {
 	switch command.kind {
 	case .Add_Name:
 		return fmt.tprintf(
-			`[[:db/add %d :item/name "%s"]]`,
+			`[:db/add %d :item/name "%s"]`,
 			command.entity,
 			MODEL_NAMES[command.value_index],
 		)
 	case .Add_Tag:
 		return fmt.tprintf(
-			`[[:db/add %d :item/tags "%s"]]`,
+			`[:db/add %d :item/tags "%s"]`,
 			command.entity,
 			MODEL_TAGS[command.value_index],
 		)
 	case .Retract_Name:
 		return fmt.tprintf(
-			`[[:db/retract %d :item/name "%s"]]`,
+			`[:db/retract %d :item/name "%s"]`,
 			command.entity,
 			MODEL_NAMES[command.value_index],
 		)
 	case .Retract_Tag:
 		return fmt.tprintf(
-			`[[:db/retract %d :item/tags "%s"]]`,
+			`[:db/retract %d :item/tags "%s"]`,
 			command.entity,
 			MODEL_TAGS[command.value_index],
 		)
 	case .Retract_Name_Attribute:
-		return fmt.tprintf(`[[:db.fn/retractAttribute %d :item/name]]`, command.entity)
+		return fmt.tprintf(`[:db.fn/retractAttribute %d :item/name]`, command.entity)
 	case .Retract_Tags_Attribute:
-		return fmt.tprintf(`[[:db.fn/retractAttribute %d :item/tags]]`, command.entity)
+		return fmt.tprintf(`[:db.fn/retractAttribute %d :item/tags]`, command.entity)
 	case .Retract_Entity:
-		return fmt.tprintf(`[[:db/retractEntity %d]]`, command.entity)
+		return fmt.tprintf(`[:db/retractEntity %d]`, command.entity)
 	}
-	return "[]"
+	return ""
 }
 
 transaction_model_next_state :: proc(
@@ -959,6 +963,14 @@ transaction_model_next_state :: proc(
 	if next.ctx.track_since {
 		transaction_model_update_since(next.ctx, state, command)
 	}
+	return transaction_model_apply_command(next, command)
+}
+
+transaction_model_apply_command :: proc(
+	state: Model_State,
+	command: Model_Command,
+) -> Model_State {
+	next := state
 	entity_index := command.entity - 1
 	switch command.kind {
 	case .Add_Name:
@@ -990,8 +1002,21 @@ transaction_model_record_log :: proc(
 	command: Model_Command,
 	observation: Model_Observation,
 ) {
-	ctx.transaction_basis[ctx.transaction_count] = observation.basis
+	transaction_model_record_transaction(ctx, observation.basis)
+	transaction_model_record_command_datoms(ctx, state, command, observation.basis)
+}
+
+transaction_model_record_transaction :: proc(ctx: ^Model_Context, basis: u64) {
+	ctx.transaction_basis[ctx.transaction_count] = basis
 	ctx.transaction_count += 1
+}
+
+transaction_model_record_command_datoms :: proc(
+	ctx: ^Model_Context,
+	state: Model_State,
+	command: Model_Command,
+	basis: u64,
+) {
 	entity_index := command.entity - 1
 	switch command.kind {
 	case .Add_Name:
@@ -1003,7 +1028,7 @@ transaction_model_record_log :: proc(
 					command.entity,
 					.Name,
 					state.names[entity_index] - 1,
-					observation.basis,
+					basis,
 					false,
 				)
 			}
@@ -1012,7 +1037,7 @@ transaction_model_record_log :: proc(
 				command.entity,
 				.Name,
 				command.value_index,
-				observation.basis,
+				basis,
 				true,
 			)
 		}
@@ -1023,7 +1048,7 @@ transaction_model_record_log :: proc(
 				command.entity,
 				.Tag,
 				command.value_index,
-				observation.basis,
+				basis,
 				true,
 			)
 		}
@@ -1034,7 +1059,7 @@ transaction_model_record_log :: proc(
 				command.entity,
 				.Name,
 				command.value_index,
-				observation.basis,
+				basis,
 				false,
 			)
 		}
@@ -1045,7 +1070,7 @@ transaction_model_record_log :: proc(
 				command.entity,
 				.Tag,
 				command.value_index,
-				observation.basis,
+				basis,
 				false,
 			)
 		}
@@ -1056,7 +1081,7 @@ transaction_model_record_log :: proc(
 				command.entity,
 				.Name,
 				state.names[entity_index] - 1,
-				observation.basis,
+				basis,
 				false,
 			)
 		}
@@ -1068,7 +1093,7 @@ transaction_model_record_log :: proc(
 					command.entity,
 					.Tag,
 					value_index,
-					observation.basis,
+					basis,
 					false,
 				)
 			}
@@ -1080,7 +1105,7 @@ transaction_model_record_log :: proc(
 				command.entity,
 				.Name,
 				state.names[entity_index] - 1,
-				observation.basis,
+				basis,
 				false,
 			)
 		}
@@ -1091,7 +1116,7 @@ transaction_model_record_log :: proc(
 					command.entity,
 					.Tag,
 					value_index,
-					observation.basis,
+					basis,
 					false,
 				)
 			}

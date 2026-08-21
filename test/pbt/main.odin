@@ -194,6 +194,12 @@ main :: proc() {
 			description = "generated transactions preserve snapshots, time filters, history, and exact transaction-log ranges across backends and reopen",
 			tags = DIFFERENTIAL_MODEL_TAGS[:],
 		},
+		{
+			name = "atomic transaction batches agree with model",
+			property = transaction_batch_property,
+			description = "generated multi-operation transactions apply atomically and in order across resident, SQLite, and reopen",
+			tags = BATCH_MODEL_TAGS[:],
+		},
 	}
 
 	pbt.run_cli(properties[:], os.args[1:], {
