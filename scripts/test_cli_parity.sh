@@ -2,7 +2,9 @@
 # Copyright (c) Andreas Flakstad and Vev contributors
 # SPDX-License-Identifier: EPL-2.0
 
-set -euo pipefail
+set -Eeuo pipefail
+
+trap 'status=$?; printf "cli-parity-error line=%s status=%s\n" "$LINENO" "$status" >&2; exit "$status"' ERR
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLI="$ROOT/build/vevdb"
