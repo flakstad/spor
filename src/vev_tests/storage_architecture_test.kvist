@@ -1775,6 +1775,58 @@
       (vev.close-store right))
     (vev.close-store left)))
 
+(t.deftest sqlite-store-basis-follows-explicit-resident-writes
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.store-resident-basis.sqlite"]
+    (remove-sqlite-files path)
+    (defer (remove-sqlite-files path))
+    (let [[store opened-ok opened-error] (vev.open-store path)]
+      (t.is opened-ok opened-error)
+      (let [seed (vev.transact-store-report-text (addr store) "[{:db/id 1 :user/name \"Ada\"}]")]
+        (t.is seed.ok seed.error)
+        (vev.delete-store-tx-report seed))
+      (let [[resident-ok resident-error] (vev.ensure-store-resident! (addr store))]
+        (t.is resident-ok resident-error))
+      (let [[before before-ok before-error] (vev.store-basis-t (addr store))
+            report (vev.transact-store-report-text (addr store) "[{:db/id 2 :user/name \"Grace\"}]")
+            [after after-ok after-error] (vev.store-basis-t (addr store))]
+        (t.is before-ok before-error)
+        (t.is report.ok report.error)
+        (t.is after-ok after-error)
+        (t.is (= after (+ before 1)))
+        (vev.delete-store-tx-report report))
+      (vev.close-store store))))
+
+(t.deftest sqlite-explicit-resident-writer-reloads-after-external-write
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.store-resident-external-writer.sqlite"]
+    (remove-sqlite-files path)
+    (defer (remove-sqlite-files path))
+    (let [[left left-ok left-error] (vev.open-store path)]
+      (t.is left-ok left-error)
+      (let [seed (vev.transact-store-report-text (addr left) "[{:db/id 1 :user/name \"Ada\"}]")]
+        (t.is seed.ok seed.error)
+        (vev.delete-store-tx-report seed))
+      (let [[right right-ok right-error] (vev.open-store path)]
+        (t.is right-ok right-error)
+        (let [[resident-ok resident-error] (vev.ensure-store-resident! (addr right))]
+          (t.is resident-ok resident-error))
+        (let [external (vev.transact-store-report-text (addr left) "[{:db/id 2 :user/name \"Grace\"}]")]
+          (t.is external.ok external.error)
+          (vev.delete-store-tx-report external))
+        (let [resident (vev.transact-store-report-text (addr right) "[{:db/id 3 :user/name \"Hedy\"}]")
+              result (vev.q-result-store-text (addr right) "[:find ?name :where [?e :user/name ?name]]")]
+          (t.is resident.ok resident.error)
+          (t.is result.result.ok result.result.error)
+          (t.is (= (count result.result.rows) 3))
+          (t.is (result-has-string-row? result.result "Ada"))
+          (t.is (result-has-string-row? result.result "Grace"))
+          (t.is (result-has-string-row? result.result "Hedy"))
+          (vev.delete-query-result result)
+          (vev.delete-store-tx-report resident))
+        (vev.close-store right))
+      (vev.close-store left))))
+
 (t.deftest sqlite-datom-cache-retains-formerly-colliding-log-indexes
   (defer (free_all context.allocator))
   (let [snapshot (vev.SQLite-DB-Snapshot {datom-cache-log-indexes: (vev.sqlite-db-snapshot-empty-datom-cache-log-indexes)

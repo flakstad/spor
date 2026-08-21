@@ -574,11 +574,11 @@
               false
               (string-owned handle-error)))))
 
-(defn sqlite-conn-ensure-resident! [store: ^SQLite-Conn] -> [ok: bool, error: string]
-  (when store^.shared-resident-loaded
-    (return true ""))
+(defn sqlite-conn-reload-resident! [store: ^SQLite-Conn] -> [ok: bool, error: string]
   (sqlite-conn-invalidate-write-state-cache! store)
   (sqlite-conn-invalidate-direct-attr-cache! store)
+  (sqlite-conn-invalidate-log-metadata-cache! store)
+  (sqlite-conn-invalidate-current-root-cache! store)
   (let [[loaded-db opened-ok opened-error]
           (load-db-sqlite-resident-handle store^.handle)
         conn (conn-from-db loaded-db)]
@@ -588,20 +588,35 @@
       (delete-owned-db conn.db)
       (delete conn.listeners)
       (return false opened-error))
-    (delete-owned-db store^.conn.db)
-    (delete store^.conn.listeners)
-    (set! store^.conn conn)
-    (set! store^.resident-loaded true)
     (let [[shared shared-ok shared-error]
             (create-shared-conn-from-db
-              store^.conn.db sqlite-db-source-default-page-size)]
+              conn.db sqlite-db-source-default-page-size)]
       (when (not shared-ok)
+        (delete-owned-db conn.db)
+        (delete conn.listeners)
         (return false shared-error))
+      (delete-owned-db store^.conn.db)
+      (delete store^.conn.listeners)
+      (when store^.shared-resident-loaded
+        (delete-shared-conn store^.shared-resident))
+      (set! store^.conn conn)
+      (set! store^.resident-loaded true)
       (set! store^.shared-resident shared)
       (set! store^.shared-resident-loaded true))
     (return true "")))
 
+(defn sqlite-conn-ensure-resident! [store: ^SQLite-Conn] -> [ok: bool, error: string]
+  (when store^.shared-resident-loaded
+    (return true ""))
+  (sqlite-conn-reload-resident! store))
+
 (defn sqlite-conn-basis-t [store: ^SQLite-Conn] -> [basis-t: u64, ok: bool, error: string]
+  ;; Explicit resident reads and writes advance shared-resident. The original
+  ;; Conn remains only as the materialization source and no longer represents
+  ;; the connection's current basis after a shared-resident transaction.
+  (when (and store^.resident-reads-enabled store^.shared-resident-loaded)
+    (let [next-tx (shared-write-state-next-tx (addr store^.shared-resident.write))]
+      (return (if (= next-tx 0) 0 (- next-tx 1)) true "")))
   (when store^.resident-loaded
     (let [next-tx store^.conn.next-tx]
       (return (if (= next-tx 0) 0 (- next-tx 1)) true "")))
@@ -2111,8 +2126,25 @@
           (set! store^.resident-reads-enabled true)))))
   (when store^.resident-loaded
     (when (and store^.resident-reads-enabled store^.shared-resident-loaded)
-      (return (transact-sqlite-shared-resident-store-report-tx-data
-                store tx-data)))
+      ;; Another connection may commit after this resident snapshot was
+      ;; loaded. The append detects that exact basis race while holding the
+      ;; writer lock; reload the committed generation and resolve again.
+      (let [attempt 0]
+        (while (< attempt 16)
+          (let [report
+                  (transact-sqlite-shared-resident-store-report-tx-data
+                    store tx-data)]
+            (when (or report.ok
+                      (not (= report.error sqlite-write-basis-changed-error)))
+              (return report))
+            (delete-store-tx-report report)
+            (let [[reloaded reload-error] (sqlite-conn-reload-resident! store)]
+              (when (not reloaded)
+                (return (failed-sqlite-store-tx-report store reload-error))))
+            (inc! attempt)))
+        (return (failed-sqlite-store-tx-report
+                  store
+                  "SQLite transaction basis kept changing while retrying resident transaction"))))
     (return (store-tx-report-from-temp-resident-report
               (transact-sqlite-tx-data store tx-data))))
   (let [[direct-report direct-used direct-ok direct-error] (transact-sqlite-store-report-direct-tx-data store tx-data)]

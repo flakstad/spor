@@ -327,6 +327,30 @@ main :: proc() {
 			tags = INDEX_READ_TAGS[:],
 		},
 		{
+			name = "durable index maintenance preserves logical history",
+			property = index_maintenance_property,
+			description = "generated indexed histories remain byte-for-byte equivalent through bounded maintenance, compaction, residency, repeated compaction, and reopen",
+			tags = INDEX_MAINTENANCE_TAGS[:],
+		},
+		{
+			name = "durable connections serialize shared history",
+			property = multi_connection_property,
+			description = "generated writes through two live durable connections preserve one exact history, immutable checkpoints, stale-generation integration, maintenance, and reopen state",
+			tags = MULTI_CONNECTION_TAGS[:],
+		},
+		{
+			name = "stale resident conflicts preserve atomic history",
+			property = multi_connection_conflict_property,
+			description = "generated stale CAS and unique conflicts refresh against external commits, roll back prefixes without advancing history, preserve checkpoints, and allow later commits",
+			tags = MULTI_CONNECTION_CONFLICT_TAGS[:],
+		},
+		{
+			name = "concurrent durable writers preserve every commit",
+			property = concurrent_connection_property,
+			description = "generated synchronized writer races across source-backed and resident connection combinations preserve every unique commit, immutable checkpoints, exact coordinates, logs, and reopen state",
+			tags = CONCURRENT_CONNECTION_TAGS[:],
+		},
+		{
 			name = "index pull agrees with paged walk model",
 			property = index_pull_property,
 			description = "generated AVET and AEVT walks preserve forward and reverse ordering, duplicate targets, offset, limit, mutations, backend parity, and reopen",
