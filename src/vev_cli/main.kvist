@@ -2129,44 +2129,12 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                                         (cli-tx-report-value report))
                                   (set! resource.has-value true)
                                   (when report.ok
-                                    (if owns-store
-                                      (let [[store-form _]
-                                            (value-map-field step ":store")
-                                            [after-db after-ok after-error]
-                                            (exec-sqlite-lazy-db-pointer
-                                              store-form.text
-                                              (addr report.db-after))]
-                                        (if after-ok
-                                          (do
-                                            (set! resource.db-pointer after-db)
-                                            (set! resource.has-db-pointer true))
-                                          (do
-                                            (set! step-ok false)
-                                            (set! step-error after-error))))
-                                      (do
-                                        (set! resource.db
-                                              (vev.retain-store-db report.db-after))
-                                        (set! resource.has-db true)))
-                                    (if owns-store
-                                      (let [[store-form _]
-                                            (value-map-field step ":store")
-                                            [before-db before-ok before-error]
-                                            (exec-sqlite-lazy-db-pointer
-                                              store-form.text
-                                              (addr report.db-before))]
-                                        (if before-ok
-                                          (do
-                                            (set! resource.db-before-pointer
-                                                  before-db)
-                                            (set! resource.has-db-before-pointer
-                                                  true))
-                                          (do
-                                            (set! step-ok false)
-                                            (set! step-error before-error))))
-                                      (do
-                                        (set! resource.db-before
-                                              (vev.retain-store-db report.db-before))
-                                        (set! resource.has-db-before true)))
+                                    (set! resource.db
+                                          (vev.retain-store-db report.db-after))
+                                    (set! resource.has-db true)
+                                    (set! resource.db-before
+                                          (vev.retain-store-db report.db-before))
+                                    (set! resource.has-db-before true)
                                     (close-exec-step-store!
                                       step-store owns-store))
                                   (when (not report.ok)
