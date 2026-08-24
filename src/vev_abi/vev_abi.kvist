@@ -2067,6 +2067,20 @@
   (abi-sqlite-conn-basis-t (rawptr conn)))
 
 @export
+(defn vev_storage_basis_t :abi "c" [path: cstring, basis-out: ^u64] -> cstring
+  (odin "context = runtime.default_context()")
+  (when (or (= path nil) (= basis-out nil))
+    (return (c-string-owned "invalid storage path or basis output")))
+  (let [storage-path (text-from-c path)
+        [basis ok error] (vev.sqlite-latest-index-root-basis storage-path)]
+    (delete storage-path)
+    (if ok
+      (do
+        (set! basis-out^ (vev.store-db-tx-t basis))
+        (c-string-owned ""))
+      (c-string-owned error))))
+
+@export
 (defn vev_connection_backup :abi "c" [conn: Vev-Connection, destination-path: cstring, basis-out: ^u64] -> cstring
   (odin "context = runtime.default_context()")
   (when (or (= (rawptr conn) nil) (= destination-path nil) (= basis-out nil))

@@ -616,10 +616,10 @@
   ;; the connection's current basis after a shared-resident transaction.
   (when (and store^.resident-reads-enabled store^.shared-resident-loaded)
     (let [next-tx (shared-write-state-next-tx (addr store^.shared-resident.write))]
-      (return (if (= next-tx 0) 0 (- next-tx 1)) true "")))
+      (return (if (= next-tx 0) (u64 0) (- next-tx 1)) true "")))
   (when store^.resident-loaded
     (let [next-tx store^.conn.next-tx]
-      (return (if (= next-tx 0) 0 (- next-tx 1)) true "")))
+      (return (if (= next-tx 0) (u64 0) (- next-tx 1)) true "")))
   (vev.sqlite-latest-index-root-basis-raw store^.handle))
 
 (defn sqlite-conn-backup! [store: ^SQLite-Conn, destination-path: string] -> [basis-t: u64, ok: bool, error: string]

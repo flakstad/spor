@@ -213,6 +213,12 @@
         (set! ada-id resolved))
       (when (< (d.basis-t report.db-after) (u64 2))
         (panic "binary Kvist transaction report omitted db-after"))
+      (let [[persisted-basis persisted? persisted-error]
+              (d.persisted-basis-t path)]
+        (defer (delete persisted-error))
+        (when (or (not persisted?)
+                  (not (= persisted-basis (d.basis-t report.db-after))))
+          (panic "path basis did not match the public DB basis t")))
       (let [name-query
             '[:find ?name .
               :in $ ?id

@@ -948,7 +948,7 @@
                              old-level
                              (+ (max old-level added-level) 1))
               payload (string-owned "[]")
-              [parent-id parent-ok parent-error] (sqlite-insert-index-chunk-with-stmts handle stmts index-name parent-level ":shared-root" ":shared-root" (i64 (+ old-count (count appended))) (if flatten-parent (+ known-child-count 1) 2) payload "" basis-tx)]
+                [parent-id parent-ok parent-error] (sqlite-insert-index-chunk-with-stmts handle stmts index-name parent-level ":shared-root" ":shared-root" (i64 (+ old-count (count appended))) (if flatten-parent (+ known-child-count 1) (i64 2)) payload "" basis-tx)]
           (delete payload)
           (when (not parent-ok)
             (return 0 false parent-error))

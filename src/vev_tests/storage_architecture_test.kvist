@@ -1451,6 +1451,8 @@
         [root-page-count root-page-count-ok root-page-count-error] (vev.sqlite-conn-index-root-page-count (addr store))
         [chunk-count chunk-count-ok chunk-count-error] (vev.sqlite-conn-index-chunk-count (addr store))
         [basis basis-ok basis-error] (vev.sqlite-conn-latest-index-root-basis (addr store))
+        [path-basis path-basis-ok path-basis-error]
+          (vev.sqlite-latest-index-root-basis path)
         [eavt-basis eavt-rows eavt-ok eavt-error] (vev.sqlite-conn-latest-index-chunk-row-count (addr store) ":eavt")
         [aevt-basis aevt-rows aevt-ok aevt-error] (vev.sqlite-conn-latest-index-chunk-row-count (addr store) ":aevt")
         [avet-basis avet-rows avet-ok avet-error] (vev.sqlite-conn-latest-index-chunk-row-count (addr store) ":avet")
@@ -1479,6 +1481,12 @@
     (t.is basis-ok)
     (t.is (= basis-error ""))
     (t.is (= basis second-report.tx))
+    (t.is path-basis-ok path-basis-error)
+    (t.is (= path-basis-error ""))
+    (t.is (= path-basis second-report.tx))
+    ;; Public basis t is the Datomic coordinate, not the internal transaction
+    ;; entity id stored in index roots.
+    (t.is (= (vev.store-db-tx-t path-basis) (u64 2)))
     (t.is eavt-ok)
     (t.is (= eavt-error ""))
     (t.is (= eavt-basis second-report.tx))
