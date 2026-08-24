@@ -238,7 +238,6 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.connection_ok == nil ||
 	   library.api.connection_error == nil ||
 	   library.api.connection_basis_t == nil ||
-	   library.api.storage_basis_t == nil ||
 	   library.api.connection_backup == nil ||
 	   library.api.connection_tx_count == nil ||
 	   library.api.connection_ensure_resident == nil ||
