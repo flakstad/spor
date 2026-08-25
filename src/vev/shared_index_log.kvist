@@ -98,6 +98,16 @@
 (defn shared-int-index-count [index: Shared-Int-Index] -> int
   index.count)
 
+(defn shared-int-index-to-slice [index: Shared-Int-Index] -> [values: [dynamic]int, ok: bool]
+  (let [out (make [dynamic]int 0 index.count)]
+    (for [position (arr.range 0 index.count)]
+      (let [[value value-ok] (shared-int-index-at index position)]
+        (when (not value-ok)
+          (delete out)
+          (return (make [dynamic]int) false))
+        (arr.push! out value)))
+    (return out true)))
+
 (defn shared-int-index-at [index: Shared-Int-Index, position: int] -> [value: int, ok: bool]
   (when (or (< position 0)
             (>= position index.count))
@@ -913,4 +923,3 @@
                                                     report.datom-start-index
                                                     report.new-entities-after-existing)
     (shared-db-snapshot-with-tx-report base after report)))
-

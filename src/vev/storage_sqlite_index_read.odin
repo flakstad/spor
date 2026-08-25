@@ -3,6 +3,33 @@
 
 package vev
 
+sqlite_index_lag_stats_raw :: proc(handle: rawptr) -> (head_basis: u64, indexed_basis: u64, tail_transactions: u64, tail_datoms: u64, ok: bool, error: string) {
+    if handle == nil {
+        return 0, 0, 0, 0, false, "sqlite handle was nil"
+    }
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql := "WITH head(basis) AS (SELECT COALESCE(MAX(tx), 0) FROM vev_transactions), indexed(basis) AS (SELECT COALESCE(MAX(basis_tx), 0) FROM vev_index_roots) SELECT head.basis, indexed.basis, (SELECT COUNT(*) FROM vev_transactions WHERE tx > indexed.basis), (SELECT COUNT(*) FROM vev_datoms WHERE tx > indexed.basis) FROM head, indexed"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return 0, 0, 0, 0, false, "failed to allocate sqlite SQL text"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return 0, 0, 0, 0, false, sqlite_error_text(db, "sqlite prepare index lag stats failed")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    if sqlite3_step(stmt) != SQLITE_ROW {
+        return 0, 0, 0, 0, false, sqlite_error_text(db, "sqlite index lag stats read failed")
+    }
+    return u64(sqlite3_column_int64(stmt, 0)),
+           u64(sqlite3_column_int64(stmt, 1)),
+           u64(sqlite3_column_int64(stmt, 2)),
+           u64(sqlite3_column_int64(stmt, 3)),
+           true,
+           ""
+}
+
 import c "core:c"
 import "core:fmt"
 import "core:strings"

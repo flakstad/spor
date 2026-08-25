@@ -28,7 +28,7 @@ watch_signal_handler :: proc \"c\" (_sig: i32) {
   vevdb sync <uri> [target-t]
   vevdb confirm-entity-partitions <uri>
   vevdb transact <uri> <tx-edn | file.edn>
-  vevdb transact-many <uri> <txs-edn | file.edn> --mode logical|flatten
+  vevdb transact-many <uri> <txs-edn | file.edn> --mode committed|logical|flatten
   vevdb with <uri> <tx-edn | file.edn> [--db <pipeline-edn>]
   vevdb query <uri> <query-edn | file.edn> [inputs-edn | file.edn]
   vevdb pull <uri> <pattern-edn | file.edn> <entity-edn> [--db <pipeline-edn>]
@@ -48,6 +48,7 @@ watch_signal_handler :: proc \"c\" (_sig: i32) {
   vevdb index-pull <uri> <options-edn> [--db <pipeline-edn>]
   vevdb ensure-resident <uri>
   vevdb compact-indexes <uri>
+  vevdb reclaim-indexes <uri>
   vevdb maintain-indexes <uri> [--max-steps <n>]
   vevdb index-info <uri> [index]
   vevdb watch <uri> [--after <time-point>]
@@ -1452,6 +1453,20 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                  (vev.value-bool compacted)]))
             true "")
           (return (vev.Value {}) false error)))
+    (= operation ":reclaim-indexes")
+      (let [[reclaimed ok error] (vev.reclaim-store-indexes! store true)]
+        (if ok
+          (return
+            (vev.value-map
+              ([]vev.Value
+                [(vev.value-keyword (vev.string-owned ":ok"))
+                 (vev.value-bool true)
+                 (vev.value-keyword (vev.string-owned ":reclaimed?"))
+                 (vev.value-bool reclaimed)
+                 (vev.value-keyword (vev.string-owned ":physical?"))
+                 (vev.value-bool true)]))
+            true "")
+          (return (vev.Value {}) false error)))
     (= operation ":maintain-indexes")
       (let [[max-steps max-steps?] (value-map-field step ":max-steps")
             [steps-run compacted ok error]
@@ -1498,13 +1513,33 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
   -> [value: vev.Value, ok: bool, error: string]
   (when (not (= transactions.kind .Vector))
     (return (vev.Value {}) false "transact-many requires vector :transactions"))
-  (when (not (or (= mode "logical") (= mode "flatten")))
-    (return (vev.Value {}) false "transact-many :mode must be :logical or :flatten"))
+  (when (not (or (= mode "committed") (= mode "logical") (= mode "flatten")))
+    (return (vev.Value {}) false "transact-many :mode must be :committed, :logical, or :flatten"))
   (let [texts (make [dynamic]string)]
     (defer (delete-texts! texts))
     (for [tx transactions.items]
       (arr.push! texts (vev.value-serializable-text tx)))
-    (if (= mode "logical")
+    (if (= mode "committed")
+      (let [values (make [dynamic]vev.Value)
+            all-ok true
+            failure ""]
+        (for [text texts]
+          (let [report (vev.transact-store-report-text store text)]
+            (arr.push! values (cli-tx-report-value report))
+            (when (not report.ok)
+              (set! all-ok false)
+              (set! failure (vev.string-owned report.error)))
+            (vev.delete-store-tx-report report)
+            (when (not all-ok)
+              (break))))
+        (let [out (vev.value-vector-owned values)]
+          (if all-ok
+            (return out true "")
+            (do
+              (let [error (vev.string-owned failure)]
+                (delete failure)
+                (return out false error))))))
+      (if (= mode "logical")
       (let [[reports reports-ok reports-error]
             (vev.transact-store-report-logical-text-groups
               store (slice texts 0))]
@@ -1532,7 +1567,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                 report-ok report.ok
                 report-error report.error]
             (vev.delete-store-tx-report report)
-            (return value report-ok report-error)))))))
+            (return value report-ok report-error))))))))
 
 (defn exec-resolve-tempid-value [resources: [dynamic]Exec-Resource,
                                  step: vev.Value]
@@ -1594,6 +1629,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                            (= operation.text ":transact-many")
                            (= operation.text ":ensure-resident")
                            (= operation.text ":compact-indexes")
+                           (= operation.text ":reclaim-indexes")
                            (= operation.text ":maintain-indexes")))
               (set! needs-write true))))
         (when (and memory? needs-write)
@@ -2272,6 +2308,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                             (set! step-error "coordinate operation requires non-negative integer :value"))))
                     (or (= operation.text ":ensure-resident")
                         (= operation.text ":compact-indexes")
+                        (= operation.text ":reclaim-indexes")
                         (= operation.text ":maintain-indexes")
                         (= operation.text ":index-info"))
                       (let [[step-store owns-store store-ok store-error]
@@ -2387,8 +2424,8 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
   (delete texts))
 
 (defn command-transact-many [uri: string, txs-arg: string, mode: string] -> int
-  (when (not (or (= mode "logical") (= mode "flatten")))
-    (print-cli-error "transact-many --mode must be logical or flatten")
+  (when (not (or (= mode "committed") (= mode "logical") (= mode "flatten")))
+    (print-cli-error "transact-many --mode must be committed, logical, or flatten")
     (return 1))
   (let [[txs txs-ok txs-error] (read-value-arg txs-arg)]
     (when (not txs-ok)
@@ -2816,6 +2853,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                  (command-index-pull os.args[2] os.args[3] pipeline)
                (and (or (= command "ensure-resident")
                         (= command "compact-indexes")
+                        (= command "reclaim-indexes")
                         (= command "maintain-indexes"))
                     (>= (len os.args) 3))
                  (command-maintenance command os.args[2]

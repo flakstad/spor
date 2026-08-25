@@ -486,6 +486,7 @@ command is required.
 ```text
 vevdb ensure-resident <store>
 vevdb compact-indexes <store>
+vevdb reclaim-indexes <store>
 vevdb maintain-indexes <store> [--max-steps <n>]
 ```
 
@@ -495,6 +496,7 @@ be data rather than prose, for example:
 ```clojure
 {:ok true :resident? true}
 {:ok true :compacted? true}
+{:ok true :reclaimed? true :physical? true}
 {:ok true :steps 3 :compacted? true}
 ```
 
@@ -592,7 +594,7 @@ The executor must support these operation families:
 | Transactions | `:transact`, `:transact-many`, `:resolve-tempid` |
 | Log | `:log`, `:tx-range` |
 | Utilities | `:squuid`, `:squuid-time-millis`, `:t-to-tx`, `:tx-to-t` |
-| Maintenance | `:ensure-resident`, `:compact-indexes`, `:maintain-indexes`, `:index-info` |
+| Maintenance | `:ensure-resident`, `:compact-indexes`, `:reclaim-indexes`, `:maintain-indexes`, `:index-info` |
 
 Operation maps use the same EDN values and result shapes as the corresponding
 direct commands. The implementation should route direct commands through the

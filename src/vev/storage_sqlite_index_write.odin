@@ -1654,3 +1654,197 @@ sqlite_step_copy_index_chunk_edges_before_ordinal_stmt_raw :: proc(handle: rawpt
     _ = sqlite3_clear_bindings(stmt)
     return true, ""
 }
+
+// Reclaim only derived index state. The caller first publishes one compact,
+// manifest-free latest root set in the same transaction. Historical facts and
+// transaction coordinates remain in vev_datoms/vev_transactions and can
+// reconstruct an exact old basis when a retained descriptor is opened later.
+sqlite_reclaim_obsolete_index_artifacts_raw :: proc(handle: rawptr) -> (bool, string) {
+    if handle == nil {
+        return false, "sqlite handle was nil"
+    }
+    db := (^SQLite3)(handle)
+    sql := `
+DELETE FROM vev_index_root_pages
+ WHERE root_id <> (SELECT MAX(root_id) FROM vev_index_roots);
+DELETE FROM vev_index_roots
+ WHERE root_id <> (SELECT MAX(root_id) FROM vev_index_roots);
+DELETE FROM vev_index_run_manifest_entity_attr_ranges;
+DELETE FROM vev_index_run_manifest_attr_ranges;
+DELETE FROM vev_index_run_manifest_runs;
+DELETE FROM vev_index_run_manifests;
+WITH RECURSIVE reachable(chunk_id) AS (
+  SELECT root_chunk_id
+    FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots)
+  UNION
+  SELECT edge.child_chunk_id
+    FROM reachable
+    JOIN vev_index_chunk_edges edge
+      ON edge.parent_chunk_id = reachable.chunk_id
+)
+DELETE FROM vev_index_chunk_edges
+ WHERE parent_chunk_id NOT IN (SELECT chunk_id FROM reachable)
+    OR child_chunk_id NOT IN (SELECT chunk_id FROM reachable);
+WITH RECURSIVE reachable(chunk_id) AS (
+  SELECT root_chunk_id
+    FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots)
+  UNION
+  SELECT edge.child_chunk_id
+    FROM reachable
+    JOIN vev_index_chunk_edges edge
+      ON edge.parent_chunk_id = reachable.chunk_id
+)
+DELETE FROM vev_index_chunk_entries
+ WHERE chunk_id NOT IN (SELECT chunk_id FROM reachable);
+WITH RECURSIVE reachable(chunk_id) AS (
+  SELECT root_chunk_id
+    FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots)
+  UNION
+  SELECT edge.child_chunk_id
+    FROM reachable
+    JOIN vev_index_chunk_edges edge
+      ON edge.parent_chunk_id = reachable.chunk_id
+)
+DELETE FROM vev_index_chunks
+ WHERE chunk_id NOT IN (SELECT chunk_id FROM reachable);
+DELETE FROM vev_index_maintenance;
+INSERT OR REPLACE INTO vev_meta(key, value)
+VALUES ('derived-index-retention', 'latest-checkpoint-v1');
+`
+    return sqlite_exec_ok(db, sql)
+}
+
+// Drop historical derived roots and any manifest/chunk state not reachable
+// from the latest root. Unlike full reclamation this is safe when the latest
+// root still uses a structurally shared manifest chain.
+sqlite_prune_obsolete_index_artifacts_raw :: proc(handle: rawptr) -> (bool, string) {
+    if handle == nil {
+        return false, "sqlite handle was nil"
+    }
+    db := (^SQLite3)(handle)
+    sql := `
+DELETE FROM vev_index_root_pages
+ WHERE root_id <> (SELECT MAX(root_id) FROM vev_index_roots);
+DELETE FROM vev_index_roots
+ WHERE root_id <> (SELECT MAX(root_id) FROM vev_index_roots);
+WITH RECURSIVE retained(manifest_id) AS (
+  SELECT manifest_id
+    FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots)
+     AND manifest_id <> 0
+  UNION
+  SELECT manifest.parent_manifest_id
+    FROM retained
+    JOIN vev_index_run_manifests manifest
+      ON manifest.manifest_id = retained.manifest_id
+   WHERE manifest.parent_manifest_id <> 0
+)
+DELETE FROM vev_index_run_manifest_entity_attr_ranges
+ WHERE manifest_id NOT IN (SELECT manifest_id FROM retained);
+WITH RECURSIVE retained(manifest_id) AS (
+  SELECT manifest_id FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots) AND manifest_id <> 0
+  UNION
+  SELECT manifest.parent_manifest_id FROM retained
+    JOIN vev_index_run_manifests manifest ON manifest.manifest_id = retained.manifest_id
+   WHERE manifest.parent_manifest_id <> 0
+)
+DELETE FROM vev_index_run_manifest_attr_ranges
+ WHERE manifest_id NOT IN (SELECT manifest_id FROM retained);
+WITH RECURSIVE retained(manifest_id) AS (
+  SELECT manifest_id FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots) AND manifest_id <> 0
+  UNION
+  SELECT manifest.parent_manifest_id FROM retained
+    JOIN vev_index_run_manifests manifest ON manifest.manifest_id = retained.manifest_id
+   WHERE manifest.parent_manifest_id <> 0
+)
+DELETE FROM vev_index_run_manifest_runs
+ WHERE manifest_id NOT IN (SELECT manifest_id FROM retained);
+WITH RECURSIVE retained(manifest_id) AS (
+  SELECT manifest_id FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots) AND manifest_id <> 0
+  UNION
+  SELECT manifest.parent_manifest_id FROM retained
+    JOIN vev_index_run_manifests manifest ON manifest.manifest_id = retained.manifest_id
+   WHERE manifest.parent_manifest_id <> 0
+)
+DELETE FROM vev_index_run_manifests
+ WHERE manifest_id NOT IN (SELECT manifest_id FROM retained);
+WITH RECURSIVE
+retained_manifests(manifest_id) AS (
+  SELECT manifest_id FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots) AND manifest_id <> 0
+  UNION
+  SELECT manifest.parent_manifest_id FROM retained_manifests
+    JOIN vev_index_run_manifests manifest ON manifest.manifest_id = retained_manifests.manifest_id
+   WHERE manifest.parent_manifest_id <> 0
+),
+reachable(chunk_id) AS (
+  SELECT root_chunk_id FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots)
+  UNION SELECT base_chunk_id FROM vev_index_run_manifests
+   WHERE manifest_id IN (SELECT manifest_id FROM retained_manifests)
+  UNION SELECT run_chunk_id FROM vev_index_run_manifest_runs
+   WHERE manifest_id IN (SELECT manifest_id FROM retained_manifests)
+  UNION SELECT edge.child_chunk_id FROM reachable
+    JOIN vev_index_chunk_edges edge ON edge.parent_chunk_id = reachable.chunk_id
+)
+DELETE FROM vev_index_chunk_edges
+ WHERE parent_chunk_id NOT IN (SELECT chunk_id FROM reachable)
+    OR child_chunk_id NOT IN (SELECT chunk_id FROM reachable);
+WITH RECURSIVE
+retained_manifests(manifest_id) AS (
+  SELECT manifest_id FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots) AND manifest_id <> 0
+  UNION SELECT manifest.parent_manifest_id FROM retained_manifests
+    JOIN vev_index_run_manifests manifest ON manifest.manifest_id = retained_manifests.manifest_id
+   WHERE manifest.parent_manifest_id <> 0
+),
+reachable(chunk_id) AS (
+  SELECT root_chunk_id FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots)
+  UNION SELECT base_chunk_id FROM vev_index_run_manifests
+   WHERE manifest_id IN (SELECT manifest_id FROM retained_manifests)
+  UNION SELECT run_chunk_id FROM vev_index_run_manifest_runs
+   WHERE manifest_id IN (SELECT manifest_id FROM retained_manifests)
+  UNION SELECT edge.child_chunk_id FROM reachable
+    JOIN vev_index_chunk_edges edge ON edge.parent_chunk_id = reachable.chunk_id
+)
+DELETE FROM vev_index_chunk_entries WHERE chunk_id NOT IN (SELECT chunk_id FROM reachable);
+WITH RECURSIVE
+retained_manifests(manifest_id) AS (
+  SELECT manifest_id FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots) AND manifest_id <> 0
+  UNION SELECT manifest.parent_manifest_id FROM retained_manifests
+    JOIN vev_index_run_manifests manifest ON manifest.manifest_id = retained_manifests.manifest_id
+   WHERE manifest.parent_manifest_id <> 0
+),
+reachable(chunk_id) AS (
+  SELECT root_chunk_id FROM vev_index_root_pages
+   WHERE root_id = (SELECT MAX(root_id) FROM vev_index_roots)
+  UNION SELECT base_chunk_id FROM vev_index_run_manifests
+   WHERE manifest_id IN (SELECT manifest_id FROM retained_manifests)
+  UNION SELECT run_chunk_id FROM vev_index_run_manifest_runs
+   WHERE manifest_id IN (SELECT manifest_id FROM retained_manifests)
+  UNION SELECT edge.child_chunk_id FROM reachable
+    JOIN vev_index_chunk_edges edge ON edge.parent_chunk_id = reachable.chunk_id
+)
+DELETE FROM vev_index_chunks WHERE chunk_id NOT IN (SELECT chunk_id FROM reachable);
+DELETE FROM vev_index_maintenance
+ WHERE basis_tx <> (SELECT MAX(basis_tx) FROM vev_index_roots);
+INSERT OR REPLACE INTO vev_meta(key, value)
+VALUES ('derived-index-retention', 'latest-reachable-v1');
+`
+    return sqlite_exec_ok(db, sql)
+}
+
+sqlite_vacuum_raw :: proc(handle: rawptr) -> (bool, string) {
+    if handle == nil {
+        return false, "sqlite handle was nil"
+    }
+    return sqlite_exec_ok((^SQLite3)(handle), "VACUUM")
+}

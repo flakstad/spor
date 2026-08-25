@@ -362,6 +362,10 @@
                                 (vev.add 30 ":release/media" (vev.value-entity 20))
                                 (vev.add 30 ":release/name" (vev.value-string "Example Album"))
                                 (vev.add 30 ":release/year" (vev.value-int 1971))]))
+        ;; This test asserts the stable-checkpoint joined-frontier plan. The
+        ;; preceding seed commit is otherwise intentionally left in the
+        ;; bounded novelty tail, whose composed source has distinct counters.
+        [_ compact-ok compact-error] (vev.compact-store-indexes! (addr store))
         [db db-ok db-error] (vev.store-db (addr store))
         [source source-ok source-error] (vev.store-db-read-source (addr db))
         prepared (vev.prepare-query-text "[:find ?title ?artist ?album ?year :in $ % ?search :where (track-search ?search ?track) (track-info ?track ?title ?artist ?album ?year)]")
@@ -370,6 +374,7 @@
     (t.is opened-ok opened-error)
     (t.is schema.ok schema.error)
     (t.is seed.ok seed.error)
+    (t.is compact-ok compact-error)
     (t.is db-ok db-error)
     (t.is source-ok source-error)
     (t.is prepared.ok prepared.error)

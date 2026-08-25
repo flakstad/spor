@@ -742,29 +742,24 @@
 (defn shared-write-state-append-incoming-retract-ops! [ops: ^[dynamic]Tx-Op, source: DB-Read-Source, entity: u64] -> [ok: bool, error: string]
   (let [ref-value (value-entity entity)
         values ([]Value [ref-value])
-        view (db-read-source-index-view source .VAET)
-        ;; The source index lookup may include ordinary integers that compare
-        ;; numerically with the entity id. Keep the broad index range, then
-        ;; require an exact Entity value below before retracting a fact.
-        [low low-ok low-error] (db-read-source-lower-bound-values source view values)]
-    (when (not low-ok)
-      (return false low-error))
-    (let [[high high-ok high-error] (db-read-source-upper-bound-values source view values)]
-      (when (not high-ok)
-        (return false high-error))
-      (for [pos (arr.range low high)]
-        (let [entry (db-index-view-at view pos)
-              [current current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
-          (when (not current-ok)
-            (return false current-error))
-          (when current
-            (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
-              (when (not datom-ok)
-                (return false datom-error))
-              (when (and (= datom.v.kind .Entity)
-                         (= datom.v.entity entity))
-                (shared-write-state-push-owned-retract-op-once! ops datom.e datom.a datom.v))
-              (delete-owned-datom datom)))))))
+        datoms (make [dynamic]Datom)
+        ;; Scan through the read-source merger, not only the checkpoint's base
+        ;; VAET view: incoming refs committed in the novelty tail are equally
+        ;; current and must participate in retractEntity/component cascades.
+        [scan-ok scan-error]
+          (db-read-source-append-index-datoms!
+            (addr datoms) source .VAET values)]
+    (when (not scan-ok)
+      (delete-owned-datoms datoms)
+      (return false scan-error))
+    ;; The broad VAET comparison can include ordinary integers. Require an
+    ;; exact entity-valued reference before retracting the incoming fact.
+    (for [datom datoms]
+      (when (and (= datom.v.kind .Entity)
+                 (= datom.v.entity entity))
+        (shared-write-state-push-owned-retract-op-once!
+          ops datom.e datom.a datom.v)))
+    (delete-owned-datoms datoms))
   (return true ""))
 
 
@@ -2313,8 +2308,18 @@
 (defn db-read-source-next-entity-id [source: DB-Read-Source] -> [entity: u64, ok: bool, error: string]
   (when (= source.kind .SQLite-Snapshot)
     (return (sqlite-db-snapshot-next-entity-id source.sqlite-snapshot)))
+  (when (= source.kind .Tx-Ops-Overlay)
+    (let [[base-next base-ok base-error] (db-read-source-next-entity-id source.overlay-base^)]
+      (when (not base-ok)
+        (return 0 false base-error))
+      (let [next base-next]
+        (for [op source.overlay-ops^]
+          (when (and (< op.e tx-partition-base) (>= op.e next))
+            (set! next (+ op.e 1))))
+        (return next true ""))))
   (let [view (db-read-source-index-view source .EAVT)
-        position (- (db-index-view-count view) 1)]
+        position (- (db-index-view-count view) 1)
+        next: u64 1]
     (while (>= position 0)
       ;; A view position is not necessarily a datom-log index. Durable
       ;; manifest views map positions through their ordered index entries.
@@ -2325,9 +2330,32 @@
         (let [entity datom.e]
           (delete-owned-datom datom)
           (when (< entity tx-partition-base)
-            (return (+ entity 1) true ""))))
+            (set! next (+ entity 1))
+            (break))))
       (mut! position -= 1))
-    (return 1 true "")))
+    ;; Durable checkpoint views intentionally exclude the committed novelty
+    ;; tail. Entity allocation must nevertheless observe that tail, otherwise
+    ;; successive transactions can reuse an entity id and turn an insert into
+    ;; a cardinality-one replacement.
+    (when (or (= source.kind .Shared-Tx-Ops-Overlay)
+              (= source.kind .SQLite-Tx-Ops-Overlay))
+      (for [op source.overlay-ops^]
+        (when (and (< op.e tx-partition-base) (>= op.e next))
+          (set! next (+ op.e 1)))))
+    (when (or (= source.kind .Shared-Datom-Overlay)
+              (= source.kind .SQLite-Datom-Overlay))
+      (for [datom source.overlay-datoms^]
+        (when (and (< datom.e tx-partition-base) (>= datom.e next))
+          (set! next (+ datom.e 1)))))
+    (when (or (= source.kind .Shared-Datom-Log-Overlay)
+              (= source.kind .SQLite-Datom-Log-Overlay))
+      (for [index (arr.range 0 source.overlay-log^.count)]
+        (let [[datom datom-ok] (shared-datom-log-at source.overlay-log^ index)]
+          (when datom-ok
+            (when (and (< datom.e tx-partition-base) (>= datom.e next))
+              (set! next (+ datom.e 1)))
+            (delete-owned-datom datom)))))
+    (return next true "")))
 
 (defn db-read-source-has-tuple-schema? [source: DB-Read-Source] -> [has-tuple: bool, ok: bool, error: string]
   (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source ":db/tupleAttrs")]

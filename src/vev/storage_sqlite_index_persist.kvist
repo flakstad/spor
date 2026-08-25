@@ -13,6 +13,13 @@
 (def sqlite-index-merge-root-max-direct-runs 5)
 (def sqlite-index-foreground-merge-row-budget 512)
 (def sqlite-index-auto-maintenance-row-budget 512)
+(def sqlite-index-auto-maintenance-steps 4)
+(def sqlite-index-auto-maintenance-target 4)
+(def sqlite-index-auto-maintenance-trigger 8)
+(def sqlite-index-logical-group-checkpoint-threshold 8)
+(def sqlite-index-automatic-checkpoint-root-threshold 128)
+(def sqlite-index-novelty-transaction-threshold 128)
+(def sqlite-index-novelty-datom-threshold 4096)
 
 (defn index-int-slice-text [items: []int] -> string
   (let [builder (kstr.builder)]

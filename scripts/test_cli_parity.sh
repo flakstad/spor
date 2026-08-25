@@ -48,6 +48,16 @@ flatten="$($CLI transact-many "$DB" \
     [{:db/id 7 :person/name "Donald"}]]' --mode flatten)"
 case "$flatten" in '{'*':ok true'*) ;; *) exit 1 ;; esac
 
+if committed_failure="$($CLI transact-many "$DB" \
+  '[[{:db/id 8 :person/name "Committed"}]
+    [[:db.fn/cas 1 :person/name "Wrong" "Changed"]]]' \
+  --mode committed 2>&1)"; then
+  exit 1
+fi
+case "$committed_failure" in *':ok false'*) ;; *) exit 1 ;; esac
+committed_visible="$($CLI entity-get "$DB" 8 :person/name)"
+test "$committed_visible" = '"Committed"'
+
 exec_result="$($CLI exec "$DB" \
   '{:steps [{:id :current :op :db}
             {:id :old :op :as-of :db [:ref :current] :time 1}
@@ -112,6 +122,13 @@ case "$index_pulled" in *'"ada@example.test"'*) ;; *) exit 1 ;; esac
 
 maintained="$($CLI maintain-indexes "$DB" --max-steps 0)"
 case "$maintained" in *':ok true'*':steps '*) ;; *) exit 1 ;; esac
+reclaimed="$($CLI reclaim-indexes "$DB")"
+case "$reclaimed" in *':ok true'*':reclaimed? true'*':physical? true'*) ;; *) exit 1 ;; esac
+reclaimed_as_of="$($CLI query "$DB" \
+  '[:find ?name :where [?e :person/name ?name]]' \
+  --result q --db '[[:as-of 1]]')"
+case "$reclaimed_as_of" in *'"Ada"'*) ;; *) exit 1 ;; esac
+case "$reclaimed_as_of" in *'"Grace"'*) exit 1 ;; esac
 index_info="$($CLI index-info "$DB" :eavt)"
 case "$index_info" in *':index :eavt'*':run-count '*) ;; *) exit 1 ;; esac
 

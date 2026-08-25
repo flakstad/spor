@@ -1834,6 +1834,77 @@ sqlite_load_datom_rows_text_handle_raw :: proc(handle: rawptr) -> (string, bool,
     return out, true, ""
 }
 
+// Load only the canonical novelty after an index checkpoint.  The caller is
+// expected to hold a SQLite read transaction while it reads the root and this
+// tail, so the two pieces describe one committed database generation.
+sqlite_load_datom_rows_text_after_basis_handle_raw :: proc(handle: rawptr, after_basis: u64, through_basis: u64) -> (string, bool, string) {
+    if handle == nil {
+        return "", false, "sqlite handle was nil"
+    }
+    db := (^SQLite3)(handle)
+    stmt: ^SQLite3_Stmt
+    sql := "SELECT e, a, value_text, tx, added FROM vev_datoms WHERE tx > ? AND tx <= ? ORDER BY tx, id"
+    sql_c, sql_c_ok := sqlite_cstring(sql)
+    if !sql_c_ok {
+        return "", false, "failed to allocate sqlite SQL text"
+    }
+    defer delete(sql_c)
+    if sqlite3_prepare_v2(db, sql_c, -1, &stmt, nil) != SQLITE_OK {
+        return "", false, sqlite_error_text(db, "sqlite prepare datom tail read failed")
+    }
+    defer _ = sqlite3_finalize(stmt)
+    if sqlite3_bind_int64(stmt, 1, i64(after_basis)) != SQLITE_OK ||
+       sqlite3_bind_int64(stmt, 2, i64(through_basis)) != SQLITE_OK {
+        return "", false, sqlite_error_text(db, "sqlite bind datom tail read failed")
+    }
+    parts := make([dynamic]string)
+    append(&parts, "[")
+    first := true
+    for {
+        rc := sqlite3_step(stmt)
+        if rc == SQLITE_DONE {
+            break
+        }
+        if rc != SQLITE_ROW {
+            delete(parts)
+            return "", false, sqlite_error_text(db, "sqlite datom tail read failed")
+        }
+        a_raw := sqlite3_column_text(stmt, 1)
+        value_raw := sqlite3_column_text(stmt, 2)
+        if a_raw == nil || value_raw == nil {
+            delete(parts)
+            return "", false, "sqlite datom tail row had null text"
+        }
+        a_text, a_err := strings.clone_from_cstring(a_raw)
+        if a_err != nil {
+            delete(parts)
+            return "", false, "failed to clone sqlite datom tail attr"
+        }
+        value_text, value_err := strings.clone_from_cstring(value_raw)
+        if value_err != nil {
+            delete(a_text)
+            delete(parts)
+            return "", false, "failed to clone sqlite datom tail value"
+        }
+        if !first {
+            append(&parts, " ")
+        }
+        first = false
+        append(&parts, fmt.tprintf("[%d %s %s %d %v]",
+            sqlite3_column_int64(stmt, 0),
+            sqlite_attr_serializable_text(a_text),
+            value_text,
+            sqlite3_column_int64(stmt, 3),
+            sqlite3_column_int(stmt, 4) != 0))
+        delete(a_text)
+        delete(value_text)
+    }
+    append(&parts, "]")
+    out := strings.concatenate(parts[:])
+    delete(parts)
+    return out, true, ""
+}
+
 sqlite_load_datom_rows_text_raw :: proc(path: string) -> (string, bool, string) {
     db, open_ok, open_error := sqlite_open_initialized(path)
     if !open_ok {

@@ -5,6 +5,76 @@
 
 (def sqlite-db-source-default-page-size 512)
 
+(defn sqlite-store-db-checkpoint-with-tail [path: string] -> [snapshot: Store-DB, ok: bool, error: string]
+  (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
+    (when (not open-ok)
+      (return (Store-DB {}) false open-error))
+    (let [[read-ok read-started read-error] (vev.sqlite-begin-query-read-raw handle)]
+      (when (not read-ok)
+        (vev.sqlite-close-live-raw handle)
+        (return (Store-DB {}) false read-error))
+      (discard read-started))
+    (let [[head-basis indexed-basis _tail-transactions tail-datoms lag-ok lag-error]
+            (vev.sqlite-index-lag-stats-raw handle)]
+      (when (not lag-ok)
+        (vev.sqlite-end-query-read-raw handle true)
+        (vev.sqlite-close-live-raw handle)
+        (return (Store-DB {}) false lag-error))
+      (when (= indexed-basis 0)
+        (vev.sqlite-end-query-read-raw handle true)
+        (vev.sqlite-close-live-raw handle)
+        (let [[db db-ok db-error] (load-db-sqlite-resident path)]
+          (if db-ok
+            (return (Store-DB {kind: .Resident resident: db}) true "")
+            (do
+              (delete-owned-db db)
+              (return (Store-DB {}) false db-error)))))
+      (let [[root-count count-ok count-error]
+              (vev.sqlite-index-chunk-row-count-at-basis-raw handle ":eavt" indexed-basis)]
+        (when (not count-ok)
+          (vev.sqlite-end-query-read-raw handle true)
+          (vev.sqlite-close-live-raw handle)
+          (return (Store-DB {}) false count-error))
+        ;; A true value is conservative for the checkpoint and avoids a second
+        ;; basis-filtered scan. It affects only current-datom acceleration.
+        (let [[has-retractions retractions-ok retractions-error]
+                (vev.sqlite-datom-has-retractions-raw handle)]
+          (when (not retractions-ok)
+            (vev.sqlite-end-query-read-raw handle true)
+            (vev.sqlite-close-live-raw handle)
+            (return (Store-DB {}) false retractions-error))
+          (let [[base base-ok base-error]
+                  (sqlite-open-db-snapshot-handle-at-basis-known-log
+                    handle indexed-basis sqlite-db-source-default-page-size
+                    root-count has-retractions)]
+            (when (not base-ok)
+              (vev.sqlite-end-query-read-raw handle true)
+              (vev.sqlite-close-live-raw handle)
+              (return (Store-DB {}) false base-error))
+            (set! base.indexes.owns-handle true)
+            (set! base.path (string-owned path))
+            (when (or (= head-basis indexed-basis) (= tail-datoms 0))
+              (return (Store-DB {kind: .SQLite-Snapshot sqlite-snapshot: base}) true ""))
+            (let [[tail-text tail-ok tail-error]
+                    (vev.sqlite-load-datom-rows-text-after-basis-handle-raw
+                      handle indexed-basis head-basis)]
+              (when (not tail-ok)
+                (close-sqlite-db-snapshot base)
+                (return (Store-DB {}) false tail-error))
+              (defer (delete tail-text))
+              (let [[tail-db parsed-ok parsed-error]
+                      (from-serializable-text tail-text)]
+                (when (not parsed-ok)
+                  (close-sqlite-db-snapshot base)
+                  (delete-owned-db tail-db)
+                  (return (Store-DB {}) false parsed-error))
+                (let [out (sqlite-store-db-with-datom-log-overlay
+                            base (slice tail-db.datoms 0))]
+                  (set! out.overlay-tx head-basis)
+                  (delete-owned-db tail-db)
+                  (close-sqlite-db-snapshot base)
+                  (return out true ""))))))))))
+
 (defn query-result-owned-copy [result: Query-Result] -> Query-Result
   (when (query-result-owns-values? result)
     (return result))
@@ -66,12 +136,7 @@
     (when (not lag-ok)
       (return (Store-DB {}) false lag-error))
     (when lags
-      (let [[db db-ok db-error] (load-db-sqlite-resident store^.path)]
-        (if db-ok
-          (return (Store-DB {kind: .Resident resident: db}) true "")
-          (do
-            (delete-owned-db db)
-            (return (Store-DB {}) false db-error))))))
+      (return (sqlite-store-db-checkpoint-with-tail store^.path))))
   (let [[basis basis-ok basis-error] (sqlite-conn-current-root-basis store)]
     (when (not basis-ok)
       (return (sqlite-store-db store)))
@@ -108,12 +173,7 @@
     (when (not lag-ok)
       (return (Store-DB {}) false lag-error))
     (when lags
-      (let [[db db-ok db-error] (load-db-sqlite-resident store^.path)]
-        (if db-ok
-          (return (Store-DB {kind: .Resident resident: db}) true "")
-          (do
-            (delete-owned-db db)
-            (return (Store-DB {}) false db-error))))))
+      (return (sqlite-store-db-checkpoint-with-tail store^.path))))
   ;; A public DB value is a cheap immutable root descriptor. It must not hold
   ;; statements on the writable connection's live SQLite handle: callers may
   ;; retain DB values across later transactions and use them on other threads.
@@ -142,10 +202,7 @@
           "")))))
 
 (defn sqlite-store-db-latest [store: ^SQLite-Conn] -> [snapshot: Store-DB, ok: bool, error: string]
-  (let [[sqlite-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot store^.path sqlite-db-source-default-page-size)]
-    (when snapshot-ok
-      (return (Store-DB {kind: .SQLite-Snapshot sqlite-snapshot: sqlite-snapshot}) true ""))
-    (return (Store-DB {}) false snapshot-error)))
+  (sqlite-store-db-checkpoint-with-tail store^.path))
 
 (defn sqlite-lazy-store-db-at-basis [path: string, basis-tx: u64] -> Store-DB
   (Store-DB {kind: .SQLite-Lazy-Snapshot
@@ -329,8 +386,14 @@
   (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
     (when (not open-ok)
       (return (SQLite-DB-Snapshot {}) false open-error))
+    (let [[read-started read-ok read-error] (vev.sqlite-begin-query-read-raw handle)]
+      (when (not read-ok)
+        (vev.sqlite-close-live-raw handle)
+        (return (SQLite-DB-Snapshot {}) false read-error))
+      (discard read-started))
     (let [[opened-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot-handle-at-root-set handle published page-size)]
       (when (not snapshot-ok)
+        (vev.sqlite-end-query-read-raw handle true)
         (vev.sqlite-close-live-raw handle)
         (return opened-snapshot false snapshot-error))
       (set! opened-snapshot.indexes.owns-handle true)

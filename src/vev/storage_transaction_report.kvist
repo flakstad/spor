@@ -208,7 +208,10 @@
                       error: report.error
                       db-before: (retain-store-db before)
                       db-after: (Store-DB {kind: .Shared-Snapshot shared-snapshot: after-snapshot})
-                      tx-data: (clone-datoms report.tx-data)
+                      ;; delete-store-db-temp-tx-report destroys the resident
+                      ;; report and its owned tx-data immediately after this
+                      ;; conversion, so this report needs an independent copy.
+                      tx-data: (clone-owned-datom-slice (slice report.tx-data 0))
                       tx: report.tx
                       tx-meta: (clone-tx-meta (slice report.tx-meta 0))
                       tempids: tempids
@@ -308,7 +311,7 @@
     (close-store-db before)
     (sqlite-commit-initial-source-overlay-report store overlay-report)))
 
-(defn transact-sqlite-store-report-direct-tx-data-with-before-mode [store: ^SQLite-Conn, before: Store-DB, tx-data: []Tx-Data, owns-sqlite-tx: bool] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
+(defn transact-sqlite-store-report-direct-tx-data-with-before-mode [store: ^SQLite-Conn, before: Store-DB, tx-data: []Tx-Data, owns-sqlite-tx: bool, publish-indexes: bool] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (let [owned-before before
         read-source-start (time.now)
         [source source-ok source-error] (store-db-read-source (addr owned-before))]
@@ -342,13 +345,15 @@
             (delete-resolved-tx resolved)
             (close-store-db owned-before)
             (return (Store-Tx-Report {}) false false overlay-error))
-          (when (not (= owned-before.kind .SQLite-Snapshot))
+          (when (and publish-indexes
+                     (not (= owned-before.kind .SQLite-Snapshot)))
             (delete-owned-tx-ops overlay-ops)
             (delete-resolved-tx resolved)
             (close-store-db owned-before)
             (return (Store-Tx-Report {}) false false "source-direct SQLite write requires a SQLite snapshot basis"))
           (let [tx state^.conn.next-tx
-                start-index owned-before.sqlite-snapshot.datom-count
+                source-eavt (db-read-source-index-view source .EAVT)
+                start-index (db-index-view-count source-eavt)
                 new-entities-after-existing (source-append-ops-all-new-entities? state^.next-entity-id (slice overlay-ops 0))
                 appended (source-overlay-datoms-from-ops (slice overlay-ops 0) tx)]
             (let [append-start (time.now)
@@ -358,9 +363,29 @@
                                                            aevt: false
                                                            avet: false
                                                            vaet: false})
-                  plan (sqlite-durable-append-plan-from-modes (slice appended 0) start-index append-modes (addr store^.direct-write-profile))
-                  [published-root append-ok append-error] (append-source-direct-sqlite-conn-from-source-plan-published-mode store source tx (slice appended 0) (slice resolved.tx-meta 0) plan (addr store^.direct-write-profile) owns-sqlite-tx)]
-              (defer (delete-sqlite-durable-append-plan plan))
+                  published-root (SQLite-Durable-Published-Root {})
+                  append-ok false
+                  append-error ""]
+              (if publish-indexes
+                (let [plan (sqlite-durable-append-plan-from-modes
+                             (slice appended 0) start-index append-modes
+                             (addr store^.direct-write-profile))
+                      [next-published root-ok root-error]
+                        (append-source-direct-sqlite-conn-from-source-plan-published-mode
+                          store source tx (slice appended 0)
+                          (slice resolved.tx-meta 0) plan
+                          (addr store^.direct-write-profile) owns-sqlite-tx)]
+                  (delete-sqlite-durable-append-plan plan)
+                  (set! published-root next-published)
+                  (set! append-ok root-ok)
+                  (set! append-error root-error))
+                (let [[tail-ok tail-error]
+                        (append-source-direct-sqlite-conn-log-only-mode!
+                          store source tx (slice appended 0)
+                          (slice resolved.tx-meta 0) start-index
+                          (addr store^.direct-write-profile) owns-sqlite-tx)]
+                  (set! append-ok tail-ok)
+                  (set! append-error tail-error)))
               (set! store^.direct-write-profile.append-us (+ store^.direct-write-profile.append-us (sqlite-profile-elapsed-us append-start)))
               (when (not append-ok)
                 (let [failed (failed-store-tx-report owned-before append-error)]
@@ -370,38 +395,48 @@
                   (close-store-db owned-before)
                   (return failed true true "")))
               (let [report-open-start (time.now)
-                    out-report (sqlite-committed-source-store-tx-report-with-before
-                                 store^.path
-                                 owned-before
-                                 tx
-                                 (slice appended 0)
-                                 (slice resolved.tx-meta 0)
-                                 (slice resolved.tempids 0)
-                                 new-entities-after-existing
-                                 published-root)]
+                    after (if publish-indexes
+                            (Store-DB {})
+                            (store-db-source-overlay-from-resolved
+                              owned-before (slice overlay-ops 0) tx))
+                    out-report (if publish-indexes
+                                 (sqlite-committed-source-store-tx-report-with-before
+                                   store^.path owned-before tx (slice appended 0)
+                                   (slice resolved.tx-meta 0)
+                                   (slice resolved.tempids 0)
+                                   new-entities-after-existing published-root)
+                                 (sqlite-committed-log-tail-store-tx-report-with-before
+                                   owned-before after tx (slice appended 0)
+                                   (slice resolved.tx-meta 0)
+                                   (slice resolved.tempids 0)
+                                   new-entities-after-existing))]
+                (when (not publish-indexes)
+                  (close-store-db after))
                 (set! store^.direct-write-profile.report-open-us (+ store^.direct-write-profile.report-open-us (sqlite-profile-elapsed-us report-open-start)))
                 (sqlite-conn-advance-write-state-cache-after-datoms! store (slice appended 0))
-                (set! store^.direct-write-profile.writes (+ store^.direct-write-profile.writes 1))
+                (when publish-indexes
+                  (set! store^.direct-write-profile.writes (+ store^.direct-write-profile.writes 1)))
                 (delete-owned-datoms appended)
                 (delete-owned-tx-ops overlay-ops)
                 (delete-resolved-tx resolved)
                 (close-store-db owned-before)
                 (return out-report true true "")))))))))
 
-(defn transact-sqlite-store-report-direct-tx-data-mode [store: ^SQLite-Conn, tx-data: []Tx-Data, owns-sqlite-tx: bool] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
+(defn transact-sqlite-store-report-direct-tx-data-mode [store: ^SQLite-Conn, tx-data: []Tx-Data, owns-sqlite-tx: bool, publish-indexes: bool] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (when store^.resident-loaded
     (return (Store-Tx-Report {}) false true ""))
   (let [open-before-start (time.now)
         [before before-ok before-error] (sqlite-store-db-current-root-open-cached store)]
     (set! store^.direct-write-profile.open-before-us (+ store^.direct-write-profile.open-before-us (sqlite-profile-elapsed-us open-before-start)))
       (when (not before-ok)
-        (if (= before-error "sqlite DB has no Vev index roots")
+      (if (or (= before-error "sqlite DB has no Vev index roots")
+              (= before-error "sqlite DB has no Vev datom rows"))
         (let [before (empty-shared-store-db-for-sqlite-bootstrap)
               overlay-report (with-store-db-report-tx-data (addr before) tx-data)]
           (close-store-db before)
           (return (sqlite-commit-initial-source-overlay-report-mode store overlay-report owns-sqlite-tx) true true ""))
         (return (Store-Tx-Report {}) false false before-error)))
-    (transact-sqlite-store-report-direct-tx-data-with-before-mode store before tx-data owns-sqlite-tx)))
+    (transact-sqlite-store-report-direct-tx-data-with-before-mode store before tx-data owns-sqlite-tx publish-indexes)))
 
 (defn transact-sqlite-store-report-direct-tx-data [store: ^SQLite-Conn, tx-data: []Tx-Data] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (when store^.resident-loaded
@@ -428,7 +463,7 @@
       (sqlite-conn-invalidate-log-metadata-cache! store)
       (sqlite-conn-invalidate-current-root-cache! store)))
   (let [[direct-report direct-used direct-ok direct-error]
-        (transact-sqlite-store-report-direct-tx-data-mode store tx-data false)]
+        (transact-sqlite-store-report-direct-tx-data-mode store tx-data false false)]
     (when (or (not direct-ok) (not direct-used))
       (vev.sqlite-rollback-raw store^.handle)
       (return direct-report direct-used direct-ok direct-error))
@@ -447,7 +482,7 @@
       (return direct-report true true ""))))
 
 (defn transact-sqlite-store-report-direct-tx-data-open-tx [store: ^SQLite-Conn, tx-data: []Tx-Data] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
-  (transact-sqlite-store-report-direct-tx-data-mode store tx-data false))
+  (transact-sqlite-store-report-direct-tx-data-mode store tx-data false true))
 
 (defn source-overlay-datoms-from-ops [ops: []Tx-Op, tx: u64] -> [dynamic]Datom
   (let [out (make [dynamic]Datom 0 (count ops))]

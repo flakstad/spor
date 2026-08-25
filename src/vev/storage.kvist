@@ -164,6 +164,18 @@
       (vev.sqlite-close-live-raw handle)
       (return db loaded-ok loaded-error))))
 
+(defn load-db-sqlite-resident-at-basis [path: string, basis-tx: u64] -> [db: DB, ok: bool, error: string]
+  (let [[latest loaded-ok loaded-error] (load-db-sqlite-resident path)]
+    (when (not loaded-ok)
+      (return latest false loaded-error))
+    (let [datoms (make [dynamic]Datom)]
+      (for [datom latest.datoms]
+        (when (<= datom.tx basis-tx)
+          (arr.push! datoms (datom-owned datom))))
+      (let [historical (build-db datoms)]
+        (delete-owned-db latest)
+        (return historical true "")))))
+
 (defn load-db-sqlite [path: string] -> [db: DB, ok: bool, error: string]
   (load-db-sqlite-resident path))
 
@@ -595,6 +607,19 @@
         (delete-owned-db conn.db)
         (delete conn.listeners)
         (return false shared-error))
+      ;; The canonical transaction table, not the last datom, owns the next
+      ;; transaction coordinate. A committed no-op may have no user datoms and
+      ;; must still advance a reloaded resident writer.
+      (let [[head-basis _ _ _ head-ok head-error]
+              (vev.sqlite-index-lag-stats-raw store^.handle)]
+        (when (not head-ok)
+          (delete-shared-conn shared)
+          (delete-owned-db conn.db)
+          (delete conn.listeners)
+          (return false head-error))
+        (when (> head-basis 0)
+          (set! conn.next-tx (+ head-basis 1))
+          (set! shared.write.conn.next-tx (+ head-basis 1))))
       (delete-owned-db store^.conn.db)
       (delete store^.conn.listeners)
       (when store^.shared-resident-loaded
@@ -610,6 +635,17 @@
     (return true ""))
   (sqlite-conn-reload-resident! store))
 
+(defn sqlite-conn-drop-resident-cache! [store: ^SQLite-Conn]
+  (when store^.shared-resident-loaded
+    (delete-shared-conn store^.shared-resident)
+    (set! store^.shared-resident (Shared-Conn {}))
+    (set! store^.shared-resident-loaded false))
+  (delete store^.conn.listeners)
+  (delete-resident-db store^.conn.db)
+  (set! store^.conn (create-conn))
+  (set! store^.resident-loaded false)
+  (set! store^.resident-reads-enabled false))
+
 (defn sqlite-conn-basis-t [store: ^SQLite-Conn] -> [basis-t: u64, ok: bool, error: string]
   ;; Explicit resident reads and writes advance shared-resident. The original
   ;; Conn remains only as the materialization source and no longer represents
@@ -620,7 +656,11 @@
   (when store^.resident-loaded
     (let [next-tx store^.conn.next-tx]
       (return (if (= next-tx 0) (u64 0) (- next-tx 1)) true "")))
-  (vev.sqlite-latest-index-root-basis-raw store^.handle))
+  ;; Connection basis is the transaction entity coordinate. Derived checkpoint
+  ;; roots may intentionally lag, so source-backed connections read log head.
+  (let [[head-basis _ _ _ lag-ok lag-error]
+          (vev.sqlite-index-lag-stats-raw store^.handle)]
+    (return head-basis lag-ok lag-error)))
 
 (defn sqlite-conn-backup! [store: ^SQLite-Conn, destination-path: string] -> [basis-t: u64, ok: bool, error: string]
   (when (= store nil)
@@ -737,6 +777,28 @@
 (defn sqlite-conn-compact-indexes! [store: ^SQLite-Conn] -> [compacted: bool, ok: bool, error: string]
   (when store^.source-only
     (return false false "SQLite source connection is read-only; open a writable SQLite connection to compact indexes"))
+  (let [[_ _ tail-transactions tail-datoms stats-ok stats-error]
+          (vev.sqlite-index-lag-stats-raw store^.handle)]
+    (when (not stats-ok)
+      (return false false stats-error))
+    (when (or (> tail-transactions 0) (> tail-datoms 0))
+      (let [attempt 0]
+        (while (< attempt 16)
+          (let [[resident-ok resident-error] (sqlite-conn-ensure-resident! store)]
+            (when (not resident-ok)
+              (return false false resident-error)))
+          (let [[checkpointed checkpoint-ok checkpoint-error]
+                  (sqlite-conn-checkpoint-shared-resident! store)]
+            (when checkpoint-ok
+              (return checkpointed true ""))
+            (when (not (= checkpoint-error sqlite-write-basis-changed-error))
+              (return checkpointed false checkpoint-error)))
+          (let [[reloaded reload-error] (sqlite-conn-reload-resident! store)]
+            (when (not reloaded)
+              (return false false reload-error)))
+          (inc! attempt))
+        (return false false
+          "SQLite transaction basis kept changing while compacting indexes"))))
   (let [[begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
     (when (not begin-ok)
       (return false false begin-error)))
@@ -744,12 +806,169 @@
     (when (not compact-ok)
       (vev.sqlite-rollback-raw store^.handle)
       (return did-compact false compact-error))
+    ;; Logical compaction and reachability reclamation are one atomic metadata
+    ;; operation. This makes old-format roots reusable without conflating it
+    ;; with physical file truncation, which remains reclaim-indexes/VACUUM.
+    (let [[reclaim-ok reclaim-error]
+            (vev.sqlite-reclaim-obsolete-index-artifacts-raw store^.handle)]
+      (when (not reclaim-ok)
+        (vev.sqlite-rollback-raw store^.handle)
+        (return false false reclaim-error))
+      (let [[commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
+        (when (not commit-ok)
+          (vev.sqlite-rollback-raw store^.handle)
+          (return false false commit-error))
+        (sqlite-conn-invalidate-current-root-cache! store)
+        (return did-compact true "")))))
+
+(defn sqlite-conn-reclaim-indexes! [store: ^SQLite-Conn, shrink-file: bool] -> [reclaimed: bool, ok: bool, error: string]
+  (when store^.source-only
+    (return false false "SQLite source connection is read-only; open a writable SQLite connection to reclaim indexes"))
+  (let [[_ _ tail-transactions tail-datoms stats-ok stats-error]
+          (vev.sqlite-index-lag-stats-raw store^.handle)]
+    (when (not stats-ok)
+      (return false false stats-error))
+    (when (or (> tail-transactions 0) (> tail-datoms 0))
+      (let [[resident-ok resident-error] (sqlite-conn-ensure-resident! store)]
+        (when (not resident-ok)
+          (return false false resident-error)))
+      (let [[checkpointed checkpoint-ok checkpoint-error]
+              (sqlite-conn-checkpoint-shared-resident! store)]
+        (when (not checkpoint-ok)
+          (return checkpointed false checkpoint-error))
+        (when shrink-file
+          (let [[vacuum-ok vacuum-error] (vev.sqlite-vacuum-raw store^.handle)]
+            (when (not vacuum-ok)
+              (return checkpointed false vacuum-error))))
+        (return checkpointed true ""))))
+  (let [[begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
+    (when (not begin-ok)
+      (return false false begin-error)))
+  (let [[did-compact compact-ok compact-error] (sqlite-conn-compact-indexes-open-tx! store)]
+    (when (not compact-ok)
+      (vev.sqlite-rollback-raw store^.handle)
+      (return false false compact-error))
+    (let [[reclaim-ok reclaim-error] (vev.sqlite-reclaim-obsolete-index-artifacts-raw store^.handle)]
+      (when (not reclaim-ok)
+        (vev.sqlite-rollback-raw store^.handle)
+        (return false false reclaim-error))
+      (let [[commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
+        (when (not commit-ok)
+          (vev.sqlite-rollback-raw store^.handle)
+          (return false false commit-error))
+        (sqlite-conn-invalidate-current-root-cache! store)
+        (when shrink-file
+          (let [[vacuum-ok vacuum-error] (vev.sqlite-vacuum-raw store^.handle)]
+            (when (not vacuum-ok)
+              ;; Derived rows are already safely reclaimed and reusable. A
+              ;; busy reader may prevent only the optional file truncation.
+              (return did-compact false vacuum-error))))
+        (return true true "")))))
+
+(defn sqlite-conn-prune-obsolete-index-artifacts! [store: ^SQLite-Conn] -> [ok: bool, error: string]
+  (when store^.source-only
+    (return false "SQLite source connection is read-only; open a writable SQLite connection to prune indexes"))
+  (let [[begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
+    (when (not begin-ok)
+      (return false begin-error)))
+  (let [[prune-ok prune-error] (vev.sqlite-prune-obsolete-index-artifacts-raw store^.handle)]
+    (when (not prune-ok)
+      (vev.sqlite-rollback-raw store^.handle)
+      (return false prune-error))
     (let [[commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
       (when (not commit-ok)
         (vev.sqlite-rollback-raw store^.handle)
-        (return false false commit-error))
-      (sqlite-conn-invalidate-current-root-cache! store)
-      (return did-compact true ""))))
+        (return false commit-error))
+      (return true ""))))
+
+(defn sqlite-conn-checkpoint-shared-resident! [store: ^SQLite-Conn] -> [checkpointed: bool, ok: bool, error: string]
+  (when (not store^.shared-resident-loaded)
+    (return false false "SQLite novelty checkpoint requires a resident current value"))
+  (let [[head-basis _ _ _ stats-ok stats-error]
+          (vev.sqlite-index-lag-stats-raw store^.handle)]
+    (when (not stats-ok)
+      (return false false stats-error))
+    (let [[resident-basis resident-ok]
+            (db-read-source-effective-basis
+              (shared-db-snapshot-read-source (addr store^.shared-resident.snapshot)))]
+      (when (or (not resident-ok) (not (= resident-basis head-basis)))
+        (return false false sqlite-write-basis-changed-error)))
+  (let [[eavt eavt-ok] (shared-int-index-to-slice store^.shared-resident.snapshot.indexes.eavt)]
+    (when (not eavt-ok)
+      (return false false "failed to materialize resident EAVT checkpoint"))
+    (defer (delete eavt))
+    (let [[aevt aevt-ok] (shared-int-index-to-slice store^.shared-resident.snapshot.indexes.aevt)]
+      (when (not aevt-ok)
+        (return false false "failed to materialize resident AEVT checkpoint"))
+      (defer (delete aevt))
+      (let [[avet avet-ok] (shared-int-index-to-slice store^.shared-resident.snapshot.indexes.avet)]
+        (when (not avet-ok)
+          (return false false "failed to materialize resident AVET checkpoint"))
+        (defer (delete avet))
+        (let [[vaet vaet-ok] (shared-int-index-to-slice store^.shared-resident.snapshot.indexes.vaet)]
+          (when (not vaet-ok)
+            (return false false "failed to materialize resident VAET checkpoint"))
+          (defer (delete vaet))
+          (let [[begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
+            (when (not begin-ok)
+              (return false false begin-error)))
+          (let [[locked-head _ _ _ locked-ok locked-error]
+                  (vev.sqlite-index-lag-stats-raw store^.handle)]
+            (when (or (not locked-ok) (not (= locked-head head-basis)))
+              (vev.sqlite-rollback-raw store^.handle)
+              (return false false (if locked-ok sqlite-write-basis-changed-error locked-error))))
+          (let [[stmts stmts-ok stmts-error] (sqlite-index-write-stmts-open store^.handle)]
+            (when (not stmts-ok)
+              (vev.sqlite-rollback-raw store^.handle)
+              (return false false stmts-error))
+            (defer (sqlite-index-write-stmts-close stmts))
+            (let [[root-ok root-error]
+                    (persist-index-root-sqlite-handle-from-indexes-with-stmts
+                      store^.handle (addr stmts) head-basis
+                      (slice eavt 0) (slice aevt 0) (slice avet 0) (slice vaet 0))]
+              (when (not root-ok)
+                (vev.sqlite-rollback-raw store^.handle)
+                (return false false root-error))))
+          (let [[reclaim-ok reclaim-error]
+                  (vev.sqlite-reclaim-obsolete-index-artifacts-raw store^.handle)]
+            (when (not reclaim-ok)
+              (vev.sqlite-rollback-raw store^.handle)
+              (return false false reclaim-error)))
+          (let [[commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
+            (when (not commit-ok)
+              (vev.sqlite-rollback-raw store^.handle)
+              (return false false commit-error)))
+          (sqlite-conn-invalidate-current-root-cache! store)
+          (return true true "")))))))
+
+(defn sqlite-auto-checkpoint-report! [store: ^SQLite-Conn, report: Store-Tx-Report] -> Store-Tx-Report
+  (when report.ok
+    (let [[_ _ tail-transactions tail-datoms stats-ok _stats-error]
+            (vev.sqlite-index-lag-stats-raw store^.handle)]
+      (when (and stats-ok
+                 (or (>= tail-transactions sqlite-index-novelty-transaction-threshold)
+                     (>= tail-datoms sqlite-index-novelty-datom-threshold)))
+        ;; The transaction is already durable. Indexing is derived maintenance;
+        ;; failure leaves the canonical tail readable and is retried later.
+        (when (not store^.shared-resident-loaded)
+          (let [[loaded _load-error] (sqlite-conn-ensure-resident! store)]
+            (when loaded
+              (set! store^.resident-reads-enabled true))))
+        (let [[checkpointed checkpoint-ok checkpoint-error]
+                (sqlite-conn-checkpoint-shared-resident! store)]
+          (discard checkpointed)
+          (discard checkpoint-ok)
+          (discard checkpoint-error))))
+    ;; Compatibility for direct writers that still publish one derived root.
+    (when (not store^.shared-resident-loaded)
+      (let [[root-count count-ok _count-error] (sqlite-conn-index-root-count store)]
+        (when (and count-ok (>= root-count sqlite-index-automatic-checkpoint-root-threshold))
+          (let [[checkpointed checkpoint-ok checkpoint-error]
+                  (sqlite-conn-reclaim-indexes! store false)]
+            (discard checkpointed)
+            (discard checkpoint-ok)
+            (discard checkpoint-error))))))
+  report)
 
 (defn sqlite-maintain-queued-index-root-step! [handle: rawptr] -> [handled: bool, compacted: bool, ok: bool, error: string]
   (let [[task-id task-index task-basis task-root has-task task-ok task-error] (vev.sqlite-next-index-maintenance-raw handle)]
@@ -1590,15 +1809,43 @@
     (close-store-db before)
     out))
 
+(defn sqlite-committed-log-tail-store-tx-report-with-before
+  [before: Store-DB, after: Store-DB, tx: u64, tx-data: []Datom,
+   tx-meta: []Tx-Meta, tempids: []Tempid, new-entities-after-existing: bool]
+  -> Store-Tx-Report
+  (Store-Tx-Report {ok: true
+                    error: ""
+                    db-before: (retain-store-db before)
+                    db-after: (retain-store-db after)
+                    tx-data: (clone-owned-datom-slice tx-data)
+                    tx: tx
+                    tx-meta: (clone-tx-meta tx-meta)
+                    tempids: (store-report-tempids-with-current-tx tempids tx)
+                    source-append-metadata-known: false
+                    source-new-entities-after-existing: new-entities-after-existing
+                    source-eavt-append-mode: false
+                    source-aevt-append-mode: false
+                    source-avet-append-mode: false
+                    source-vaet-append-mode: false
+                    source-published-root-known: false
+                    source-published-root: (SQLite-Durable-Published-Root {})}))
+
 (defn sqlite-commit-source-overlay-report-mode [store: ^SQLite-Conn, overlay-report: Store-Tx-Report, owns-sqlite-tx: bool] -> Store-Tx-Report
   (when (not overlay-report.ok)
     (return overlay-report))
-  (let [report-before (retain-store-db overlay-report.db-before)
+  (let [[_ indexed-basis _ _ lag-ok _lag-error]
+          (vev.sqlite-index-lag-stats-raw store^.handle)
+        ;; A logical group owns the surrounding transaction. Its source may be
+        ;; the immutable overlay returned by the preceding logical transaction,
+        ;; so it still uses the canonical tail path without committing here.
+        use-log-tail (and lag-ok (> indexed-basis 0))
+        report-before (retain-store-db overlay-report.db-before)
         borrow-before (= overlay-report.db-before.kind .SQLite-Snapshot)
         opened-before (if borrow-before
                         overlay-report.db-before
                         (retain-store-db overlay-report.db-before))
-        [_ before-source-ok before-source-error] (store-db-read-source (addr opened-before))]
+        [before-source before-source-ok before-source-error]
+          (store-db-read-source (addr opened-before))]
     (when (not before-source-ok)
       (let [failed (failed-store-tx-report overlay-report.db-before before-source-error)]
         (close-store-db report-before)
@@ -1610,7 +1857,8 @@
             (close-store-db opened-before)
             (delete-store-tx-report overlay-report)))
         (return failed)))
-    (when (not (= opened-before.kind .SQLite-Snapshot))
+    (when (and (not use-log-tail)
+               (not (= opened-before.kind .SQLite-Snapshot)))
       (let [failed (failed-store-tx-report opened-before "source transaction functions require a SQLite-backed Store-DB")]
         (close-store-db report-before)
         (if borrow-before
@@ -1621,22 +1869,52 @@
             (close-store-db opened-before)
             (delete-store-tx-report overlay-report)))
         (return failed)))
-  (let [before-snapshot opened-before.sqlite-snapshot
-        source (sqlite-db-read-source (addr before-snapshot))
-        start-index before-snapshot.datom-count]
-    (let [append-modes (store-tx-report-source-append-modes overlay-report)
-          plan (sqlite-durable-append-plan-from-modes (slice overlay-report.tx-data 0) start-index append-modes (addr store^.direct-write-profile))
-          [published-root append-ok append-error]
-          (append-source-direct-sqlite-conn-from-source-plan-published-mode
-            store
-            source
-            overlay-report.tx
-            (slice overlay-report.tx-data 0)
-            (slice overlay-report.tx-meta 0)
-            plan
-            (addr store^.direct-write-profile)
-            owns-sqlite-tx)]
-      (defer (delete-sqlite-durable-append-plan plan))
+    (let [source-view (db-read-source-index-view before-source .EAVT)
+          start-index (db-index-view-count source-view)
+          out (Store-Tx-Report {})
+          append-ok false
+          append-error ""]
+      (if use-log-tail
+        (let [[tail-ok tail-error]
+                (append-source-direct-sqlite-conn-log-only-mode!
+                  store before-source overlay-report.tx
+                  (slice overlay-report.tx-data 0)
+                  (slice overlay-report.tx-meta 0)
+                  start-index
+                  (addr store^.direct-write-profile)
+                  owns-sqlite-tx)]
+          (set! append-ok tail-ok)
+          (set! append-error tail-error)
+          (when tail-ok
+            (set! out
+              (sqlite-committed-log-tail-store-tx-report-with-before
+                report-before overlay-report.db-after overlay-report.tx
+                (slice overlay-report.tx-data 0)
+                (slice overlay-report.tx-meta 0)
+                (slice overlay-report.tempids 0)
+                overlay-report.source-new-entities-after-existing))))
+        (let [append-modes (store-tx-report-source-append-modes overlay-report)
+              plan (sqlite-durable-append-plan-from-modes
+                     (slice overlay-report.tx-data 0) start-index append-modes
+                     (addr store^.direct-write-profile))
+              [published-root root-ok root-error]
+                (append-source-direct-sqlite-conn-from-source-plan-published-mode
+                  store before-source overlay-report.tx
+                  (slice overlay-report.tx-data 0)
+                  (slice overlay-report.tx-meta 0)
+                  plan (addr store^.direct-write-profile) owns-sqlite-tx)]
+          (delete-sqlite-durable-append-plan plan)
+          (set! append-ok root-ok)
+          (set! append-error root-error)
+          (when root-ok
+            (set! out
+              (sqlite-committed-source-store-tx-report-with-before
+                store^.path report-before overlay-report.tx
+                (slice overlay-report.tx-data 0)
+                (slice overlay-report.tx-meta 0)
+                (slice overlay-report.tempids 0)
+                overlay-report.source-new-entities-after-existing
+                published-root)))))
       (when (not append-ok)
         (let [failed (failed-store-tx-report opened-before append-error)]
           (close-store-db report-before)
@@ -1649,24 +1927,15 @@
               (delete-store-tx-report overlay-report)))
           (return failed)))
       (sqlite-conn-advance-write-state-cache-after-datoms! store (slice overlay-report.tx-data 0))
-      (let [out (sqlite-committed-source-store-tx-report-with-before
-                  store^.path
-                  report-before
-                  overlay-report.tx
-                  (slice overlay-report.tx-data 0)
-                  (slice overlay-report.tx-meta 0)
-                  (slice overlay-report.tempids 0)
-                  overlay-report.source-new-entities-after-existing
-                  published-root)]
-        (close-store-db report-before)
-        (if borrow-before
-          (do
-            (delete-store-tx-report-preserve-db-before overlay-report)
-            (close-store-db opened-before))
-          (do
-            (close-store-db opened-before)
-            (delete-store-tx-report overlay-report)))
-        out)))))
+      (close-store-db report-before)
+      (if borrow-before
+        (do
+          (delete-store-tx-report-preserve-db-before overlay-report)
+          (close-store-db opened-before))
+        (do
+          (close-store-db opened-before)
+          (delete-store-tx-report overlay-report)))
+      out)))
 
 (defn sqlite-commit-source-overlay-report [store: ^SQLite-Conn, overlay-report: Store-Tx-Report] -> Store-Tx-Report
   (sqlite-commit-source-overlay-report-mode store overlay-report true))
@@ -1693,8 +1962,14 @@
   (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
     (when (not open-ok)
       (return (SQLite-DB-Snapshot {}) false open-error))
+    (let [[read-started read-ok read-error] (vev.sqlite-begin-query-read-raw handle)]
+      (when (not read-ok)
+        (vev.sqlite-close-live-raw handle)
+        (return (SQLite-DB-Snapshot {}) false read-error))
+      (discard read-started))
     (let [[opened-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot-handle handle page-size)]
       (when (not snapshot-ok)
+        (vev.sqlite-end-query-read-raw handle true)
         (vev.sqlite-close-live-raw handle)
         (return opened-snapshot false snapshot-error))
       (set! opened-snapshot.indexes.owns-handle true)
@@ -1705,8 +1980,14 @@
   (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
     (when (not open-ok)
       (return (SQLite-DB-Snapshot {}) false open-error))
+    (let [[read-started read-ok read-error] (vev.sqlite-begin-query-read-raw handle)]
+      (when (not read-ok)
+        (vev.sqlite-close-live-raw handle)
+        (return (SQLite-DB-Snapshot {}) false read-error))
+      (discard read-started))
     (let [[opened-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot-handle-at-basis handle basis-tx page-size)]
       (when (not snapshot-ok)
+        (vev.sqlite-end-query-read-raw handle true)
         (vev.sqlite-close-live-raw handle)
         (return opened-snapshot false snapshot-error))
       (set! opened-snapshot.indexes.owns-handle true)
@@ -2133,30 +2414,21 @@
         (delete-shared-conn candidate)
         (delete-store-tx-report report)
         (return (failed-sqlite-store-tx-report store source-error)))
-      (let [modes (store-tx-report-source-append-modes report)
-            start-index report.db-before.shared-snapshot.datoms.count
-            plan
-              (sqlite-durable-append-plan-from-modes
+      (let [start-index report.db-before.shared-snapshot.datoms.count
+            [append-ok append-error]
+              (append-source-direct-sqlite-conn-log-only-open-tx!
+                store
+                source
+                report.tx
                 (slice report.tx-data 0)
+                (slice report.tx-meta 0)
                 start-index
-                modes
                 (addr store^.direct-write-profile))]
-        (defer (delete-sqlite-durable-append-plan plan))
-        (let [[_ append-ok append-error]
-                (append-source-direct-sqlite-conn-from-source-plan-published-mode
-                  store
-                  source
-                  report.tx
-                  (slice report.tx-data 0)
-                  (slice report.tx-meta 0)
-                  plan
-                  (addr store^.direct-write-profile)
-                  false)]
-          (when (not append-ok)
-            (vev.sqlite-rollback-raw store^.handle)
-            (delete-shared-conn candidate)
-            (delete-store-tx-report report)
-            (return (failed-sqlite-store-tx-report store append-error)))))
+        (when (not append-ok)
+          (vev.sqlite-rollback-raw store^.handle)
+          (delete-shared-conn candidate)
+          (delete-store-tx-report report)
+          (return (failed-sqlite-store-tx-report store append-error))))
     (let [commit-start (time.now)
           [commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
       (set! store^.direct-write-profile.append-commit-us
@@ -2183,15 +2455,6 @@
 (defn transact-sqlite-store-report-tx-data [store: ^SQLite-Conn, tx-data: []Tx-Data] -> Store-Tx-Report
   (when store^.source-only
     (return (failed-sqlite-store-tx-report store "SQLite source connection is read-only; open a writable SQLite connection to transact")))
-  (when (not store^.resident-loaded)
-    (let [[lags lag-ok lag-error] (sqlite-conn-index-root-lags-log? store)]
-      (when (not lag-ok)
-        (return (failed-sqlite-store-tx-report store lag-error)))
-      (when lags
-        (let [[loaded loaded-error] (sqlite-conn-ensure-resident! store)]
-          (when (not loaded)
-            (return (failed-sqlite-store-tx-report store loaded-error)))
-          (set! store^.resident-reads-enabled true)))))
   (when store^.resident-loaded
     (when (and store^.resident-reads-enabled store^.shared-resident-loaded)
       ;; Another connection may commit after this resident snapshot was
@@ -2204,7 +2467,7 @@
                     store tx-data)]
             (when (or report.ok
                       (not (= report.error sqlite-write-basis-changed-error)))
-              (return report))
+              (return (sqlite-auto-checkpoint-report! store report)))
             (delete-store-tx-report report)
             (let [[reloaded reload-error] (sqlite-conn-reload-resident! store)]
               (when (not reloaded)
@@ -2213,19 +2476,38 @@
         (return (failed-sqlite-store-tx-report
                   store
                   "SQLite transaction basis kept changing while retrying resident transaction"))))
-    (return (store-tx-report-from-temp-resident-report
-              (transact-sqlite-tx-data store tx-data))))
-  (let [[direct-report direct-used direct-ok direct-error] (transact-sqlite-store-report-direct-tx-data store tx-data)]
-    (when direct-ok
-      (when direct-used
-        (return direct-report)))
-    (when (not direct-ok)
-      (return (failed-sqlite-store-tx-report store direct-error))))
+    (return (sqlite-auto-checkpoint-report!
+              store
+              (store-tx-report-from-temp-resident-report
+                (transact-sqlite-tx-data store tx-data)))))
+  (let [attempt 0]
+    (while (< attempt 16)
+      (let [[direct-report direct-used direct-ok direct-error]
+              (transact-sqlite-store-report-direct-tx-data store tx-data)]
+        (when (not direct-ok)
+          (return (failed-sqlite-store-tx-report store direct-error)))
+        (when direct-used
+          (if (and (not direct-report.ok)
+                   (= direct-report.error sqlite-write-basis-changed-error))
+            (do
+              (delete-store-tx-report direct-report)
+              (sqlite-conn-invalidate-write-state-cache! store)
+              (sqlite-conn-invalidate-direct-attr-cache! store)
+              (sqlite-conn-invalidate-log-metadata-cache! store)
+              (sqlite-conn-invalidate-current-root-cache! store)
+              (inc! attempt)
+              (continue))
+            (return (sqlite-auto-checkpoint-report! store direct-report))))
+        (break)))
+    (when (>= attempt 16)
+      (return (failed-sqlite-store-tx-report
+                store
+                "SQLite transaction basis kept changing while retrying transaction"))))
   (when (not store^.resident-loaded)
     (return (failed-sqlite-store-tx-report store "unsupported source-backed durable transaction shape")))
   (let [report (transact-sqlite-tx-data store tx-data)
         out (store-tx-report-from-temp-resident-report report)]
-    out))
+    (sqlite-auto-checkpoint-report! store out)))
 
 (defn transact-sqlite-store-report-text [store: ^SQLite-Conn, text: string] -> Store-Tx-Report
   (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
@@ -2240,7 +2522,8 @@
     (return (Store-Tx-Report {}) false true ""))
   (let [[snapshot snapshot-ok snapshot-error] (sqlite-store-db-current-root-open-cached store)]
     (when (not snapshot-ok)
-      (if (= snapshot-error "sqlite DB has no Vev index roots")
+      (if (or (= snapshot-error "sqlite DB has no Vev index roots")
+              (= snapshot-error "sqlite DB has no Vev datom rows"))
         (let [before (empty-shared-store-db-for-sqlite-bootstrap)
               overlay-report (with-store-db-report-tx-data-with-source-string-fns (addr before) tx-data registry)]
           (close-store-db before)
@@ -2298,12 +2581,14 @@
                 (sqlite-conn-invalidate-current-root-cache! store)
                 (inc! attempt)
                 (continue))
-              (return direct-report)))
+              (return (sqlite-auto-checkpoint-report! store direct-report))))
           (return (failed-sqlite-store-tx-report store "unsupported source-backed durable transaction shape"))))
       (return (failed-sqlite-store-tx-report store "SQLite transaction basis kept changing while retrying transaction functions"))))
   (when (not store^.resident-loaded)
     (return (failed-sqlite-store-tx-report store "unsupported source-backed durable transaction shape")))
-  (store-tx-report-from-temp-resident-report (transact-sqlite-tx-data store tx-data)))
+  (sqlite-auto-checkpoint-report!
+    store
+    (store-tx-report-from-temp-resident-report (transact-sqlite-tx-data store tx-data))))
 
 (defn transact-sqlite-store-report-text-with-source-string-fns [store: ^SQLite-Conn, text: string, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
   (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
@@ -2315,10 +2600,10 @@
   (Store-Conn {kind: .SQLite
                sqlite: store
                listeners: (make [dynamic]Store-Tx-Listener)
-               auto-maintenance-enabled: false
-               auto-maintenance-steps: 0
-               auto-maintenance-target: 0
-               auto-maintenance-trigger: 1}))
+               auto-maintenance-enabled: true
+               auto-maintenance-steps: sqlite-index-auto-maintenance-steps
+               auto-maintenance-target: sqlite-index-auto-maintenance-target
+               auto-maintenance-trigger: sqlite-index-auto-maintenance-trigger}))
 
 (defn create-shared-store [chunk-size: int] -> Store-Conn
   (Store-Conn {kind: .Shared
@@ -2491,6 +2776,12 @@
     .Shared (return false true "")
      (return false false "store is not open")))
 
+(defn reclaim-store-indexes! [store: ^Store-Conn, shrink-file: bool] -> [reclaimed: bool, ok: bool, error: string]
+  (case store^.kind
+    .SQLite (sqlite-conn-reclaim-indexes! (addr store^.sqlite) shrink-file)
+    .Shared (return false true "")
+     (return false false "store is not open")))
+
 (defn maintain-store-indexes-step! [store: ^Store-Conn] -> [compacted: bool, ok: bool, error: string]
   (case store^.kind
     .SQLite
@@ -2580,7 +2871,13 @@
                         (return 0 false pending true "")))))))
            (return 0 false pending true "")))
       (case store^.kind
-        .SQLite (sqlite-conn-maintain-indexes-to-target-foreground! (addr store^.sqlite) store^.auto-maintenance-steps store^.auto-maintenance-target sqlite-index-auto-maintenance-row-budget)
+        .SQLite
+          (let [[steps compacted remaining maintenance-ok maintenance-error]
+                  (sqlite-conn-maintain-indexes-to-target-foreground! (addr store^.sqlite) store^.auto-maintenance-steps store^.auto-maintenance-target sqlite-index-auto-maintenance-row-budget)]
+            (when (not maintenance-ok)
+              (return steps compacted remaining false maintenance-error))
+            (let [[prune-ok prune-error] (sqlite-conn-prune-obsolete-index-artifacts! (addr store^.sqlite))]
+              (return steps compacted remaining prune-ok prune-error)))
         .Shared (return 0 false 0 true "")
          (return 0 false pending false "store is not open")))
     (let [[pending pending-ok pending-error] (store-index-maintenance-count store)]
@@ -2727,108 +3024,134 @@
   (let [out-reports (make [dynamic]Store-Tx-Report 0 (count groups))]
     (when store^.source-only
       (return out-reports false "SQLite source connection is read-only; open a writable SQLite connection to transact"))
-    (when store^.resident-loaded
-      (return out-reports false "logical group commit requires source-backed SQLite store reports"))
     (when (= (count groups) 0)
       (return out-reports true ""))
+    ;; Capture the exact committed checkpoint + novelty value before taking the
+    ;; writer lock. Each group retains its immutable db-after as the next
+    ;; group's basis, so exact reports do not require internal durable roots.
+    (let [initial-before (Store-DB {})
+          initial-ok false
+          initial-error ""
+          initial-is-empty-root false
+          has-initial false]
+      (if store^.resident-loaded
+        ;; resident-loaded may refer to the legacy resident writer while the
+        ;; shared snapshot was last refreshed by an earlier compaction. Reload
+        ;; from the canonical log so the first logical group's tx coordinate
+        ;; is checked against the actual durable head.
+        (let [[resident-ok resident-error] (sqlite-conn-reload-resident! store)]
+          (if resident-ok
+            (do
+              (set! initial-before (shared-store-db (addr store^.shared-resident)))
+              (set! initial-ok true))
+            (set! initial-error resident-error)))
+        (let [[opened-before opened-ok opened-error]
+                (sqlite-store-db-current-root-open-cached store)]
+          (set! initial-before opened-before)
+          (set! initial-ok opened-ok)
+          (set! initial-error opened-error)))
+      (set! initial-is-empty-root
+        (and initial-ok
+             (= initial-before.kind .SQLite-Root-Snapshot)
+             (= initial-before.sqlite-root-published.basis-tx 0)))
+      (set! has-initial (and initial-ok (not initial-is-empty-root)))
+      (when initial-is-empty-root
+        (close-store-db initial-before))
+      (when (and (not initial-ok)
+                 (not (= initial-error "sqlite DB has no Vev index roots"))
+                 (not (= initial-error "sqlite DB has no Vev datom rows")))
+        (return out-reports false initial-error))
     (let [begin-start (time.now)
           [begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
       (set! store^.direct-write-profile.append-begin-us (+ store^.direct-write-profile.append-begin-us (sqlite-profile-elapsed-us begin-start)))
       (when (not begin-ok)
+        (when has-initial
+          (close-store-db initial-before))
         (return out-reports false begin-error)))
     (sqlite-conn-invalidate-write-state-cache! store)
     (sqlite-conn-invalidate-direct-attr-cache! store)
     (sqlite-conn-invalidate-log-metadata-cache! store)
     (sqlite-conn-invalidate-current-root-cache! store)
-    (let [[group-state state-ok state-error] (sqlite-logical-group-state-open store)]
-      (when (not state-ok)
-        (rollback-sqlite-logical-group! store out-reports)
-        (return (make [dynamic]Store-Tx-Report) false state-error))
-      (for [group group-index groups]
+    (let [next-before initial-before
+          has-next-before has-initial]
+      (for [group groups]
         (let [report (Store-Tx-Report {})
               direct-used false
               direct-ok false
               direct-error ""
+              next-basis-override (Store-DB {})
+              has-next-basis-override false
               group-uses-source-fns (and use-source-fns (tx-data-has-source-fn-call? (slice group.tx-data 0)))]
-        (if group-state.has-carried-before
-          (let [[before before-ok before-error] (sqlite-logical-group-state-take-carried-before-store-db! store (addr group-state))]
-            (when (not before-ok)
-              (sqlite-logical-group-state-close! (addr group-state))
-              (rollback-sqlite-logical-group! store out-reports)
-              (return (make [dynamic]Store-Tx-Report) false before-error))
+        (if has-next-before
+          (do
             (if group-uses-source-fns
-              (let [[next-report next-used next-ok next-error] (transact-sqlite-store-report-tx-data-with-source-string-fns-before-mode store before (slice group.tx-data 0) registry false)]
+              (let [[next-report next-used next-ok next-error]
+                      (transact-sqlite-store-report-tx-data-with-source-string-fns-before-mode
+                        store next-before (slice group.tx-data 0) registry false)]
                 (set! report next-report)
                 (set! direct-used next-used)
                 (set! direct-ok next-ok)
                 (set! direct-error next-error))
-              (let [[next-report next-used next-ok next-error] (transact-sqlite-store-report-direct-tx-data-with-before-mode store before (slice group.tx-data 0) false)]
+              (let [[next-report next-used next-ok next-error]
+                      (transact-sqlite-store-report-direct-tx-data-with-before-mode
+                        store next-before (slice group.tx-data 0) false false)]
                 (set! report next-report)
                 (set! direct-used next-used)
                 (set! direct-ok next-ok)
-                (set! direct-error next-error))))
-          (if group-state.has-current-basis
-            (let [[before before-ok before-error] (sqlite-logical-group-state-current-before-store-db store (addr group-state))]
-              (when (not before-ok)
-                (sqlite-logical-group-state-close! (addr group-state))
-                (rollback-sqlite-logical-group! store out-reports)
-                (return (make [dynamic]Store-Tx-Report) false before-error))
-              (if group-uses-source-fns
-                (let [[next-report next-used next-ok next-error] (transact-sqlite-store-report-tx-data-with-source-string-fns-before-mode store before (slice group.tx-data 0) registry false)]
-                  (set! report next-report)
-                  (set! direct-used next-used)
-                  (set! direct-ok next-ok)
-                  (set! direct-error next-error))
-                (let [[next-report next-used next-ok next-error] (transact-sqlite-store-report-direct-tx-data-with-before-mode store before (slice group.tx-data 0) false)]
-                  (set! report next-report)
-                  (set! direct-used next-used)
-                  (set! direct-ok next-ok)
-                  (set! direct-error next-error))))
-            (if group-uses-source-fns
-              (let [[next-report next-used next-ok next-error] (transact-sqlite-store-report-tx-data-with-source-string-fns-mode store (slice group.tx-data 0) registry false)]
-                (set! report next-report)
-                (set! direct-used next-used)
-                (set! direct-ok next-ok)
-                (set! direct-error next-error))
-              (let [[next-report next-used next-ok next-error] (transact-sqlite-store-report-direct-tx-data-open-tx store (slice group.tx-data 0))]
-                (set! report next-report)
-                (set! direct-used next-used)
-                (set! direct-ok next-ok)
-                (set! direct-error next-error)))))
+                (set! direct-error next-error)))
+            ;; Both before-mode helpers consume this owned basis.
+            (set! next-before (Store-DB {}))
+            (set! has-next-before false))
+          ;; Empty-store bootstrap publishes the first broad root. Preserve the
+          ;; independently owned shared db-after as the next uncommitted basis;
+          ;; a root descriptor cannot be reopened from another handle until the
+          ;; surrounding logical SQLite transaction commits.
+          (let [before (empty-shared-store-db-for-sqlite-bootstrap)
+                overlay-report
+                  (if group-uses-source-fns
+                    (with-store-db-report-tx-data-with-source-string-fns
+                      (addr before) (slice group.tx-data 0) registry)
+                    (initial-source-overlay-report-from-tx-data
+                      before (slice group.tx-data 0)))]
+            (close-store-db before)
+            (when overlay-report.ok
+              (set! next-basis-override
+                (retain-store-db overlay-report.db-after))
+              (set! has-next-basis-override true))
+            (set! report
+              (sqlite-commit-initial-source-overlay-report-mode
+                store overlay-report false))
+            (set! direct-used true)
+            (set! direct-ok true)))
         (when (not direct-ok)
-          (sqlite-logical-group-state-close! (addr group-state))
+          (when has-next-before
+            (close-store-db next-before))
           (rollback-sqlite-logical-group! store out-reports)
           (return (make [dynamic]Store-Tx-Report) false direct-error))
         (when (not direct-used)
-          (sqlite-logical-group-state-close! (addr group-state))
+          (when has-next-before
+            (close-store-db next-before))
           (rollback-sqlite-logical-group! store out-reports)
           (return (make [dynamic]Store-Tx-Report) false "logical group commit could not use source-backed direct write path"))
         (when (not report.ok)
           (let [error report.error]
             (delete-store-tx-report report)
-            (sqlite-logical-group-state-close! (addr group-state))
+            (when has-next-basis-override
+              (close-store-db next-basis-override))
+            (when has-next-before
+              (close-store-db next-before))
             (rollback-sqlite-logical-group! store out-reports)
             (return (make [dynamic]Store-Tx-Report) false error)))
-        (sqlite-logical-group-state-advance-after-report! (addr group-state) report)
-        (when (< group-index (- (count groups) 1))
-          (let [[next-before-ok next-before-error] (sqlite-logical-group-state-carry-before-after-report! store (addr group-state) report)]
-            (when (not next-before-ok)
-              (delete-store-tx-report report)
-              (sqlite-logical-group-state-close! (addr group-state))
-              (rollback-sqlite-logical-group! store out-reports)
-              (return (make [dynamic]Store-Tx-Report) false next-before-error))))
+        (set! next-before
+          (if has-next-basis-override
+            next-basis-override
+            (retain-store-db report.db-after)))
+        (set! has-next-before true)
         (arr.push! out-reports report)))
-      (sqlite-logical-group-state-close! (addr group-state)))
-    (when (> (count out-reports) 0)
-      (let [latest-report out-reports[(- (count out-reports) 1)]
-            [maintenance-ok maintenance-error] (sqlite-enqueue-latest-root-set-maintenance-unless-manifest! store^.handle latest-report.tx)]
-        (when (not maintenance-ok)
-          (vev.sqlite-rollback-raw store^.handle)
-          (sqlite-conn-invalidate-write-state-cache! store)
-          (sqlite-conn-invalidate-log-metadata-cache! store)
-          (sqlite-conn-invalidate-direct-attr-cache! store)
-          (delete-store-tx-reports out-reports)
-          (return (make [dynamic]Store-Tx-Report) false maintenance-error))))
+      (when has-next-before
+        (close-store-db next-before)))
+    ;; Log-only logical groups have no per-group derived root to enqueue for
+    ;; legacy root maintenance. The bounded novelty checkpoint handles them.
     (let [commit-start (time.now)
           [commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
       (set! store^.direct-write-profile.append-commit-us (+ store^.direct-write-profile.append-commit-us (sqlite-profile-elapsed-us commit-start)))
@@ -2840,7 +3163,21 @@
         (return (make [dynamic]Store-Tx-Report) false commit-error)))
     (sqlite-conn-invalidate-write-state-cache! store)
     (sqlite-conn-invalidate-direct-attr-cache! store)
-    (return out-reports true "")))
+    ;; A connection may have entered resident mode through explicit
+    ;; compaction. The logical reports retain their exact immutable values;
+    ;; discard the optional writer cache so subsequent operations reopen the
+    ;; newly committed canonical generation instead of retaining a stale
+    ;; legacy resident value.
+    (when store^.resident-loaded
+      (sqlite-conn-drop-resident-cache! store))
+    (when (>= (count groups) sqlite-index-logical-group-checkpoint-threshold)
+      (let [[checkpointed checkpoint-ok checkpoint-error]
+              (sqlite-conn-reclaim-indexes! store false)]
+        (discard checkpointed)
+        (discard checkpoint-error)
+        (when (not checkpoint-ok)
+          (sqlite-conn-invalidate-current-root-cache! store))))
+    (return out-reports true ""))))
 
 (defn transact-sqlite-store-report-logical-tx-data-groups [store: ^SQLite-Conn, groups: []Store-Tx-Data-Group] -> [reports: [dynamic]Store-Tx-Report, ok: bool, error: string]
   (let [registry ([]Tx-Fn-Source-String [])]

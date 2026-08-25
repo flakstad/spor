@@ -169,10 +169,11 @@
                    sqlite-snapshot: snapshot
                    overlay-datoms: overlay-datoms}))
 
-(defn sqlite-datom-log-overlay-db-read-source [snapshot: ^SQLite-DB-Snapshot, overlay-log: ^Shared-Datom-Log] -> DB-Read-Source
+(defn sqlite-datom-log-overlay-db-read-source [snapshot: ^SQLite-DB-Snapshot, overlay-log: ^Shared-Datom-Log, basis-tx: u64] -> DB-Read-Source
   (DB-Read-Source {kind: .SQLite-Datom-Log-Overlay
                    sqlite-snapshot: snapshot
-                   overlay-log: overlay-log}))
+                   overlay-log: overlay-log
+                   overlay-tx: basis-tx}))
 
 (defn relation-value-db-read-source [value: ^Value] -> DB-Read-Source
   (DB-Read-Source {kind: .Relation-Value relation-value: value}))

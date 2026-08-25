@@ -74,12 +74,98 @@ Resident execution does not change transaction semantics. `transact` returns
 the ordinary rich report with immutable `db-before` and `db-after` values;
 those values retain persistent/chunked snapshot roots rather than cloning the
 database. Before the call returns, SQLite has durably appended the transaction
-log and published the corresponding EAVT, AEVT, AVET, and VAET roots. A fresh
-connection can therefore read the same transaction immediately.
+log. Publishing a new EAVT, AEVT, AVET, and VAET checkpoint is independent,
+derived work; a fresh connection reads the last checkpoint plus the committed
+log tail and therefore sees the transaction immediately.
 
 Index compaction remains derived maintenance and may run independently. It can
 replace a deep run tree with a shallower equivalent root, but it never changes
 the transaction basis or the facts visible at that basis.
+
+### Canonical history and derived retention
+
+The durable schema separates semantic history from rebuildable acceleration:
+
+| Storage object | Purpose | Retention |
+| --- | --- | --- |
+| `vev_transactions` | committed transaction coordinates | canonical, permanent |
+| `vev_datoms` | assertions, retractions, and transaction datoms | canonical, permanent |
+| `vev_tx_meta` | transaction metadata values | canonical, permanent |
+| `vev_datoms_*` SQLite indexes | direct log/query access paths | derived, retained for performance |
+| `vev_fulltext*`, `vev_text_terms` | text-search acceleration | derived |
+| `vev_index_roots`, `vev_index_root_pages` | immutable EAVT/AEVT/AVET/VAET checkpoints | derived; latest checkpoint retained |
+| `vev_index_run_manifests`, runs, and range tables | legacy/delta-root plans and cursor pruning | derived; not created by ordinary novelty commits |
+| `vev_index_chunks`, entries, and edges | immutable B-tree-like checkpoint pages | derived; latest-reachable pages retained |
+| `vev_index_maintenance` | pending merge work | transient |
+| `vev_snapshots` | legacy serialized-store compatibility | legacy migration input |
+| `vev_meta` | store format and retention markers | semantic format metadata |
+
+An ordinary commit writes canonical transaction, datom, transaction-metadata,
+and full-text rows only. It does not create four roots, chunks, manifests, or
+range rows. A database value is composed from the latest immutable checkpoint
+and the canonical novelty after its basis. The novelty is replayed in
+transaction order and merged into index scans, pulls, validation, `history`,
+and immutable transaction reports.
+
+VevDB publishes a broad checkpoint when the novelty reaches either 128
+transactions or 4,096 datoms. Checkpoint publication and deletion of obsolete
+derived artifacts are atomic, but do not run `VACUUM`; freed pages remain on
+SQLite's freelist and are reused by later commits. The first transaction in a
+new store creates the bootstrap checkpoint. The logical multi-transaction API
+keeps one immutable in-process overlay per report inside its one uncommitted
+SQLite transaction. Each overlay supplies the next group's exact `db-before`;
+no intermediate durable roots are required, and the whole group still commits
+or rolls back atomically.
+
+Historical roots are accelerators, not the fact history. A retained
+`db-before`, `db-after`, or `db` owns its checkpoint descriptor and immutable
+novelty tail. If its derived root is no longer available, VevDB reconstructs
+that exact basis from canonical datoms. Reopened `as-of`, `since`, `history`,
+and basis-coordinate values use the canonical log. No committed logical
+transactions are combined or removed.
+
+An opened storage-backed DB value pins an independent SQLite read snapshot
+until that value is closed. This closes the race between a concurrent query
+and reclamation: the reader either sees its old pages or, if it had not opened
+yet, reconstructs its basis. A long-lived opened reader can consequently keep
+WAL pages alive and make an optional `VACUUM` report busy; close unused native
+DB values and retry physical reclamation when immediate truncation matters.
+
+`compact-indexes` absorbs the current novelty into a shallow equivalent
+checkpoint and reclaims obsolete derived rows, but does not truncate the file.
+`reclaim-indexes` performs the same logical checkpoint/reachability work and
+then runs `VACUUM` to return free pages to the filesystem. Neither operation
+deletes datoms, transaction rows, or transaction metadata:
+
+```sh
+vevdb compact-indexes example.db
+vevdb reclaim-indexes example.db
+```
+
+The retention marker `derived-index-retention=latest-checkpoint-v1` is written
+after full reclamation (`latest-reachable-v1` after reachability pruning).
+These markers do not make the canonical schema incompatible with older stores;
+opening an existing store needs no eager rewrite. The first normal maintenance
+cycle migrates its derived retention lazily. Explicit reclamation is useful
+after upgrading a large existing file because only it guarantees immediate
+file truncation rather than reuse through SQLite's freelist.
+
+The ordinary `vev_datoms_*` indexes are SQLite B-trees. The chunk indexes are
+VevDB's immutable B-tree-like structure: leaf chunks normally contain 128
+entries (512 for broad builds) and internal nodes have fanout 64. The two
+representations overlap in sort order but serve different access paths. Direct
+source operators use SQLite `INDEXED BY` plans, while immutable cursors, index
+APIs, and checkpoint descriptors use chunks. This version retains both and
+budgets their combined bytes. Range rows remain a legacy manifest optimization;
+ordinary checkpoint-plus-novelty operation creates none.
+
+This resembles Datomic's broad index segments plus novelty model, but is not a
+claim that VevDB implements Datomic's private storage format. Datomic separates
+its transaction log, broad immutable index segments, and an in-memory novelty
+layer. VevDB maps the same semantic boundary onto one SQLite file: canonical
+rows are the durable log, a chunk root is the broad checkpoint, and the
+canonical rows after its basis are the novelty. SQLite B-trees remain part of
+the local execution engine.
 
 Public database values are immutable root descriptors. Creating one does not
 leave statements or a read transaction attached to the writable connection's
@@ -88,8 +174,8 @@ at the descriptor's exact root row, so callers may retain `db-before`,
 `db-after`, and `db` values across later writes without blocking the writer or
 silently advancing the retained value.
 
-Opening or promoting a connection to resident execution reads its root basis,
-datom log, manifests, and validation metadata through one SQLite read
+Opening or promoting a connection to resident execution reads its checkpoint,
+datom log, legacy manifest metadata, and validation metadata through one SQLite read
 transaction on one handle. A concurrent writer therefore cannot make the
 loader combine parts of two storage generations. Existing current-format
 stores also skip schema DDL during open, so an ordinary reader does not become
@@ -118,6 +204,8 @@ Several connections and processes may open one store.
 - Readers use stable snapshots.
 - One writer commits at a time.
 - Writers refresh the current basis before assigning a transaction ID.
+- The canonical next transaction ID is checked again while holding the writer
+  lock; a stale source or no-op transaction cannot reuse a committed ID.
 - Existing database values do not change.
 - Call `db` again to observe newer commits.
 - Concurrent open and resident promotion observe one coherent storage

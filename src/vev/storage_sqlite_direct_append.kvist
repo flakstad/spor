@@ -744,47 +744,116 @@
 
 (def sqlite-write-basis-changed-error "SQLite write basis changed while waiting for the writer lock")
 
-(defn sqlite-write-source-current? [handle: rawptr, source: DB-Read-Source] -> [current: bool, ok: bool, error: string]
+(defn db-read-source-effective-basis [source: DB-Read-Source] -> [basis: u64, ok: bool]
   (case source.kind
-    .SQLite-Snapshot
-      (let [[latest latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw handle)]
-        (if latest-ok
-          (return (= latest source.sqlite-snapshot^.basis-tx) true "")
-          (return false false latest-error)))
-    .Shared-Resident-Datoms-And-Indexes
-      (let [count source.shared-datoms^.count]
-        (when (= count 0)
-          (let [[_ latest-ok latest-error]
-                  (vev.sqlite-latest-index-root-basis-raw handle)]
-            (if latest-ok
-              (return false true "")
-              (if (= latest-error "sqlite DB has no Vev index roots")
-                (return true true "")
-                (return false false latest-error)))))
-        (let [[last last-ok]
-                (shared-datom-log-at-borrowed
-                  source.shared-datoms^ (- count 1))]
-          (when (not last-ok)
-            (return false false
-                    "shared source did not expose its durable basis"))
-          (let [[latest latest-ok latest-error]
-                  (vev.sqlite-latest-index-root-basis-raw handle)]
-            (if latest-ok
-              (return (= latest last.tx) true "")
-              (return false false latest-error)))))
-    .SQLite-Tx-Ops-Overlay
-      (sqlite-write-source-current? handle source.overlay-base^)
+    .SQLite-Snapshot (return source.sqlite-snapshot^.basis-tx true)
+    .SQLite-Tx-Ops-Overlay (return source.overlay-tx true)
     .SQLite-Datom-Overlay
-      (sqlite-write-source-current? handle source.overlay-base^)
+      (if (> (count source.overlay-datoms^) 0)
+        (return source.overlay-datoms^[(- (count source.overlay-datoms^) 1)].tx true)
+        (return source.sqlite-snapshot^.basis-tx true))
     .SQLite-Datom-Log-Overlay
-      (sqlite-write-source-current? handle source.overlay-base^)
-    .Shared-Tx-Ops-Overlay
-      (sqlite-write-source-current? handle source.overlay-base^)
+      (if (> source.overlay-tx 0)
+        (return source.overlay-tx true)
+        (if (> source.overlay-log^.count 0)
+        (let [[last last-ok]
+                (shared-datom-log-at-borrowed source.overlay-log^ (- source.overlay-log^.count 1))]
+          (return last.tx last-ok))
+        (return source.sqlite-snapshot^.basis-tx true)))
+    .Shared-Resident-Datoms-And-Indexes
+      (if (> source.shared-datoms^.count 0)
+        (let [[last last-ok]
+                (shared-datom-log-at-borrowed source.shared-datoms^ (- source.shared-datoms^.count 1))]
+          (return last.tx last-ok))
+        (return 0 true))
+    .Shared-Tx-Ops-Overlay (return source.overlay-tx true)
     .Shared-Datom-Overlay
-      (sqlite-write-source-current? handle source.overlay-base^)
+      (if (> (count source.overlay-datoms^) 0)
+        (return source.overlay-datoms^[(- (count source.overlay-datoms^) 1)].tx true)
+        (db-read-source-effective-basis
+          (shared-resident-db-read-source source.shared-datoms source.shared-indexes)))
     .Shared-Datom-Log-Overlay
-      (sqlite-write-source-current? handle source.overlay-base^)
-     (return false false "SQLite durable write requires a SQLite or empty shared source")))
+      (if (> source.overlay-log^.count 0)
+        (let [[last last-ok]
+                (shared-datom-log-at-borrowed source.overlay-log^ (- source.overlay-log^.count 1))]
+          (return last.tx last-ok))
+        (db-read-source-effective-basis
+          (shared-resident-db-read-source source.shared-datoms source.shared-indexes)))
+    .Tx-Ops-Overlay (return source.overlay-tx true)
+     (return 0 false)))
+
+(defn sqlite-write-source-current? [handle: rawptr, source: DB-Read-Source] -> [current: bool, ok: bool, error: string]
+  (let [[source-basis source-ok] (db-read-source-effective-basis source)]
+    (when (not source-ok)
+      (return false false "SQLite durable write source did not expose its basis"))
+    (let [[head-basis _ _ _ lag-ok lag-error]
+            (vev.sqlite-index-lag-stats-raw handle)]
+      (if lag-ok
+        (return (= source-basis head-basis) true "")
+        (return false false lag-error)))))
+
+(defn append-source-direct-sqlite-conn-log-only-open-tx!
+  [store: ^SQLite-Conn, source: DB-Read-Source, tx: u64, tx-data: []Datom,
+   tx-meta: []Tx-Meta, start-index: int, profile: ^SQLite-Direct-Write-Profile]
+  -> [ok: bool, error: string]
+  ;; The canonical next transaction entity is the definitive optimistic
+  ;; generation check while the writer lock is held. A committed no-op can
+  ;; advance the transaction table without adding a datom, so deriving current
+  ;; basis only from the source's last datom would reject a correctly reloaded
+  ;; resident value forever.
+  (let [[head-basis _ _ _ head-ok head-error]
+          (vev.sqlite-index-lag-stats-raw store^.handle)]
+    (when (not head-ok)
+      (return false head-error))
+    (when (not (= tx (+ head-basis 1)))
+      (return false sqlite-write-basis-changed-error)))
+  (let [[canonical-count count-ok count-error]
+          (vev.sqlite-datom-count-raw store^.handle)]
+    (when (not count-ok)
+      (return false count-error))
+  (let [[write-stmts write-ok write-error] (sqlite-conn-direct-write-stmts store)]
+    (when (not write-ok)
+      (return false write-error))
+    (let [[tx-ok tx-error] (insert-sqlite-tx-with-stmts! store^.handle write-stmts tx)]
+      (when (not tx-ok)
+        (return false tx-error)))
+    (let [[fulltext-attrs attrs-ok attrs-error]
+            (source-fulltext-attrs-for-direct-append-cached store source tx-data)]
+      (when (not attrs-ok)
+        (return false attrs-error))
+      (defer (delete-owned-string-set fulltext-attrs))
+      (let [[datoms-ok datoms-error]
+              (append-sqlite-datoms-with-stmts! store^.handle write-stmts
+                (int canonical-count) tx-data (addr fulltext-attrs))]
+        (when (not datoms-ok)
+          (return false datoms-error))))
+    (let [[meta-ok meta-error]
+            (insert-sqlite-tx-meta-with-stmts! store^.handle write-stmts tx tx-meta)]
+      (when (not meta-ok)
+        (return false meta-error))))
+  (inc! profile^.writes)
+  (return true "")))
+
+(defn append-source-direct-sqlite-conn-log-only-mode!
+  [store: ^SQLite-Conn, source: DB-Read-Source, tx: u64, tx-data: []Datom,
+   tx-meta: []Tx-Meta, start-index: int, profile: ^SQLite-Direct-Write-Profile,
+   owns-tx: bool] -> [ok: bool, error: string]
+  (when owns-tx
+    (let [[begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
+      (when (not begin-ok)
+        (return false begin-error))))
+  (let [[append-ok append-error]
+          (append-source-direct-sqlite-conn-log-only-open-tx!
+            store source tx tx-data tx-meta start-index profile)]
+    (when (not append-ok)
+      (sqlite-rollback-if-owned! store^.handle owns-tx)
+      (return false append-error)))
+  (when owns-tx
+    (let [[commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
+      (when (not commit-ok)
+        (vev.sqlite-rollback-raw store^.handle)
+        (return false commit-error))))
+  (return true ""))
 
 (defn append-source-direct-sqlite-conn-from-source-plan-published-mode [store: ^SQLite-Conn, source: DB-Read-Source, tx: u64, tx-data: []Datom, tx-meta: []Tx-Meta, plan: SQLite-Durable-Append-Plan, profile: ^SQLite-Direct-Write-Profile, owns-tx: bool] -> [published: SQLite-Durable-Published-Root, ok: bool, error: string]
   (let [handle store^.handle]

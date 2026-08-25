@@ -18,7 +18,7 @@ vevdb db-info <store> [--db <pipeline>]
 vevdb index-info <store> [index]
 
 vevdb transact <store> <transaction>
-vevdb transact-many <store> <transactions> --mode logical|flatten
+vevdb transact-many <store> <transactions> --mode committed|logical|flatten
 vevdb with <store> <transaction> [--db <pipeline>]
 
 vevdb query <store> <query> [inputs] [--rules <rules>]
@@ -43,6 +43,7 @@ vevdb tx-range <store> [start [end]]
 
 vevdb ensure-resident <store>
 vevdb compact-indexes <store>
+vevdb reclaim-indexes <store>
 vevdb maintain-indexes <store> [--max-steps <n>]
 
 vevdb t-to-tx <t>
@@ -146,11 +147,13 @@ it starts after the basis captured at startup. With `--after`, it emits every
 transaction strictly after that time point and then continues polling until
 interrupted.
 
-## Logical and flattened bulk writes
+## Committed, logical, and flattened bulk writes
 
-`transact-many --mode logical` keeps one transaction/report per input group
-while using one durable commit. `--mode flatten` combines all groups into one
-logical transaction.
+`transact-many --mode committed` commits each input group independently and is
+the right mode for durability/storage-amplification measurements. A later
+failure does not roll back earlier committed groups. `--mode logical` keeps one
+transaction/report per input group while using one all-or-nothing durable
+commit. `--mode flatten` combines all groups into one logical transaction.
 
 ## Legacy stores
 

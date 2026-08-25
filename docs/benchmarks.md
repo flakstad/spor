@@ -54,6 +54,41 @@ bench/write_bench/run_datomic.sh \
   --total 10000
 ```
 
+## Durable storage amplification
+
+The deterministic storage benchmark writes 1,000 application assertions using
+five transaction shapes. Its default `committed` mode performs one real SQLite
+commit for every logical transaction. It checkpoints the WAL before measuring
+the SQLite file, reports file/live/freelist bytes, checkpoint and novelty
+bases, every durable index artifact, `dbstat` object sizes, and transaction,
+open, and query latency:
+
+```sh
+python3 bench/storage_amplification.py --build
+```
+
+Pass `--output-dir` to retain the databases for inspection, `--json-output`
+to save the measurements, and `--budgets` to enforce a checked-in or local
+JSON budget. A shape such as `--shape 1000x1` means 1,000 logical
+transactions containing one assertion each. Every transaction also records
+the normal `:db/txInstant` datom.
+
+`--mode logical` exercises the atomic multi-transaction API instead. That mode
+is useful for its distinct all-or-nothing contract, but it is not a substitute
+for measuring visibility and durability after every small commit.
+
+The checked-in regression budget covers file bytes per datom, incremental
+bytes per logical transaction, derived row counts, and process-level open,
+query, and transaction latency:
+
+```sh
+python3 bench/storage_amplification.py --build \
+  --budgets bench/storage_amplification_budget.json
+```
+
+Latency limits are deliberately broad enough for CI machines; dated result
+files remain the useful same-machine comparison.
+
 ## Recursive rules
 
 Compare VevDB with a local DataScript checkout:

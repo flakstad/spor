@@ -193,17 +193,20 @@
                  sqlite-root-path: root-path
                  sqlite-root-published: root-published
                  sqlite-root-page-cache: root-cache
-                 overlay-log: (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)})
+                 overlay-log: (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)
+                 overlay-tx: base.basis-tx})
       (Store-DB {kind: .SQLite-Datom-Log-Overlay
                  sqlite-snapshot: (retain-sqlite-db-snapshot base)
-                 overlay-log: (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)}))))
+                 overlay-log: (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)
+                 overlay-tx: base.basis-tx}))))
 
 (defn sqlite-root-store-db-with-datom-log-overlay [base: Store-DB, datoms: []Datom] -> Store-DB
   (Store-DB {kind: .SQLite-Datom-Log-Overlay
              sqlite-root-path: (string-owned base.sqlite-root-path)
              sqlite-root-published: base.sqlite-root-published
              sqlite-root-page-cache: (retain-sqlite-index-page-cache base.sqlite-root-page-cache)
-             overlay-log: (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)}))
+             overlay-log: (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)
+             overlay-tx: base.overlay-tx}))
 
 (defn shared-store-db-with-retained-datom-log-overlay [base: Shared-DB-Snapshot, log: Shared-Datom-Log] -> Store-DB
   (Store-DB {kind: .Shared-Datom-Log-Overlay
@@ -217,17 +220,20 @@
                  sqlite-root-path: root-path
                  sqlite-root-published: root-published
                  sqlite-root-page-cache: root-cache
-                 overlay-log: (retain-shared-datom-log log)})
+                 overlay-log: (retain-shared-datom-log log)
+                 overlay-tx: base.basis-tx})
       (Store-DB {kind: .SQLite-Datom-Log-Overlay
                  sqlite-snapshot: (retain-sqlite-db-snapshot base)
-                 overlay-log: (retain-shared-datom-log log)}))))
+                 overlay-log: (retain-shared-datom-log log)
+                 overlay-tx: base.basis-tx}))))
 
 (defn sqlite-root-store-db-with-retained-datom-log-overlay [base: Store-DB, log: Shared-Datom-Log] -> Store-DB
   (Store-DB {kind: .SQLite-Datom-Log-Overlay
              sqlite-root-path: (string-owned base.sqlite-root-path)
              sqlite-root-published: base.sqlite-root-published
              sqlite-root-page-cache: (retain-sqlite-index-page-cache base.sqlite-root-page-cache)
-             overlay-log: (retain-shared-datom-log log)}))
+             overlay-log: (retain-shared-datom-log log)
+             overlay-tx: base.overlay-tx}))
 
 (defn shared-store-db-with-report-overlay [base: Shared-DB-Snapshot, report: Tx-Report] -> Store-DB
   (Store-DB {kind: .Shared-Tx-Ops-Overlay
@@ -1181,6 +1187,7 @@
         (let [out (if (not (= snapshot.sqlite-root-path ""))
                     (sqlite-root-store-db-with-datom-log-overlay snapshot (slice datoms 0))
                     (sqlite-store-db-with-datom-log-overlay snapshot.sqlite-snapshot (slice datoms 0)))]
+          (set! out.overlay-tx tx)
           (delete-owned-datoms datoms)
           out))
     .SQLite-Datom-Overlay
@@ -1189,6 +1196,7 @@
         (let [out (if (not (= snapshot.sqlite-root-path ""))
                     (sqlite-root-store-db-with-datom-log-overlay snapshot (slice datoms 0))
                     (sqlite-store-db-with-datom-log-overlay snapshot.sqlite-snapshot (slice datoms 0)))]
+          (set! out.overlay-tx tx)
           (delete-owned-datoms datoms)
           out))
     .SQLite-Datom-Log-Overlay
@@ -1197,6 +1205,7 @@
             out (if (not (= snapshot.sqlite-root-path ""))
                   (sqlite-root-store-db-with-retained-datom-log-overlay snapshot log)
                   (sqlite-store-db-with-retained-datom-log-overlay snapshot.sqlite-snapshot log))]
+        (set! out.overlay-tx tx)
         (delete-shared-datom-log log)
         (delete-owned-datoms datoms)
         out)
