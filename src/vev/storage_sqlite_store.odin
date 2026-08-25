@@ -134,6 +134,30 @@ sqlite_open_live_raw :: proc(path: string) -> (rawptr, bool, string) {
     return rawptr(db), true, ""
 }
 
+// Opens an existing Vev store strictly for metadata inspection. Unlike the
+// live open path this never creates a database, initializes schema, or runs
+// any storage maintenance.
+sqlite_open_inspection_raw :: proc(path: string) -> (rawptr, bool, string) {
+    db: ^SQLite3
+    path_c, path_c_ok := sqlite_cstring(path)
+    if !path_c_ok {
+        return nil, false, "failed to allocate sqlite path"
+    }
+    defer delete(path_c)
+    if sqlite3_open_v2(path_c, &db, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
+        error := sqlite_error_text(db, "sqlite read-only inspection open failed")
+        if db != nil {
+            _ = sqlite3_close_v2(db)
+        }
+        return nil, false, error
+    }
+    if !sqlite_app_is_vev_store(db) {
+        _ = sqlite3_close_v2(db)
+        return nil, false, "storage path is not a Vev store"
+    }
+    return rawptr(db), true, ""
+}
+
 sqlite_close_live_raw :: proc(handle: rawptr) {
     if handle != nil {
         _ = sqlite3_close((^SQLite3)(handle))

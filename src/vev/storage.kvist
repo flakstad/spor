@@ -1417,6 +1417,25 @@
       (vev.sqlite-close-live-raw handle)
       (return basis basis-ok basis-error))))
 
+(defn sqlite-storage-head-basis [path: string] -> [basis-tx: u64, ok: bool, error: string]
+  (let [[handle open-ok open-error] (vev.sqlite-open-inspection-raw path)]
+    (when (not open-ok)
+      (return 0 false open-error))
+    (let [[basis basis-ok basis-error] (vev.sqlite-storage-head-basis-raw handle)]
+      (vev.sqlite-close-live-raw handle)
+      (return basis basis-ok basis-error))))
+
+(defn sqlite-storage-indexed-basis [path: string] -> [basis-tx: u64, ok: bool, error: string]
+  (let [[handle open-ok open-error] (vev.sqlite-open-inspection-raw path)]
+    (when (not open-ok)
+      (return 0 false open-error))
+    (let [[basis basis-ok basis-error] (vev.sqlite-latest-index-root-basis-raw handle)]
+      (vev.sqlite-close-live-raw handle)
+      (if (and (not basis-ok)
+               (= basis-error "sqlite DB has no Vev index roots"))
+        (return 0 true "")
+        (return basis basis-ok basis-error)))))
+
 (defn sqlite-latest-index-chunk-row-count [path: string, index-name: string] -> [basis-tx: u64, row-count: u64, ok: bool, error: string]
   (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
     (when (not open-ok)

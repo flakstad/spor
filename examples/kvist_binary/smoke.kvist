@@ -214,11 +214,19 @@
       (when (< (d.basis-t report.db-after) (u64 2))
         (panic "binary Kvist transaction report omitted db-after"))
       (let [[persisted-basis persisted? persisted-error]
-              (d.persisted-basis-t path)]
+              (d.persisted-basis-t path)
+            [head-basis head? head-error]
+              (d.storage-head-basis-t path)
+            [indexed-basis indexed? indexed-error]
+              (d.storage-indexed-basis-t path)]
         (defer (delete persisted-error))
-        (when (or (not persisted?)
-                  (not (= persisted-basis (d.basis-t report.db-after))))
-          (panic "path basis did not match the public DB basis t")))
+        (defer (delete head-error))
+        (defer (delete indexed-error))
+        (when (or (not persisted?) (not head?) (not indexed?)
+                  (not (= head-basis (d.basis-t report.db-after)))
+                  (not (= persisted-basis indexed-basis))
+                  (> indexed-basis head-basis))
+          (panic "storage head/indexed basis APIs disagreed")))
       (let [name-query
             '[:find ?name .
               :in $ ?id

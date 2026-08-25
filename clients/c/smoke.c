@@ -259,6 +259,22 @@ static void count_tx_listener(void *user, vev_tx_report_t report) {
     vev_string_free(edn);
 }
 
+static int read_storage_basis(
+    const char *label,
+    char *(*read_basis)(const char *, unsigned long long *),
+    const char *path,
+    unsigned long long *basis_out) {
+    char *error = read_basis(path, basis_out);
+    if (error == NULL || error[0] != '\0') {
+        fprintf(stderr, "%s failed: %s\n", label,
+                error != NULL ? error : "<null>");
+        if (error != NULL) vev_string_free(error);
+        return 0;
+    }
+    vev_string_free(error);
+    return 1;
+}
+
 static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     const char *path = "tmp.vev.c-abi.sqlite";
     remove(path);
@@ -412,6 +428,26 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
         fprintf(stderr, "unexpected durable basis after first tx\n");
         goto cleanup;
     }
+    unsigned long long storage_head = 0;
+    unsigned long long storage_indexed = 0;
+    unsigned long long storage_compat = 0;
+    db = vev_connection_db(durable);
+    unsigned long long first_public_basis = vev_db_basis_t(db);
+    vev_db_release(db);
+    db = NULL;
+    if (!read_storage_basis("storage head basis", vev_storage_head_basis_t,
+                            path, &storage_head) ||
+        !read_storage_basis("storage indexed basis", vev_storage_indexed_basis_t,
+                            path, &storage_indexed) ||
+        !read_storage_basis("storage compatibility basis", vev_storage_basis_t,
+                            path, &storage_compat) ||
+        storage_head != first_public_basis || storage_indexed > storage_head ||
+        storage_compat != storage_indexed) {
+        fprintf(stderr,
+                "unexpected durable storage basis coordinates: connection=%llu head=%llu indexed=%llu compatibility=%llu\n",
+                first_public_basis, storage_head, storage_indexed, storage_compat);
+        goto cleanup;
+    }
     if (vev_connection_tx_count(durable) != 1) {
         fprintf(stderr, "unexpected durable tx count after first tx\n");
         goto cleanup;
@@ -524,6 +560,19 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
     report = NULL;
     if (vev_connection_basis_t(durable) != first_basis + 3) {
         fprintf(stderr, "unexpected durable basis after second tx\n");
+        goto cleanup;
+    }
+    db = vev_connection_db(durable);
+    unsigned long long latest_public_basis = vev_db_basis_t(db);
+    vev_db_release(db);
+    db = NULL;
+    if (!read_storage_basis("storage head basis", vev_storage_head_basis_t,
+                            path, &storage_head) ||
+        !read_storage_basis("storage indexed basis", vev_storage_indexed_basis_t,
+                            path, &storage_indexed) ||
+        storage_head != latest_public_basis ||
+        storage_indexed > storage_head) {
+        fprintf(stderr, "storage head did not track durable db-after basis\n");
         goto cleanup;
     }
     if (vev_connection_tx_count(durable) != 4) {

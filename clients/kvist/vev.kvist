@@ -363,6 +363,24 @@
       (native.unload (addr library))
       (return basis read-ok read-error))))
 
+(defn storage-head-basis-t [path: string] -> [basis-t: u64, ok: bool, error: string]
+  (let [[library loaded?] (native.load-default)]
+    (when (not loaded?)
+      (return (u64 0) false
+              (clone-text "could not load the bundled Vev native library")))
+    (let [[basis read-ok read-error] (native.storage-head-basis-t (addr library) path)]
+      (native.unload (addr library))
+      (return basis read-ok read-error))))
+
+(defn storage-indexed-basis-t [path: string] -> [basis-t: u64, ok: bool, error: string]
+  (let [[library loaded?] (native.load-default)]
+    (when (not loaded?)
+      (return (u64 0) false
+              (clone-text "could not load the bundled Vev native library")))
+    (let [[basis read-ok read-error] (native.storage-indexed-basis-t (addr library) path)]
+      (native.unload (addr library))
+      (return basis read-ok read-error))))
+
 (defn backup [conn: Conn, destination-path: string] -> [basis-t: u64, ok: bool, error: string]
   (let [state (conn-state conn)]
     (native.backup (addr state^.connection) destination-path)))

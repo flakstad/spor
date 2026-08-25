@@ -127,10 +127,17 @@ const char *vev_connection_error(vev_connection_t conn);
 const char *vev_connection_backend(vev_connection_t conn);
 const char *vev_connection_path(vev_connection_t conn);
 unsigned long long vev_connection_basis_t(vev_connection_t conn);
-/* Reads the latest durable basis without opening/materializing a connection.
+/* Compatibility alias for vev_storage_indexed_basis_t. Reads the latest
+ * durable index-root basis without opening/materializing a connection.
  * Returns an owned error string (empty on success); release with
  * vev_string_free. */
 char *vev_storage_basis_t(const char *path, unsigned long long *basis_out);
+/* Reads the latest fully committed durable transaction basis directly from
+ * storage metadata. Does not construct or materialize a connection. */
+char *vev_storage_head_basis_t(const char *path, unsigned long long *basis_out);
+/* Reads the basis represented by the latest durable index root directly from
+ * storage metadata. Does not construct or materialize a connection. */
+char *vev_storage_indexed_basis_t(const char *path, unsigned long long *basis_out);
 /* Creates a consistent snapshot at a path which must not already exist.
  * Returns an allocated empty string on success and writes the snapshot's exact
  * basis to basis_out. Returns an allocated diagnostic on failure. Free the

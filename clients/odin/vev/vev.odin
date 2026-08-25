@@ -5,6 +5,7 @@ package vev
 
 import "core:dynlib"
 import "core:os"
+import "base:runtime"
 import "core:strings"
 import "core:time"
 
@@ -26,6 +27,8 @@ API :: struct {
 	connection_error: proc "c" (conn: rawptr) -> cstring `dynlib:"vev_connection_error"`,
 	connection_basis_t: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_basis_t"`,
 	storage_basis_t: proc "c" (path: cstring, basis_out: ^u64) -> cstring `dynlib:"vev_storage_basis_t"`,
+	storage_head_basis_t: proc "c" (path: cstring, basis_out: ^u64) -> cstring `dynlib:"vev_storage_head_basis_t"`,
+	storage_indexed_basis_t: proc "c" (path: cstring, basis_out: ^u64) -> cstring `dynlib:"vev_storage_indexed_basis_t"`,
 	connection_backup: proc "c" (conn: rawptr, destination_path: cstring, basis_out: ^u64) -> cstring `dynlib:"vev_connection_backup"`,
 	connection_tx_count: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_tx_count"`,
 	connection_ensure_resident: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_ensure_resident"`,
@@ -238,6 +241,9 @@ load :: proc(path: string) -> (library: Library, ok: bool) {
 	   library.api.connection_ok == nil ||
 	   library.api.connection_error == nil ||
 	   library.api.connection_basis_t == nil ||
+	   library.api.storage_basis_t == nil ||
+	   library.api.storage_head_basis_t == nil ||
+	   library.api.storage_indexed_basis_t == nil ||
 	   library.api.connection_backup == nil ||
 	   library.api.connection_tx_count == nil ||
 	   library.api.connection_ensure_resident == nil ||
@@ -475,8 +481,7 @@ connection_basis_t :: proc(connection: ^Durable_Connection) -> (t: u64, ok: bool
 	return connection.library.api.connection_basis_t(connection.handle), true
 }
 
-// storage_basis_t reads the exact latest durable index-root basis without
-// constructing a Connection or materializing resident indexes.
+// storage_basis_t is the compatibility name for storage_indexed_basis_t.
 storage_basis_t :: proc(
 	library: ^Library,
 	path: string,
@@ -488,6 +493,52 @@ storage_basis_t :: proc(
 	basis: u64
 	path_text := strings.clone_to_cstring(path, context.temp_allocator)
 	native_error := library.api.storage_basis_t(path_text, &basis)
+	if native_error == nil {
+		return 0, false, strings.clone("could not read durable basis", allocator)
+	}
+	defer library.api.string_free(native_error)
+	message := string(native_error)
+	if message != "" {
+		return 0, false, strings.clone(message, allocator)
+	}
+	return basis, true, strings.clone("", allocator)
+}
+
+storage_head_basis_t :: proc(
+	library: ^Library,
+	path: string,
+	allocator := context.allocator,
+) -> (basis_t: u64, ok: bool, error: string) {
+	if library == nil {
+		return 0, false, strings.clone("invalid Vev library", allocator)
+	}
+	return storage_basis_t_with(library, path, library.api.storage_head_basis_t, allocator)
+}
+
+storage_indexed_basis_t :: proc(
+	library: ^Library,
+	path: string,
+	allocator := context.allocator,
+) -> (basis_t: u64, ok: bool, error: string) {
+	if library == nil {
+		return 0, false, strings.clone("invalid Vev library", allocator)
+	}
+	return storage_basis_t_with(library, path, library.api.storage_indexed_basis_t, allocator)
+}
+
+@(private)
+storage_basis_t_with :: proc(
+	library: ^Library,
+	path: string,
+	read_basis: proc "c" (path: cstring, basis_out: ^u64) -> cstring,
+	allocator: runtime.Allocator,
+) -> (basis_t: u64, ok: bool, error: string) {
+	if library == nil || read_basis == nil {
+		return 0, false, strings.clone("invalid Vev library", allocator)
+	}
+	basis: u64
+	path_text := strings.clone_to_cstring(path, context.temp_allocator)
+	native_error := read_basis(path_text, &basis)
 	if native_error == nil {
 		return 0, false, strings.clone("could not read durable basis", allocator)
 	}

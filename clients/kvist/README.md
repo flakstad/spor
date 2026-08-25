@@ -47,6 +47,21 @@ Create a consistent durable backup without copying SQLite/WAL files directly:
 The destination must be new. `basis` identifies exactly the committed Vev
 generation in the independently openable result.
 
+Inspect durable coordinates without opening a Vev connection:
+
+```clojure
+(let [[head head-ok head-error] (d.storage-head-basis-t "example.db")
+      [indexed indexed-ok indexed-error]
+        (d.storage-indexed-basis-t "example.db")]
+  ...)
+```
+
+`storage-head-basis-t` is the latest fully committed transaction and is the
+coordinate exposed by the current DB after reopen. `storage-indexed-basis-t`
+is the latest durable index-root coordinate and may lag behind head while
+maintenance is deferred. `persisted-basis-t` remains a compatibility alias for
+`storage-indexed-basis-t`.
+
 General SQLite access is a separate package in the same bundle:
 
 ```clojure
