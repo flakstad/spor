@@ -153,12 +153,16 @@
           (case range.kind
             .Value
               (let [values ([]Value [(value-entity e-value-in.entity)])
-                    [candidate-view candidate-low candidate-high range-ok range-error] (db-read-source-clause-index-range-from-physical-prefix source range values)]
-                (when (not range-ok)
-                  (return (db-read-source-empty-clause-index-scan source) (= range-error "") range-error))
-                (set! view candidate-view)
-                (set! low candidate-low)
-                (set! high candidate-high))
+                    candidate-view (db-read-source-index-view source range.order)
+                    [candidate-low low-ok low-error] (db-read-source-strict-bound-values source candidate-view values false)]
+                (when (not low-ok)
+                  (return (db-read-source-empty-clause-index-scan source) false low-error))
+                (let [[candidate-high high-ok high-error] (db-read-source-strict-bound-values source candidate-view values true)]
+                  (when (not high-ok)
+                    (return (db-read-source-empty-clause-index-scan source) false high-error))
+                  (set! view candidate-view)
+                  (set! low candidate-low)
+                  (set! high candidate-high)))
             .EntityAttr
               (let [values ([]Value [(value-entity v-value.entity) (value-keyword forward-attr)])
                     [candidate-view candidate-low candidate-high range-ok range-error] (db-read-source-clause-index-range-from-physical-prefix source range values)]

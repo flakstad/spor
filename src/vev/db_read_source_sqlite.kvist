@@ -34,6 +34,9 @@
     (when (not read-ok)
       (return (result-set-error read-error)))
     (defer (db-read-source-end-query-read source read-started)))
+  (let [[pull-ok pull-error] (validate-db-read-source-query-pull-patterns source sources query-value inputs)]
+    (when (not pull-ok)
+      (return (result-set-error pull-error))))
   ;; Filtered immutable DB values must not enter source fast paths which read
   ;; the underlying durable indexes without applying the temporal predicate.
   (let [has-filtered-source

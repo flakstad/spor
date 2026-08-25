@@ -1842,8 +1842,13 @@
     (source-index-datom-stream-for-values source .EAVT values)))
 
 (defn source-vaet-entity-attr-stream [source: DB-Read-Source, entity: u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
-  (let [values ([]Value [(value-entity entity) (value-keyword attr)])]
-    (source-index-datom-stream-for-values source .VAET values)))
+  ;; Public index prefix comparisons intentionally coerce Entity and Int
+  ;; values with the same numeric payload. Internal reverse reads must keep
+  ;; those value kinds distinct or the selected VAET range can be disjoint.
+  (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-reverse-entity-attr source entity attr)]
+    (if datoms-ok
+      (source-index-datom-stream-from-owned-datoms source datoms)
+      (return (Source-Index-Datom-Stream {}) false datoms-error))))
 
 (defn append-source-entity-attr-option-values! [option-row: ^Result-Row, source: DB-Read-Source, entity: u64, attr: string] -> [ok: bool, error: string]
   (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity attr)]

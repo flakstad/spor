@@ -288,6 +288,72 @@
     (db-read-source-for-name primary sources pull-find.source)
     (return primary true "")))
 
+(defn db-read-source-has-schema? [source: DB-Read-Source] -> [has-schema: bool, ok: bool, error: string]
+  (let [[idents idents-ok idents-error] (db-read-source-datoms-by-attr source ":db/ident")]
+    (when (not idents-ok)
+      (return false false idents-error))
+    (let [present (> (count idents) 0)]
+      (delete-owned-datoms idents)
+      (return present true ""))))
+
+(defn validate-db-read-source-pull-spec-schema [source: DB-Read-Source, has-schema: bool, spec: Pull-Spec] -> [ok: bool, error: string]
+  (when (or (= spec.a "*")
+            (= spec.a ":db/id"))
+    (return true ""))
+  (let [reverse? (reverse-attr? spec.a)
+        attr (if reverse?
+               (forward-attr-for-reverse spec.a)
+               spec.a)]
+    (defer (when reverse? (delete attr)))
+    (when (and has-schema reverse?)
+      (let [[ref ref-ok ref-error] (db-read-source-schema-ref? source attr)]
+        (when (not ref-ok)
+          (return false ref-error))
+        (when (not ref)
+          (return false (fmt.tprintf "pull reverse attr must be ref: %s" spec.a)))))
+    (when (and has-schema spec.has-limit)
+      (let [[many many-ok many-error] (db-read-source-schema-cardinality-many? source attr)]
+        (when (not many-ok)
+          (return false many-error))
+        (when (not many)
+          (return false (fmt.tprintf "pull limit attr must be cardinality many: %s" spec.a)))))
+    (when (and has-schema
+               (or (> (count spec.pattern) 0)
+                   spec.has-recursion))
+      (let [[ref ref-ok ref-error] (db-read-source-schema-ref? source attr)]
+        (when (not ref-ok)
+          (return false ref-error))
+        (when (not ref)
+          (return false (fmt.tprintf "pull nested attr must be ref: %s" spec.a)))))
+    (for [child spec.pattern]
+      (let [[child-ok child-error] (validate-db-read-source-pull-spec-schema source has-schema child)]
+        (when (not child-ok)
+          (return false child-error)))))
+  (return true ""))
+
+(defn validate-db-read-source-pull-pattern [source: DB-Read-Source, pattern: []Pull-Spec] -> [ok: bool, error: string]
+  (let [[has-schema has-schema-ok has-schema-error] (db-read-source-has-schema? source)]
+    (when (not has-schema-ok)
+      (return false has-schema-error))
+    (for [spec pattern]
+      (let [[spec-ok spec-error] (validate-db-read-source-pull-spec-schema source has-schema spec)]
+        (when (not spec-ok)
+          (return false spec-error)))))
+  (return true ""))
+
+(defn validate-db-read-source-query-pull-patterns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input] -> [ok: bool, error: string]
+  (for [pull-find query-value.pulls]
+    (let [[pull-source pull-source-ok pull-source-error] (db-read-source-pull-find-source source sources pull-find)]
+      (when (not pull-source-ok)
+        (return false pull-source-error))
+      (let [[pattern pattern-ok] (db-read-source-pull-find-pattern query-value inputs pull-find)]
+        (when (not pattern-ok)
+          (return false "pull pattern input must be a pull pattern"))
+        (let [[pattern-valid pattern-error] (validate-db-read-source-pull-pattern pull-source pattern)]
+          (when (not pattern-valid)
+            (return false pattern-error))))))
+  (return true ""))
+
 (defn db-read-source-pulls-for-binding-with-sources-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, binding: Binding, registry: []Native-Query-Fn] -> [pulls: [dynamic]Pull-Result, ok: bool, error: string]
   (let [out (make [dynamic]Pull-Result 0 (count query-value.pulls))]
     (for [pull-find query-value.pulls]
