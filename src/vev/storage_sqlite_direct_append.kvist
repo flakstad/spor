@@ -805,8 +805,16 @@
           (vev.sqlite-index-lag-stats-raw store^.handle)]
     (when (not head-ok)
       (return false head-error))
-    (when (not (= tx (+ head-basis 1)))
-      (return false sqlite-write-basis-changed-error)))
+    ;; Transaction IDs live in the reserved transaction partition. An empty
+    ;; store has durable head 0, so its canonical successor is the partition
+    ;; base rather than integer 1. Subsequent heads are already transaction
+    ;; entity IDs and advance normally.
+    (let [expected-tx
+            (if (= head-basis 0)
+              tx-partition-base
+              (+ head-basis 1))]
+      (when (not (= tx expected-tx))
+        (return false sqlite-write-basis-changed-error))))
   (let [[canonical-count count-ok count-error]
           (vev.sqlite-datom-count-raw store^.handle)]
     (when (not count-ok)

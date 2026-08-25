@@ -1647,6 +1647,37 @@
       (vev.close-store-db! (addr snapshot)))
     (vev.close-store store)))
 
+(t.deftest fresh-sqlite-resident-first-schema-transaction-uses-transaction-partition
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.fresh-resident-first-schema.sqlite"]
+    (remove-sqlite-files path)
+    (defer (remove-sqlite-files path))
+    (let [[store store-ok store-error] (vev.open-store path)
+          [resident-ok resident-error] (vev.ensure-store-resident! (addr store))
+          report
+            (vev.transact-store-report-text
+              (addr store)
+              "[{:db/id 100 :db/ident :item/id :db/valueType :db.type/string :db/unique :db.unique/identity}
+                 {:db/id 101 :db/ident :item/title :db/valueType :db.type/string}
+                 {:db/id 102 :db/ident :item/parent :db/valueType :db.type/ref}
+                 {:db/id 103 :db/ident :item/children :db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
+                 {:db/id 104 :db/ident :item/order :db/valueType :db.type/long}
+                 {:db/id 105 :db/ident :item/archived :db/valueType :db.type/boolean}
+                 {:db/id 106 :db/ident :item/created-at :db/valueType :db.type/instant}
+                 {:db/id 107 :db/ident :item/tags :db/valueType :db.type/string :db/cardinality :db.cardinality/many}]")]
+      (t.is store-ok store-error)
+      (t.is resident-ok resident-error)
+      (t.is report.ok report.error)
+      (t.is (= report.tx vev.tx-partition-base))
+      (let [[basis basis-ok basis-error] (vev.store-db-basis-t (addr report.db-after))]
+        (t.is basis-ok basis-error)
+        (t.is (= basis 1)))
+      (let [[head head-ok head-error] (vev.sqlite-storage-head-basis path)]
+        (t.is head-ok head-error)
+        (t.is (= head report.tx)))
+      (vev.delete-store-tx-report report)
+      (vev.close-store store))))
+
 (t.deftest sqlite-index-run-manifest-schema-stores-base-and-runs
   (defer (free_all context.allocator))
   (remove-sqlite-files "tmp.vev.storage-architecture-run-manifest.sqlite")
