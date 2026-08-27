@@ -9,6 +9,7 @@
 (import set "kvist:set")
 (import fmt "core:fmt")
 (import strings "core:strings")
+(import time "core:time")
 (import vev "../vev")
 
 
@@ -75,6 +76,19 @@
 
 (defn- connection-as-sqlite [conn: Vev-Connection] -> Vev-SQLite-Conn
   (Vev-SQLite-Conn (rawptr conn)))
+
+(defn- tx-boundary-profile-start [conn: Vev-SQLite-Conn] -> time.Time
+  (let [profile (abi-sqlite-conn-tx-boundary-profile-ptr (rawptr conn))]
+    (if (and (not (= profile nil)) profile^.enabled)
+      (time.now)
+      (time.Time {}))))
+
+(defn- tx-boundary-profile-elapsed-us
+  [conn: Vev-SQLite-Conn, start: time.Time] -> f64
+  (let [profile (abi-sqlite-conn-tx-boundary-profile-ptr (rawptr conn))]
+    (if (and (not (= profile nil)) profile^.enabled)
+      (time.duration_microseconds (time.since start))
+      0.0)))
 
 (defn- durable-path-from-uri [uri: string] -> string
   (if (strings.has_prefix uri "sqlite://")
@@ -2307,6 +2321,83 @@
     ok))
 
 @export
+(defn vev_connection_tx_profile_reset :abi "c" [conn: Vev-Connection] -> bool
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr conn) nil) (not (abi-sqlite-conn-ok (rawptr conn))))
+    (return false))
+  (let [sqlite-conn (connection-as-sqlite conn)
+        boundary (abi-sqlite-conn-tx-boundary-profile-ptr (rawptr sqlite-conn))]
+    (set! boundary^.enabled true)
+    (set! boundary^.input-copy-us 0.0)
+    (set! boundary^.engine-us 0.0)
+    (set! boundary^.report-handle-us 0.0)
+    (set! boundary^.listener-us 0.0)
+    (set! boundary^.cleanup-us 0.0)
+    (vev.reset-sqlite-tx-phase-profile! (sqlite-conn-ptr sqlite-conn))
+    true))
+
+@export
+(defn vev_connection_tx_profile_disable :abi "c" [conn: Vev-Connection]
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr conn) nil) (not (abi-sqlite-conn-ok (rawptr conn))))
+    (return))
+  (let [sqlite-conn (connection-as-sqlite conn)
+        boundary (abi-sqlite-conn-tx-boundary-profile-ptr (rawptr sqlite-conn))
+        store (sqlite-conn-ptr sqlite-conn)]
+    (set! boundary^.enabled false)
+    (set! store^.tx-phase-profile.enabled false)))
+
+@export
+(defn vev_connection_tx_profile_value :abi "c" [conn: Vev-Connection] -> Vev-Value-Handle
+  (odin "context = runtime.default_context()")
+  (when (or (= (rawptr conn) nil) (not (abi-sqlite-conn-ok (rawptr conn))))
+    (return (Vev-Value-Handle nil)))
+  (let [sqlite-conn (connection-as-sqlite conn)
+        boundary (abi-sqlite-conn-tx-boundary-profile-ptr (rawptr sqlite-conn))
+        profile (vev.sqlite-tx-phase-profile (sqlite-conn-ptr sqlite-conn))]
+    (value-handle-from-owned-value
+      (vev.value-map
+        ([]vev.Value
+          [(vev.value-keyword (string-owned ":transactions"))
+           (vev.value-int (i64 profile.transactions))
+           (vev.value-keyword (string-owned ":effective-datoms"))
+           (vev.value-int (i64 profile.effective-datoms))
+           (vev.value-keyword (string-owned ":kvist-to-native-copy-us"))
+           (vev.value-float boundary^.input-copy-us)
+           (vev.value-keyword (string-owned ":native-engine-us"))
+           (vev.value-float boundary^.engine-us)
+           (vev.value-keyword (string-owned ":native-report-handle-us"))
+           (vev.value-float boundary^.report-handle-us)
+           (vev.value-keyword (string-owned ":native-listener-us"))
+           (vev.value-float boundary^.listener-us)
+           (vev.value-keyword (string-owned ":native-cleanup-us"))
+           (vev.value-float boundary^.cleanup-us)
+           (vev.value-keyword (string-owned ":parsing-us"))
+           (vev.value-float profile.parsing-us)
+           (vev.value-keyword (string-owned ":resolution-us"))
+           (vev.value-float profile.resolution-us)
+           (vev.value-keyword (string-owned ":validation-us"))
+           (vev.value-float profile.validation-us)
+           (vev.value-keyword (string-owned ":planning-us"))
+           (vev.value-float profile.planning-us)
+           (vev.value-keyword (string-owned ":db-after-us"))
+           (vev.value-float profile.db-after-us)
+           (vev.value-keyword (string-owned ":report-ownership-us"))
+           (vev.value-float profile.report-ownership-us)
+           (vev.value-keyword (string-owned ":canonical-append-us"))
+           (vev.value-float profile.canonical-append-us)
+           (vev.value-keyword (string-owned ":derived-bookkeeping-us"))
+           (vev.value-float profile.derived-bookkeeping-us)
+           (vev.value-keyword (string-owned ":sqlite-commit-us"))
+           (vev.value-float profile.sqlite-commit-us)
+           (vev.value-keyword (string-owned ":append-db-after"))
+           (vev.value-int (i64 profile.append-db-after))
+           (vev.value-keyword (string-owned ":incremental-db-after"))
+           (vev.value-int (i64 profile.incremental-db-after))
+           (vev.value-keyword (string-owned ":full-db-after"))
+           (vev.value-int (i64 profile.full-db-after))])))))
+
+@export
 (defn vev_connection_maintain_indexes :abi "c" [conn: Vev-Connection, max-steps: int] -> bool
   (odin "context = runtime.default_context()")
   (vev_sqlite_conn_maintain_indexes (connection-as-sqlite conn) max-steps))
@@ -3080,13 +3171,34 @@
   (odin "context = runtime.default_context()")
   (when (or (= (rawptr conn) nil) (= tx-text nil) (not (abi-sqlite-conn-ok (rawptr conn))))
     (return (Vev-Tx-Report nil)))
-  (let [tx (text-from-c tx-text)
-        report (vev.transact-sqlite-store-report-text (sqlite-conn-ptr conn) tx)
-        out (tx-report-handle-from-store-report report)]
-    (notify-abi-sqlite-tx-listeners! conn report)
-    (delete tx)
-    (vev.delete-store-tx-report report)
-    out))
+  (let [profile (abi-sqlite-conn-tx-boundary-profile-ptr (rawptr conn))
+        input-start (tx-boundary-profile-start conn)
+        tx (text-from-c tx-text)]
+    (set! profile^.input-copy-us
+      (+ profile^.input-copy-us
+         (tx-boundary-profile-elapsed-us conn input-start)))
+    (let [engine-start (tx-boundary-profile-start conn)
+          report (vev.transact-sqlite-store-report-text (sqlite-conn-ptr conn) tx)]
+      (set! profile^.engine-us
+        (+ profile^.engine-us
+           (tx-boundary-profile-elapsed-us conn engine-start)))
+      (let [report-start (tx-boundary-profile-start conn)
+            out (tx-report-handle-from-store-report report)]
+        (set! profile^.report-handle-us
+          (+ profile^.report-handle-us
+             (tx-boundary-profile-elapsed-us conn report-start)))
+        (let [listener-start (tx-boundary-profile-start conn)]
+          (notify-abi-sqlite-tx-listeners! conn report)
+          (set! profile^.listener-us
+            (+ profile^.listener-us
+               (tx-boundary-profile-elapsed-us conn listener-start))))
+        (let [cleanup-start (tx-boundary-profile-start conn)]
+          (delete tx)
+          (vev.delete-store-tx-report report)
+          (set! profile^.cleanup-us
+            (+ profile^.cleanup-us
+               (tx-boundary-profile-elapsed-us conn cleanup-start))))
+        out))))
 
 @export
 (defn vev_connection_transact_edn_report_with_tx_fns :abi "c" [conn: Vev-Connection, tx-text: cstring, registry: Vev-Tx-Fn-Registry] -> Vev-Tx-Report

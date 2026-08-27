@@ -32,6 +32,9 @@ API :: struct {
 	connection_backup: proc "c" (conn: rawptr, destination_path: cstring, basis_out: ^u64) -> cstring `dynlib:"vev_connection_backup"`,
 	connection_tx_count: proc "c" (conn: rawptr) -> u64 `dynlib:"vev_connection_tx_count"`,
 	connection_ensure_resident: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_ensure_resident"`,
+	connection_tx_profile_reset: proc "c" (conn: rawptr) -> bool `dynlib:"vev_connection_tx_profile_reset"`,
+	connection_tx_profile_disable: proc "c" (conn: rawptr) `dynlib:"vev_connection_tx_profile_disable"`,
+	connection_tx_profile_value: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_tx_profile_value"`,
 	connection_tx_ids: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_tx_ids"`,
 	connection_close: proc "c" (conn: rawptr) `dynlib:"vev_connection_close"`,
 	connection_db: proc "c" (conn: rawptr) -> rawptr `dynlib:"vev_connection_db"`,
@@ -615,6 +618,34 @@ ensure_resident :: proc(connection: ^Durable_Connection) -> bool {
 		return false
 	}
 	return connection.library.api.connection_ensure_resident(connection.handle)
+}
+
+reset_tx_profile :: proc(connection: ^Durable_Connection) -> bool {
+	if connection == nil || connection.handle == nil ||
+	   connection.library.api.connection_tx_profile_reset == nil {
+		return false
+	}
+	return connection.library.api.connection_tx_profile_reset(connection.handle)
+}
+
+disable_tx_profile :: proc(connection: ^Durable_Connection) {
+	if connection == nil || connection.handle == nil ||
+	   connection.library.api.connection_tx_profile_disable == nil {
+		return
+	}
+	connection.library.api.connection_tx_profile_disable(connection.handle)
+}
+
+tx_profile :: proc(connection: ^Durable_Connection) -> (result: Data, ok: bool) {
+	if connection == nil || connection.handle == nil ||
+	   connection.library.api.connection_tx_profile_value == nil {
+		return {}, false
+	}
+	handle := connection.library.api.connection_tx_profile_value(connection.handle)
+	if handle == nil {
+		return {}, false
+	}
+	return Data{library = connection.library, handle = handle}, true
 }
 
 maintain_indexes :: proc(connection: ^Durable_Connection, max_steps: int) -> bool {

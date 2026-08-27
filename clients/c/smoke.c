@@ -514,12 +514,38 @@ static int run_sqlite_smoke(vev_prepared_query_t all_emails) {
         fprintf(stderr, "failed to register durable tx report listener\n");
         goto cleanup;
     }
+    if (!vev_connection_ensure_resident(durable) ||
+        !vev_connection_tx_profile_reset(durable)) {
+        fprintf(stderr, "failed to enable resident durable transaction profile\n");
+        goto cleanup;
+    }
     report = vev_connection_transact_edn_report(
         durable,
         "[[:db/add 1 :user/listener \"durable-heard\"]]");
+    vev_connection_tx_profile_disable(durable);
     if (!tx_report_ok_or_error("sqlite-listener-tx", report)) {
         goto cleanup;
     }
+    vev_value_handle_t tx_profile = vev_connection_tx_profile_value(durable);
+    if (tx_profile == NULL) {
+        fprintf(stderr, "failed to read durable transaction profile\n");
+        goto cleanup;
+    }
+    vev_value_t tx_profile_value = vev_value_handle_value(tx_profile);
+    vev_value_t profiled_transactions = map_get(tx_profile_value, ":transactions");
+    vev_value_t profiled_engine = map_get(tx_profile_value, ":native-engine-us");
+    if (vev_value_kind(profiled_transactions) != VEV_VALUE_INT ||
+        vev_value_int(profiled_transactions) != 1 ||
+        vev_value_kind(profiled_engine) != VEV_VALUE_FLOAT ||
+        vev_value_float(profiled_engine) <= 0.0) {
+        const char *profile_edn = vev_value_handle_edn(tx_profile);
+        fprintf(stderr, "unexpected durable transaction profile: %s\n",
+                profile_edn != NULL ? profile_edn : "<null>");
+        if (profile_edn != NULL) vev_string_free(profile_edn);
+        vev_value_handle_free(tx_profile);
+        goto cleanup;
+    }
+    vev_value_handle_free(tx_profile);
     vev_tx_report_free(report);
     report = NULL;
     if (durable_listener_stats.count != 1 || !durable_listener_stats.saw_listener_attr) {

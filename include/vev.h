@@ -145,6 +145,12 @@ char *vev_storage_indexed_basis_t(const char *path, unsigned long long *basis_ou
 const char *vev_connection_backup(vev_connection_t conn, const char *destination_path, unsigned long long *basis_out);
 unsigned long long vev_connection_tx_count(vev_connection_t conn);
 bool vev_connection_ensure_resident(vev_connection_t conn);
+/* Opt-in transaction-boundary instrumentation. Reset enables profiling and
+ * clears both the public ABI and engine phase accumulators. The returned
+ * value handle is caller-owned and released with vev_value_handle_free. */
+bool vev_connection_tx_profile_reset(vev_connection_t conn);
+void vev_connection_tx_profile_disable(vev_connection_t conn);
+vev_value_handle_t vev_connection_tx_profile_value(vev_connection_t conn);
 vev_u64_array_t vev_connection_tx_ids(vev_connection_t conn);
 const char *vev_connection_tx_data_edn(
     vev_connection_t conn,

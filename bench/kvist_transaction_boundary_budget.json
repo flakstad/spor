@@ -1,0 +1,13 @@
+{
+  "format": "vev-kvist-transaction-boundary-budget-v1",
+  "workloads": {
+    "large/ro-like": {
+      "report_value_materialize_p95_us": 150,
+      "structured_boundary_p95_us": 1000
+    },
+    "ro-demo/ro-demo": {
+      "report_value_materialize_p95_us": 200,
+      "structured_boundary_p95_us": 1000
+    }
+  }
+}

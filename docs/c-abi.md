@@ -50,6 +50,18 @@ Strings returned by VevDB must be released with `vev_string_free`.
 Values borrowed from a result, report, or owned value remain valid only while
 their owner is alive. Callback arguments are borrowed for the callback.
 
+`vev_tx_report_value` returns a borrowed immutable root owned by its
+`vev_tx_report_t`. Its descendants have the same lifetime. In contrast,
+`vev_tx_report_db_before` and `vev_tx_report_db_after` each return a retained
+immutable database handle which the caller releases independently. They are
+the exact values captured by that transaction report, not later reads from the
+connection.
+
+`vev_connection_tx_profile_value` returns an owned Value handle. Release it
+with `vev_value_handle_free`. Profiling is opt-in: reset enables and clears the
+ABI and engine phase accumulators, disable stops clock reads while preserving
+the last values for inspection.
+
 Do not free borrowed handles.
 
 ## Errors

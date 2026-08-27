@@ -87,10 +87,11 @@ Build with `-collection:deps=vendor`. The facade finds `libvev` from `VEV_LIB`
 for explicit development/test overrides, beside the executable for command-line
 applications, or under `Contents/Frameworks` in a macOS application bundle.
 
-Transactions and queries accept ordinary local Kvist `Data`; only canonical EDN
-inputs and opaque native handles cross the library boundary. Canonical query
-text is prepared once per connection, and typed result trees are traversed into
-fresh local `Data` values without rendering result EDN.
+Transactions and queries accept ordinary local Kvist `Data`; canonical EDN
+inputs and opaque native handles cross into the library. Canonical query text
+is prepared once per connection. Typed query and transaction-report Value
+trees are traversed into fresh local `Data` values without rendering result or
+report EDN. The EDN report API remains available at the C compatibility layer.
 
 `transact` and `with` return native `Tx-Report` structs with explicit database,
 transaction-data, tempid, metadata, and Vev error fields. Reports own their DB

@@ -8,6 +8,7 @@
 (import edn "kvist:edn")
 (import arr "kvist:arr")
 (import fmt "core:fmt")
+(import math "core:math")
 (import strings "core:strings")
 (import os-sync "core:sync")
 (import time "core:time")
@@ -631,7 +632,14 @@
     (arr.push! state^.queries query)
     query))
 
-(defn- native-value-data [value: native.Value] -> Data
+(defn- serializable-marker-data [marker: string, payload: Data] -> Data
+  (let [marker-value (data.from-keyword marker)]
+    (defer (data.release marker-value))
+    (defer (data.release payload))
+    (data.vector-from-array ([]Data [marker-value payload]))))
+
+(defn- native-value-data-mode
+  [value: native.Value, serializable-markers: bool] -> Data
   (let [kind (native.kind value)]
   (cond
     (= kind .Nil)
@@ -639,7 +647,12 @@
 
     (= kind .Entity)
     (let [[entity ok] (native.as-entity value)]
-      (if ok (data.from-int (i64 entity)) (data.from-nil)))
+      (if ok
+        (if serializable-markers
+          (serializable-marker-data
+            ":vev/entity" (data.from-int (i64 entity)))
+          (data.from-int (i64 entity)))
+        (data.from-nil)))
 
     (= kind .Int)
     (let [[number ok] (native.as-int value)]
@@ -647,7 +660,18 @@
 
     (= kind .Float)
     (let [[number ok] (native.as-float value)]
-      (if ok (data.from-float number) (data.from-nil)))
+      (if ok
+        (if serializable-markers
+          (serializable-marker-data
+            ":vev/float"
+            (data.from-string
+              (cond
+                (math.is_nan number) "NaN"
+                (math.is_inf number 1) "Inf"
+                (math.is_inf number -1) "-Inf"
+                :else (fmt.tprintf "%v" number))))
+          (data.from-float number))
+        (data.from-nil)))
 
     (= kind .Bool)
     (let [[flag ok] (native.as-bool value)]
@@ -697,7 +721,8 @@
       (for [index (arr.range 0 (native.item-count value))]
         (let [[item item-ok] (native.item value index)]
           (when item-ok
-            (arr.push! items (native-value-data item)))))
+            (arr.push! items
+              (native-value-data-mode item serializable-markers)))))
       (data.vector-from-array (slice items 0)))
 
     (= kind .Set)
@@ -706,7 +731,8 @@
       (for [index (arr.range 0 (native.item-count value))]
         (let [[item item-ok] (native.item value index)]
           (when item-ok
-            (arr.push! items (native-value-data item)))))
+            (arr.push! items
+              (native-value-data-mode item serializable-markers)))))
       (data.set-from-unique (slice items 0)))
 
     (= kind .Map)
@@ -716,12 +742,23 @@
         (let [[key key-ok] (native.map-key value index)
               [item item-ok] (native.map-value value index)]
           (when (and key-ok item-ok)
-            (arr.push! items (native-value-data key))
-            (arr.push! items (native-value-data item)))))
+            (arr.push! items
+              (native-value-data-mode key serializable-markers))
+            (arr.push! items
+              (native-value-data-mode item serializable-markers)))))
       (data.map-from-alternating (slice items 0)))
 
     :else
     (data.from-nil))))
+
+(defn- native-value-data [value: native.Value] -> Data
+  (native-value-data-mode value false))
+
+(defn- native-report-value-data [value: native.Value] -> Data
+  ;; vev_tx_report_edn historically represents native entity and float values
+  ;; with serializable marker vectors. Preserve that public Kvist Data shape
+  ;; while bypassing the text serialization and parse.
+  (native-value-data-mode value true))
 
 (defn- q-data [query: Data, db-value: DB, inputs: Data] -> Data
   (let [query-text (edn.write query)
@@ -756,9 +793,8 @@
    after-ok: bool] -> Tx-Report
   (let [report-handle native-report
         [report-value value-ok]
-        (native.tx-report-edn (addr report-handle))]
-    (defer (delete report-value))
-    (when (not (and handle-ok value-ok (> (count report-value) 0)))
+        (native.tx-report-value (addr report-handle))]
+    (when (not (and handle-ok value-ok))
       (return
         (Tx-Report
           {ok: false
@@ -776,7 +812,10 @@
            tx-meta: (data.from-nil)
            internal-owner-data: (data.from-nil)
            native-report: report-handle})))
-    (let [report (edn.read report-value)
+    ;; The Value is borrowed from report-handle. Materialize a fully owned
+    ;; Kvist Data tree while that handle is live; the Tx-Report then owns both
+    ;; the Data tree and the native report until close-tx-report.
+    (let [report (native-report-value-data report-value)
           ok-value (data.get-in report [:ok])
           error-value (data.get-in report [:error])
           error-kind-value (data.get-in report [:vev/error])

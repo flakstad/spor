@@ -23,6 +23,7 @@ trap cleanup EXIT
 unzip -q "$ARCHIVE" -d "$TMP_DIR"
 cp "$ROOT/examples/kvist_binary/smoke.kvist" "$TMP_DIR/smoke.kvist"
 sed -i.bak 's|"../../clients/kvist"|"./vev/kvist"|' "$TMP_DIR/smoke.kvist"
+sed -i.bak 's|"../../clients/odin/vev"|"./vev/odin/vev"|' "$TMP_DIR/smoke.kvist"
 rm -f "$TMP_DIR/smoke.kvist.bak"
 cp "$ROOT/examples/kvist/sqlite.kvist" "$TMP_DIR/sqlite-smoke.kvist"
 sed -i.bak \

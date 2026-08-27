@@ -17,6 +17,16 @@ ABI_SQLite_Conn :: struct {
     error: string,
     tx_sources: [dynamic]string,
     listeners: [dynamic]ABI_Tx_Listener,
+    tx_boundary_profile: ABI_Tx_Boundary_Profile,
+}
+
+ABI_Tx_Boundary_Profile :: struct {
+    enabled: bool,
+    input_copy_us: f64,
+    engine_us: f64,
+    report_handle_us: f64,
+    listener_us: f64,
+    cleanup_us: f64,
 }
 
 ABI_Prepared_Query :: struct {
@@ -148,6 +158,13 @@ ABI_Tx_Report :: struct {
 
 ABI_Tx_Report_Array :: struct {
     reports: [dynamic]rawptr,
+}
+
+abi_sqlite_conn_tx_boundary_profile_ptr :: proc(conn: rawptr) -> ^ABI_Tx_Boundary_Profile {
+    if conn == nil {
+        return nil
+    }
+    return &((^ABI_SQLite_Conn)(conn))^.tx_boundary_profile
 }
 
 ABI_Tx_Builder :: struct {

@@ -1,0 +1,592 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import arr "kvist:arr")
+(import bench "./support")
+(import cli "../deps/cli")
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import math "core:math")
+(import os "core:os")
+(import time "core:time")
+(import d "../clients/kvist/vev")
+(import native "../clients/odin/vev")
+
+(defstruct Samples {
+  public-total: [dynamic]f64
+  manual-total: [dynamic]f64
+  edn-write: [dynamic]f64
+  native-call: [dynamic]f64
+  db-before-retain: [dynamic]f64
+  db-after-retain: [dynamic]f64
+  report-edn-write: [dynamic]f64
+  report-edn-read: [dynamic]f64
+  report-value-materialize: [dynamic]f64
+  abi-input-copy: [dynamic]f64
+  native-engine: [dynamic]f64
+  native-report-handle: [dynamic]f64
+  native-listener: [dynamic]f64
+  native-cleanup: [dynamic]f64
+  parsing: [dynamic]f64
+  resolution: [dynamic]f64
+  validation: [dynamic]f64
+  planning: [dynamic]f64
+  db-after: [dynamic]f64
+  report-ownership: [dynamic]f64
+  canonical-append: [dynamic]f64
+  derived-bookkeeping: [dynamic]f64
+  sqlite-commit: [dynamic]f64
+})
+
+(defn empty-samples [capacity: int] -> Samples
+  (Samples {
+    public-total: (make [dynamic]f64 0 capacity)
+    manual-total: (make [dynamic]f64 0 capacity)
+    edn-write: (make [dynamic]f64 0 capacity)
+    native-call: (make [dynamic]f64 0 capacity)
+    db-before-retain: (make [dynamic]f64 0 capacity)
+    db-after-retain: (make [dynamic]f64 0 capacity)
+    report-edn-write: (make [dynamic]f64 0 capacity)
+    report-edn-read: (make [dynamic]f64 0 capacity)
+    report-value-materialize: (make [dynamic]f64 0 capacity)
+    abi-input-copy: (make [dynamic]f64 0 capacity)
+    native-engine: (make [dynamic]f64 0 capacity)
+    native-report-handle: (make [dynamic]f64 0 capacity)
+    native-listener: (make [dynamic]f64 0 capacity)
+    native-cleanup: (make [dynamic]f64 0 capacity)
+    parsing: (make [dynamic]f64 0 capacity)
+    resolution: (make [dynamic]f64 0 capacity)
+    validation: (make [dynamic]f64 0 capacity)
+    planning: (make [dynamic]f64 0 capacity)
+    db-after: (make [dynamic]f64 0 capacity)
+    report-ownership: (make [dynamic]f64 0 capacity)
+    canonical-append: (make [dynamic]f64 0 capacity)
+    derived-bookkeeping: (make [dynamic]f64 0 capacity)
+    sqlite-commit: (make [dynamic]f64 0 capacity)
+  }))
+
+(defn delete-samples [samples: ^Samples]
+  (delete samples^.public-total)
+  (delete samples^.manual-total)
+  (delete samples^.edn-write)
+  (delete samples^.native-call)
+  (delete samples^.db-before-retain)
+  (delete samples^.db-after-retain)
+  (delete samples^.report-edn-write)
+  (delete samples^.report-edn-read)
+  (delete samples^.report-value-materialize)
+  (delete samples^.abi-input-copy)
+  (delete samples^.native-engine)
+  (delete samples^.native-report-handle)
+  (delete samples^.native-listener)
+  (delete samples^.native-cleanup)
+  (delete samples^.parsing)
+  (delete samples^.resolution)
+  (delete samples^.validation)
+  (delete samples^.planning)
+  (delete samples^.db-after)
+  (delete samples^.report-ownership)
+  (delete samples^.canonical-append)
+  (delete samples^.derived-bookkeeping)
+  (delete samples^.sqlite-commit))
+
+(defn release-data-items! [items: [dynamic]Data]
+  (for [item items]
+    (data.release item))
+  (delete items))
+
+(defn vector-data [items: [dynamic]Data] -> Data
+  (let [out (data.vector-from-array (slice items 0))]
+    (release-data-items! items)
+    out))
+
+(defn op-data [op: string, entity: Data, attr: string, values: []Data] -> Data
+  (let [items (make [dynamic]Data 0 (+ 3 (count values)))
+        op-value (data.from-keyword op)
+        attr-value (data.from-keyword attr)]
+    (arr.push! items op-value)
+    (arr.push! items entity)
+    (arr.push! items attr-value)
+    (for [value values]
+      (arr.push! items value))
+    (let [out (data.vector-from-array (slice items 0))]
+      (data.release op-value)
+      (data.release attr-value)
+      (delete items)
+      out)))
+
+(defn add-string [entity: i64, attr: string, value: string] -> Data
+  (let [v (data.from-string value)]
+    (op-data ":db/add" (data.from-int entity) attr ([]Data [v]))))
+
+(defn add-keyword [entity: i64, attr: string, value: string] -> Data
+  (let [v (data.from-keyword value)]
+    (op-data ":db/add" (data.from-int entity) attr ([]Data [v]))))
+
+(defn add-current-tx-string [attr: string, value: string] -> Data
+  (let [v (data.from-string value)]
+    (op-data ":db/add" (data.from-keyword ":db/current-tx") attr ([]Data [v]))))
+
+(defn retract-string [entity: i64, attr: string, value: string] -> Data
+  (let [v (data.from-string value)]
+    (op-data ":db/retract" (data.from-int entity) attr ([]Data [v]))))
+
+(defn schema-tx [] -> Data
+  (let [items (make [dynamic]Data 0 6)]
+    (arr.push! items (add-keyword 100 ":db/ident" ":item/name"))
+    (arr.push! items (add-keyword 100 ":db/valueType" ":db.type/string"))
+    (arr.push! items (add-keyword 100 ":db/cardinality" ":db.cardinality/one"))
+    (arr.push! items (add-keyword 101 ":db/ident" ":item/tag"))
+    (arr.push! items (add-keyword 101 ":db/valueType" ":db.type/string"))
+    (arr.push! items (add-keyword 101 ":db/cardinality" ":db.cardinality/many"))
+    (vector-data items)))
+
+(defn seed-tx [entity-count: int] -> Data
+  (let [items (make [dynamic]Data 0 (* entity-count 2))]
+    (for [index (arr.range 0 entity-count)]
+      (let [entity (+ (i64 index) 1)]
+        (arr.push! items
+          (add-string entity ":item/name" (fmt.tprintf "seed-%d" entity)))
+        (arr.push! items (add-string entity ":item/tag" "seed"))))
+    (vector-data items)))
+
+(defn workload-tx [workload: string, sample: int] -> Data
+  (when (= workload "ro-demo")
+    (return
+      [{:db/id "value-item-demo-plan-property-inbox-priority"
+        :ro/id "value-item-demo-plan-property-inbox-priority"
+        :ro/type :ro.type/property-value
+        :property-value/item [:ro/id "item-demo-plan"]
+        :property-value/property-def [:ro/id "property-inbox-priority"]
+        :property-value/checked (= (% sample 2) 0)}
+       [:db/add :db/current-tx :ro.tx/actor [:ro/id "actor-local"]]
+       [:db/add :db/current-tx :ro.tx/source :command.source/native]
+       [:db/add :db/current-tx :ro.tx/cause "Native semantic command"]]))
+  (let [items (make [dynamic]Data)]
+    (case workload
+      "append"
+        (arr.push! items
+          (add-string (+ 2000000 (i64 sample)) ":item/name"
+            (fmt.tprintf "append-%d" sample)))
+      "replacement"
+        (arr.push! items
+          (add-string 1 ":item/name"
+            (if (= (% sample 2) 0) "replacement-a" "replacement-b")))
+      "explicit-retract"
+        (arr.push! items
+          (retract-string 2 ":item/tag" (fmt.tprintf "retract-%d" sample)))
+      "ro-like"
+        (do
+          (arr.push! items
+            (add-string 3 ":item/name"
+              (if (= (% sample 2) 0) "ro-a" "ro-b")))
+          (arr.push! items (add-current-tx-string ":tx/source" "ro-ui"))
+          (arr.push! items (add-current-tx-string ":tx/actor" "user-1"))
+          (arr.push! items
+            (add-current-tx-string ":tx/request"
+              (fmt.tprintf "request-%d" sample))))
+      (panic "unknown transaction boundary workload"))
+    (vector-data items)))
+
+(defn remove-sqlite-files [path: string]
+  (os.remove path)
+  (os.remove (fmt.tprintf "%s-wal" path))
+  (os.remove (fmt.tprintf "%s-shm" path)))
+
+(defn native-transact-data! [conn: ^native.Durable-Connection, tx: Data]
+  (let [text (edn.write tx)]
+    (defer (delete text))
+    (let [[report ok] (native.transact-report-durable conn text)]
+      (when (not ok)
+        (panic "native Vev transaction returned no report"))
+      (native.close (addr report)))))
+
+(defn seed-native! [conn: ^native.Durable-Connection, entity-count: int]
+  (let [schema (schema-tx)]
+    (defer (data.release schema))
+    (native-transact-data! conn schema))
+  (let [seed (seed-tx entity-count)]
+    (defer (data.release seed))
+    (native-transact-data! conn seed))
+  (when (not (native.ensure-resident conn))
+    (panic "could not make native benchmark connection resident")))
+
+(defn seed-public! [conn: d.Conn, entity-count: int]
+  (let [schema (schema-tx)]
+    (defer (data.release schema))
+    (let [report (d.transact-data conn schema)]
+      (when (not report.ok)
+        (panic report.error))
+      (d.close (addr report))))
+  (let [seed (seed-tx entity-count)]
+    (defer (data.release seed))
+    (let [report (d.transact-data conn seed)]
+      (when (not report.ok)
+        (panic report.error))
+      (d.close (addr report))))
+  (when (not (d.ensure-resident! conn))
+    (panic "could not make public benchmark connection resident")))
+
+(defn prepare-native! [conn: ^native.Durable-Connection, workload: string, sample: int]
+  (when (= workload "explicit-retract")
+    (let [tx (vector-data
+               ([dynamic]Data
+                 [(add-string 2 ":item/tag" (fmt.tprintf "retract-%d" sample))]))]
+      (defer (data.release tx))
+      (native-transact-data! conn tx))))
+
+(defn prepare-public! [conn: d.Conn, workload: string, sample: int]
+  (when (= workload "explicit-retract")
+    (let [tx (vector-data
+               ([dynamic]Data
+                 [(add-string 2 ":item/tag" (fmt.tprintf "retract-%d" sample))]))]
+      (defer (data.release tx))
+      (let [report (d.transact-data conn tx)]
+        (when (not report.ok)
+          (panic report.error))
+        (d.close (addr report))))))
+
+(defn instant-text [unix-millis: i64] -> string
+  (let [[datetime ok]
+        (time.time-to-datetime (time.unix 0 (* unix-millis 1000000)))]
+    (when (not ok)
+      (return ""))
+    (fmt.tprintf "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ"
+                 datetime.year datetime.month datetime.day
+                 datetime.hour datetime.minute datetime.second
+                 (/ datetime.nano 1000000))))
+
+(defn serializable-marker-data [marker: string, payload: Data] -> Data
+  (let [marker-value (data.from-keyword marker)]
+    (defer (data.release marker-value))
+    (defer (data.release payload))
+    (data.vector-from-array ([]Data [marker-value payload]))))
+
+(defn native-value-data [value: native.Value] -> Data
+  (case (native.kind value)
+    .Nil (data.from-nil)
+    .Entity
+      (let [[entity ok] (native.as-entity value)]
+        (if ok
+          (serializable-marker-data
+            ":vev/entity" (data.from-int (i64 entity)))
+          (data.from-nil)))
+    .Int
+      (let [[number ok] (native.as-int value)]
+        (if ok (data.from-int number) (data.from-nil)))
+    .Float
+      (let [[number ok] (native.as-float value)]
+        (if ok
+          (serializable-marker-data
+            ":vev/float"
+            (data.from-string
+              (cond
+                (math.is_nan number) "NaN"
+                (math.is_inf number 1) "Inf"
+                (math.is_inf number -1) "-Inf"
+                :else (fmt.tprintf "%v" number))))
+          (data.from-nil)))
+    .Bool
+      (let [[flag ok] (native.as-bool value)]
+        (if ok (data.from-bool flag) (data.from-nil)))
+    .String
+      (let [[text ok] (native.as-string value)]
+        (if ok
+          (do (defer (delete text)) (data.from-string text))
+          (data.from-nil)))
+    .Keyword
+      (let [[text ok] (native.as-string value)]
+        (if ok
+          (do (defer (delete text)) (data.from-keyword text))
+          (data.from-nil)))
+    .Symbol
+      (let [[text ok] (native.as-string value)]
+        (if ok
+          (do (defer (delete text)) (data.from-symbol text))
+          (data.from-nil)))
+    .UUID
+      (let [[text ok] (native.as-string value)]
+        (if ok
+          (do
+            (defer (delete text))
+            (let [payload (data.from-string text)]
+              (defer (data.release payload))
+              (data.tagged "uuid" payload)))
+          (data.from-nil)))
+    .Instant
+      (let [[millis ok] (native.as-instant value)]
+        (if ok
+          (let [payload (data.from-string (instant-text millis))]
+            (defer (data.release payload))
+            (data.tagged "inst" payload))
+          (data.from-nil)))
+    .Vector
+      (let [items (make [dynamic]Data 0 (native.item-count value))]
+        (for [index (arr.range 0 (native.item-count value))]
+          (let [[item ok] (native.item value index)]
+            (when ok (arr.push! items (native-value-data item)))))
+        (vector-data items))
+    .Set
+      (let [items (make [dynamic]Data 0 (native.item-count value))]
+        (for [index (arr.range 0 (native.item-count value))]
+          (let [[item ok] (native.item value index)]
+            (when ok (arr.push! items (native-value-data item)))))
+        (let [out (data.set-from-unique (slice items 0))]
+          (release-data-items! items)
+          out))
+    .Map
+      (let [items (make [dynamic]Data 0 (* 2 (native.map-count value)))]
+        (for [index (arr.range 0 (native.map-count value))]
+          (let [[key key-ok] (native.map-key value index)
+                [item item-ok] (native.map-value value index)]
+            (when (and key-ok item-ok)
+              (arr.push! items (native-value-data key))
+              (arr.push! items (native-value-data item)))))
+        (let [out (data.map-from-alternating (slice items 0))]
+          (release-data-items! items)
+          out))
+    (data.from-nil)))
+
+(defn profile-float [profile: native.Value, key: string] -> f64
+  (let [[value value-ok] (native.get profile key)]
+    (when (not value-ok)
+      (panic (fmt.tprintf "transaction profile is missing %s" key)))
+    (let [[number number-ok] (native.as-float value)]
+      (when (not number-ok)
+        (panic (fmt.tprintf "transaction profile field is not a float: %s" key)))
+      number)))
+
+(defn append-profile! [samples: ^Samples, conn: ^native.Durable-Connection]
+  (native.disable-tx-profile conn)
+  (let [[profile-data data-ok] (native.tx-profile conn)]
+    (when (not data-ok)
+      (panic "could not read transaction boundary profile"))
+    (defer (native.close (addr profile-data)))
+    (let [[profile value-ok] (native.value (addr profile-data))]
+      (when (not value-ok)
+        (panic "could not traverse transaction boundary profile"))
+      (arr.push! samples^.abi-input-copy
+        (profile-float profile ":kvist-to-native-copy-us"))
+      (arr.push! samples^.native-engine
+        (profile-float profile ":native-engine-us"))
+      (arr.push! samples^.native-report-handle
+        (profile-float profile ":native-report-handle-us"))
+      (arr.push! samples^.native-listener
+        (profile-float profile ":native-listener-us"))
+      (arr.push! samples^.native-cleanup
+        (profile-float profile ":native-cleanup-us"))
+      (arr.push! samples^.parsing (profile-float profile ":parsing-us"))
+      (arr.push! samples^.resolution (profile-float profile ":resolution-us"))
+      (arr.push! samples^.validation (profile-float profile ":validation-us"))
+      (arr.push! samples^.planning (profile-float profile ":planning-us"))
+      (arr.push! samples^.db-after (profile-float profile ":db-after-us"))
+      (arr.push! samples^.report-ownership
+        (profile-float profile ":report-ownership-us"))
+      (arr.push! samples^.canonical-append
+        (profile-float profile ":canonical-append-us"))
+      (arr.push! samples^.derived-bookkeeping
+        (profile-float profile ":derived-bookkeeping-us"))
+      (arr.push! samples^.sqlite-commit
+        (profile-float profile ":sqlite-commit-us")))))
+
+(defn measure-public!
+  [samples: ^Samples, conn: d.Conn, workload: string, sample: int]
+  (prepare-public! conn workload sample)
+  (let [tx (workload-tx workload sample)]
+    (defer (data.release tx))
+    (let [start (time.now)
+          report (d.transact-data conn tx)
+          elapsed (bench.elapsed-us start)]
+      (when (not report.ok)
+        (panic report.error))
+      (arr.push! samples^.public-total elapsed)
+      (d.close (addr report)))))
+
+(defn measure-manual!
+  [samples: ^Samples, conn: ^native.Durable-Connection,
+   workload: string, sample: int]
+  (prepare-native! conn workload sample)
+  (let [tx (workload-tx workload sample)]
+    (defer (data.release tx))
+    (let [total-start (time.now)
+          write-start (time.now)
+          tx-text (edn.write tx)]
+      (arr.push! samples^.edn-write (bench.elapsed-us write-start))
+      (let [native-start (time.now)
+            [report report-ok] (native.transact-report-durable conn tx-text)]
+        (arr.push! samples^.native-call (bench.elapsed-us native-start))
+        (when (not report-ok)
+          (delete tx-text)
+          (panic "manual native transaction returned no report"))
+        (let [before-start (time.now)
+              [before before-ok] (native.tx-report-db-before (addr report))]
+          (arr.push! samples^.db-before-retain (bench.elapsed-us before-start))
+          (when before-ok (native.close (addr before))))
+        (let [after-start (time.now)
+              [after after-ok] (native.tx-report-db-after (addr report))]
+          (arr.push! samples^.db-after-retain (bench.elapsed-us after-start))
+          (when after-ok (native.close (addr after))))
+        (let [report-write-start (time.now)
+              [report-text report-text-ok] (native.tx-report-edn (addr report))]
+          (arr.push! samples^.report-edn-write
+            (bench.elapsed-us report-write-start))
+          (when (not report-text-ok)
+            (native.close (addr report))
+            (delete tx-text)
+            (panic "could not serialize native transaction report"))
+          (let [report-read-start (time.now)
+                parsed (edn.read report-text)]
+            (arr.push! samples^.report-edn-read
+              (bench.elapsed-us report-read-start))
+            (arr.push! samples^.manual-total (bench.elapsed-us total-start))
+            (data.release parsed))
+          (delete report-text))
+        (let [value-start (time.now)
+              [report-value value-ok] (native.tx-report-value (addr report))]
+          (when (not value-ok)
+            (native.close (addr report))
+            (delete tx-text)
+            (panic "could not traverse native transaction report"))
+          (let [materialized (native-value-data report-value)]
+            (arr.push! samples^.report-value-materialize
+              (bench.elapsed-us value-start))
+            (data.release materialized)))
+        (native.close (addr report)))
+      (delete tx-text))))
+
+(defn measure-profile!
+  [samples: ^Samples, conn: ^native.Durable-Connection,
+   workload: string, sample: int]
+  (prepare-native! conn workload sample)
+  (let [tx (workload-tx workload sample)
+        tx-text (edn.write tx)]
+    (defer (data.release tx))
+    (defer (delete tx-text))
+    (when (not (native.reset-tx-profile conn))
+      (panic "could not enable transaction boundary profile"))
+    (let [[report ok] (native.transact-report-durable conn tx-text)]
+      (when (not ok)
+        (panic "profiled native transaction returned no report"))
+      (append-profile! samples conn)
+      (native.close (addr report)))))
+
+(defn print-phase
+  [database: string, entities: int, workload: string,
+   phase: string, samples: []f64]
+  (let [timing (bench.timing-from-samples samples)]
+    (fmt.printf
+      "engine=vev-kvist-boundary database=%s entities=%d workload=%s phase=%s samples=%d median_us=%.1f p95_us=%.1f\n"
+      database entities workload phase (count samples)
+      timing.median-us timing.p95-us)))
+
+(defn print-samples
+  [database: string, entities: int, workload: string, samples: Samples]
+  (print-phase database entities workload "public-total" (slice samples.public-total 0))
+  (print-phase database entities workload "manual-total" (slice samples.manual-total 0))
+  (print-phase database entities workload "kvist-edn-write" (slice samples.edn-write 0))
+  (print-phase database entities workload "native-call" (slice samples.native-call 0))
+  (print-phase database entities workload "abi-input-copy" (slice samples.abi-input-copy 0))
+  (print-phase database entities workload "vev-edn-parse" (slice samples.parsing 0))
+  (print-phase database entities workload "resolution" (slice samples.resolution 0))
+  (print-phase database entities workload "validation" (slice samples.validation 0))
+  (print-phase database entities workload "planning" (slice samples.planning 0))
+  (print-phase database entities workload "db-after" (slice samples.db-after 0))
+  (print-phase database entities workload "core-report-ownership" (slice samples.report-ownership 0))
+  (print-phase database entities workload "canonical-append" (slice samples.canonical-append 0))
+  (print-phase database entities workload "derived-bookkeeping" (slice samples.derived-bookkeeping 0))
+  (print-phase database entities workload "sqlite-commit" (slice samples.sqlite-commit 0))
+  (print-phase database entities workload "native-engine-total" (slice samples.native-engine 0))
+  (print-phase database entities workload "native-report-handle" (slice samples.native-report-handle 0))
+  (print-phase database entities workload "native-listener" (slice samples.native-listener 0))
+  (print-phase database entities workload "native-cleanup" (slice samples.native-cleanup 0))
+  (print-phase database entities workload "db-before-retain" (slice samples.db-before-retain 0))
+  (print-phase database entities workload "db-after-retain" (slice samples.db-after-retain 0))
+  (print-phase database entities workload "report-edn-write" (slice samples.report-edn-write 0))
+  (print-phase database entities workload "report-edn-read" (slice samples.report-edn-read 0))
+  (print-phase database entities workload "report-value-materialize" (slice samples.report-value-materialize 0)))
+
+(defn run-workload
+  [database: string, entities: int, workload: string, sample-count: int]
+  (let [public-path (fmt.tprintf "tmp.vev.kvist-boundary.%s.%s.public.sqlite" database workload)
+        native-path (fmt.tprintf "tmp.vev.kvist-boundary.%s.%s.native.sqlite" database workload)]
+    (remove-sqlite-files public-path)
+    (remove-sqlite-files native-path)
+    (let [public-conn (d.connect public-path)
+          [library library-ok] (native.load-default)]
+      (when (not library-ok)
+        (d.close public-conn)
+        (panic "could not load native Vev library"))
+      (let [[native-conn native-ok] (native.connect (addr library) native-path)]
+        (when (not native-ok)
+          (native.unload (addr library))
+          (d.close public-conn)
+          (panic "could not open native transaction boundary database"))
+        (seed-public! public-conn entities)
+        (seed-native! (addr native-conn) entities)
+        (let [samples (empty-samples sample-count)]
+          (for [sample (arr.range 0 sample-count)]
+            (measure-public! (addr samples) public-conn workload sample)
+            (measure-manual! (addr samples) (addr native-conn) workload sample))
+          (for [sample (arr.range sample-count (* sample-count 2))]
+            (measure-profile! (addr samples) (addr native-conn) workload sample))
+          (print-samples database entities workload samples)
+          (delete-samples (addr samples)))
+        (native.close (addr native-conn)))
+      (native.unload (addr library))
+      (d.close public-conn))
+    (remove-sqlite-files public-path)
+    (remove-sqlite-files native-path)))
+
+(defn run-ro-demo
+  [public-path: string, native-path: string, sample-count: int]
+  (when (= public-path native-path)
+    (panic "--ro-public-db and --ro-native-db must be independent disposable copies"))
+  (let [public-conn (d.connect public-path)
+        [library library-ok] (native.load-default)]
+    (when (not library-ok)
+      (d.close public-conn)
+      (panic "could not load native Vev library"))
+    (let [[native-conn native-ok] (native.connect (addr library) native-path)]
+      (when (not native-ok)
+        (native.unload (addr library))
+        (d.close public-conn)
+        (panic "could not open native Ro demo database"))
+      (when (not (d.ensure-resident! public-conn))
+        (panic "could not make public Ro demo connection resident"))
+      (when (not (native.ensure-resident (addr native-conn)))
+        (panic "could not make native Ro demo connection resident"))
+      (let [samples (empty-samples sample-count)]
+        (for [sample (arr.range 0 sample-count)]
+          (measure-public! (addr samples) public-conn "ro-demo" sample)
+          (measure-manual! (addr samples) (addr native-conn) "ro-demo" sample))
+        (for [sample (arr.range sample-count (* sample-count 2))]
+          (measure-profile! (addr samples) (addr native-conn) "ro-demo" sample))
+        (print-samples "ro-demo" 0 "ro-demo" samples)
+        (delete-samples (addr samples)))
+      (native.close (addr native-conn)))
+    (native.unload (addr library))
+    (d.close public-conn)))
+
+(defn selected? [selected: string, value: string] -> bool
+  (or (= selected "all") (= selected value)))
+
+(defn main []
+  (defer (free_all context.allocator))
+  (let [selected-database (cli.option os.args "--database" "all")
+        selected-workload (cli.option os.args "--workload" "all")
+        ro-public-path (cli.option os.args "--ro-public-db" "")
+        ro-native-path (cli.option os.args "--ro-native-db" "")
+        sample-count (cli.int-option os.args "--samples" 30)]
+    (for [database ([]string ["small" "large"])]
+      (when (selected? selected-database database)
+        (let [entities (if (= database "small") 50 2000)]
+          (for [workload ([]string ["append" "replacement" "explicit-retract" "ro-like"])]
+            (when (selected? selected-workload workload)
+              (run-workload database entities workload sample-count))))))
+    (when (or (> (count ro-public-path) 0) (> (count ro-native-path) 0))
+      (when (or (= (count ro-public-path) 0) (= (count ro-native-path) 0))
+        (panic "both --ro-public-db and --ro-native-db are required"))
+      (run-ro-demo ro-public-path ro-native-path sample-count))))

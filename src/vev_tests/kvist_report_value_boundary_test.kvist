@@ -1,0 +1,93 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import os "core:os")
+(import test "kvist:test")
+(import data "kvist:data")
+(import d "../../clients/kvist/vev")
+
+(def report-value-test-path
+  "/tmp/vev-kvist-report-value-boundary-test.sqlite")
+
+(defn remove-report-value-test-db []
+  (os.remove report-value-test-path)
+  (os.remove "/tmp/vev-kvist-report-value-boundary-test.sqlite-wal")
+  (os.remove "/tmp/vev-kvist-report-value-boundary-test.sqlite-shm"))
+
+(test.deftest public-kvist-structured-report-retains-rich-shape-and-exact-dbs
+  (remove-report-value-test-db)
+  (let [conn (d.connect report-value-test-path)]
+    (let [schema
+            (d.transact
+              conn
+              [[:db/add 100 :db/ident :entity/id]
+               [:db/add 100 :db/valueType :db.type/string]
+               [:db/add 100 :db/unique :db.unique/identity]
+               [:db/add 101 :db/ident :entity/value]
+               [:db/add 101 :db/valueType :db.type/long]
+               [:db/add 101 :db/cardinality :db.cardinality/one]])]
+      (test.is schema.ok schema.error)
+      (d.close (addr schema)))
+    (test.is (d.ensure-resident! conn))
+    (let [second-writer (d.connect report-value-test-path)]
+      (test.is (d.ensure-resident! second-writer))
+      (let [first
+              (d.transact
+                conn
+                [{:db/id "counter"
+                  :entity/id "counter"
+                  :entity/value 1}
+                 [:db/add :db/current-tx :tx/source "kvist-test"]])]
+        (defer (d.close (addr first)))
+        (test.is first.ok first.error)
+        (test.is (= first.error-kind .None))
+        (test.is (> first.tx (u64 0)))
+        (test.is (> (data.count first.tx-data) 0))
+        (test.is (> (data.count first.tempids) 0))
+        (test.is (> (data.count first.tx-meta) 0))
+        (let [first-before (d.basis-t first.db-before)
+              first-after (d.basis-t first.db-after)
+              second
+                (d.transact
+                  second-writer
+                  [[:db/add 1000 :entity/value 2]])]
+          (defer (d.close (addr second)))
+          (test.is second.ok second.error)
+          (test.is (= first-before (d.basis-t first.db-before)))
+          (test.is (= first-after (d.basis-t first.db-after)))
+          (test.is (= first-after (d.basis-t second.db-before)))
+          (test.is (> (d.basis-t second.db-after) first-after))
+          (let [prospective
+                  (d.with
+                    second.db-after
+                    [[:db/add 1000 :entity/value 3]])]
+            (defer (d.close (addr prospective)))
+            (test.is prospective.ok prospective.error)
+            (test.is (= (d.basis-t prospective.db-before)
+                        (d.basis-t second.db-after)))
+            (test.is (> (d.basis-t prospective.db-after)
+                        (d.basis-t prospective.db-before))))))
+      (d.close second-writer))
+    (let [failed (d.transact conn [[:db/add 1 :entity/value nil]])]
+      (defer (d.close (addr failed)))
+      (test.is (not failed.ok))
+      (test.is (= failed.error-kind .Transaction-Failed))
+      (test.is (> (count failed.error) 0)))
+    (d.close conn))
+  (remove-report-value-test-db))
+
+(test.deftest public-kvist-structured-report-has-balanced-repeated-lifetime
+  (remove-report-value-test-db)
+  (let [conn (d.connect report-value-test-path)]
+    (for [index 0..<128]
+      (let [report
+              (if (= (% index 2) 0)
+                (d.transact conn [[:db/add 1 :entity/value 1]])
+                (d.transact conn [[:db/add 1 :entity/value 2]]))]
+        (test.is report.ok report.error)
+        (test.is (> (data.count report.tx-data) 0))
+        (d.close (addr report))))
+    (d.close conn))
+  (remove-report-value-test-db))

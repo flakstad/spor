@@ -2,7 +2,80 @@
 
 (import os "core:os")
 (import d "../../clients/kvist")
+(import native "../../clients/odin/vev")
 (import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+
+(defn same-data? [left: Data, right: Data] -> bool
+  (let [left-text (edn.write left)
+        right-text (edn.write right)]
+    (defer (delete left-text))
+    (defer (delete right-text))
+    (= left-text right-text)))
+
+(defn assert-same-data [field: string, left: Data, right: Data]
+  (when (not (same-data? left right))
+    (let [left-text (edn.write left)
+          right-text (edn.write right)]
+      (defer (delete left-text))
+      (defer (delete right-text))
+      (fmt.eprintf "%s structured=%s legacy=%s\n" field left-text right-text))
+    (panic field)))
+
+(defn assert-report-edn-parity [report: ^d.Tx-Report]
+  ;; Differentially compare the structured report materialized by the Kvist
+  ;; client with the retained compatibility EDN view of the same native
+  ;; report handle.
+  (let [[text text-ok]
+          (native.tx-report-edn (addr report^.native-report))]
+    (when (not text-ok)
+      (panic "transaction report compatibility EDN was unavailable"))
+    (defer (delete text))
+    (let [legacy (edn.read text)
+          legacy-ok (data.get-in legacy [:ok])
+          legacy-error (data.get-in legacy [:error])
+          legacy-error-kind (data.get-in legacy [:vev/error])
+          legacy-tx (data.get-in legacy [:tx])
+          legacy-tx-data (data.get-in legacy [:tx-data])
+          legacy-tempids (data.get-in legacy [:tempids])
+          legacy-tx-meta (data.get-in legacy [:tx-meta])]
+      (defer (data.release legacy))
+      (when (or (not (data.bool? legacy-ok))
+                (not (= report^.ok (data.bool legacy-ok))))
+        (panic "structured transaction report changed :ok"))
+      (when (or (not (data.string? legacy-error))
+                (not (= report^.error (data.string legacy-error))))
+        (panic "structured transaction report changed :error"))
+      (if report^.ok
+        (when (not (= report^.error-kind .None))
+          (panic "structured transaction report changed success error kind"))
+        (when (not
+                (and (data.keyword? legacy-error-kind)
+                     (= (data.keyword legacy-error-kind)
+                        ":vev.error/transaction-failed")
+                     (= report^.error-kind .Transaction-Failed)))
+          (panic "structured transaction report changed failure error kind")))
+      (when report^.ok
+        (let [legacy-tx-number
+                (if (data.int? legacy-tx)
+                  (u64 (data.int legacy-tx))
+                  (if (and (data.vector? legacy-tx)
+                           (= (data.count legacy-tx) 2)
+                           (data.int? (data.nth legacy-tx 1)))
+                    (u64 (data.int (data.nth legacy-tx 1)))
+                    (u64 0)))]
+          (when (not (= report^.tx legacy-tx-number))
+            (panic "structured transaction report changed :tx"))))
+      (assert-same-data
+        "structured transaction report changed :tx-data"
+        report^.tx-data legacy-tx-data)
+      (assert-same-data
+        "structured transaction report changed :tempids"
+        report^.tempids legacy-tempids)
+      (assert-same-data
+        "structured transaction report changed :tx-meta"
+        report^.tx-meta legacy-tx-meta))))
 
 (defn resident-transaction-smoke []
   (let [path "vev-kvist-resident-smoke.db"]
@@ -82,12 +155,17 @@
                  [:db/add 100 :db/unique :db.unique/identity]
                  [:db/add 101 :db/ident :entity/value]
                  [:db/add 101 :db/valueType :db.type/long]
+                 [:db/add 103 :db/ident :entity/score]
+                 [:db/add 103 :db/valueType :db.type/double]
+                 [:db/add 103 :db/cardinality :db.cardinality/many]
                  {:db/id "counter-tempid"
                   :entity/id "counter"
-                  :entity/value 0}])]
+                  :entity/value 0}
+                 [:db/add "counter-tempid" :entity/score 1.25]])]
         (defer (d.close (addr seed)))
         (when (not seed.ok)
           (panic seed.error))
+        (assert-report-edn-parity (addr seed))
         (let [[counter-id counter-ok]
                 (d.resolve-tempid
                   seed.db-after seed.tempids "counter-tempid")]
@@ -100,6 +178,7 @@
         (defer (d.close (addr first)))
         (when (not first.ok)
           (panic first.error))
+        (assert-report-edn-parity (addr first))
         (let [prospective
                 (d.with
                   first.db-after
@@ -107,6 +186,7 @@
           (defer (d.close (addr prospective)))
           (when (not prospective.ok)
             (panic prospective.error))
+          (assert-report-edn-parity (addr prospective))
           (let [before-value (d.q value-query first.db-before)
                 after-value (d.q value-query first.db-after)
                 with-before-value (d.q value-query prospective.db-before)
@@ -198,6 +278,7 @@
       (defer (d.close (addr report)))
       (when (not report.ok)
         (panic report.error))
+      (assert-report-edn-parity (addr report))
       (when (not (= report.error-kind .None))
         (panic "binary Kvist successful report carried an error kind"))
       (when (<= report.tx schema-tx)
@@ -288,6 +369,7 @@
             conn
             [[:db/add 1 :person/id nil]])]
       (defer (d.close (addr failed)))
+      (assert-report-edn-parity (addr failed))
       (when (or failed.ok
                 (not (= failed.error-kind .Transaction-Failed)))
         (panic "binary Kvist transact error was not Vev-shaped")))

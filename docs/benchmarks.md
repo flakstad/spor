@@ -74,6 +74,22 @@ for incremental mode and intentionally leaves headroom for CI variance.
 See [resident transaction performance](resident-transaction-performance.md)
 for the architecture, invariants, and a same-machine before/after profile.
 
+### Public Kvist/native transaction boundary
+
+`kvist_transaction_boundary.kvist` measures the actual public Kvist package,
+the retained EDN compatibility path, native engine phases, report ownership,
+exact DB retains, and structured report materialization:
+
+```sh
+python3 bench/check_kvist_transaction_boundary.py --samples 100
+```
+
+The checked budget conservatively sums phase p95 values and limits the
+large/Ro-like overhead outside ordinary engine work to 1 ms. The benchmark can
+also run the exact Ro transaction against two disposable Ro demo databases.
+See [Kvist/native transaction boundary](kvist-native-transaction-boundary.md)
+for commands, measurements, API rationale, and ownership rules.
+
 ## Durable storage amplification
 
 The deterministic storage benchmark writes 1,000 application assertions using
