@@ -50,10 +50,34 @@ Useful variables:
 - `VEV_COMPARE_BASELINES`: space-separated `datascript`, `datalevin`, or
   `datomic`
 - `VEV_COMPARE_DATOMIC=1`: include Datomic
+- `VEV_COMPARE_VEV_FIRST=1`: run Vev before the comparison engines
 - `VEV_COMPARE_SKIP_BASELINES=1`: run only VevDB
 - `VEV_BENCH_PEOPLE`: fixture size
 - `VEV_BENCH_WARMUP_MS`: warmup duration
 - `VEV_BENCH_MS`: measurement duration
 - `VEV_BENCH_REPEATS`: repeat count
+- `DATASCRIPT_VERSION`: DataScript release; default `1.7.8`
+- `DATALEVIN_VERSION`: Datalevin release; default `0.10.7`
+- `DATOMIC_VERSION`: Datomic Peer release; default `1.0.7705`
+
+The comparison runner places a checked-in deterministic fixture generator
+ahead of the upstream benchmark sources. All engines therefore receive the
+same seeded values, insertion order, fixture size, warmup, measurement window,
+and repeat count. Set the three version variables to the historical pins
+`1.7.4`, `0.10.5`, and `1.0.7277` when reproducing the July 2026 snapshot.
+
+The campaign runner reuses one immutable Vev fixture across query shapes; each
+shape still runs its own warmup. This changes only untimed fixture construction
+and avoids rebuilding the same 100,000 datoms seven times per process.
 
 Compare only runs with the same fixture and timing settings.
+
+For a campaign with five timed windows per query, raw output, median, and p95:
+
+```sh
+bench/run_comparative_benchmarks.py --track both
+```
+
+The runner's JSON output retains every engine's stdout, stderr, and individual
+timed-window samples. Pass `--runs 5` for five full process repetitions; Vev's
+position and the baseline order are then alternated between processes.

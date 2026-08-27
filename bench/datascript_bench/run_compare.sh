@@ -6,6 +6,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DATALEVIN_BENCH="${DATALEVIN_BENCH:-}"
+DATASCRIPT_VERSION="${DATASCRIPT_VERSION:-1.7.8}"
+DATALEVIN_VERSION="${DATALEVIN_VERSION:-0.10.7}"
+DATOMIC_VERSION="${DATOMIC_VERSION:-1.0.7705}"
+DETERMINISTIC_ROOT="$ROOT/bench/datascript_bench/deterministic"
 
 if [[ -z "$DATALEVIN_BENCH" || ! -d "$DATALEVIN_BENCH" ]]; then
   echo "Datalevin datascript-bench not found: $DATALEVIN_BENCH" >&2
@@ -56,24 +60,24 @@ run_version() {
     datascript)
       (
         cd "$ROOT"
-        clojure -Srepro -Sdeps "{:paths [\"$DATALEVIN_BENCH/src-datascript\"] :deps {datascript/datascript {:mvn/version \"1.7.4\"}}}" \
+        VEV_BENCH_ENGINE=datascript clojure -Srepro -Sdeps "{:paths [\"$DETERMINISTIC_ROOT\" \"$DATALEVIN_BENCH/src-datascript\"] :deps {datascript/datascript {:mvn/version \"$DATASCRIPT_VERSION\"}}}" \
           -M -m datascript-bench.datascript "${queries[@]}"
       ) >"$out"
       ;;
     datalevin)
       (
         cd "$ROOT"
-        clojure -Srepro \
+        VEV_BENCH_ENGINE=datalevin clojure -Srepro \
           -J--add-opens=java.base/java.nio=ALL-UNNAMED \
           -J--add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
-          -Sdeps "{:paths [\"$ROOT/bench/datascript_bench/src\" \"$DATALEVIN_BENCH/src\"] :deps {datalevin/datalevin {:mvn/version \"0.10.5\"}}}" \
+          -Sdeps "{:paths [\"$DETERMINISTIC_ROOT\" \"$ROOT/bench/datascript_bench/src\" \"$DATALEVIN_BENCH/src\"] :deps {datalevin/datalevin {:mvn/version \"$DATALEVIN_VERSION\"}}}" \
           -M -m vev-datascript-bench.datalevin-runner "${queries[@]}"
       ) >"$out"
       ;;
     datomic)
       (
         cd "$ROOT"
-        clojure -Srepro -Sdeps "{:paths [\"$DATALEVIN_BENCH/src\" \"$DATALEVIN_BENCH/src-datomic\"] :deps {com.datomic/peer {:mvn/version \"1.0.7277\"}}}" \
+        VEV_BENCH_ENGINE=datomic clojure -Srepro -Sdeps "{:paths [\"$DETERMINISTIC_ROOT\" \"$DATALEVIN_BENCH/src\" \"$DATALEVIN_BENCH/src-datomic\"] :deps {com.datomic/peer {:mvn/version \"$DATOMIC_VERSION\"}}}" \
           -M -m datalevin-bench.datomic "${queries[@]}"
       ) >"$out"
       ;;
@@ -81,6 +85,7 @@ run_version() {
       (
         cd "$ROOT"
         VEV_BENCH_ISOLATED_DBS="${VEV_BENCH_ISOLATED_DBS:-true}" \
+          VEV_BENCH_ENGINE=vev \
           bench/datascript_bench/run_vev.sh "${queries[@]}"
       ) >"$out"
       ;;
@@ -126,13 +131,19 @@ ratio() {
   awk -v n="$numerator" -v d="$denominator" 'BEGIN { if (d == "" || d == 0) print "---"; else printf "%.2fx", n / d }'
 }
 
+if [[ "${VEV_COMPARE_VEV_FIRST:-0}" == "1" ]]; then
+  run_version vev
+fi
+
 if [[ "${VEV_COMPARE_SKIP_BASELINES:-0}" != "1" ]]; then
   for version in "${versions[@]}"; do
     run_version "$version"
   done
 fi
 
-run_version vev
+if [[ "${VEV_COMPARE_VEV_FIRST:-0}" != "1" ]]; then
+  run_version vev
+fi
 
 printf "query"
 if [[ "${VEV_COMPARE_SKIP_BASELINES:-0}" != "1" ]]; then

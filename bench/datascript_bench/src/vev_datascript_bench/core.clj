@@ -1,7 +1,9 @@
 ;; Copyright (c) Andreas Flakstad and Vev contributors
 ;; SPDX-License-Identifier: EPL-2.0
 
-(ns vev-datascript-bench.core)
+(ns vev-datascript-bench.core
+  (:require [clojure.string :as str])
+  (:import [java.util ArrayList Collections Random]))
 
 (def ^:dynamic *warmup-t*
   (Double/parseDouble (or (System/getenv "VEV_BENCH_WARMUP_MS") "500")))
@@ -33,8 +35,10 @@
 (defn people
   ([] (people 20000))
   ([n]
-   (let [rng (java.util.Random. 42)]
-     (shuffle (mapv #(random-man rng %) (range 1 (inc n)))))))
+   (let [rng (Random. 42)
+         values (ArrayList. (mapv #(random-man rng %) (range 1 (inc n))))]
+     (Collections/shuffle values (Random. 43))
+     (vec values))))
 
 (def people20k (delay (people *people-count*)))
 
@@ -71,4 +75,9 @@
          results# (into []
                         (for [_# (range *repeats*)]
                           (dotime *bench-t* ~@body)))]
+     (when (= "1" (System/getenv "VEV_BENCH_SAMPLE_LOG"))
+       (binding [*out* *err*]
+         (println "benchmark_samples"
+                  (or (System/getenv "VEV_BENCH_ENGINE") "unknown")
+                  (str/join "," results#))))
      (percentile results# 0.5)))

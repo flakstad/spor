@@ -1,0 +1,37 @@
+{
+  "format": "vev-musicbrainz-comparison-v1",
+  "generated_at": "2026-08-27",
+  "versions": {
+    "vev": "b0f2700dc77785bdf9daf94134483ff4f7ee7c41",
+    "datomic_peer": "1.0.7277",
+    "datomic_transactor": "1.0.7277"
+  },
+  "methodology": {
+    "dataset": "Datomic mbrainz 1968-1973 sample",
+    "warmup_runs": 5,
+    "measurement_runs": 7,
+    "vev_queries": "prepared",
+    "reported_unit": "microseconds",
+    "summary": "median, best, and worst across seven synchronous query calls"
+  },
+  "results": [
+    {"engine": "datomic", "workload": "mbrainz-title-by-artist", "rows": 70, "fingerprint": "5c36ddd76e2d9a45", "median_us": 1791, "best_us": 1607, "worst_us": 2313},
+    {"engine": "datomic", "workload": "mbrainz-title-album-year-by-artist", "rows": 93, "fingerprint": "d2548ca97497433f", "median_us": 4536, "best_us": 3942, "worst_us": 6063},
+    {"engine": "datomic", "workload": "mbrainz-pre-1970-title-album-year", "rows": 18, "fingerprint": "4598839c2af58631", "median_us": 3632, "best_us": 3360, "worst_us": 4400},
+    {"engine": "datomic", "workload": "mbrainz-track-release-rule", "rows": 93, "fingerprint": "d2548ca97497433f", "median_us": 4035, "best_us": 3910, "worst_us": 5118},
+    {"engine": "datomic", "workload": "mbrainz-track-search-info", "rows": 92, "fingerprint": "1d14f508a95941fd", "median_us": 7329, "best_us": 6243, "worst_us": 11590},
+    {"engine": "datomic", "workload": "mbrainz-collab", "rows": 5, "fingerprint": "35305b2b80000441", "median_us": 3001, "best_us": 2875, "worst_us": 3135},
+    {"engine": "datomic", "workload": "mbrainz-collab-net-2", "rows": 3, "fingerprint": "9d4606f7c70396bb", "median_us": 3627, "best_us": 3541, "worst_us": 3950},
+    {"engine": "datomic", "workload": "mbrainz-collab-nested", "rows": 2, "fingerprint": "0ba13093fe8a03ae", "median_us": 2968, "best_us": 2537, "worst_us": 4029},
+    {"engine": "datomic", "workload": "mbrainz-bill-withers-collaborations", "rows": 83, "fingerprint": "90603a9e5a54a04e", "median_us": 1807, "best_us": 1588, "worst_us": 2165},
+    {"engine": "vev-clojure-prepared", "workload": "mbrainz-title-by-artist", "rows": 70, "fingerprint": "5c36ddd76e2d9a45", "median_us": 613, "best_us": 371, "worst_us": 784},
+    {"engine": "vev-clojure-prepared", "workload": "mbrainz-title-album-year-by-artist", "rows": 93, "fingerprint": "d2548ca97497433f", "median_us": 2542, "best_us": 2225, "worst_us": 2827},
+    {"engine": "vev-clojure-prepared", "workload": "mbrainz-pre-1970-title-album-year", "rows": 18, "fingerprint": "4598839c2af58631", "median_us": 1563, "best_us": 1247, "worst_us": 3062},
+    {"engine": "vev-clojure-prepared", "workload": "mbrainz-track-release-rule", "rows": 93, "fingerprint": "d2548ca97497433f", "median_us": 1848, "best_us": 1668, "worst_us": 2067},
+    {"engine": "vev-clojure-prepared", "workload": "mbrainz-track-search-info", "rows": 92, "fingerprint": "1d14f508a95941fd", "median_us": 4123, "best_us": 2998, "worst_us": 5747},
+    {"engine": "vev-clojure-prepared", "workload": "mbrainz-collab", "rows": 5, "fingerprint": "35305b2b80000441", "median_us": 919, "best_us": 900, "worst_us": 948},
+    {"engine": "vev-clojure-prepared", "workload": "mbrainz-collab-net-2", "rows": 3, "fingerprint": "9d4606f7c70396bb", "median_us": 805, "best_us": 789, "worst_us": 1212},
+    {"engine": "vev-clojure-prepared", "workload": "mbrainz-collab-nested", "rows": 2, "fingerprint": "0ba13093fe8a03ae", "median_us": 1512, "best_us": 1478, "worst_us": 1597},
+    {"engine": "vev-clojure-prepared", "workload": "mbrainz-bill-withers-collaborations", "rows": 83, "fingerprint": "90603a9e5a54a04e", "median_us": 1186, "best_us": 975, "worst_us": 1313}
+  ]
+}
