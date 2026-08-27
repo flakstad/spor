@@ -193,6 +193,13 @@ evolution, `with`, concurrent writers, reopen, history, and backup. The full
 cross-process visibility, history, backup, and SQLite application smokes also
 passed.
 
+Ro commit `51d239d` was then verified in an isolated worktree with its Vev lock
+temporarily pinned to `e6d5ce3b`. The complete `scripts/test.sh` passed,
+including 67 store tests with memory tracking, both Ro PBT suites, reopen,
+history/restore, checkbox semantics, and native engine/input tests. A freshly
+built Ro passed `native-steady-latency-smoke.sh` at 8.018 ms average across
+seven steady committed commands against a disposable database.
+
 Focused planner, source-connection, retained-snapshot, reopen, and index tests
 pass with memory tracking. A full `DurableApp` tracking experiment reports an
 existing 45-allocation/618-byte test-harness baseline at both `78f7f516` and
