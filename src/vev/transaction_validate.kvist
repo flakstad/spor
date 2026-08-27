@@ -598,6 +598,8 @@
       (= datom.a ":db/cardinality")
       (= datom.a ":db/unique")
       (= datom.a ":db/tupleAttrs")
+      (= datom.a ":db/index")
+      (= datom.a ":db/fulltext")
       (= datom.a ":db/isComponent")))
 
 (defn datom-add-op [datom: Datom] -> Tx-Op
@@ -644,7 +646,9 @@
           plan (tx-publish-plan-for-append appended start-index new-entities-after-existing)]
       (defer (delete-tx-publish-plan plan))
       (build-db-append-only-with-publish-plan before datoms plan))
-    (build-db datoms)))
+    (if (small-incremental-db-after-eligible? appended)
+      (build-db-small-transaction-incremental before datoms start-index)
+      (build-db datoms))))
 
 (defn failed-tx-apply-result [error: string] -> Tx-Apply-Result
   (Tx-Apply-Result {ok: false
@@ -696,8 +700,9 @@
                 new-entities-after-existing: applied.new-entities-after-existing
                 publish-plan: applied.publish-plan})))
 
-(defn apply-resolved-ops-to-datoms [before: DB, ops: []Tx-Op, tx: u64] -> Tx-Apply-Result
-  (let [expanded-ops (expand-tuple-ops before ops)
+(defn apply-resolved-ops-to-datoms [before: DB, ops: []Tx-Op, tx: u64, profile: ^Tx-Phase-Profile = nil] -> Tx-Apply-Result
+  (let [validation-start (tx-phase-profile-start profile)
+        expanded-ops (expand-tuple-ops before ops)
         clock-instant (current-instant)
         tx-instant clock-instant
         has-explicit-tx-instant false]
@@ -732,9 +737,11 @@
           [valid error] (validate-ops before (slice validation-ops 0))]
       (delete validation-ops)
       (when (not valid)
+        (tx-phase-profile-add-validation! profile validation-start)
         (delete expanded-ops)
         (return (failed-tx-apply-result error))))
-    (let [
+    (tx-phase-profile-add-validation! profile validation-start)
+    (let [planning-start (tx-phase-profile-start profile)
         expanded-schema-changed (ops-modify-validation-schema? (slice expanded-ops 0))
         ordered-append-only-ok (and (not expanded-schema-changed)
                                     (append-only-ordered-new-entity-ops-eligible? before (slice expanded-ops 0)))
@@ -754,6 +761,7 @@
     (defer (delete seen-ea))
     (let [[valid error] (validate-ops before (slice compacted-ops 0))]
       (when (not valid)
+        (tx-phase-profile-add-planning! profile planning-start)
         (delete expanded-ops)
         (delete compacted-ops)
         (delete tx-data)
@@ -793,6 +801,7 @@
                            (tx-publish-plan-empty start-index (count tx-data)))]
         (delete expanded-ops)
         (delete compacted-ops)
+        (tx-phase-profile-add-planning! profile planning-start)
         (Tx-Apply-Result {ok: true
                           error: ""
                           after-datoms: after-datoms
@@ -804,18 +813,28 @@
                           publish-plan: publish-plan}))))))
 
 (defn transact-ops-with-tempids-from-before [conn: ^Conn, before: DB, ops: []Tx-Op, tx-meta: []Tx-Meta, tempids: [dynamic]Tempid] -> Tx-Report
-  (let [applied (apply-resolved-ops-to-datoms before ops conn^.next-tx)]
+  (let [applied (apply-resolved-ops-to-datoms before ops conn^.next-tx conn^.tx-phase-profile)]
     (when (not applied.ok)
       (delete-owned-tempids tempids)
       (delete-tx-apply-result applied)
       (return (failed-tx-report before applied.error)))
-    (let [after (if applied.append-only
+    (let [incremental (and (not applied.append-only)
+                           (not conn^.force-full-db-after)
+                           (small-incremental-db-after-eligible? (slice applied.tx-data 0)))
+          db-after-start (tx-phase-profile-start conn^.tx-phase-profile)
+          after (if applied.append-only
                   (build-db-append-only-with-publish-plan before applied.after-datoms applied.publish-plan)
-                  (build-db applied.after-datoms))]
+                  (if incremental
+                    (build-db-small-transaction-incremental before applied.after-datoms applied.start-index)
+                    (build-db applied.after-datoms)))]
+      (tx-phase-profile-add-db-after! conn^.tx-phase-profile db-after-start applied.append-only incremental)
       (set! conn^.db after)
       (set! conn^.next-tx (+ conn^.next-tx 1))
-      (let [report (tx-report-from-apply-result before after applied tx-meta tempids)]
+      (let [report-start (tx-phase-profile-start conn^.tx-phase-profile)
+            report (tx-report-from-apply-result before after applied tx-meta tempids)]
         (notify-listeners! conn report)
+        (tx-phase-profile-add-report-ownership!
+          conn^.tx-phase-profile report-start (count report.tx-data))
         report))))
 
 (defn transact-ops-with-tempids [conn: ^Conn, ops: []Tx-Op, tx-meta: []Tx-Meta, tempids: [dynamic]Tempid] -> Tx-Report
@@ -830,7 +849,9 @@
 
 (defn transact-tx-data [conn: ^Conn, tx-data: []Tx-Data] -> Tx-Report
   (let [before conn^.db
+        resolve-start (tx-phase-profile-start conn^.tx-phase-profile)
         resolved (resolve-tx-data-for-tx before tx-data conn^.next-tx)]
+    (tx-phase-profile-add-resolution! conn^.tx-phase-profile resolve-start)
     (when (not resolved.ok)
       (delete-resolved-tx resolved)
       (return (failed-tx-report before resolved.error)))
@@ -897,7 +918,9 @@
                          (tx-publish-plan-empty start-index (count datoms)))
           after (if append-only-ok
                   (build-db-append-only-with-publish-plan before out publish-plan)
-                  (build-db out))
+                  (if (small-incremental-db-after-eligible? datoms)
+                    (build-db-small-transaction-incremental before out start-index)
+                    (build-db out)))
           tx-data (arr.into [dynamic]Datom datoms)]
       (Tx-Report {ok: true
                   error: (string-owned "")
@@ -932,7 +955,10 @@
                            (tx-publish-plan-empty start-index (count datoms)))
             after (if append-only-ok
                     (build-db-append-only-with-publish-plan before out publish-plan)
-                    (build-db out))
+                    (if (and (not conn^.force-full-db-after)
+                             (small-incremental-db-after-eligible? datoms))
+                      (build-db-small-transaction-incremental before out start-index)
+                      (build-db out)))
             report (Tx-Report {ok: true
                                error: (string-owned "")
                                db-before: before

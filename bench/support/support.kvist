@@ -10,6 +10,7 @@
   min-us: f64
   median-us: f64
   p90-us: f64
+  p95-us: f64
   max-us: f64
 })
 
@@ -22,8 +23,11 @@
     (arr.sort! sorted)
     (let [last-index (- (count sorted) 1)
           median-index (/ (count sorted) 2)
-          p90-index (min last-index (/ (* (count sorted) 9) 10))]
+          p90-index (min last-index (/ (* (count sorted) 9) 10))
+          ;; Nearest-rank p95 uses ceil(0.95 * n) - 1 in zero-based form.
+          p95-index (min last-index (/ (- (* (count sorted) 95) 1) 100))]
       (Timing {min-us: sorted[0]
                median-us: sorted[median-index]
                p90-us: sorted[p90-index]
+               p95-us: sorted[p95-index]
                max-us: sorted[last-index]}))))

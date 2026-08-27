@@ -1,0 +1,358 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package vev-tests)
+
+(import arr "kvist:arr")
+(import fmt "core:fmt")
+(import mmap "kvist:map")
+(import os "core:os")
+(import set "kvist:set")
+(import t "kvist:test")
+(import vev "../vev")
+
+(defn incremental-int-slices-equal? [left: []int, right: []int] -> bool
+  (when (not (= (count left) (count right)))
+    (return false))
+  (for [value index left]
+    (when (not (= value right[index]))
+      (return false)))
+  true)
+
+(defn incremental-u64-slices-equal? [left: []u64, right: []u64] -> bool
+  (when (not (= (count left) (count right)))
+    (return false))
+  (for [value index left]
+    (when (not (= value right[index]))
+      (return false)))
+  true)
+
+(defn incremental-datoms-equal? [left: []vev.Datom, right: []vev.Datom] -> bool
+  (when (not (= (count left) (count right)))
+    (return false))
+  (for [datom index left]
+    (let [other right[index]]
+      (when (not (and (= datom.e other.e)
+                      (= datom.a other.a)
+                      (vev.value-equal? datom.v other.v)
+                      (= datom.tx other.tx)
+                      (= datom.added other.added)))
+        (return false))))
+  true)
+
+(defn incremental-string-maps-equal? [left: map[string]string, right: map[string]string] -> bool
+  (when (not (= (count left) (count right)))
+    (return false))
+  (for [key value left]
+    (let [[other found] (mmap.get right key)]
+      (when (or (not found) (not (= value other)))
+        (return false))))
+  true)
+
+(defn incremental-string-sets-equal? [left: (map string (struct {})), right: (map string (struct {}))] -> bool
+  (when (not (= (count left) (count right)))
+    (return false))
+  (for [key left]
+    (when (not (set.contains? right key))
+      (return false)))
+  true)
+
+(defn incremental-dbs-equal? [left: vev.DB, right: vev.DB] -> bool
+  (and (incremental-datoms-equal? (slice left.datoms 0) (slice right.datoms 0))
+       (incremental-int-slices-equal? (slice left.current 0) (slice right.current 0))
+       (incremental-int-slices-equal? (slice left.eavt 0) (slice right.eavt 0))
+       (incremental-u64-slices-equal? (slice left.eavt-entities 0) (slice right.eavt-entities 0))
+       (incremental-int-slices-equal? (slice left.eavt-entity-starts 0) (slice right.eavt-entity-starts 0))
+       (incremental-int-slices-equal? (slice left.aevt 0) (slice right.aevt 0))
+       (incremental-int-slices-equal? (slice left.avet 0) (slice right.avet 0))
+       (incremental-int-slices-equal? (slice left.vaet 0) (slice right.vaet 0))
+       (incremental-string-maps-equal? left.schema-value-types right.schema-value-types)
+       (incremental-string-sets-equal? left.schema-cardinality-many right.schema-cardinality-many)
+       (incremental-string-sets-equal? left.schema-unique right.schema-unique)
+       (incremental-string-sets-equal? left.schema-ref right.schema-ref)))
+
+(defn incremental-matches-full-rebuild? [db: vev.DB] -> bool
+  (let [rebuilt (vev.build-db (vev.clone-datoms db.datoms))]
+    (let [equal (incremental-dbs-equal? db rebuilt)]
+      (vev.delete-owned-db rebuilt)
+      equal)))
+
+(defn incremental-test-schema [] -> [dynamic]vev.Tx-Data
+  (let [tx (make [dynamic]vev.Tx-Data)]
+    (arr.push! tx (vev.add 100 ":db/ident" (vev.value-keyword ":item/name")))
+    (arr.push! tx (vev.add 100 ":db/valueType" (vev.value-keyword ":db.type/string")))
+    (arr.push! tx (vev.add 100 ":db/cardinality" (vev.value-keyword ":db.cardinality/one")))
+    (arr.push! tx (vev.add 101 ":db/ident" (vev.value-keyword ":item/tag")))
+    (arr.push! tx (vev.add 101 ":db/valueType" (vev.value-keyword ":db.type/string")))
+    (arr.push! tx (vev.add 101 ":db/cardinality" (vev.value-keyword ":db.cardinality/many")))
+    (arr.push! tx (vev.add 102 ":db/ident" (vev.value-keyword ":item/friend")))
+    (arr.push! tx (vev.add 102 ":db/valueType" (vev.value-keyword ":db.type/ref")))
+    (arr.push! tx (vev.add 102 ":db/cardinality" (vev.value-keyword ":db.cardinality/one")))
+    tx))
+
+(defn incremental-test-seed [conn: ^vev.Conn] -> bool
+  (let [schema (incremental-test-schema)
+        schema-report (vev.transact-tx-data conn (slice schema 0))]
+    (delete schema)
+    (when (not schema-report.ok)
+      (vev.delete-live-tx-report-shallow schema-report)
+      (return false))
+    (vev.delete-live-tx-report-shallow schema-report))
+  (let [seed ([]vev.Tx-Data
+               [(vev.add 1 ":item/name" (vev.value-string "one"))
+                (vev.add 1 ":item/tag" (vev.value-string "red"))
+                (vev.add 1 ":item/friend" (vev.value-entity 2))
+                (vev.add 2 ":item/name" (vev.value-string "two"))
+                (vev.add 2 ":item/tag" (vev.value-string "blue"))])
+        report (vev.transact-tx-data conn seed)]
+    (let [ok (and report.ok
+                  (incremental-matches-full-rebuild? report.db-after))]
+      (vev.delete-live-tx-report-shallow report)
+      ok)))
+
+(defn incremental-test-conn-delete [conn: vev.Conn]
+  (delete conn.listeners)
+  (vev.delete-resident-db conn.db))
+
+(defn remove-incremental-sqlite-files [path: string]
+  (os.remove path)
+  (let [wal (fmt.tprintf "%s-wal" path)
+        shm (fmt.tprintf "%s-shm" path)]
+    (os.remove wal)
+    (os.remove shm)))
+
+(t.deftest small-non-schema-db-after-matches-full-rebuild
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)]
+    (t.is (incremental-test-seed (addr conn)))
+    (let [replacement (vev.transact-tx-data
+                        (addr conn)
+                        ([]vev.Tx-Data
+                          [(vev.add 1 ":item/name" (vev.value-string "uno"))]))]
+      (t.is replacement.ok replacement.error)
+      (t.is (not replacement.append-only))
+      (t.is (= (count replacement.tx-data) 3))
+      (t.is (incremental-matches-full-rebuild? replacement.db-after))
+      (vev.delete-live-tx-report-shallow replacement))
+    (let [retract (vev.transact-tx-data
+                    (addr conn)
+                    ([]vev.Tx-Data
+                      [(vev.retract 1 ":item/tag" (vev.value-string "red"))]))]
+      (t.is retract.ok retract.error)
+      (t.is (not retract.append-only))
+      (t.is (incremental-matches-full-rebuild? retract.db-after))
+      (vev.delete-live-tx-report-shallow retract))
+    (let [retract-entity (vev.transact-tx-data
+                           (addr conn)
+                           ([]vev.Tx-Data [(vev.retract-entity 2)]))]
+      (t.is retract-entity.ok retract-entity.error)
+      (t.is (not retract-entity.append-only))
+      (t.is (incremental-matches-full-rebuild? retract-entity.db-after))
+      (vev.delete-live-tx-report-shallow retract-entity))
+    (let [tx conn.next-tx
+          ro-like (vev.transact-tx-data
+                    (addr conn)
+                    ([]vev.Tx-Data
+                      [(vev.add 1 ":item/name" (vev.value-string "eins"))
+                       (vev.add tx ":tx/source" (vev.value-string "ui"))
+                       (vev.add tx ":tx/actor" (vev.value-string "user-1"))
+                       (vev.add tx ":tx/request" (vev.value-string "request-1"))]))]
+      (t.is ro-like.ok ro-like.error)
+      (t.is (not ro-like.append-only))
+      (t.is (= (count ro-like.tx-data) 6))
+      (t.is (incremental-matches-full-rebuild? ro-like.db-after))
+      (vev.delete-live-tx-report-shallow ro-like))
+    (incremental-test-conn-delete conn)))
+
+(t.deftest deterministic-replacement-retraction-sequence-matches-full-rebuild
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)]
+    (t.is (incremental-test-seed (addr conn)))
+    (for [step (arr.range 0 240)]
+      (let [entity (+ (u64 (% step 12)) 10)
+            tx (case (% step 6)
+                 0 ([]vev.Tx-Data
+                     [(vev.add entity ":item/name"
+                        (vev.value-string (if (= (% step 4) 0) "alpha" "beta")))])
+                 1 ([]vev.Tx-Data
+                     [(vev.add entity ":item/tag" (vev.value-string "hot"))])
+                 2 ([]vev.Tx-Data
+                     [(vev.retract entity ":item/tag" (vev.value-string "hot"))])
+                 3 ([]vev.Tx-Data
+                     [(vev.add entity ":item/friend" (vev.value-entity 1))])
+                 4 ([]vev.Tx-Data
+                     [(vev.retract entity ":item/friend" (vev.value-entity 1))])
+                   ([]vev.Tx-Data [(vev.retract-entity entity)]))
+            report (vev.transact-tx-data (addr conn) tx)]
+        (t.is report.ok report.error)
+        (t.is (incremental-matches-full-rebuild? report.db-after))
+        (vev.delete-live-tx-report-shallow report)))
+    (incremental-test-conn-delete conn)))
+
+(t.deftest retained-before-and-after-survive-many-incremental-transactions
+  (defer (free_all context.allocator))
+  (let [conn (vev.create-conn)]
+    (t.is (incremental-test-seed (addr conn)))
+    (let [replacement
+            (vev.transact-tx-data
+              (addr conn)
+              ([]vev.Tx-Data
+                [(vev.add 1 ":item/name" (vev.value-string "retained"))]))
+          retained-before (vev.clone-db replacement.db-before)
+          retained-after (vev.clone-db replacement.db-after)]
+      (t.is replacement.ok replacement.error)
+      (vev.delete-live-tx-report-shallow replacement)
+      (for [step (arr.range 0 160)]
+        (let [tx
+                (case (% step 3)
+                  0 ([]vev.Tx-Data
+                      [(vev.add 1 ":item/name"
+                         (vev.value-string (fmt.tprintf "later-%d" step)))])
+                  1 ([]vev.Tx-Data
+                      [(vev.add 1 ":item/tag" (vev.value-string "later"))])
+                    ([]vev.Tx-Data
+                      [(vev.retract 1 ":item/tag" (vev.value-string "later"))]))
+              report (vev.transact-tx-data (addr conn) tx)]
+          (t.is report.ok report.error)
+          (t.is (incremental-matches-full-rebuild? report.db-after))
+          (vev.delete-live-tx-report-shallow report)))
+      (let [before-names
+              (vev.q-collection
+                retained-before
+                [:find [?name ...] :where [1 :item/name ?name]])
+            after-names
+              (vev.q-collection
+                retained-after
+                [:find [?name ...] :where [1 :item/name ?name]])]
+        (t.is (= (count before-names) 1))
+        (t.is (= before-names[0].text "one"))
+        (t.is (= (count after-names) 1))
+        (t.is (= after-names[0].text "retained"))
+        (delete before-names)
+        (delete after-names))
+      (t.is (incremental-matches-full-rebuild? retained-before))
+      (t.is (incremental-matches-full-rebuild? retained-after))
+      (vev.delete-owned-db retained-before)
+      (vev.delete-owned-db retained-after))
+    (incremental-test-conn-delete conn)))
+
+(t.deftest schema-transactions-retain-full-rebuild-fallback
+  (defer (free_all context.allocator))
+  (let [profile (vev.Tx-Phase-Profile {enabled: true})
+        conn (vev.create-conn)]
+    (set! conn.tx-phase-profile (addr profile))
+    (let [schema (incremental-test-schema)
+          report (vev.transact-tx-data (addr conn) (slice schema 0))]
+      (delete schema)
+      (t.is report.ok report.error)
+      (t.is (= profile.full-db-after 1))
+      (t.is (= profile.incremental-db-after 0))
+      (t.is (incremental-matches-full-rebuild? report.db-after))
+      (vev.delete-live-tx-report-shallow report))
+    (let [report (vev.transact-tx-data
+                   (addr conn)
+                   ([]vev.Tx-Data [(vev.add 1 ":item/name" (vev.value-string "one"))]))]
+      (t.is report.ok report.error)
+      (t.is (= profile.append-db-after 1))
+      (t.is (incremental-matches-full-rebuild? report.db-after))
+      (vev.delete-live-tx-report-shallow report))
+    (let [report (vev.transact-tx-data
+                   (addr conn)
+                   ([]vev.Tx-Data [(vev.add 1 ":item/name" (vev.value-string "two"))]))]
+      (t.is report.ok report.error)
+      (t.is (= profile.incremental-db-after 1))
+      (t.is (incremental-matches-full-rebuild? report.db-after))
+      (vev.delete-live-tx-report-shallow report))
+    (let [full-before profile.full-db-after
+          report (vev.transact-tx-data
+                   (addr conn)
+                   ([]vev.Tx-Data
+                     [(vev.add 100 ":db/index" (vev.value-bool true))]))]
+      (t.is report.ok report.error)
+      (t.is (= profile.full-db-after (+ full-before 1)))
+      (t.is (incremental-matches-full-rebuild? report.db-after))
+      (vev.delete-live-tx-report-shallow report))
+    (incremental-test-conn-delete conn)))
+
+(t.deftest sqlite-resident-phase-profile-is-opt-in-durable-and-prepared
+  (defer (free_all context.allocator))
+  (let [path "tmp.vev.incremental-resident-profile.sqlite"]
+    (remove-incremental-sqlite-files path)
+    (defer (remove-incremental-sqlite-files path))
+    (let [[store opened-ok opened-error] (vev.open-sqlite-conn path)]
+      (t.is opened-ok opened-error)
+      (let [schema (incremental-test-schema)
+            schema-report
+              (vev.transact-sqlite-tx-data (addr store) (slice schema 0))]
+        (delete schema)
+        (t.is schema-report.ok schema-report.error)
+        (vev.delete-live-tx-report-shallow schema-report))
+      (let [seed
+              (vev.transact-sqlite-tx-data
+                (addr store)
+                ([]vev.Tx-Data
+                  [(vev.add 1 ":item/name" (vev.value-string "before"))]))]
+        (t.is seed.ok seed.error)
+        (vev.delete-live-tx-report-shallow seed))
+      (let [disabled (vev.sqlite-tx-phase-profile (addr store))]
+        (t.is (not disabled.enabled))
+        (t.is (= disabled.transactions 0)))
+      (vev.reset-sqlite-tx-phase-profile! (addr store))
+      (let [replacement
+              (vev.transact-sqlite-text
+                (addr store) "[[:db/add 1 :item/name \"after\"]]")
+            profile (vev.sqlite-tx-phase-profile (addr store))]
+        (t.is replacement.ok replacement.error)
+        (t.is (= (count replacement.tx-data) 3))
+        (t.is (= profile.transactions 1))
+        (t.is (= profile.effective-datoms 3))
+        (t.is (= profile.incremental-db-after 1))
+        (t.is (> profile.parsing-us 0.0))
+        (t.is (> profile.db-after-us 0.0))
+        (t.is (> profile.canonical-append-us 0.0))
+        (t.is (> profile.derived-bookkeeping-us 0.0))
+        (t.is (> profile.sqlite-commit-us 0.0))
+        (t.is store.direct-write-stmts-valid)
+        (t.is store.index-write-stmts-valid)
+        (vev.delete-live-tx-report-shallow replacement))
+      ;; This is a fresh SQLite connection while the writer remains open.
+      (let [[reader reader-ok reader-error] (vev.open-conn-sqlite path)
+            names
+              (vev.q-collection
+                reader.db
+                [:find [?name ...] :where [1 :item/name ?name]])]
+        (t.is reader-ok reader-error)
+        (t.is (= (count names) 1))
+        (t.is (= names[0].text "after"))
+        (delete names)
+        (incremental-test-conn-delete reader))
+      (vev.close-sqlite-conn store))
+    (let [[store opened-ok opened-error] (vev.open-store path)]
+      (t.is opened-ok opened-error)
+      (let [[resident-ok resident-error]
+              (vev.ensure-store-resident! (addr store))]
+        (t.is resident-ok resident-error))
+      (vev.reset-store-tx-phase-profile! (addr store))
+      (let [replacement
+              (vev.transact-store-report-text
+                (addr store) "[[:db/add 1 :item/name \"final\"]]")
+            profile (vev.store-tx-phase-profile (addr store))]
+        (t.is replacement.ok replacement.error)
+        (t.is (= (count replacement.tx-data) 3))
+        (t.is (= profile.transactions 1))
+        (t.is (= profile.incremental-db-after 1))
+        (t.is (> profile.parsing-us 0.0))
+        (t.is (> profile.canonical-append-us 0.0))
+        (t.is (> profile.sqlite-commit-us 0.0))
+        (vev.delete-store-tx-report replacement))
+      (vev.close-store store))
+    (let [[reopened reopened-ok reopened-error] (vev.open-conn-sqlite path)
+          names
+            (vev.q-collection
+              reopened.db
+              [:find [?name ...] :where [1 :item/name ?name]])]
+      (t.is reopened-ok reopened-error)
+      (t.is (= (count names) 1))
+      (t.is (= names[0].text "final"))
+      (delete names)
+      (incremental-test-conn-delete reopened))))

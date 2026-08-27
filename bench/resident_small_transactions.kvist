@@ -1,0 +1,239 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import arr "kvist:arr")
+(import bench "./support")
+(import cli "../deps/cli")
+(import fmt "core:fmt")
+(import os "core:os")
+(import time "core:time")
+(import vev "../src/vev")
+
+(defn remove-sqlite-files [path: string]
+  (os.remove path)
+  (os.remove (fmt.tprintf "%s-wal" path))
+  (os.remove (fmt.tprintf "%s-shm" path)))
+
+(defn benchmark-schema [] -> [dynamic]vev.Tx-Data
+  (let [tx (make [dynamic]vev.Tx-Data)]
+    (arr.push! tx (vev.add 100 ":db/ident" (vev.value-keyword ":item/name")))
+    (arr.push! tx (vev.add 100 ":db/valueType" (vev.value-keyword ":db.type/string")))
+    (arr.push! tx (vev.add 100 ":db/cardinality" (vev.value-keyword ":db.cardinality/one")))
+    (arr.push! tx (vev.add 101 ":db/ident" (vev.value-keyword ":item/tag")))
+    (arr.push! tx (vev.add 101 ":db/valueType" (vev.value-keyword ":db.type/string")))
+    (arr.push! tx (vev.add 101 ":db/cardinality" (vev.value-keyword ":db.cardinality/many")))
+    tx))
+
+(defn seed-resident! [store: ^vev.SQLite-Conn, entity-count: int] -> bool
+  (let [schema (benchmark-schema)
+        schema-report
+          (vev.transact-sqlite-tx-data store (slice schema 0))]
+    (delete schema)
+    (when (not schema-report.ok)
+      (fmt.eprintf "resident benchmark schema failed: %s\n" schema-report.error)
+      (vev.delete-tx-report-shallow schema-report)
+      (return false))
+    (vev.delete-live-tx-report-shallow schema-report))
+  (let [seed (make [dynamic]vev.Tx-Data 0 (* entity-count 2))]
+    (for [index (arr.range 0 entity-count)]
+      (let [entity (+ (u64 index) 1)]
+        (arr.push! seed
+          (vev.add entity ":item/name"
+            (vev.value-string (fmt.tprintf "seed-%d" entity))))
+        (arr.push! seed
+          (vev.add entity ":item/tag" (vev.value-string "seed")))))
+    (let [report (vev.transact-sqlite-tx-data store (slice seed 0))]
+      (delete seed)
+      (when (not report.ok)
+        (fmt.eprintf "resident benchmark seed failed: %s\n" report.error)
+        (vev.delete-tx-report-shallow report)
+        (return false))
+      (vev.delete-live-tx-report-shallow report)))
+  true)
+
+(defn prepare-workload! [store: ^vev.SQLite-Conn, workload: string, sample: int] -> bool
+  (when (= workload "explicit-retract")
+    (let [tag (fmt.tprintf "retract-%d" sample)
+          tx ([]vev.Tx-Data
+               [(vev.add 2 ":item/tag" (vev.value-string tag))])
+          report (vev.transact-sqlite-tx-data store (slice tx 0))]
+      (when (not report.ok)
+        (vev.delete-tx-report-shallow report)
+        (return false))
+      (vev.delete-live-tx-report-shallow report)))
+  (when (= workload "retract-entity")
+    (let [entity (+ (u64 1000000) (u64 sample))
+          tx ([]vev.Tx-Data
+               [(vev.add entity ":item/name"
+                  (vev.value-string (fmt.tprintf "doomed-%d" sample)))
+                (vev.add entity ":item/tag" (vev.value-string "doomed"))])
+          report (vev.transact-sqlite-tx-data store (slice tx 0))]
+      (when (not report.ok)
+        (vev.delete-tx-report-shallow report)
+        (return false))
+      (vev.delete-live-tx-report-shallow report)))
+  true)
+
+(defn transact-workload! [store: ^vev.SQLite-Conn, workload: string, sample: int] -> vev.Tx-Report
+  (case workload
+    "append"
+      (let [entity (+ (u64 2000000) (u64 sample))]
+        (vev.transact-sqlite-tx-data
+          store
+          ([]vev.Tx-Data
+            [(vev.add entity ":item/name"
+               (vev.value-string (fmt.tprintf "append-%d" sample)))])))
+    "replacement"
+      (vev.transact-sqlite-tx-data
+        store
+        ([]vev.Tx-Data
+          [(vev.add 1 ":item/name"
+             (vev.value-string
+               (if (= (% sample 2) 0) "replacement-a" "replacement-b")))]))
+    "explicit-retract"
+      (vev.transact-sqlite-tx-data
+        store
+        ([]vev.Tx-Data
+          [(vev.retract 2 ":item/tag"
+             (vev.value-string (fmt.tprintf "retract-%d" sample)))]))
+    "retract-entity"
+      (vev.transact-sqlite-tx-data
+        store
+        ([]vev.Tx-Data
+          [(vev.retract-entity (+ (u64 1000000) (u64 sample)))]))
+    "ro-like"
+      (let [tx store^.conn.next-tx]
+        (vev.transact-sqlite-tx-data
+          store
+          ([]vev.Tx-Data
+            [(vev.add 3 ":item/name"
+               (vev.value-string
+                 (if (= (% sample 2) 0) "ro-a" "ro-b")))
+             (vev.add tx ":tx/source" (vev.value-string "ro-ui"))
+             (vev.add tx ":tx/actor" (vev.value-string "user-1"))
+             (vev.add tx ":tx/request"
+               (vev.value-string (fmt.tprintf "request-%d" sample)))])))
+    (vev.failed-tx-report store^.conn.db "unknown resident benchmark workload")))
+
+(defn profile-average [value: f64, transactions: u64] -> f64
+  (if (= transactions 0) 0.0 (/ value (f64 transactions))))
+
+(defn phase-percent [value: f64, total: f64] -> f64
+  (if (= total 0.0) 0.0 (* 100.0 (/ value total))))
+
+(defn print-result
+  [database: string, entities: int, workload: string, mode: string,
+   samples: []f64, profile: vev.Tx-Phase-Profile]
+  (let [timing (bench.timing-from-samples samples)
+        phases (+ profile.parsing-us profile.resolution-us
+                  profile.validation-us profile.planning-us
+                  profile.db-after-us profile.report-ownership-us
+                  profile.canonical-append-us profile.derived-bookkeeping-us
+                  profile.sqlite-commit-us)
+        effective
+          (if (= profile.transactions 0)
+            0.0
+            (/ (f64 profile.effective-datoms) (f64 profile.transactions)))]
+    (fmt.printf
+      "engine=vev-resident database=%s entities=%d workload=%s mode=%s samples=%d median_us=%.0f p95_us=%.0f effective_tx_datoms=%.1f phase_total_us=%.0f parsing_us=%.0f resolution_us=%.0f validation_us=%.0f planning_us=%.0f db_after_us=%.0f report_ownership_us=%.0f canonical_append_us=%.0f derived_bookkeeping_us=%.0f sqlite_commit_us=%.0f parsing_pct=%.1f resolution_pct=%.1f validation_pct=%.1f planning_pct=%.1f db_after_pct=%.1f report_ownership_pct=%.1f canonical_append_pct=%.1f derived_bookkeeping_pct=%.1f sqlite_commit_pct=%.1f append_db_after=%d incremental_db_after=%d full_db_after=%d\n"
+      database entities workload mode (count samples)
+      timing.median-us timing.p95-us effective
+      (profile-average phases profile.transactions)
+      (profile-average profile.parsing-us profile.transactions)
+      (profile-average profile.resolution-us profile.transactions)
+      (profile-average profile.validation-us profile.transactions)
+      (profile-average profile.planning-us profile.transactions)
+      (profile-average profile.db-after-us profile.transactions)
+      (profile-average profile.report-ownership-us profile.transactions)
+      (profile-average profile.canonical-append-us profile.transactions)
+      (profile-average profile.derived-bookkeeping-us profile.transactions)
+      (profile-average profile.sqlite-commit-us profile.transactions)
+      (phase-percent profile.parsing-us phases)
+      (phase-percent profile.resolution-us phases)
+      (phase-percent profile.validation-us phases)
+      (phase-percent profile.planning-us phases)
+      (phase-percent profile.db-after-us phases)
+      (phase-percent profile.report-ownership-us phases)
+      (phase-percent profile.canonical-append-us phases)
+      (phase-percent profile.derived-bookkeeping-us phases)
+      (phase-percent profile.sqlite-commit-us phases)
+      profile.append-db-after profile.incremental-db-after profile.full-db-after)))
+
+(defn run-workload
+  [store: ^vev.SQLite-Conn, database: string, entities: int,
+   workload: string, mode: string, sample-count: int]
+  (let [samples (make [dynamic]f64 0 sample-count)]
+    (defer (delete samples))
+    ;; Timing is collected with instrumentation disabled. A second deterministic
+    ;; pass collects phase data so time.now calls do not contaminate the latency.
+    (vev.disable-sqlite-tx-phase-profile! store)
+    (for [sample (arr.range 0 sample-count)]
+      (when (not (prepare-workload! store workload sample))
+        (fmt.eprintf "workload setup failed: %s\n" workload)
+        (return))
+      (let [start (time.now)
+            report (transact-workload! store workload sample)
+            elapsed (bench.elapsed-us start)]
+        (when (not report.ok)
+          (fmt.eprintf "workload failed: %s: %s\n" workload report.error)
+          (vev.delete-tx-report-shallow report)
+          (return))
+        (arr.push! samples elapsed)
+        (vev.delete-live-tx-report-shallow report)))
+    (vev.reset-sqlite-tx-phase-profile! store)
+    (for [sample (arr.range sample-count (* sample-count 2))]
+      (set! store^.tx-phase-profile.enabled false)
+      (when (not (prepare-workload! store workload sample))
+        (fmt.eprintf "profile setup failed: %s\n" workload)
+        (return))
+      (set! store^.tx-phase-profile.enabled true)
+      (let [report (transact-workload! store workload sample)]
+        (when (not report.ok)
+          (fmt.eprintf "profile workload failed: %s: %s\n" workload report.error)
+          (vev.delete-tx-report-shallow report)
+          (return))
+        (vev.delete-live-tx-report-shallow report)))
+    (print-result database entities workload mode (slice samples 0)
+      (vev.sqlite-tx-phase-profile store))))
+
+(defn selected? [selected: string, value: string] -> bool
+  (or (= selected "all") (= selected value)))
+
+(defn run-database [database: string, entities: int, selected-workload: string, mode: string, sample-count: int]
+  (for [workload ([]string ["append" "replacement" "explicit-retract" "retract-entity" "ro-like"])]
+    (when (selected? selected-workload workload)
+      ;; Every workload starts from an identically sized resident database.
+      ;; This prevents an earlier workload's novelty tail from biasing a later
+      ;; workload and makes full/incremental runs directly comparable.
+      (let [path
+              (fmt.tprintf "tmp.vev.resident-small.%s.%s.%s.sqlite"
+                database mode workload)]
+        (remove-sqlite-files path)
+        (let [[store open-ok open-error] (vev.open-sqlite-conn path)]
+          (when (not open-ok)
+            (fmt.eprintf "open failed: %s\n" open-error)
+            (remove-sqlite-files path)
+            (return))
+          (when (not (seed-resident! (addr store) entities))
+            (vev.close-sqlite-conn store)
+            (remove-sqlite-files path)
+            (return))
+          ;; ensure-resident! may replace the embedded Conn while seeding, so
+          ;; set the differential mode only after the seed is resident.
+          (set! store.conn.force-full-db-after (= mode "full"))
+          (run-workload (addr store) database entities workload mode sample-count)
+          (vev.close-sqlite-conn store))
+        (remove-sqlite-files path)))))
+
+(defn main []
+  (defer (free_all context.allocator))
+  (let [selected-database (cli.option os.args "--database" "all")
+        selected-workload (cli.option os.args "--workload" "all")
+        mode (cli.option os.args "--mode" "incremental")
+        samples (cli.int-option os.args "--samples" 40)]
+    (when (selected? selected-database "small")
+      (run-database "small" 50 selected-workload mode samples))
+    (when (selected? selected-database "large")
+      (run-database "large" 2000 selected-workload mode samples))))

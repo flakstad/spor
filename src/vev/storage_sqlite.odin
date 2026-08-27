@@ -211,7 +211,7 @@ sqlite_app_is_vev_store :: proc(db: ^SQLite3) -> bool {
     }
 
     marker_stmt: ^SQLite3_Stmt
-    marker_sql := cstring("SELECT 1 FROM vev_meta WHERE (key='schema-version' AND value='1') OR (key='storage-architecture' AND value LIKE 'vev-%') LIMIT 1")
+    marker_sql := cstring("SELECT 1 FROM vev_meta WHERE (key='schema-version' AND value IN ('1', '2')) OR (key='storage-architecture' AND value LIKE 'vev-%') LIMIT 1")
     if sqlite3_prepare_v2(db, marker_sql, -1, &marker_stmt, nil) != SQLITE_OK {
         return false
     }

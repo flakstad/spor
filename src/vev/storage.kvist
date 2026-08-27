@@ -379,6 +379,7 @@
   current-root-cache-published: SQLite-Durable-Published-Root
   current-root-cache-page-cache: SQLite-Index-Page-Cache
   direct-write-profile: SQLite-Direct-Write-Profile
+  tx-phase-profile: Tx-Phase-Profile
   direct-attr-cache: [dynamic]SQLite-Direct-Attr-Info
 })
 
@@ -720,6 +721,15 @@
 
 (defn sqlite-direct-write-profile [store: ^SQLite-Conn] -> SQLite-Direct-Write-Profile
   store^.direct-write-profile)
+
+(defn reset-sqlite-tx-phase-profile! [store: ^SQLite-Conn]
+  (set! store^.tx-phase-profile (Tx-Phase-Profile {enabled: true})))
+
+(defn disable-sqlite-tx-phase-profile! [store: ^SQLite-Conn]
+  (set! store^.tx-phase-profile (Tx-Phase-Profile {})))
+
+(defn sqlite-tx-phase-profile [store: ^SQLite-Conn] -> Tx-Phase-Profile
+  store^.tx-phase-profile)
 
 (defn sqlite-conn-latest-index-root-basis [store: ^SQLite-Conn] -> [basis-tx: u64, ok: bool, error: string]
   (vev.sqlite-latest-index-root-basis-raw store^.handle))
@@ -2355,8 +2365,10 @@
   (let [[resident-ok resident-error] (sqlite-conn-ensure-resident! store)]
     (when (not resident-ok)
       (return (failed-tx-report store^.conn.db resident-error))))
+  (set! store^.conn.tx-phase-profile (addr store^.tx-phase-profile))
   (let [resident-start (time.now)
         report (transact-tx-data (addr store^.conn) tx-data)]
+    (set! store^.conn.tx-phase-profile nil)
     (set! store^.direct-write-profile.resolve-us
       (+ store^.direct-write-profile.resolve-us
          (sqlite-profile-elapsed-us resident-start)))
@@ -2366,7 +2378,8 @@
           saved-ok false
           save-error ""]
       (let [[ok error]
-              (append-tx-report-sqlite-handle store^.handle report)]
+              (append-tx-report-sqlite-conn
+                store report (addr store^.tx-phase-profile))]
         (set! saved-ok ok)
         (set! save-error error))
       (set! store^.direct-write-profile.append-us
@@ -2385,7 +2398,9 @@
     report))
 
 (defn transact-sqlite-text [store: ^SQLite-Conn, text: string] -> Tx-Report
-  (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+  (let [parsing-start (tx-phase-profile-start (addr store^.tx-phase-profile))
+        prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+    (tx-phase-profile-add-parsing! (addr store^.tx-phase-profile) parsing-start)
     (when (not prepared.ok)
       (return (failed-tx-report store^.conn.db prepared.error)))
     (transact-sqlite-tx-data store (slice prepared.tx-data 0))))
@@ -2409,7 +2424,7 @@
     (let [report-start (time.now)
           report
             (transact-shared-source-conn-store-report-tx-data
-              (addr candidate) tx-data)]
+              (addr candidate) tx-data (addr store^.tx-phase-profile))]
     (set! store^.direct-write-profile.overlay-us
       (+ store^.direct-write-profile.overlay-us
          (sqlite-profile-elapsed-us report-start)))
@@ -2433,7 +2448,9 @@
         (delete-shared-conn candidate)
         (delete-store-tx-report report)
         (return (failed-sqlite-store-tx-report store source-error)))
-      (let [start-index report.db-before.shared-snapshot.datoms.count
+      (let [canonical-start
+              (tx-phase-profile-start (addr store^.tx-phase-profile))
+            start-index report.db-before.shared-snapshot.datoms.count
             [append-ok append-error]
               (append-source-direct-sqlite-conn-log-only-open-tx!
                 store
@@ -2447,9 +2464,15 @@
           (vev.sqlite-rollback-raw store^.handle)
           (delete-shared-conn candidate)
           (delete-store-tx-report report)
-          (return (failed-sqlite-store-tx-report store append-error))))
-    (let [commit-start (time.now)
+          (return (failed-sqlite-store-tx-report store append-error)))
+      (tx-phase-profile-add-canonical-append!
+        (addr store^.tx-phase-profile) canonical-start))
+    (let [commit-phase-start
+            (tx-phase-profile-start (addr store^.tx-phase-profile))
+          commit-start (time.now)
           [commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
+      (tx-phase-profile-add-sqlite-commit!
+        (addr store^.tx-phase-profile) commit-phase-start)
       (set! store^.direct-write-profile.append-commit-us
         (+ store^.direct-write-profile.append-commit-us
            (sqlite-profile-elapsed-us commit-start)))
@@ -2458,8 +2481,10 @@
         (delete-shared-conn candidate)
         (delete-store-tx-report report)
         (return (failed-sqlite-store-tx-report store commit-error))))
-    (sqlite-conn-advance-write-state-cache-after-datoms!
-      store (slice report.tx-data 0))
+    (let [derived-start
+            (tx-phase-profile-start (addr store^.tx-phase-profile))]
+      (sqlite-conn-advance-write-state-cache-after-datoms!
+        store (slice report.tx-data 0))
     (set! store^.direct-write-profile.append-us
       (+ store^.direct-write-profile.append-us
          (sqlite-profile-elapsed-us append-start)))
@@ -2469,7 +2494,9 @@
     (delete-shared-conn store^.shared-resident)
     (set! store^.shared-resident candidate)
     (sqlite-conn-invalidate-current-root-cache! store)
-    report))))
+    (tx-phase-profile-add-derived-bookkeeping!
+      (addr store^.tx-phase-profile) derived-start)
+    report)))))
 
 (defn transact-sqlite-store-report-tx-data [store: ^SQLite-Conn, tx-data: []Tx-Data] -> Store-Tx-Report
   (when store^.source-only
@@ -2529,7 +2556,9 @@
     (sqlite-auto-checkpoint-report! store out)))
 
 (defn transact-sqlite-store-report-text [store: ^SQLite-Conn, text: string] -> Store-Tx-Report
-  (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+  (let [parsing-start (tx-phase-profile-start (addr store^.tx-phase-profile))
+        prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+    (tx-phase-profile-add-parsing! (addr store^.tx-phase-profile) parsing-start)
     (when (not prepared.ok)
       (return (failed-sqlite-store-tx-report store prepared.error)))
     (transact-sqlite-store-report-tx-data store (slice prepared.tx-data 0))))
@@ -2747,6 +2776,21 @@
   (case store^.kind
     .SQLite (sqlite-direct-write-profile (addr store^.sqlite))
      (SQLite-Direct-Write-Profile {})))
+
+(defn reset-store-tx-phase-profile! [store: ^Store-Conn]
+  (case store^.kind
+    .SQLite (reset-sqlite-tx-phase-profile! (addr store^.sqlite))
+     (do)))
+
+(defn disable-store-tx-phase-profile! [store: ^Store-Conn]
+  (case store^.kind
+    .SQLite (disable-sqlite-tx-phase-profile! (addr store^.sqlite))
+     (do)))
+
+(defn store-tx-phase-profile [store: ^Store-Conn] -> Tx-Phase-Profile
+  (case store^.kind
+    .SQLite (sqlite-tx-phase-profile (addr store^.sqlite))
+     (Tx-Phase-Profile {})))
 
 (defn store-latest-index-merge-run-count [store: ^Store-Conn, index-name: string] -> [run-count: int, is-merge: bool, ok: bool, error: string]
   (case store^.kind
@@ -3400,7 +3444,11 @@
 (defn transact-store-report-text [store: ^Store-Conn, text: string] -> Store-Tx-Report
   (case store^.kind
     .SQLite
-      (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+      (let [parsing-start
+              (tx-phase-profile-start (addr store^.sqlite.tx-phase-profile))
+            prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+        (tx-phase-profile-add-parsing!
+          (addr store^.sqlite.tx-phase-profile) parsing-start)
         (when (not prepared.ok)
           (return (failed-sqlite-store-tx-report (addr store^.sqlite) prepared.error)))
         (transact-store-report-tx-data store (slice prepared.tx-data 0)))
@@ -3414,7 +3462,11 @@
 (defn transact-store-report-text-with-source-string-fns [store: ^Store-Conn, text: string, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
   (case store^.kind
     .SQLite
-      (let [prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+      (let [parsing-start
+              (tx-phase-profile-start (addr store^.sqlite.tx-phase-profile))
+            prepared (prepare-tx-text text) :defer-with delete-prepared-tx-data-shallow]
+        (tx-phase-profile-add-parsing!
+          (addr store^.sqlite.tx-phase-profile) parsing-start)
         (when (not prepared.ok)
           (return (failed-sqlite-store-tx-report (addr store^.sqlite) prepared.error)))
         (transact-store-report-tx-data-with-source-string-fns store (slice prepared.tx-data 0) registry))

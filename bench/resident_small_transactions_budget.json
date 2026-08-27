@@ -1,0 +1,16 @@
+{
+  "format": "vev-resident-small-transactions-budget-v1",
+  "mode": "incremental",
+  "workloads": {
+    "small/append": {"median_us": 5000, "p95_us": 15000},
+    "small/replacement": {"median_us": 5000, "p95_us": 15000},
+    "small/explicit-retract": {"median_us": 5000, "p95_us": 15000},
+    "small/retract-entity": {"median_us": 7000, "p95_us": 20000},
+    "small/ro-like": {"median_us": 5000, "p95_us": 15000},
+    "large/append": {"median_us": 6000, "p95_us": 15000},
+    "large/replacement": {"median_us": 6000, "p95_us": 15000},
+    "large/explicit-retract": {"median_us": 6000, "p95_us": 15000},
+    "large/retract-entity": {"median_us": 30000, "p95_us": 50000},
+    "large/ro-like": {"median_us": 6000, "p95_us": 15000}
+  }
+}

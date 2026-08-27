@@ -160,6 +160,79 @@
           (return false root-error))))
     (vev.sqlite-commit-raw handle)))
 
+(defn append-tx-report-sqlite-conn
+  [store: ^SQLite-Conn, report: Tx-Report, profile: ^Tx-Phase-Profile]
+  -> [ok: bool, error: string]
+  ;; Resident connections keep both statement sets alive. Besides avoiding
+  ;; prepare/finalize churn, this split exposes canonical log work separately
+  ;; from the derived immutable root publication and the durable commit.
+  (let [canonical-start (tx-phase-profile-start profile)
+        [begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
+    (when (not begin-ok)
+      (return false begin-error))
+    (let [[write-stmts stmts-ok stmts-error]
+            (sqlite-conn-direct-write-stmts store)]
+      (when (not stmts-ok)
+        (vev.sqlite-rollback-raw store^.handle)
+        (return false stmts-error))
+      (let [[tx-ok tx-error]
+              (insert-sqlite-tx-with-stmts!
+                store^.handle write-stmts report.tx)]
+        (when (not tx-ok)
+          (vev.sqlite-rollback-raw store^.handle)
+          (return false tx-error)))
+      (let [[datoms-ok datoms-error]
+              (append-sqlite-datoms-with-stmts!
+                store^.handle write-stmts (count report.db-before.datoms)
+                (slice report.tx-data 0))]
+        (when (not datoms-ok)
+          (vev.sqlite-rollback-raw store^.handle)
+          (return false datoms-error)))
+      (let [[meta-ok meta-error]
+              (insert-sqlite-tx-meta-with-stmts!
+                store^.handle write-stmts report.tx (slice report.tx-meta 0))]
+        (when (not meta-ok)
+          (vev.sqlite-rollback-raw store^.handle)
+          (return false meta-error))))
+    (tx-phase-profile-add-canonical-append! profile canonical-start)
+    (let [derived-start (tx-phase-profile-start profile)
+          before report.db-before
+          source (resident-db-read-source (addr before))
+          start-index (count report.db-before.datoms)
+          ;; A general small transaction may merge into every public order.
+          ;; Publishing a four-run delta is correct for append, replacement,
+          ;; and retraction alike and avoids serializing the complete root.
+          modes (SQLite-Index-Append-Modes {})
+          plan
+            (sqlite-durable-append-plan-from-modes
+              (slice report.tx-data 0) start-index modes
+              (addr store^.direct-write-profile))]
+      (let [[index-stmts stmts-ok stmts-error]
+              (sqlite-conn-index-write-stmts store)]
+        (when (not stmts-ok)
+          (delete-sqlite-durable-append-plan plan)
+          (vev.sqlite-rollback-raw store^.handle)
+          (return false stmts-error))
+        (let [[_published root-ok root-error]
+                (sqlite-publish-durable-append-plan-with-stmts!
+                  store^.handle index-stmts report.tx source
+                  (slice report.tx-data 0) plan
+                  (addr store^.direct-write-profile) true)]
+          (discard _published)
+          (delete-sqlite-durable-append-plan plan)
+          (when (not root-ok)
+            (vev.sqlite-rollback-raw store^.handle)
+            (return false root-error))))
+      (tx-phase-profile-add-derived-bookkeeping! profile derived-start))
+    (let [commit-start (tx-phase-profile-start profile)
+          [commit-ok commit-error] (vev.sqlite-commit-raw store^.handle)]
+      (tx-phase-profile-add-sqlite-commit! profile commit-start)
+      (if commit-ok
+        (return true "")
+        (do
+          (vev.sqlite-rollback-raw store^.handle)
+          (return false commit-error))))))
+
 (defn db-index-view-entries [view: DB-Index-View] -> [dynamic]int
   (let [out (make [dynamic]int 0 (db-index-view-count view))
         index 0]

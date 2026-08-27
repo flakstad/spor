@@ -592,16 +592,18 @@
           (return out-report true true ""))))))
 
 (defn transact-shared-source-conn-store-report-tx-data
-  [conn: ^Shared-Conn, tx-data: []Tx-Data]
+  [conn: ^Shared-Conn, tx-data: []Tx-Data, profile: ^Tx-Phase-Profile = nil]
   -> Store-Tx-Report
   ;; The live shared connection already owns the compact allocator/schema
   ;; metadata needed to resolve a transaction. Do not derive that metadata by
   ;; rescanning the snapshot for every write.
   (let [base conn^.snapshot
         source (shared-db-snapshot-read-source (addr base))
+        resolution-start (tx-phase-profile-start profile)
         resolved
           (shared-write-state-resolve-tx-data-source-only
             (addr conn^.write) source tx-data)]
+    (tx-phase-profile-add-resolution! profile resolution-start)
     (when (not resolved.ok)
       (let [error resolved.error]
         (delete-resolved-tx resolved)
@@ -610,12 +612,14 @@
                              shared-snapshot:
                                (retain-shared-db-snapshot base)})
                   error))))
-    (let [[instant-ok instant-error]
+    (let [instant-start (tx-phase-profile-start profile)
+          [instant-ok instant-error]
             (finalize-source-transaction-instant!
               source
               (addr resolved.ops)
               (addr resolved.tx-meta)
               conn^.write.conn.next-tx)]
+      (tx-phase-profile-add-validation! profile instant-start)
       (when (not instant-ok)
         (delete-resolved-tx resolved)
         (return (failed-store-tx-report
@@ -624,7 +628,7 @@
                                (retain-shared-db-snapshot base)})
                   instant-error))))
     (let [[overlay-ops overlay-ok overlay-error]
-            (source-overlay-ops-from-resolved source resolved)]
+            (source-overlay-ops-from-resolved source resolved profile)]
       (when (not overlay-ok)
         (delete-resolved-tx resolved)
         (return (failed-store-tx-report
@@ -632,7 +636,8 @@
                              shared-snapshot:
                                (retain-shared-db-snapshot base)})
                   overlay-error)))
-      (let [before
+      (let [report-start (tx-phase-profile-start profile)
+            before
               (Store-DB {kind: .Shared-Snapshot
                          shared-snapshot: (retain-shared-db-snapshot base)})
             out-report
@@ -644,11 +649,15 @@
                 conn^.write.next-entity-id)]
         (close-store-db before)
         (when out-report.ok
+          (tx-phase-profile-add-report-ownership!
+            profile report-start (count out-report.tx-data)))
+        (when out-report.ok
           (let [append-only true]
             (for [datom out-report.tx-data]
               (when (not datom.added)
                 (set! append-only false)))
-          (let [next-snapshot
+          (let [db-after-start (tx-phase-profile-start profile)
+                next-snapshot
                   (if append-only
                     (shared-db-snapshot-with-appended-datoms-direct
                       base
@@ -659,6 +668,8 @@
                       base
                       (slice out-report.tx-data 0)
                       base.datoms.count))]
+            (tx-phase-profile-add-db-after!
+              profile db-after-start append-only (not append-only))
             (close-store-db out-report.db-after)
             (set! out-report.db-after
               (Store-DB {kind: .Shared-Snapshot

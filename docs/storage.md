@@ -91,7 +91,7 @@ The durable schema separates semantic history from rebuildable acceleration:
 | `vev_transactions` | committed transaction coordinates | canonical, permanent |
 | `vev_datoms` | assertions, retractions, and transaction datoms | canonical, permanent |
 | `vev_tx_meta` | transaction metadata values | canonical, permanent |
-| `vev_datoms_*` SQLite indexes | direct log/query access paths | derived, retained for performance |
+| selected `vev_datoms_*` SQLite indexes | log position, EAVT/entity, AVET, and ref-entity access paths | derived, retained for performance |
 | `vev_fulltext*`, `vev_text_terms` | text-search acceleration | derived |
 | `vev_index_roots`, `vev_index_root_pages` | immutable EAVT/AEVT/AVET/VAET checkpoints | derived; latest checkpoint retained |
 | `vev_index_run_manifests`, runs, and range tables | legacy/delta-root plans and cursor pruning | derived; not created by ordinary novelty commits |
@@ -150,7 +150,14 @@ cycle migrates its derived retention lazily. Explicit reclamation is useful
 after upgrading a large existing file because only it guarantees immediate
 file truncation rather than reuse through SQLite's freelist.
 
-The ordinary `vev_datoms_*` indexes are SQLite B-trees. The chunk indexes are
+The synchronous canonical-row indexes are `vev_datoms_log_index`,
+`vev_datoms_eavt`, `vev_datoms_eavt_entity_cover`, `vev_datoms_avet`, and
+`vev_datoms_vaet_entity`. Schema version 2 removes the unused text-ordered
+`vev_datoms_aevt` and `vev_datoms_vaet`; immutable AEVT and VAET checkpoints
+already provide those public orders. This migration changes only derived SQL
+indexes, not canonical rows or the Vev database model.
+
+The ordinary retained `vev_datoms_*` indexes are SQLite B-trees. The chunk indexes are
 VevDB's immutable B-tree-like structure: leaf chunks normally contain 128
 entries (512 for broad builds) and internal nodes have fanout 64. The two
 representations overlap in sort order but serve different access paths. Direct

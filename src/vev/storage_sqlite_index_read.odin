@@ -264,7 +264,7 @@ sqlite_latest_index_chunk_row_count_raw :: proc(handle: rawptr, index_name: stri
     }
     db := (^SQLite3)(handle)
     stmt: ^SQLite3_Stmt
-    sql := "SELECT r.basis_tx, c.row_count FROM (SELECT root_id, basis_tx FROM vev_index_roots ORDER BY root_id DESC LIMIT 1) r JOIN vev_index_root_pages p ON p.root_id = r.root_id JOIN vev_index_chunks c ON c.chunk_id = p.root_chunk_id WHERE p.index_name = ?"
+    sql := "SELECT r.basis_tx, COALESCE(m.row_count, c.row_count) FROM (SELECT root_id, basis_tx FROM vev_index_roots ORDER BY root_id DESC LIMIT 1) r JOIN vev_index_root_pages p ON p.root_id = r.root_id JOIN vev_index_chunks c ON c.chunk_id = p.root_chunk_id LEFT JOIN vev_index_run_manifests m ON m.manifest_id = p.manifest_id WHERE p.index_name = ?"
     sql_c, sql_c_ok := sqlite_cstring(sql)
     if !sql_c_ok {
         return 0, 0, false, "failed to allocate sqlite SQL text"

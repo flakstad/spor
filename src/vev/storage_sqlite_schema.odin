@@ -55,9 +55,7 @@ CREATE TABLE IF NOT EXISTS vev_datoms (
 CREATE INDEX IF NOT EXISTS vev_tx_meta_tx ON vev_tx_meta(tx, a);
 CREATE INDEX IF NOT EXISTS vev_datoms_eavt ON vev_datoms(e, a, value_text, tx, added);
 CREATE INDEX IF NOT EXISTS vev_datoms_eavt_entity_cover ON vev_datoms(e, a, value_text, value_entity, tx, added);
-CREATE INDEX IF NOT EXISTS vev_datoms_aevt ON vev_datoms(a, e, value_text, tx, added);
 CREATE INDEX IF NOT EXISTS vev_datoms_avet ON vev_datoms(a, value_text, e, tx, added);
-CREATE INDEX IF NOT EXISTS vev_datoms_vaet ON vev_datoms(value_text, a, e, tx, added);
 CREATE TABLE IF NOT EXISTS vev_text_terms (
   attr TEXT NOT NULL,
   term TEXT NOT NULL,
@@ -204,7 +202,7 @@ INSERT OR REPLACE INTO vev_meta (key, value) VALUES ('format', 'vev-snapshot-tex
 INSERT OR REPLACE INTO vev_meta (key, value) VALUES ('storage-architecture', 'vev-sqlite-chunked-index-v0');
 `
 
-SQLITE_SCHEMA_VERSION :: "1"
+SQLITE_SCHEMA_VERSION :: "2"
 SQLITE_ENTITY_PARTITION_LAYOUT :: "separated-v1"
 
 sqlite_entity_partition_layout_current :: proc(db: ^SQLite3) -> bool {
@@ -280,8 +278,20 @@ sqlite_schema_version_current :: proc(db: ^SQLite3) -> bool {
 sqlite_mark_schema_current :: proc(db: ^SQLite3) -> (bool, string) {
     return sqlite_exec_ok(
         db,
-        "INSERT OR REPLACE INTO vev_meta (key, value) VALUES ('schema-version', '1')",
+        "INSERT OR REPLACE INTO vev_meta (key, value) VALUES ('schema-version', '2')",
     )
+}
+
+sqlite_drop_derived_legacy_datom_indexes :: proc(db: ^SQLite3) -> (bool, string) {
+    // AEVT and VAET ordering is published by the immutable derived roots.
+    // Canonical SQLite reads use EAVT/EAVT-cover, AVET, VAET-entity, and the
+    // log-index lookup; keeping these two unused indexes would only amplify
+    // every durable datom insert.
+    ok, err := sqlite_exec_ok(
+        db,
+        "DROP INDEX IF EXISTS vev_datoms_aevt; DROP INDEX IF EXISTS vev_datoms_vaet;",
+    )
+    return ok, err
 }
 
 sqlite_open_initialized :: proc(path: string) -> (^SQLite3, bool, string) {
@@ -331,6 +341,11 @@ sqlite_open_initialized :: proc(path: string) -> (^SQLite3, bool, string) {
     if !value_entity_ok {
         _ = sqlite3_close(db)
         return nil, false, value_entity_error
+    }
+    legacy_indexes_ok, legacy_indexes_error := sqlite_drop_derived_legacy_datom_indexes(db)
+    if !legacy_indexes_ok {
+        _ = sqlite3_close(db)
+        return nil, false, legacy_indexes_error
     }
     text_terms_ok, text_terms_error := sqlite_ensure_text_terms_table(db)
     if !text_terms_ok {

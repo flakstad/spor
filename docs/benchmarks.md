@@ -54,6 +54,26 @@ bench/write_bench/run_datomic.sh \
   --total 10000
 ```
 
+### Small resident durable transactions
+
+`resident_small_transactions.kvist` measures one durable commit at a time on
+one long-lived resident connection. It covers a new fact, cardinality-one
+replacement, explicit retract, `retractEntity`, and a Ro-shaped replacement
+with three transaction-provenance facts. Every shape runs from the same seed on
+both a 50-entity and a 2,000-entity database.
+
+```sh
+python3 bench/check_resident_small_transactions.py --mode both --samples 40
+```
+
+The output includes median/p95, effective `tx-data` datoms, phase time and phase
+percentages. `--mode full` forces the reference full-`build-db` path; the
+default `incremental` mode uses production selection. The checked-in budget is
+for incremental mode and intentionally leaves headroom for CI variance.
+
+See [resident transaction performance](resident-transaction-performance.md)
+for the architecture, invariants, and a same-machine before/after profile.
+
 ## Durable storage amplification
 
 The deterministic storage benchmark writes 1,000 application assertions using

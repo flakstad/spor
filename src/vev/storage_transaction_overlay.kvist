@@ -1022,8 +1022,8 @@
               (arr.push! batch^.owned-cardinality-keys cardinality-key))))))
     (return true "")))
 
-(defn source-overlay-ops-from-resolved [source: DB-Read-Source, resolved: Resolved-Tx] -> [ops: [dynamic]Tx-Op, ok: bool, error: string]
-  (source-overlay-ops-from-ops source (slice resolved.ops 0)))
+(defn source-overlay-ops-from-resolved [source: DB-Read-Source, resolved: Resolved-Tx, profile: ^Tx-Phase-Profile = nil] -> [ops: [dynamic]Tx-Op, ok: bool, error: string]
+  (source-overlay-ops-from-ops source (slice resolved.ops 0) profile))
 
 (defn finalize-source-transaction-instant! [source: DB-Read-Source, ops: ^[dynamic]Tx-Op, tx-meta: ^[dynamic]Tx-Meta, tx: u64] -> [ok: bool, error: string]
   (let [clock-instant (current-instant)
@@ -1117,36 +1117,46 @@
         (return (make [dynamic]Tx-Op) false unique-error)))
     (return out true "")))
 
-(defn source-overlay-ops-from-ops [source: DB-Read-Source, ops: []Tx-Op] -> [out-ops: [dynamic]Tx-Op, ok: bool, error: string]
-  (let [out (make [dynamic]Tx-Op 0 (count ops))]
+(defn source-overlay-ops-from-ops [source: DB-Read-Source, ops: []Tx-Op, profile: ^Tx-Phase-Profile = nil] -> [out-ops: [dynamic]Tx-Op, ok: bool, error: string]
+  (let [out (make [dynamic]Tx-Op 0 (count ops))
+        planning-start (tx-phase-profile-start profile)]
     (for [op ops]
       (let [[append-ok append-error] (append-source-overlay-op! (addr out) source op)]
         (when (not append-ok)
+          (tx-phase-profile-add-planning! profile planning-start)
           (delete-owned-tx-ops out)
           (return (make [dynamic]Tx-Op) false append-error))))
+    (tx-phase-profile-add-planning! profile planning-start)
+    (let [validation-start (tx-phase-profile-start profile)]
     (let [[schema-ok schema-error] (validate-source-overlay-schema-keyword-ops (slice out 0))]
       (when (not schema-ok)
+        (tx-phase-profile-add-validation! profile validation-start)
         (delete-owned-tx-ops out)
         (return (make [dynamic]Tx-Op) false schema-error)))
     (let [[bool-ok bool-error] (validate-source-overlay-schema-bool-ops (slice out 0))]
       (when (not bool-ok)
+        (tx-phase-profile-add-validation! profile validation-start)
         (delete-owned-tx-ops out)
         (return (make [dynamic]Tx-Op) false bool-error)))
     (let [[component-ok component-error]
             (validate-source-overlay-component-schema source (slice out 0))]
       (when (not component-ok)
+        (tx-phase-profile-add-validation! profile validation-start)
         (delete-owned-tx-ops out)
         (return (make [dynamic]Tx-Op) false component-error)))
     (let [[tuple-ok tuple-error]
             (validate-source-overlay-tuple-schema source (slice out 0))]
       (when (not tuple-ok)
+        (tx-phase-profile-add-validation! profile validation-start)
         (delete-owned-tx-ops out)
         (return (make [dynamic]Tx-Op) false tuple-error)))
     (let [[unique-ok unique-error] (validate-source-overlay-new-unique-schemas source (slice out 0))]
       (when (not unique-ok)
+        (tx-phase-profile-add-validation! profile validation-start)
         (delete-owned-tx-ops out)
         (return (make [dynamic]Tx-Op) false unique-error)))
-    (return out true "")))
+    (tx-phase-profile-add-validation! profile validation-start)
+    (return out true ""))))
 
 (defn shared-store-db-with-source-overlay-tx-data [snapshot: Shared-DB-Snapshot, tx-data: []Tx-Data] -> [next: Store-DB, used: bool, ok: bool, error: string]
   (let [base snapshot

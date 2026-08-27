@@ -10,6 +10,7 @@
 (import regex "core:text/regex")
 (import strings "core:strings")
 (import strconv "core:strconv")
+(import time "core:time")
 
 (def tx-partition-base (u64 4611686018427387904))
 
@@ -103,11 +104,95 @@
   reports: ^[dynamic]Tx-Report
 })
 
+(defstruct Tx-Phase-Profile {
+  enabled: bool
+  transactions: u64
+  effective-datoms: u64
+  parsing-us: f64
+  resolution-us: f64
+  validation-us: f64
+  planning-us: f64
+  db-after-us: f64
+  report-ownership-us: f64
+  canonical-append-us: f64
+  derived-bookkeeping-us: f64
+  sqlite-commit-us: f64
+  append-db-after: u64
+  incremental-db-after: u64
+  full-db-after: u64
+})
+
 (defstruct Conn {
   db: DB
   next-tx: u64
   listeners: [dynamic]Tx-Listener
+  tx-phase-profile: ^Tx-Phase-Profile
+  force-full-db-after: bool
 })
+
+(defn tx-phase-profile-start [profile: ^Tx-Phase-Profile] -> time.Time
+  (if (and (not (= profile nil)) profile^.enabled)
+    (time.now)
+    (time.Time {})))
+
+(defn tx-phase-profile-elapsed-us [profile: ^Tx-Phase-Profile, start: time.Time] -> f64
+  (if (and (not (= profile nil)) profile^.enabled)
+    (time.duration_microseconds (time.since start))
+    0.0))
+
+(defn tx-phase-profile-add-parsing! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.parsing-us
+      (+ profile^.parsing-us (tx-phase-profile-elapsed-us profile start)))))
+
+(defn tx-phase-profile-add-resolution! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.resolution-us
+      (+ profile^.resolution-us (tx-phase-profile-elapsed-us profile start)))))
+
+(defn tx-phase-profile-add-validation! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.validation-us
+      (+ profile^.validation-us (tx-phase-profile-elapsed-us profile start)))))
+
+(defn tx-phase-profile-add-planning! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.planning-us
+      (+ profile^.planning-us (tx-phase-profile-elapsed-us profile start)))))
+
+(defn tx-phase-profile-add-db-after! [profile: ^Tx-Phase-Profile, start: time.Time, append-only: bool, incremental: bool]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.db-after-us
+      (+ profile^.db-after-us (tx-phase-profile-elapsed-us profile start)))
+    (if append-only
+      (set! profile^.append-db-after (+ profile^.append-db-after 1))
+      (if incremental
+        (set! profile^.incremental-db-after (+ profile^.incremental-db-after 1))
+        (set! profile^.full-db-after (+ profile^.full-db-after 1))))))
+
+(defn tx-phase-profile-add-canonical-append! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.canonical-append-us
+      (+ profile^.canonical-append-us (tx-phase-profile-elapsed-us profile start)))))
+
+(defn tx-phase-profile-add-derived-bookkeeping! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.derived-bookkeeping-us
+      (+ profile^.derived-bookkeeping-us (tx-phase-profile-elapsed-us profile start)))))
+
+(defn tx-phase-profile-add-sqlite-commit! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.sqlite-commit-us
+      (+ profile^.sqlite-commit-us (tx-phase-profile-elapsed-us profile start)))))
+
+(defn tx-phase-profile-add-report-ownership! [profile: ^Tx-Phase-Profile, start: time.Time, effective-datoms: int]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.report-ownership-us
+      (+ profile^.report-ownership-us
+         (tx-phase-profile-elapsed-us profile start)))
+    (set! profile^.transactions (+ profile^.transactions 1))
+    (set! profile^.effective-datoms
+      (+ profile^.effective-datoms (u64 effective-datoms)))))
 
 (defenum Tx-Op-Kind [
   Add
@@ -1849,6 +1934,72 @@
          schema-cardinality-many: schema-cardinality-many
          schema-unique: schema-unique
          schema-ref: schema-ref})))
+
+(def small-incremental-db-after-max-datoms 64)
+
+(defn datom-modifies-db-schema? [datom: Datom] -> bool
+  (or (= datom.a ":db/ident")
+      (= datom.a ":db/valueType")
+      (= datom.a ":db/cardinality")
+      (= datom.a ":db/unique")
+      (= datom.a ":db/tupleAttrs")
+      (= datom.a ":db/index")
+      (= datom.a ":db/fulltext")
+      (= datom.a ":db/isComponent")))
+
+(defn small-incremental-db-after-eligible? [appended: []Datom] -> bool
+  (when (> (count appended) small-incremental-db-after-max-datoms)
+    (return false))
+  (for [datom appended]
+    (when (datom-modifies-db-schema? datom)
+      (return false)))
+  true)
+
+(defn remove-current-fact-index! [current: ^[dynamic]int, datoms: []Datom, target: Datom]
+  (let [position 0]
+    (while (< position (count current^))
+      (when (same-fact? datoms[current^[position]] target)
+        (arr.remove-ordered-at! current^ position)
+        (return))
+      (set! position (+ position 1)))))
+
+(defn build-current-index-with-appended-datoms [before: DB, datoms: []Datom, start-index: int] -> [dynamic]int
+  ;; Current is ordered by log position. Existing positions remain ordered
+  ;; after removals, and every appended assertion has a larger log position.
+  (let [current (arr.into [dynamic]int (slice before.current 0))
+        index start-index]
+    (while (< index (count datoms))
+      (let [datom datoms[index]]
+        (remove-current-fact-index! (addr current) datoms datom)
+        (when datom.added
+          (arr.push! current index)))
+      (set! index (+ index 1)))
+    current))
+
+(defn build-db-small-transaction-incremental [before: DB, datoms: [dynamic]Datom, start-index: int] -> DB
+  ;; All four ordered indexes are history indexes: a retraction adds a new log
+  ;; position just like an assertion. Only `current` removes superseded facts.
+  ;; The schema caches are safe to clone because callers exclude schema datoms.
+  (let [slice-datoms (slice datoms 0)
+        eavt (append-index slice-datoms (slice before.eavt 0) start-index "eavt")
+        aevt (append-index slice-datoms (slice before.aevt 0) start-index "aevt")
+        avet (append-index slice-datoms (slice before.avet 0) start-index "avet")
+        vaet (append-index slice-datoms (slice before.vaet 0) start-index "vaet")
+        [eavt-entities eavt-entity-starts]
+          (build-eavt-entities slice-datoms (slice eavt 0))
+        current (build-current-index-with-appended-datoms before slice-datoms start-index)]
+    (DB {datoms: datoms
+         current: current
+         eavt: eavt
+         eavt-entities: eavt-entities
+         eavt-entity-starts: eavt-entity-starts
+         aevt: aevt
+         avet: avet
+         vaet: vaet
+         schema-value-types: (clone-schema-value-types before.schema-value-types)
+         schema-cardinality-many: (clone-schema-cardinality-many before.schema-cardinality-many)
+         schema-unique: (clone-schema-unique before.schema-unique)
+         schema-ref: (clone-schema-ref before.schema-ref)})))
 
 (defn clone-schema-value-types [schema: map[string]string] -> map[string]string
   (mmap.merge schema (mmap.empty string string)))
