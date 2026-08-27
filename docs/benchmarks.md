@@ -90,6 +90,27 @@ also run the exact Ro transaction against two disposable Ro demo databases.
 See [Kvist/native transaction boundary](kvist-native-transaction-boundary.md)
 for commands, measurements, API rationale, and ownership rules.
 
+The same executable includes `small`, `large`, `wide-schema`, and
+`schema-churn` databases and `append`, `replacement`, `cas`,
+`explicit-retract`, `retract-entity`, and `ro-like` workloads. Its profile
+output includes detailed resolution/planning times, operation counts, and
+effective transaction datoms. Exact Ro diagnostics select
+`--ro-workload ro-demo`, `ro-demo-no-provenance`, or
+`ro-demo-resolved-ids` against independent disposable database copies.
+
+Registered transaction-function expansion has a deterministic source-backed
+durable row:
+
+```sh
+kvist build bench/durable_transaction_function.kvist \
+  --out build/bench/durable-transaction-function
+build/bench/durable-transaction-function --samples 100 --warmup 20
+```
+
+See [resident transaction resolution and
+planning](transaction-resolution-planning-profile.md) for the root cause,
+scaling matrix, reference-planner differential, and current budgets.
+
 ## Durable storage amplification
 
 The deterministic storage benchmark writes 1,000 application assertions using

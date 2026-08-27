@@ -629,7 +629,8 @@
                                (retain-shared-db-snapshot base)})
                   instant-error))))
     (let [[overlay-ops overlay-ok overlay-error]
-            (source-overlay-ops-from-resolved source resolved profile)]
+            (source-overlay-ops-from-resolved-with-state
+              source resolved (addr conn^.write) profile)]
       (when (not overlay-ok)
         (delete-resolved-tx resolved)
         (return (failed-store-tx-report
@@ -734,10 +735,15 @@
   (delete segment)
   (failed-store-tx-report snapshot error))
 
-(defn with-store-db-report-tx-data-with-source-string-fns-state [snapshot: ^Store-DB, base-source: DB-Read-Source, state: ^Shared-Write-State, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
+(defn with-store-db-report-tx-data-with-source-string-fns-state
+  [snapshot: ^Store-DB, base-source: DB-Read-Source,
+   state: ^Shared-Write-State, tx-data: []Tx-Data,
+   registry: []Tx-Fn-Source-String, profile: ^Tx-Phase-Profile = nil]
+  -> Store-Tx-Report
   (let [source base-source
         [duplicate-ident has-duplicate] (tx-fn-source-string-duplicate-ident registry)
         tx state^.conn.next-tx
+        resolution-start (tx-phase-profile-start profile)
         ops (make [dynamic]Tx-Op)
         tx-meta (make [dynamic]Tx-Meta)
         tempids (make [dynamic]Tempid)
@@ -769,26 +775,35 @@
       (when (not tail-ok)
         (return (failed-store-source-registered-tx snapshot^ ops tx-meta tempids segment tail-error))))
     (delete segment)
+    (tx-phase-profile-add-resolution! profile resolution-start)
     (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr ops) (addr tx-meta) tx)]
       (when (not instant-ok)
         (delete ops)
         (delete tx-meta)
         (delete-owned-tempids tempids)
         (return (failed-store-tx-report snapshot^ instant-error))))
-    (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-ops source (slice ops 0))]
+    (let [[overlay-ops overlay-ok overlay-error]
+            (source-overlay-ops-from-ops-with-state
+              source (slice ops 0) state profile)]
       (when (not overlay-ok)
         (delete ops)
         (delete tx-meta)
         (delete-owned-tempids tempids)
         (return (failed-store-tx-report snapshot^ overlay-error)))
-      (let [report (store-tx-report-from-source-overlay-parts snapshot^ (slice overlay-ops 0) tx (slice tx-meta 0) (slice tempids 0) state^.next-entity-id)]
+      (let [report-start (tx-phase-profile-start profile)
+            report (store-tx-report-from-source-overlay-parts snapshot^ (slice overlay-ops 0) tx (slice tx-meta 0) (slice tempids 0) state^.next-entity-id)]
+        (tx-phase-profile-add-report-ownership!
+          profile report-start (count report.tx-data))
         (delete-owned-tx-ops overlay-ops)
         (delete ops)
         (delete tx-meta)
         (delete-owned-tempids tempids)
         report))))
 
-(defn with-store-db-report-tx-data-with-source-string-fns [snapshot: ^Store-DB, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
+(defn with-store-db-report-tx-data-with-source-string-fns
+  [snapshot: ^Store-DB, tx-data: []Tx-Data,
+   registry: []Tx-Fn-Source-String, profile: ^Tx-Phase-Profile = nil]
+  -> Store-Tx-Report
   (when (not (source-backed-store-db? snapshot))
     (return (failed-store-tx-report snapshot^ "source transaction functions require a source-backed Store-DB")))
   (let [[base-source source-ok source-error] (store-db-read-source snapshot)]
@@ -797,6 +812,8 @@
     (let [[state state-ok state-error] (shared-write-state-from-source-metadata base-source)]
       (when (not state-ok)
         (return (failed-store-tx-report snapshot^ state-error)))
-      (let [report (with-store-db-report-tx-data-with-source-string-fns-state snapshot base-source (addr state) tx-data registry)]
+      (let [report
+              (with-store-db-report-tx-data-with-source-string-fns-state
+                snapshot base-source (addr state) tx-data registry profile)]
         (delete-shared-write-state-metadata state)
         report))))

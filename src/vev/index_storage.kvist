@@ -48,6 +48,9 @@
   resident-current: bool
   has-tuple-schema: bool
   schema-cache-complete: bool
+  force-reference-planner: bool
+  owns-schema-cache: bool
+  schema-value-types: map[string]string
   schema-cardinality-many: (map string (struct {}))
   schema-ref: (map string (struct {}))
   schema-unique: (map string (struct {}))
@@ -103,6 +106,47 @@
       (set.add! out (string-owned value)))
     out))
 
+(defn shared-write-state-clone-schema-value-types [values: map[string]string] -> map[string]string
+  (let [out (mmap.empty string string)]
+    (for [attr values]
+      (let [[value-type value-type-ok] (mmap.get values attr)]
+        (when value-type-ok
+          (mmap.assoc! out (string-owned attr) (string-owned value-type)))))
+    out))
+
+(defn shared-write-state-ensure-owned-schema-cache! [state: ^Shared-Write-State]
+  (when (not state^.owns-schema-cache)
+    ;; Transaction candidates borrow an immutable projection from the live
+    ;; generation. A schema transaction must detach before planning publishes
+    ;; its new schema so rollback cannot mutate the live generation.
+    (let [schema-value-types
+            (shared-write-state-clone-schema-value-types
+              state^.schema-value-types)
+          schema-cardinality-many
+            (shared-write-state-clone-schema-set
+              state^.schema-cardinality-many)
+          schema-ref
+            (shared-write-state-clone-schema-set state^.schema-ref)
+          schema-unique
+            (shared-write-state-clone-schema-set state^.schema-unique)
+          schema-unique-identity
+            (shared-write-state-clone-schema-set
+              state^.schema-unique-identity)]
+      (set! state^.schema-value-types schema-value-types)
+      (set! state^.schema-cardinality-many schema-cardinality-many)
+      (set! state^.schema-ref schema-ref)
+      (set! state^.schema-unique schema-unique)
+      (set! state^.schema-unique-identity schema-unique-identity)
+      (set! state^.owns-schema-cache true))))
+
+(defn delete-shared-write-state-schema-value-types [values: map[string]string]
+  (for [attr values]
+    (let [[value-type value-type-ok] (mmap.get values attr)]
+      (when value-type-ok
+        (delete value-type)))
+    (delete attr))
+  (delete values))
+
 (defn retain-shared-db-snapshot [snapshot: Shared-DB-Snapshot] -> Shared-DB-Snapshot
   (Shared-DB-Snapshot {datoms: (retain-shared-datom-log snapshot.datoms)
                        indexes: (retain-shared-db-int-indexes snapshot.indexes)}))
@@ -119,6 +163,9 @@
                                               resident-current: true
                                               has-tuple-schema: (db-has-tuple-schema? conn.db)
                                               schema-cache-complete: true
+                                              force-reference-planner: false
+                                              owns-schema-cache: true
+                                              schema-value-types: (shared-write-state-clone-schema-value-types conn.db.schema-value-types)
                                               schema-cardinality-many: (shared-write-state-clone-schema-set conn.db.schema-cardinality-many)
                                               schema-ref: (shared-write-state-clone-schema-set conn.db.schema-ref)
                                               schema-unique: (shared-write-state-clone-schema-set conn.db.schema-unique)
@@ -207,6 +254,19 @@
       (return))))
 
 (defn shared-write-state-sync-schema-attr-from-after! [state: ^Shared-Write-State, after: DB, attr: string]
+  (for [owned-attr state^.schema-value-types]
+    (when (= owned-attr attr)
+      (let [[owned-value owned-value-ok]
+              (mmap.get state^.schema-value-types owned-attr)]
+        (mmap.dissoc! state^.schema-value-types attr)
+        (when owned-value-ok
+          (delete owned-value))
+        (delete owned-attr))
+      (break)))
+  (let [[value-type has-value-type] (mmap.get after.schema-value-types attr)]
+    (when has-value-type
+      (mmap.assoc! state^.schema-value-types
+        (string-owned attr) (string-owned value-type))))
   (if (schema-cardinality-many? after attr)
     (when (not (set.contains? state^.schema-cardinality-many attr))
       (set.add! state^.schema-cardinality-many (string-owned attr)))
@@ -291,13 +351,18 @@
   (set! state^.conn.next-tx (+ state^.conn.next-tx 1))
   (set! state^.resident-current true)
   (if (shared-write-state-datoms-modify-schema? (slice applied.tx-data 0))
-    (if (shared-write-state-advance-schema-incremental! state source after (slice applied.tx-data 0))
-      (shared-write-state-advance-next-entity-from-datoms! state (slice applied.tx-data 0))
-      (shared-write-state-refresh-from-current! state))
+    (do
+      (shared-write-state-ensure-owned-schema-cache! state)
+      (if (shared-write-state-advance-schema-incremental! state source after (slice applied.tx-data 0))
+        (shared-write-state-advance-next-entity-from-datoms! state (slice applied.tx-data 0))
+        (shared-write-state-refresh-from-current! state)))
     (shared-write-state-advance-next-entity-from-datoms! state (slice applied.tx-data 0))))
 
 (defn shared-write-state-refresh-from-current! [state: ^Shared-Write-State]
   (let [after state^.conn.db]
+    (delete-shared-write-state-schema-value-types state^.schema-value-types)
+    (set! state^.schema-value-types
+      (shared-write-state-clone-schema-value-types after.schema-value-types))
     (delete-owned-string-set state^.schema-cardinality-many)
     (set! state^.schema-cardinality-many (shared-write-state-clone-schema-set after.schema-cardinality-many))
     (delete-owned-string-set state^.schema-ref)
@@ -857,6 +922,20 @@
            (shared-write-state-schema-fact-before-index? tx-data attr ":db/unique" data-index))
        (shared-write-state-tx-has-local-lookup-add? tx-data attr value)))
 
+(defn shared-write-state-resolve-source-lookup-ref
+  [state: ^Shared-Write-State, source: DB-Read-Source,
+   attr: string, value: Value]
+  -> [entity: u64, ok: bool, error: string]
+  ;; A complete snapshot projection has already established uniqueness. Scalar
+  ;; values require no tuple-component resolution, so the AVET lookup itself is
+  ;; the complete reference operation. Schema-changing transactions still use
+  ;; the general resolver when the attribute is not in the current projection.
+  (if (and state^.schema-cache-complete
+           (set.contains? state^.schema-unique attr)
+           (not (= value.kind .Vector)))
+    (db-read-source-resolve-known-scalar-unique-lookup-ref source attr value)
+    (db-read-source-resolve-lookup-ref source attr value)))
+
 (defn shared-write-state-source-simple-lookup-resolves? [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, attr: string, value: Value, data-index: int] -> bool
   (when (shared-write-state-same-tx-lookup-ref-source-simple? state tx-data attr value data-index)
     (return true))
@@ -864,7 +943,8 @@
                  (shared-write-state-schema-fact-before-index? tx-data attr ":db/unique" data-index)))
     (return false))
   (let [lookup-start (tx-phase-profile-start state^.conn.tx-phase-profile)
-        [_ lookup-ok lookup-error] (db-read-source-resolve-lookup-ref source attr value)]
+        [_ lookup-ok lookup-error]
+          (shared-write-state-resolve-source-lookup-ref state source attr value)]
     (tx-phase-profile-add-resolution-lookup-ref! state^.conn.tx-phase-profile lookup-start)
     (and lookup-ok (= lookup-error ""))))
 
@@ -889,7 +969,8 @@
         (delete key)
         (return cached)))
     (let [lookup-start (tx-phase-profile-start state^.conn.tx-phase-profile)
-          [_ lookup-ok lookup-error] (db-read-source-resolve-lookup-ref source attr value)
+          [_ lookup-ok lookup-error]
+            (shared-write-state-resolve-source-lookup-ref state source attr value)
           resolved (and lookup-ok (= lookup-error ""))]
       (tx-phase-profile-add-resolution-lookup-ref! state^.conn.tx-phase-profile lookup-start)
       (mmap.assoc! source-results^ key resolved)
@@ -1364,7 +1445,9 @@
                       (set! has-found true))))
             (when (not (set.contains? resolve-index^.batch-resolved-attrs data.a))
               (let [lookup-start (tx-phase-profile-start state^.conn.tx-phase-profile)
-                    [entity entity-ok lookup-error] (db-read-source-resolve-lookup-ref source data.a value)]
+                    [entity entity-ok lookup-error]
+                      (shared-write-state-resolve-source-lookup-ref
+                        state source data.a value)]
                 (tx-phase-profile-add-resolution-lookup-ref! state^.conn.tx-phase-profile lookup-start)
                 (when (not (= lookup-error ""))
                   (return 0 false false lookup-error))
@@ -1855,7 +1938,8 @@
               (not (= tuple-error "")))
       (return tuple-e tuple-ok tuple-error)))
   (let [lookup-start (tx-phase-profile-start state^.conn.tx-phase-profile)
-        [source-e source-ok source-error] (db-read-source-resolve-lookup-ref source attr value)]
+        [source-e source-ok source-error]
+          (shared-write-state-resolve-source-lookup-ref state source attr value)]
     (tx-phase-profile-add-resolution-lookup-ref! state^.conn.tx-phase-profile lookup-start)
     (when (and (= source-error "")
                (not (= resolve-index nil)))
@@ -2443,24 +2527,86 @@
     (delete unique-identity-entities)
     (return schema-ref schema-unique schema-unique-identity true "")))
 
+(defn db-read-source-schema-planning-projection [source: DB-Read-Source]
+  -> [value-types: map[string]string,
+      cardinality-many: (map string (struct {})),
+      ok: bool,
+      error: string]
+  (let [[idents idents-ok idents-error]
+          (db-read-source-datoms-by-attr source ":db/ident")]
+    (when (not idents-ok)
+      (return (mmap.empty string string) (set.empty string) false idents-error))
+    (let [[value-type-datoms value-types-ok value-types-error]
+            (db-read-source-datoms-by-attr source ":db/valueType")]
+      (when (not value-types-ok)
+        (delete-owned-datoms idents)
+        (return (mmap.empty string string) (set.empty string) false value-types-error))
+      (let [[cardinality-datoms cardinality-ok cardinality-error]
+              (db-read-source-datoms-by-attr source ":db/cardinality")]
+        (when (not cardinality-ok)
+          (delete-owned-datoms idents)
+          (delete-owned-datoms value-type-datoms)
+          (return (mmap.empty string string) (set.empty string) false cardinality-error))
+        (let [value-type-by-entity (mmap.empty u64 string)
+              many-entities (set.empty u64)
+              out-value-types (mmap.empty string string)
+              out-cardinality-many (set.empty string)]
+          (for [datom value-type-datoms]
+            (when (= datom.v.kind .Keyword)
+              (mmap.assoc! value-type-by-entity datom.e datom.v.text)))
+          (for [datom cardinality-datoms]
+            (when (and (= datom.v.kind .Keyword)
+                       (= datom.v.text ":db.cardinality/many"))
+              (set.add! many-entities datom.e)))
+          (for [ident idents]
+            (when (= ident.v.kind .Keyword)
+              (let [[value-type has-value-type]
+                      (mmap.get value-type-by-entity ident.e)]
+                (when has-value-type
+                  (mmap.assoc! out-value-types
+                    (string-owned ident.v.text)
+                    (string-owned value-type))))
+              (when (set.contains? many-entities ident.e)
+                (set.add! out-cardinality-many
+                  (string-owned ident.v.text)))))
+          (delete value-type-by-entity)
+          (delete many-entities)
+          (delete-owned-datoms idents)
+          (delete-owned-datoms value-type-datoms)
+          (delete-owned-datoms cardinality-datoms)
+          (return out-value-types out-cardinality-many true ""))))))
+
 (defn shared-write-state-from-source-metadata [source: DB-Read-Source] -> [state: Shared-Write-State, ok: bool, error: string]
   (let [[schema-ref schema-unique schema-unique-identity schema-ok schema-error] (db-read-source-schema-sets source)]
     (when (not schema-ok)
       (return (Shared-Write-State {}) false schema-error))
+    (let [[schema-value-types schema-cardinality-many planning-schema-ok planning-schema-error]
+            (db-read-source-schema-planning-projection source)]
+      (when (not planning-schema-ok)
+        (delete-owned-string-set schema-ref)
+        (delete-owned-string-set schema-unique)
+        (delete-owned-string-set schema-unique-identity)
+        (return (Shared-Write-State {}) false planning-schema-error))
     (let [[has-tuple has-tuple-ok has-tuple-error] (db-read-source-has-tuple-schema? source)]
       (when (not has-tuple-ok)
+        (delete-shared-write-state-schema-value-types schema-value-types)
+        (delete-owned-string-set schema-cardinality-many)
         (delete-owned-string-set schema-ref)
         (delete-owned-string-set schema-unique)
         (delete-owned-string-set schema-unique-identity)
         (return (Shared-Write-State {}) false has-tuple-error))
       (let [[next-tx next-tx-ok next-tx-error] (db-read-source-next-tx source)]
         (when (not next-tx-ok)
+          (delete-shared-write-state-schema-value-types schema-value-types)
+          (delete-owned-string-set schema-cardinality-many)
           (delete-owned-string-set schema-ref)
           (delete-owned-string-set schema-unique)
           (delete-owned-string-set schema-unique-identity)
           (return (Shared-Write-State {}) false next-tx-error))
         (let [[next-entity next-entity-ok next-entity-error] (db-read-source-next-entity-id source)]
           (when (not next-entity-ok)
+            (delete-shared-write-state-schema-value-types schema-value-types)
+            (delete-owned-string-set schema-cardinality-many)
             (delete-owned-string-set schema-ref)
             (delete-owned-string-set schema-unique)
             (delete-owned-string-set schema-unique-identity)
@@ -2470,8 +2616,11 @@
                                       owns-resident-db: false
                                       resident-current: false
                                       has-tuple-schema: has-tuple
-                                      schema-cache-complete: false
-                                      schema-cardinality-many: (set.empty string)
+                                      schema-cache-complete: true
+                                      force-reference-planner: false
+                                      owns-schema-cache: true
+                                      schema-value-types: schema-value-types
+                                      schema-cardinality-many: schema-cardinality-many
                                       schema-ref: schema-ref
                                       schema-unique: schema-unique
                                       schema-unique-identity: schema-unique-identity
@@ -2479,7 +2628,7 @@
                                       source-resolves: 0
                                       resident-fallbacks: 0})
                   true
-                  ""))))))
+                  "")))))))
 
 (defn shared-write-state-from-shared-snapshot-metadata [snapshot: Shared-DB-Snapshot] -> [state: Shared-Write-State, ok: bool, error: string]
   (let [base snapshot
@@ -2524,16 +2673,13 @@
              resident-current: false
              has-tuple-schema: conn.write.has-tuple-schema
              schema-cache-complete: conn.write.schema-cache-complete
-             schema-cardinality-many:
-               (shared-write-state-clone-schema-set
-                 conn.write.schema-cardinality-many)
-             schema-ref:
-               (shared-write-state-clone-schema-set conn.write.schema-ref)
-             schema-unique:
-               (shared-write-state-clone-schema-set conn.write.schema-unique)
-             schema-unique-identity:
-               (shared-write-state-clone-schema-set
-                 conn.write.schema-unique-identity)
+             force-reference-planner: conn.write.force-reference-planner
+             owns-schema-cache: false
+             schema-value-types: conn.write.schema-value-types
+             schema-cardinality-many: conn.write.schema-cardinality-many
+             schema-ref: conn.write.schema-ref
+             schema-unique: conn.write.schema-unique
+             schema-unique-identity: conn.write.schema-unique-identity
              next-entity-id: conn.write.next-entity-id
              source-resolves: conn.write.source-resolves
              resident-fallbacks: conn.write.resident-fallbacks})]
@@ -2545,10 +2691,12 @@
             "")))
 
 (defn delete-shared-write-state-metadata [state: Shared-Write-State]
-  (delete-owned-string-set state.schema-cardinality-many)
-  (delete-owned-string-set state.schema-ref)
-  (delete-owned-string-set state.schema-unique)
-  (delete-owned-string-set state.schema-unique-identity)
+  (when state.owns-schema-cache
+    (delete-shared-write-state-schema-value-types state.schema-value-types)
+    (delete-owned-string-set state.schema-cardinality-many)
+    (delete-owned-string-set state.schema-ref)
+    (delete-owned-string-set state.schema-unique)
+    (delete-owned-string-set state.schema-unique-identity))
   (delete state.conn.listeners)
   (when state.owns-resident-db
     (delete-resident-db state.conn.db)))

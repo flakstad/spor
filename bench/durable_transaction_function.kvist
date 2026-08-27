@@ -1,0 +1,138 @@
+; Copyright (c) Andreas Flakstad and Vev contributors
+; SPDX-License-Identifier: EPL-2.0
+
+(package main)
+
+(import arr "kvist:arr")
+(import bench "./support")
+(import cli "../deps/cli")
+(import fmt "core:fmt")
+(import os "core:os")
+(import time "core:time")
+(import vev "../src/vev")
+
+(defn remove-sqlite-files [path: string]
+  (os.remove path)
+  (os.remove (fmt.tprintf "%s-wal" path))
+  (os.remove (fmt.tprintf "%s-shm" path)))
+
+(defn increment-bench-value
+  [source: vev.DB-Read-Source, _arg: string]
+  -> vev.Tx-Fn-Source-Result
+  (let [[value value-ok value-error]
+          (vev.db-read-source-cardinality-one-value-fast-all-current
+            source 1 ":bench/value")]
+    (when (not value-ok)
+      (return (vev.tx-fn-source-error value-error)))
+    (defer (vev.delete-owned-value value))
+    (when (not (= value.kind .Int))
+      (return (vev.tx-fn-source-error ":bench/value is not an integer")))
+    (let [tx-data (make [dynamic]vev.Tx-Data) :defer
+          _ (arr.push! tx-data
+              (vev.add 1 ":bench/value"
+                (vev.value-int (+ value.int-value 1))))]
+      (vev.tx-fn-source-ok (slice tx-data 0)))))
+
+(defn transact-function!
+  [store: ^vev.Store-Conn, registry: []vev.Tx-Fn-Source-String]
+  -> vev.Store-Tx-Report
+  (vev.transact-store-report-text-with-source-string-fns
+    store "[[:db.fn/call :bench/increment \"value\"]]" registry))
+
+(defn append-profile!
+  [resolution: ^[dynamic]f64, planning: ^[dynamic]f64,
+   effective: ^[dynamic]f64,
+   profile: vev.Tx-Phase-Profile]
+  (arr.push! resolution^ profile.resolution-us)
+  (arr.push! planning^ profile.planning-us)
+  (arr.push! effective^ (f64 profile.effective-datoms)))
+
+(defn open-seeded-store [path: string] -> vev.Store-Conn
+  (let [[store opened-ok opened-error] (vev.open-store path)]
+    (when (not opened-ok)
+      (panic opened-error))
+    (let [[maintenance-ok maintenance-error]
+            (vev.disable-store-auto-maintenance! (addr store))]
+      (when (not maintenance-ok)
+        (panic maintenance-error)))
+    (let [seed
+            (vev.transact-store-report-text
+              (addr store)
+              "[[:db/add 10 :db/ident :bench/value]
+                 [:db/add 10 :db/valueType :db.type/long]
+                 [:db/add 10 :db/cardinality :db.cardinality/one]
+                 [:db/add 11 :db/ident :bench/increment]
+                 [:db/add 1 :bench/value 0]]")]
+      (when (not seed.ok)
+        (panic seed.error))
+      (vev.delete-store-tx-report seed))
+    store))
+
+(defn main []
+  (defer (free_all context.allocator))
+  (let [total-path "tmp.vev.durable-transaction-function.total.sqlite"
+        profile-path "tmp.vev.durable-transaction-function.profile.sqlite"
+        samples-count (cli.int-option os.args "--samples" 100)
+        warmup-count (cli.int-option os.args "--warmup" 20)]
+    (remove-sqlite-files total-path)
+    (remove-sqlite-files profile-path)
+    (defer (remove-sqlite-files total-path))
+    (defer (remove-sqlite-files profile-path))
+    (let [total-store (open-seeded-store total-path)
+          profile-store (open-seeded-store profile-path)
+          registry
+              ([]vev.Tx-Fn-Source-String
+                [(vev.tx-fn-source-string
+                   ":bench/increment" increment-bench-value)])]
+      (for [_ (arr.range 0 warmup-count)]
+        (let [total-report
+                (transact-function! (addr total-store) registry)
+              profile-report
+                (transact-function! (addr profile-store) registry)]
+          (when (not total-report.ok)
+            (panic total-report.error))
+          (when (not profile-report.ok)
+            (panic profile-report.error))
+          (vev.delete-store-tx-report total-report)
+          (vev.delete-store-tx-report profile-report)))
+      (vev.disable-store-tx-phase-profile! (addr total-store))
+      (let [totals (make [dynamic]f64 0 samples-count)
+            resolution (make [dynamic]f64 0 samples-count)
+            planning (make [dynamic]f64 0 samples-count)
+            effective (make [dynamic]f64 0 samples-count)]
+        (for [_ (arr.range 0 samples-count)]
+          (let [start (time.now)
+                report (transact-function! (addr total-store) registry)]
+            (when (not report.ok)
+              (panic report.error))
+            (arr.push! totals (bench.elapsed-us start))
+            (vev.delete-store-tx-report report)))
+        (for [_ (arr.range 0 samples-count)]
+          (vev.reset-store-tx-phase-profile! (addr profile-store))
+          (let [report (transact-function! (addr profile-store) registry)
+                profile
+                  (vev.store-tx-phase-profile (addr profile-store))]
+            (when (not report.ok)
+              (panic report.error))
+            (append-profile! (addr resolution) (addr planning)
+              (addr effective) profile)
+            (vev.delete-store-tx-report report)))
+        (let [total-timing (bench.timing-from-samples (slice totals 0))
+              resolution-timing
+                (bench.timing-from-samples (slice resolution 0))
+              planning-timing
+                (bench.timing-from-samples (slice planning 0))
+              effective-timing
+                (bench.timing-from-samples (slice effective 0))]
+          (fmt.printf
+            "engine=vev-planner-matrix database=small workload=transaction-function samples=%d median_us=%.1f p95_us=%.1f effective_tx_datoms=%.1f resolution_median_us=%.1f resolution_p95_us=%.1f planning_median_us=%.1f planning_p95_us=%.1f\n"
+            samples-count total-timing.median-us total-timing.p95-us
+            effective-timing.median-us
+            resolution-timing.median-us resolution-timing.p95-us
+            planning-timing.median-us planning-timing.p95-us))
+        (delete totals)
+        (delete resolution)
+        (delete planning)
+        (delete effective))
+      (vev.close-store total-store)
+      (vev.close-store profile-store))))

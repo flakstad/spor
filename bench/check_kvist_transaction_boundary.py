@@ -83,6 +83,9 @@ def summarized(rows: list[dict[str, object]]) -> dict[str, dict[str, float]]:
         out[key] = {
             "public_median_us": values["public-total"]["median_us"],
             "public_p95_us": values["public-total"]["p95_us"],
+            "resolution_median_us": values["resolution"]["median_us"],
+            "planning_median_us": values["planning"]["median_us"],
+            "effective_datoms": values["effective-datoms"]["median_us"],
             "report_value_materialize_p95_us": values[
                 "report-value-materialize"
             ]["p95_us"],

@@ -6,7 +6,11 @@
       "structured_boundary_p95_us": 1000
     },
     "ro-demo/ro-demo": {
+      "planning_median_us": 1000,
+      "public_median_us": 4000,
+      "public_p95_us": 6000,
       "report_value_materialize_p95_us": 200,
+      "resolution_median_us": 500,
       "structured_boundary_p95_us": 1000
     }
   }

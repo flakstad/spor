@@ -2491,6 +2491,12 @@
     ;; The candidate has already advanced to report.db-after. Install it only
     ;; after the durable commit; failures above leave the live connection and
     ;; its db-before untouched.
+    (when (not candidate.write.owns-schema-cache)
+      ;; A non-schema candidate borrows the live generation's immutable schema
+      ;; projection. Transfer that single ownership only after commit. Schema
+      ;; transactions rebuild a distinct owned projection and skip this path.
+      (set! candidate.write.owns-schema-cache true)
+      (set! store^.shared-resident.write.owns-schema-cache false))
     (delete-shared-conn store^.shared-resident)
     (set! store^.shared-resident candidate)
     (sqlite-conn-invalidate-current-root-cache! store)
@@ -2573,12 +2579,18 @@
       (if (or (= snapshot-error "sqlite DB has no Vev index roots")
               (= snapshot-error "sqlite DB has no Vev datom rows"))
         (let [before (empty-shared-store-db-for-sqlite-bootstrap)
-              overlay-report (with-store-db-report-tx-data-with-source-string-fns (addr before) tx-data registry)]
+              overlay-report
+                (with-store-db-report-tx-data-with-source-string-fns
+                  (addr before) tx-data registry
+                  (addr store^.tx-phase-profile))]
           (close-store-db before)
           (return (sqlite-commit-initial-source-overlay-report-mode store overlay-report owns-sqlite-tx) true true ""))
         (return (Store-Tx-Report {}) false false snapshot-error)))
     (let [report-before (retain-store-db snapshot)
-          overlay-report (with-store-db-report-tx-data-with-source-string-fns (addr snapshot) tx-data registry)]
+          overlay-report
+            (with-store-db-report-tx-data-with-source-string-fns
+              (addr snapshot) tx-data registry
+              (addr store^.tx-phase-profile))]
       (close-store-db snapshot)
       (close-store-db overlay-report.db-before)
       (set! overlay-report.db-before report-before)
@@ -2600,7 +2612,10 @@
       (when (not state-ok)
         (close-store-db snapshot)
         (return (Store-Tx-Report {}) false false state-error)))
-    (let [overlay-report (with-store-db-report-tx-data-with-source-string-fns-state (addr snapshot) source (addr store^.write-state-cache) tx-data registry)]
+    (let [overlay-report
+            (with-store-db-report-tx-data-with-source-string-fns-state
+              (addr snapshot) source (addr store^.write-state-cache)
+              tx-data registry (addr store^.tx-phase-profile))]
     (when (not overlay-report.ok)
       (close-store-db snapshot)
       (return overlay-report true true ""))

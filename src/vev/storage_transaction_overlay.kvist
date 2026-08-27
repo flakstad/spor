@@ -758,7 +758,38 @@
         (return false "invalid component schema"))))
   (return true ""))
 
-(defn append-source-overlay-op! [out: ^[dynamic]Tx-Op, source: DB-Read-Source, op: Tx-Op, profile: ^Tx-Phase-Profile = nil] -> [ok: bool, error: string]
+(defn source-overlay-planning-cardinality-many?
+  [state: ^Shared-Write-State, source: DB-Read-Source, attr: string]
+  -> [many: bool, ok: bool, error: string]
+  (if (and (not (= state nil)) state^.schema-cache-complete)
+    (return (set.contains? state^.schema-cardinality-many attr) true "")
+    (db-read-source-schema-cardinality-many? source attr)))
+
+(defn source-overlay-planning-value-type
+  [state: ^Shared-Write-State, source: DB-Read-Source, attr: string]
+  -> [schema-type: string, has-type: bool, ok: bool, error: string]
+  (when (and (not (= state nil)) state^.schema-cache-complete)
+    (let [[schema-type has-type] (mmap.get state^.schema-value-types attr)]
+      (if has-type
+        (return (string-owned schema-type) true true "")
+        (return "" false true ""))))
+  (db-read-source-schema-value-type source attr))
+
+(defn source-overlay-planning-unique-kind
+  [state: ^Shared-Write-State, source: DB-Read-Source, prior: []Tx-Op, attr: string]
+  -> [kind: string, unique: bool, ok: bool, error: string]
+  (when (and (not (= state nil)) state^.schema-cache-complete)
+    (when (not (set.contains? state^.schema-unique attr))
+      (return "" false true ""))
+    (return
+      (string-owned
+        (if (set.contains? state^.schema-unique-identity attr)
+          ":db.unique/identity"
+          ":db.unique/value"))
+      true true ""))
+  (source-overlay-schema-unique-kind source prior attr))
+
+(defn append-source-overlay-op! [out: ^[dynamic]Tx-Op, source: DB-Read-Source, op: Tx-Op, profile: ^Tx-Phase-Profile = nil, state: ^Shared-Write-State = nil] -> [ok: bool, error: string]
   (when (= op.kind .Retract)
     (let [normalization-start (tx-phase-profile-start profile)
           [touched current] (source-overlay-prior-fact-state (slice out^ 0) op)]
@@ -777,7 +808,8 @@
             (return true ""))))))
   (when (= op.kind .Add)
     (let [cardinality-start (tx-phase-profile-start profile)
-          [many many-ok many-error] (db-read-source-schema-cardinality-many? source op.a)]
+          [many many-ok many-error]
+            (source-overlay-planning-cardinality-many? state source op.a)]
       (tx-phase-profile-add-planning-cardinality! profile cardinality-start)
       (when (not many-ok)
         (return false many-error))
@@ -799,7 +831,8 @@
         (when exists
           (return true ""))))
     (let [schema-start (tx-phase-profile-start profile)
-          [schema-type has-type type-ok type-error] (db-read-source-schema-value-type source op.a)]
+          [schema-type has-type type-ok type-error]
+            (source-overlay-planning-value-type state source op.a)]
       (tx-phase-profile-add-planning-schema! profile schema-start)
       (when (not type-ok)
         (return false type-error))
@@ -814,7 +847,8 @@
           (when (not matches)
             (return false "schema value type mismatch")))))
     (let [schema-start (tx-phase-profile-start profile)
-          [unique-kind unique unique-ok unique-error] (source-overlay-schema-unique-kind source (slice out^ 0) op.a)]
+          [unique-kind unique unique-ok unique-error]
+            (source-overlay-planning-unique-kind state source (slice out^ 0) op.a)]
       (tx-phase-profile-add-planning-schema! profile schema-start)
       (when (not unique-ok)
         (return false unique-error))
@@ -835,7 +869,8 @@
             (let [[error-text error-ok] (source-overlay-unique-error source (slice out^ 0) op)]
               (return false (if error-ok error-text "schema unique conflict"))))))))
     (let [cardinality-start (tx-phase-profile-start profile)
-          [many many-ok many-error] (db-read-source-schema-cardinality-many? source op.a)]
+          [many many-ok many-error]
+            (source-overlay-planning-cardinality-many? state source op.a)]
       (tx-phase-profile-add-planning-cardinality! profile cardinality-start)
       (when (not many-ok)
         (return false many-error))
@@ -1055,6 +1090,26 @@
 (defn source-overlay-ops-from-resolved [source: DB-Read-Source, resolved: Resolved-Tx, profile: ^Tx-Phase-Profile = nil] -> [ops: [dynamic]Tx-Op, ok: bool, error: string]
   (source-overlay-ops-from-ops source (slice resolved.ops 0) profile))
 
+(defn source-overlay-ops-from-resolved-with-state
+  [source: DB-Read-Source, resolved: Resolved-Tx,
+   state: ^Shared-Write-State, profile: ^Tx-Phase-Profile = nil]
+  -> [ops: [dynamic]Tx-Op, ok: bool, error: string]
+  (source-overlay-ops-from-ops-with-state
+    source (slice resolved.ops 0) state profile))
+
+(defn source-overlay-ops-from-ops-with-state
+  [source: DB-Read-Source, ops: []Tx-Op,
+   state: ^Shared-Write-State, profile: ^Tx-Phase-Profile = nil]
+  -> [out-ops: [dynamic]Tx-Op, ok: bool, error: string]
+  (if (and (not (= state nil))
+           state^.schema-cache-complete
+           (not state^.force-reference-planner)
+           (not (source-overlay-ops-contain-schema-mutation?
+                  ops)))
+    (source-overlay-ops-from-ops
+      source ops profile state)
+    (source-overlay-ops-from-ops source ops profile)))
+
 (defn finalize-source-transaction-instant! [source: DB-Read-Source, ops: ^[dynamic]Tx-Op, tx-meta: ^[dynamic]Tx-Meta, tx: u64] -> [ok: bool, error: string]
   (let [clock-instant (current-instant)
         tx-instant clock-instant
@@ -1147,11 +1202,12 @@
         (return (make [dynamic]Tx-Op) false unique-error)))
     (return out true "")))
 
-(defn source-overlay-ops-from-ops [source: DB-Read-Source, ops: []Tx-Op, profile: ^Tx-Phase-Profile = nil] -> [out-ops: [dynamic]Tx-Op, ok: bool, error: string]
+(defn source-overlay-ops-from-ops [source: DB-Read-Source, ops: []Tx-Op, profile: ^Tx-Phase-Profile = nil, state: ^Shared-Write-State = nil] -> [out-ops: [dynamic]Tx-Op, ok: bool, error: string]
   (let [out (make [dynamic]Tx-Op 0 (count ops))
         planning-start (tx-phase-profile-start profile)]
     (for [op ops]
-      (let [[append-ok append-error] (append-source-overlay-op! (addr out) source op profile)]
+      (let [[append-ok append-error]
+              (append-source-overlay-op! (addr out) source op profile state)]
         (when (not append-ok)
           (tx-phase-profile-add-planning! profile planning-start)
           (delete-owned-tx-ops out)

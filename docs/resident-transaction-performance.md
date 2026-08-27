@@ -123,6 +123,14 @@ discover all entity facts and recursively plan component retractions. SQLite
 commit latency remains dependent on the filesystem and WAL state. Neither cost
 is hidden by relaxed durability.
 
+The follow-up [resolution and planning
+work](transaction-resolution-planning-profile.md) removes repeated full-schema
+materialization from source-backed resident transactions. On the exact Ro
+schema the final checked run reduces resolution from 1.733 ms to 0.160 ms and
+planning from 5.881 ms to 0.467 ms. At that point immutable current-index and novelty-root
+work, rather than schema lookup or SQLite commit, is the main size-dependent
+cost.
+
 ## Storage consequences
 
 Canonical tables and serialized datom values are unchanged. SQLite schema

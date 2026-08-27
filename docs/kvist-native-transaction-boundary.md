@@ -1,5 +1,12 @@
 # Kvist/native transaction boundary
 
+> Follow-up (2026-08-27): transaction resolution/planning has since been
+> optimized. The final checked exact public Ro transaction now measures
+> 2.104 ms median / 3.726 ms p95 on fresh disposable databases, with 0.160 ms
+> resolution and 0.467 ms planning. See [resident transaction resolution and
+> planning](transaction-resolution-planning-profile.md). The measurements below
+> remain the `b0f2700d`/`87a948c9` boundary and pre-optimization baseline.
+
 This report measures the complete public Kvist `Data` → native durable VevDB
 → Kvist `Tx-Report` path at commit `b0f2700d`. The initial hypothesis was that
 EDN conversion explained 6–7 ms of a 8.7–9.8 ms Ro transaction. It does not:

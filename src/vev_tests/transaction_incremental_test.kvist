@@ -71,6 +71,59 @@
        (incremental-string-sets-equal? left.schema-unique right.schema-unique)
        (incremental-string-sets-equal? left.schema-ref right.schema-ref)))
 
+(defn planner-tx-meta-equal? [left: []vev.Tx-Meta, right: []vev.Tx-Meta] -> bool
+  (when (not (= (count left) (count right)))
+    (return false))
+  (for [meta index left]
+    (when (not (and (= meta.a right[index].a)
+                    (vev.value-equal? meta.v right[index].v)))
+      (return false)))
+  true)
+
+(defn planner-tempids-equal? [left: []vev.Tempid, right: []vev.Tempid] -> bool
+  (when (not (= (count left) (count right)))
+    (return false))
+  (for [tempid index left]
+    (when (not (and (= tempid.tempid right[index].tempid)
+                    (= tempid.e right[index].e)))
+      (return false)))
+  true)
+
+(defn planner-store-reports-equal?
+  [left: vev.Store-Tx-Report, right: vev.Store-Tx-Report] -> bool
+  (when (not (and (= left.ok right.ok)
+                  (= left.error right.error)
+                  (= left.tx right.tx)
+                  (incremental-datoms-equal?
+                    (slice left.tx-data 0) (slice right.tx-data 0))
+                  (planner-tx-meta-equal?
+                    (slice left.tx-meta 0) (slice right.tx-meta 0))
+                  (planner-tempids-equal?
+                    (slice left.tempids 0) (slice right.tempids 0))))
+    (return false))
+  (when (not left.ok)
+    (return true))
+  (let [[left-before left-before-ok]
+          (vev.shared-db-snapshot-materialize-db
+            left.db-before.shared-snapshot)
+        [right-before right-before-ok]
+          (vev.shared-db-snapshot-materialize-db
+            right.db-before.shared-snapshot)
+        [left-after left-after-ok]
+          (vev.shared-db-snapshot-materialize-db
+            left.db-after.shared-snapshot)
+        [right-after right-after-ok]
+          (vev.shared-db-snapshot-materialize-db
+            right.db-after.shared-snapshot)]
+    (let [equal (and left-before-ok right-before-ok left-after-ok right-after-ok
+                     (incremental-dbs-equal? left-before right-before)
+                     (incremental-dbs-equal? left-after right-after))]
+      (vev.delete-owned-db left-before)
+      (vev.delete-owned-db right-before)
+      (vev.delete-owned-db left-after)
+      (vev.delete-owned-db right-after)
+      equal)))
+
 (defn incremental-matches-full-rebuild? [db: vev.DB] -> bool
   (let [rebuilt (vev.build-db (vev.clone-datoms db.datoms))]
     (let [equal (incremental-dbs-equal? db rebuilt)]
@@ -273,6 +326,147 @@
       (t.is (incremental-matches-full-rebuild? report.db-after))
       (vev.delete-live-tx-report-shallow report))
     (incremental-test-conn-delete conn)))
+
+(t.deftest shared-schema-candidate-detaches-before-mutation
+  (defer (free_all context.allocator))
+  (let [seed-conn (vev.create-conn)]
+    (t.is (incremental-test-seed (addr seed-conn)))
+    (let [[live live-ok live-error]
+            (vev.create-shared-conn-from-db seed-conn.db 16)]
+      (t.is live-ok live-error)
+      (let [[candidate candidate-ok candidate-error]
+              (vev.clone-shared-source-conn live)]
+        (t.is candidate-ok candidate-error)
+        (t.is live.write.owns-schema-cache)
+        (t.is (not candidate.write.owns-schema-cache))
+        (let [schema-tx
+                ([]vev.Tx-Data
+                  [(vev.add 105 ":db/ident"
+                     (vev.value-keyword ":item/new-attr"))
+                   (vev.add 105 ":db/valueType"
+                     (vev.value-keyword ":db.type/string"))
+                   (vev.add 105 ":db/cardinality"
+                     (vev.value-keyword ":db.cardinality/many"))])
+              report
+                (vev.transact-shared-source-conn-store-report-tx-data
+                  (addr candidate) schema-tx)]
+          (t.is report.ok report.error)
+          (t.is candidate.write.owns-schema-cache)
+          (t.is live.write.owns-schema-cache)
+          (t.is
+            (set.contains?
+              candidate.write.schema-cardinality-many ":item/new-attr"))
+          (t.is
+            (not
+              (set.contains?
+                live.write.schema-cardinality-many ":item/new-attr")))
+          (vev.delete-store-tx-report report))
+        (vev.delete-shared-conn candidate))
+      (vev.delete-shared-conn live))
+    (incremental-test-conn-delete seed-conn)))
+
+(t.deftest optimized-source-planner-matches-forced-reference-planner
+  (defer (free_all context.allocator))
+  (let [seed-conn (vev.create-conn)]
+    (let [schema (incremental-test-schema)]
+      (arr.push! schema
+        (vev.add 103 ":db/ident" (vev.value-keyword ":item/status")))
+      (arr.push! schema
+        (vev.add 103 ":db/valueType" (vev.value-keyword ":db.type/string")))
+      (arr.push! schema
+        (vev.add 103 ":db/cardinality" (vev.value-keyword ":db.cardinality/one")))
+      (arr.push! schema
+        (vev.add 104 ":db/ident" (vev.value-keyword ":item/key")))
+      (arr.push! schema
+        (vev.add 104 ":db/valueType" (vev.value-keyword ":db.type/string")))
+      (arr.push! schema
+        (vev.add 104 ":db/unique" (vev.value-keyword ":db.unique/identity")))
+      (let [report (vev.transact-tx-data (addr seed-conn) (slice schema 0))]
+        (t.is report.ok report.error)
+        (vev.delete-live-tx-report-shallow report))
+      (delete schema))
+    (let [seed
+            ([]vev.Tx-Data
+              [(vev.add 1 ":item/name" (vev.value-string "one"))
+               (vev.add 1 ":item/status" (vev.value-string "off"))
+               (vev.add 1 ":item/key" (vev.value-string "item-1"))
+               (vev.add 2 ":item/name" (vev.value-string "two"))
+               (vev.add 2 ":item/key" (vev.value-string "item-2"))
+               (vev.add 20 ":item/name" (vev.value-string "twenty"))])
+          seed-report (vev.transact-tx-data (addr seed-conn) seed)]
+      (t.is seed-report.ok seed-report.error)
+      (vev.delete-live-tx-report-shallow seed-report))
+    (let [[optimized optimized-ok optimized-error]
+            (vev.create-shared-conn-from-db seed-conn.db 16)
+          [reference reference-ok reference-error]
+            (vev.create-shared-conn-from-db seed-conn.db 16)
+          fixed-instant (vev.current-instant)
+          status-on false]
+      (t.is optimized-ok optimized-error)
+      (t.is reference-ok reference-error)
+      (set! reference.write.force-reference-planner true)
+      (for [step (arr.range 0 120)]
+        (let [tx optimized.write.conn.next-tx
+              data (make [dynamic]vev.Tx-Data)]
+          (case (% step 6)
+            0 (arr.push! data
+                (vev.add 1 ":item/name"
+                  (vev.value-string
+                    (if (= (% step 12) 0) "alpha" "beta"))))
+            1 (arr.push! data
+                (vev.add 2 ":item/tag" (vev.value-string "hot")))
+            2 (arr.push! data
+                (vev.retract 2 ":item/tag" (vev.value-string "hot")))
+            3 (do
+                (arr.push! data
+                  (vev.cas 1 ":item/status"
+                    (vev.value-string (if status-on "on" "off"))
+                    (vev.value-string (if status-on "off" "on"))))
+                (set! status-on (not status-on)))
+            4 (do
+                (arr.push! data (vev.retract-attr 2 ":item/name"))
+                (arr.push! data
+                  (vev.add-lookup-ref
+                    ":item/key" (vev.value-string "item-1")
+                    ":item/friend" (vev.value-entity 2))))
+              (arr.push! data (vev.retract-entity 20)))
+          (arr.push! data (vev.add tx ":db/txInstant" fixed-instant))
+          (let [
+              optimized-report
+                (vev.transact-shared-source-conn-store-report-tx-data
+                  (addr optimized) (slice data 0))
+              reference-report
+                (vev.transact-shared-source-conn-store-report-tx-data
+                  (addr reference) (slice data 0))]
+          (t.is
+            (planner-store-reports-equal?
+              optimized-report reference-report)
+            (fmt.tprintf "planner mismatch at deterministic step %d" step))
+          (vev.delete-store-tx-report optimized-report)
+          (vev.delete-store-tx-report reference-report))
+          (delete data)))
+      (let [tx optimized.write.conn.next-tx
+            bad-cas
+              ([]vev.Tx-Data
+                [(vev.cas 1 ":item/status"
+                   (vev.value-string "not-current")
+                   (vev.value-string "never"))
+                 (vev.add tx ":db/txInstant" fixed-instant)])
+            optimized-error-report
+              (vev.transact-shared-source-conn-store-report-tx-data
+                (addr optimized) bad-cas)
+            reference-error-report
+              (vev.transact-shared-source-conn-store-report-tx-data
+                (addr reference) bad-cas)]
+        (t.is
+          (planner-store-reports-equal?
+            optimized-error-report reference-error-report))
+        (t.is (not optimized-error-report.ok))
+        (vev.delete-store-tx-report optimized-error-report)
+        (vev.delete-store-tx-report reference-error-report))
+      (vev.delete-shared-conn optimized)
+      (vev.delete-shared-conn reference))
+    (incremental-test-conn-delete seed-conn)))
 
 (t.deftest sqlite-resident-phase-profile-is-opt-in-durable-and-prepared
   (defer (free_all context.allocator))

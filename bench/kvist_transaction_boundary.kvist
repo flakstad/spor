@@ -15,6 +15,13 @@
 (import d "../clients/kvist/vev")
 (import native "../clients/odin/vev")
 
+(defstruct Ro-Demo-Ids {
+  property-value: i64
+  item: i64
+  property-def: i64
+  actor: i64
+})
+
 (defstruct Samples {
   public-total: [dynamic]f64
   manual-total: [dynamic]f64
@@ -30,6 +37,7 @@
   native-report-handle: [dynamic]f64
   native-listener: [dynamic]f64
   native-cleanup: [dynamic]f64
+  effective-datoms: [dynamic]f64
   parsing: [dynamic]f64
   resolution: [dynamic]f64
   resolution-lookup-ref: [dynamic]f64
@@ -78,6 +86,7 @@
     native-report-handle: (make [dynamic]f64 0 capacity)
     native-listener: (make [dynamic]f64 0 capacity)
     native-cleanup: (make [dynamic]f64 0 capacity)
+    effective-datoms: (make [dynamic]f64 0 capacity)
     parsing: (make [dynamic]f64 0 capacity)
     resolution: (make [dynamic]f64 0 capacity)
     resolution-lookup-ref: (make [dynamic]f64 0 capacity)
@@ -125,6 +134,7 @@
   (delete samples^.native-report-handle)
   (delete samples^.native-listener)
   (delete samples^.native-cleanup)
+  (delete samples^.effective-datoms)
   (delete samples^.parsing)
   (delete samples^.resolution)
   (delete samples^.resolution-lookup-ref)
@@ -197,15 +207,43 @@
   (let [v (data.from-string value)]
     (op-data ":db/retract" (data.from-int entity) attr ([]Data [v]))))
 
-(defn schema-tx [] -> Data
-  (let [items (make [dynamic]Data 0 6)]
+(defn cas-string
+  [entity: i64, attr: string, expected: string, value: string] -> Data
+  (let [expected-value (data.from-string expected)
+        next-value (data.from-string value)]
+    (op-data ":db.fn/cas" (data.from-int entity) attr
+      ([]Data [expected-value next-value]))))
+
+(defn retract-entity [entity: i64] -> Data
+  (let [items (make [dynamic]Data 0 2)
+        op-value (data.from-keyword ":db.fn/retractEntity")]
+    (arr.push! items op-value)
+    (arr.push! items (data.from-int entity))
+    (let [out (data.vector-from-array (slice items 0))]
+      (data.release op-value)
+      (delete items)
+      out)))
+
+(defn schema-tx-with-extra-attrs [extra-attrs: int] -> Data
+  (let [items (make [dynamic]Data 0 (+ 6 (* extra-attrs 3)))]
     (arr.push! items (add-keyword 100 ":db/ident" ":item/name"))
     (arr.push! items (add-keyword 100 ":db/valueType" ":db.type/string"))
     (arr.push! items (add-keyword 100 ":db/cardinality" ":db.cardinality/one"))
     (arr.push! items (add-keyword 101 ":db/ident" ":item/tag"))
     (arr.push! items (add-keyword 101 ":db/valueType" ":db.type/string"))
     (arr.push! items (add-keyword 101 ":db/cardinality" ":db.cardinality/many"))
+    (for [index (arr.range 0 extra-attrs)]
+      (let [entity (+ (i64 1000) (i64 index))
+            attr (fmt.tprintf ":bench/attr-%d" index)]
+        (arr.push! items (add-keyword entity ":db/ident" attr))
+        (arr.push! items
+          (add-keyword entity ":db/valueType" ":db.type/string"))
+        (arr.push! items
+          (add-keyword entity ":db/cardinality" ":db.cardinality/one"))))
     (vector-data items)))
+
+(defn schema-tx [] -> Data
+  (schema-tx-with-extra-attrs 0))
 
 (defn seed-tx [entity-count: int] -> Data
   (let [items (make [dynamic]Data 0 (* entity-count 2))]
@@ -216,16 +254,37 @@
         (arr.push! items (add-string entity ":item/tag" "seed"))))
     (vector-data items)))
 
-(defn workload-tx [workload: string, sample: int] -> Data
-  (when (= workload "ro-demo")
+(defn workload-tx
+  [workload: string, sample: int, ro-ids: Ro-Demo-Ids = (Ro-Demo-Ids {})]
+  -> Data
+  (when (or (= workload "ro-demo")
+            (= workload "ro-demo-no-provenance"))
     (return
-      [{:db/id "value-item-demo-plan-property-inbox-priority"
+      (if (= workload "ro-demo")
+        [{:db/id "value-item-demo-plan-property-inbox-priority"
+          :ro/id "value-item-demo-plan-property-inbox-priority"
+          :ro/type :ro.type/property-value
+          :property-value/item [:ro/id "item-demo-plan"]
+          :property-value/property-def [:ro/id "property-inbox-priority"]
+          :property-value/checked (= (% sample 2) 0)}
+         [:db/add :db/current-tx :ro.tx/actor [:ro/id "actor-local"]]
+         [:db/add :db/current-tx :ro.tx/source :command.source/native]
+         [:db/add :db/current-tx :ro.tx/cause "Native semantic command"]]
+        [{:db/id "value-item-demo-plan-property-inbox-priority"
+          :ro/id "value-item-demo-plan-property-inbox-priority"
+          :ro/type :ro.type/property-value
+          :property-value/item [:ro/id "item-demo-plan"]
+          :property-value/property-def [:ro/id "property-inbox-priority"]
+          :property-value/checked (= (% sample 2) 0)}])))
+  (when (= workload "ro-demo-resolved-ids")
+    (return
+      [{:db/id ro-ids.property-value
         :ro/id "value-item-demo-plan-property-inbox-priority"
         :ro/type :ro.type/property-value
-        :property-value/item [:ro/id "item-demo-plan"]
-        :property-value/property-def [:ro/id "property-inbox-priority"]
+        :property-value/item ro-ids.item
+        :property-value/property-def ro-ids.property-def
         :property-value/checked (= (% sample 2) 0)}
-       [:db/add :db/current-tx :ro.tx/actor [:ro/id "actor-local"]]
+       [:db/add :db/current-tx :ro.tx/actor ro-ids.actor]
        [:db/add :db/current-tx :ro.tx/source :command.source/native]
        [:db/add :db/current-tx :ro.tx/cause "Native semantic command"]]))
   (let [items (make [dynamic]Data)]
@@ -238,9 +297,18 @@
         (arr.push! items
           (add-string 1 ":item/name"
             (if (= (% sample 2) 0) "replacement-a" "replacement-b")))
+      "cas"
+        (arr.push! items
+          (cas-string 1 ":item/name"
+            (if (= sample 0)
+              "seed-1"
+              (if (= (% sample 2) 0) "cas-b" "cas-a"))
+            (if (= (% sample 2) 0) "cas-a" "cas-b")))
       "explicit-retract"
         (arr.push! items
           (retract-string 2 ":item/tag" (fmt.tprintf "retract-%d" sample)))
+      "retract-entity"
+        (arr.push! items (retract-entity (+ 3000000 (i64 sample))))
       "ro-like"
         (do
           (arr.push! items
@@ -267,18 +335,29 @@
         (panic "native Vev transaction returned no report"))
       (native.close (addr report)))))
 
-(defn seed-native! [conn: ^native.Durable-Connection, entity-count: int]
-  (let [schema (schema-tx)]
+(defn seed-native!
+  [conn: ^native.Durable-Connection, entity-count: int,
+   extra-schema-attrs: int = 0, schema-churn: int = 0]
+  (let [schema (schema-tx-with-extra-attrs extra-schema-attrs)]
     (defer (data.release schema))
     (native-transact-data! conn schema))
   (let [seed (seed-tx entity-count)]
     (defer (data.release seed))
     (native-transact-data! conn seed))
+  (for [step (arr.range 0 schema-churn)]
+    (let [tx (vector-data
+               ([dynamic]Data
+                 [(add-string 100 ":db/doc"
+                    (fmt.tprintf "schema-history-%d" step))]))]
+      (defer (data.release tx))
+      (native-transact-data! conn tx)))
   (when (not (native.ensure-resident conn))
     (panic "could not make native benchmark connection resident")))
 
-(defn seed-public! [conn: d.Conn, entity-count: int]
-  (let [schema (schema-tx)]
+(defn seed-public!
+  [conn: d.Conn, entity-count: int,
+   extra-schema-attrs: int = 0, schema-churn: int = 0]
+  (let [schema (schema-tx-with-extra-attrs extra-schema-attrs)]
     (defer (data.release schema))
     (let [report (d.transact-data conn schema)]
       (when (not report.ok)
@@ -290,6 +369,16 @@
       (when (not report.ok)
         (panic report.error))
       (d.close (addr report))))
+  (for [step (arr.range 0 schema-churn)]
+    (let [tx (vector-data
+               ([dynamic]Data
+                 [(add-string 100 ":db/doc"
+                    (fmt.tprintf "schema-history-%d" step))]))]
+      (defer (data.release tx))
+      (let [report (d.transact-data conn tx)]
+        (when (not report.ok)
+          (panic report.error))
+        (d.close (addr report)))))
   (when (not (d.ensure-resident! conn))
     (panic "could not make public benchmark connection resident")))
 
@@ -298,6 +387,14 @@
     (let [tx (vector-data
                ([dynamic]Data
                  [(add-string 2 ":item/tag" (fmt.tprintf "retract-%d" sample))]))]
+      (defer (data.release tx))
+      (native-transact-data! conn tx)))
+  (when (= workload "retract-entity")
+    (let [entity (+ 3000000 (i64 sample))
+          tx (vector-data
+               ([dynamic]Data
+                 [(add-string entity ":item/name" "temporary")
+                  (add-string entity ":item/tag" "temporary")]))]
       (defer (data.release tx))
       (native-transact-data! conn tx))))
 
@@ -310,7 +407,37 @@
       (let [report (d.transact-data conn tx)]
         (when (not report.ok)
           (panic report.error))
+        (d.close (addr report)))))
+  (when (= workload "retract-entity")
+    (let [entity (+ 3000000 (i64 sample))
+          tx (vector-data
+               ([dynamic]Data
+                 [(add-string entity ":item/name" "temporary")
+                  (add-string entity ":item/tag" "temporary")]))]
+      (defer (data.release tx))
+      (let [report (d.transact-data conn tx)]
+        (when (not report.ok)
+          (panic report.error))
         (d.close (addr report))))))
+
+(defn ro-demo-entid [snapshot: d.DB, ro-id: string] -> i64
+  (let [value (data.from-string ro-id)]
+    (defer (data.release value))
+    (let [[entity ok] (d.entid-lookup-ref snapshot ":ro/id" value)]
+      (when (not ok)
+        (panic (fmt.tprintf "Ro demo entity was not found: %s" ro-id)))
+      (i64 entity))))
+
+(defn ro-demo-ids [conn: d.Conn] -> Ro-Demo-Ids
+  (let [snapshot (d.db conn)]
+    (defer (d.close snapshot))
+    (Ro-Demo-Ids
+      {property-value:
+         (ro-demo-entid snapshot
+           "value-item-demo-plan-property-inbox-priority")
+       item: (ro-demo-entid snapshot "item-demo-plan")
+       property-def: (ro-demo-entid snapshot "property-inbox-priority")
+       actor: (ro-demo-entid snapshot "actor-local")})))
 
 (defn instant-text [unix-millis: i64] -> string
   (let [[datetime ok]
@@ -450,6 +577,8 @@
         (profile-float profile ":native-listener-us"))
       (arr.push! samples^.native-cleanup
         (profile-float profile ":native-cleanup-us"))
+      (arr.push! samples^.effective-datoms
+        (profile-int profile ":effective-datoms"))
       (arr.push! samples^.parsing (profile-float profile ":parsing-us"))
       (arr.push! samples^.resolution (profile-float profile ":resolution-us"))
       (arr.push! samples^.resolution-lookup-ref
@@ -507,9 +636,10 @@
         (profile-float profile ":sqlite-commit-us")))))
 
 (defn measure-public!
-  [samples: ^Samples, conn: d.Conn, workload: string, sample: int]
+  [samples: ^Samples, conn: d.Conn, workload: string, sample: int,
+   ro-ids: Ro-Demo-Ids = (Ro-Demo-Ids {})]
   (prepare-public! conn workload sample)
-  (let [tx (workload-tx workload sample)]
+  (let [tx (workload-tx workload sample ro-ids)]
     (defer (data.release tx))
     (let [start (time.now)
           report (d.transact-data conn tx)
@@ -521,9 +651,10 @@
 
 (defn measure-manual!
   [samples: ^Samples, conn: ^native.Durable-Connection,
-   workload: string, sample: int]
+   workload: string, sample: int,
+   ro-ids: Ro-Demo-Ids = (Ro-Demo-Ids {})]
   (prepare-native! conn workload sample)
-  (let [tx (workload-tx workload sample)]
+  (let [tx (workload-tx workload sample ro-ids)]
     (defer (data.release tx))
     (let [total-start (time.now)
           write-start (time.now)
@@ -573,9 +704,10 @@
 
 (defn measure-profile!
   [samples: ^Samples, conn: ^native.Durable-Connection,
-   workload: string, sample: int]
+   workload: string, sample: int,
+   ro-ids: Ro-Demo-Ids = (Ro-Demo-Ids {})]
   (prepare-native! conn workload sample)
-  (let [tx (workload-tx workload sample)
+  (let [tx (workload-tx workload sample ro-ids)
         tx-text (edn.write tx)]
     (defer (data.release tx))
     (defer (delete tx-text))
@@ -637,6 +769,7 @@
   (print-phase database entities workload "native-report-handle" (slice samples.native-report-handle 0))
   (print-phase database entities workload "native-listener" (slice samples.native-listener 0))
   (print-phase database entities workload "native-cleanup" (slice samples.native-cleanup 0))
+  (print-phase database entities workload "effective-datoms" (slice samples.effective-datoms 0))
   (print-phase database entities workload "db-before-retain" (slice samples.db-before-retain 0))
   (print-phase database entities workload "db-after-retain" (slice samples.db-after-retain 0))
   (print-phase database entities workload "report-edn-write" (slice samples.report-edn-write 0))
@@ -644,7 +777,8 @@
   (print-phase database entities workload "report-value-materialize" (slice samples.report-value-materialize 0)))
 
 (defn run-workload
-  [database: string, entities: int, workload: string, sample-count: int]
+  [database: string, entities: int, workload: string, sample-count: int,
+   extra-schema-attrs: int = 0, schema-churn: int = 0]
   (let [public-path (fmt.tprintf "tmp.vev.kvist-boundary.%s.%s.public.sqlite" database workload)
         native-path (fmt.tprintf "tmp.vev.kvist-boundary.%s.%s.native.sqlite" database workload)]
     (remove-sqlite-files public-path)
@@ -659,8 +793,8 @@
           (native.unload (addr library))
           (d.close public-conn)
           (panic "could not open native transaction boundary database"))
-        (seed-public! public-conn entities)
-        (seed-native! (addr native-conn) entities)
+        (seed-public! public-conn entities extra-schema-attrs schema-churn)
+        (seed-native! (addr native-conn) entities extra-schema-attrs schema-churn)
         (let [samples (empty-samples sample-count)]
           (for [sample (arr.range 0 sample-count)]
             (measure-public! (addr samples) public-conn workload sample)
@@ -676,7 +810,7 @@
     (remove-sqlite-files native-path)))
 
 (defn run-ro-demo
-  [public-path: string, native-path: string, sample-count: int]
+  [public-path: string, native-path: string, workload: string, sample-count: int]
   (when (= public-path native-path)
     (panic "--ro-public-db and --ro-native-db must be independent disposable copies"))
   (let [public-conn (d.connect public-path)
@@ -693,13 +827,29 @@
         (panic "could not make public Ro demo connection resident"))
       (when (not (native.ensure-resident (addr native-conn)))
         (panic "could not make native Ro demo connection resident"))
-      (let [samples (empty-samples sample-count)]
+      (when (= workload "ro-demo-resolved-ids")
+        ;; The demo lazily creates this property-value entity. Seed the exact
+        ;; public shape with the opposite checkbox value before replacing all
+        ;; lookup refs with ids for the diagnostic differential.
+        (let [public-seed-tx (workload-tx "ro-demo" 1)
+              public-seed-report (d.transact-data public-conn public-seed-tx)]
+          (defer (data.release public-seed-tx))
+          (when (not public-seed-report.ok)
+            (panic public-seed-report.error))
+          (d.close (addr public-seed-report)))
+        (let [native-seed-tx (workload-tx "ro-demo" 1)]
+          (defer (data.release native-seed-tx))
+          (native-transact-data! (addr native-conn) native-seed-tx)))
+      (let [ids (if (= workload "ro-demo-resolved-ids")
+                  (ro-demo-ids public-conn)
+                  (Ro-Demo-Ids {}))
+            samples (empty-samples sample-count)]
         (for [sample (arr.range 0 sample-count)]
-          (measure-public! (addr samples) public-conn "ro-demo" sample)
-          (measure-manual! (addr samples) (addr native-conn) "ro-demo" sample))
+          (measure-public! (addr samples) public-conn workload sample ids)
+          (measure-manual! (addr samples) (addr native-conn) workload sample ids))
         (for [sample (arr.range sample-count (* sample-count 2))]
-          (measure-profile! (addr samples) (addr native-conn) "ro-demo" sample))
-        (print-samples "ro-demo" 0 "ro-demo" samples)
+          (measure-profile! (addr samples) (addr native-conn) workload sample ids))
+        (print-samples "ro-demo" 0 workload samples)
         (delete-samples (addr samples)))
       (native.close (addr native-conn)))
     (native.unload (addr library))
@@ -714,14 +864,22 @@
         selected-workload (cli.option os.args "--workload" "all")
         ro-public-path (cli.option os.args "--ro-public-db" "")
         ro-native-path (cli.option os.args "--ro-native-db" "")
+        ro-workload (cli.option os.args "--ro-workload" "ro-demo")
         sample-count (cli.int-option os.args "--samples" 30)]
-    (for [database ([]string ["small" "large"])]
+    (for [database ([]string ["small" "large" "wide-schema" "schema-churn"])]
       (when (selected? selected-database database)
-        (let [entities (if (= database "small") 50 2000)]
-          (for [workload ([]string ["append" "replacement" "explicit-retract" "ro-like"])]
+        (let [entities (if (= database "large") 2000 50)
+              extra-schema-attrs (if (= database "wide-schema") 250 0)
+              schema-churn (if (= database "schema-churn") 200 0)]
+          (for [workload ([]string ["append" "replacement" "cas" "explicit-retract" "retract-entity" "ro-like"])]
             (when (selected? selected-workload workload)
-              (run-workload database entities workload sample-count))))))
+              (run-workload database entities workload sample-count
+                extra-schema-attrs schema-churn))))))
     (when (or (> (count ro-public-path) 0) (> (count ro-native-path) 0))
       (when (or (= (count ro-public-path) 0) (= (count ro-native-path) 0))
         (panic "both --ro-public-db and --ro-native-db are required"))
-      (run-ro-demo ro-public-path ro-native-path sample-count))))
+      (when (not (or (= ro-workload "ro-demo")
+                     (= ro-workload "ro-demo-no-provenance")
+                     (= ro-workload "ro-demo-resolved-ids")))
+        (panic "unknown --ro-workload"))
+      (run-ro-demo ro-public-path ro-native-path ro-workload sample-count))))
