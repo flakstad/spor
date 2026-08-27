@@ -110,8 +110,29 @@
   effective-datoms: u64
   parsing-us: f64
   resolution-us: f64
+  resolution-lookup-ref-us: f64
+  resolution-ident-us: f64
+  resolution-tempid-us: f64
+  resolution-op-generation-us: f64
+  resolution-lookup-ref-count: u64
+  resolution-ident-count: u64
+  resolution-tempid-count: u64
+  resolution-current-tx-count: u64
+  resolution-generated-op-count: u64
   validation-us: f64
   planning-us: f64
+  planning-current-fact-us: f64
+  planning-schema-us: f64
+  planning-cardinality-us: f64
+  planning-unique-us: f64
+  planning-normalization-us: f64
+  planning-ownership-us: f64
+  planning-current-fact-count: u64
+  planning-schema-lookup-count: u64
+  planning-cardinality-lookup-count: u64
+  planning-unique-lookup-count: u64
+  planning-retraction-count: u64
+  planning-owned-op-count: u64
   db-after-us: f64
   report-ownership-us: f64
   canonical-append-us: f64
@@ -150,6 +171,38 @@
     (set! profile^.resolution-us
       (+ profile^.resolution-us (tx-phase-profile-elapsed-us profile start)))))
 
+(defn tx-phase-profile-add-resolution-lookup-ref! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.resolution-lookup-ref-us
+      (+ profile^.resolution-lookup-ref-us (tx-phase-profile-elapsed-us profile start)))
+    (set! profile^.resolution-lookup-ref-count
+      (+ profile^.resolution-lookup-ref-count 1))))
+
+(defn tx-phase-profile-add-resolution-ident! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.resolution-ident-us
+      (+ profile^.resolution-ident-us (tx-phase-profile-elapsed-us profile start)))
+    (set! profile^.resolution-ident-count (+ profile^.resolution-ident-count 1))))
+
+(defn tx-phase-profile-add-resolution-tempids! [profile: ^Tx-Phase-Profile, start: time.Time, count: int]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.resolution-tempid-us
+      (+ profile^.resolution-tempid-us (tx-phase-profile-elapsed-us profile start)))
+    (set! profile^.resolution-tempid-count
+      (+ profile^.resolution-tempid-count (u64 count)))))
+
+(defn tx-phase-profile-add-resolution-op-generation! [profile: ^Tx-Phase-Profile, start: time.Time, count: int]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.resolution-op-generation-us
+      (+ profile^.resolution-op-generation-us (tx-phase-profile-elapsed-us profile start)))
+    (set! profile^.resolution-generated-op-count
+      (+ profile^.resolution-generated-op-count (u64 count)))))
+
+(defn tx-phase-profile-note-resolution-current-tx! [profile: ^Tx-Phase-Profile]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.resolution-current-tx-count
+      (+ profile^.resolution-current-tx-count 1))))
+
 (defn tx-phase-profile-add-validation! [profile: ^Tx-Phase-Profile, start: time.Time]
   (when (and (not (= profile nil)) profile^.enabled)
     (set! profile^.validation-us
@@ -159,6 +212,49 @@
   (when (and (not (= profile nil)) profile^.enabled)
     (set! profile^.planning-us
       (+ profile^.planning-us (tx-phase-profile-elapsed-us profile start)))))
+
+(defn tx-phase-profile-add-planning-current-fact! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.planning-current-fact-us
+      (+ profile^.planning-current-fact-us (tx-phase-profile-elapsed-us profile start)))
+    (set! profile^.planning-current-fact-count
+      (+ profile^.planning-current-fact-count 1))))
+
+(defn tx-phase-profile-add-planning-schema! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.planning-schema-us
+      (+ profile^.planning-schema-us (tx-phase-profile-elapsed-us profile start)))
+    (set! profile^.planning-schema-lookup-count
+      (+ profile^.planning-schema-lookup-count 1))))
+
+(defn tx-phase-profile-add-planning-cardinality! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.planning-cardinality-us
+      (+ profile^.planning-cardinality-us (tx-phase-profile-elapsed-us profile start)))
+    (set! profile^.planning-cardinality-lookup-count
+      (+ profile^.planning-cardinality-lookup-count 1))))
+
+(defn tx-phase-profile-add-planning-unique! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.planning-unique-us
+      (+ profile^.planning-unique-us (tx-phase-profile-elapsed-us profile start)))
+    (set! profile^.planning-unique-lookup-count
+      (+ profile^.planning-unique-lookup-count 1))))
+
+(defn tx-phase-profile-add-planning-normalization! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.planning-normalization-us
+      (+ profile^.planning-normalization-us (tx-phase-profile-elapsed-us profile start)))))
+
+(defn tx-phase-profile-add-planning-ownership! [profile: ^Tx-Phase-Profile, start: time.Time]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.planning-ownership-us
+      (+ profile^.planning-ownership-us (tx-phase-profile-elapsed-us profile start)))
+    (set! profile^.planning-owned-op-count (+ profile^.planning-owned-op-count 1))))
+
+(defn tx-phase-profile-note-planning-retraction! [profile: ^Tx-Phase-Profile]
+  (when (and (not (= profile nil)) profile^.enabled)
+    (set! profile^.planning-retraction-count (+ profile^.planning-retraction-count 1))))
 
 (defn tx-phase-profile-add-db-after! [profile: ^Tx-Phase-Profile, start: time.Time, append-only: bool, incremental: bool]
   (when (and (not (= profile nil)) profile^.enabled)

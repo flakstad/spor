@@ -597,6 +597,7 @@
   ;; The live shared connection already owns the compact allocator/schema
   ;; metadata needed to resolve a transaction. Do not derive that metadata by
   ;; rescanning the snapshot for every write.
+  (set! conn^.write.conn.tx-phase-profile profile)
   (let [base conn^.snapshot
         source (shared-db-snapshot-read-source (addr base))
         resolution-start (tx-phase-profile-start profile)

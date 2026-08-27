@@ -32,8 +32,29 @@
   native-cleanup: [dynamic]f64
   parsing: [dynamic]f64
   resolution: [dynamic]f64
+  resolution-lookup-ref: [dynamic]f64
+  resolution-ident: [dynamic]f64
+  resolution-tempid: [dynamic]f64
+  resolution-op-generation: [dynamic]f64
+  resolution-lookup-ref-count: [dynamic]f64
+  resolution-ident-count: [dynamic]f64
+  resolution-tempid-count: [dynamic]f64
+  resolution-current-tx-count: [dynamic]f64
+  resolution-generated-op-count: [dynamic]f64
   validation: [dynamic]f64
   planning: [dynamic]f64
+  planning-current-fact: [dynamic]f64
+  planning-schema: [dynamic]f64
+  planning-cardinality: [dynamic]f64
+  planning-unique: [dynamic]f64
+  planning-normalization: [dynamic]f64
+  planning-ownership: [dynamic]f64
+  planning-current-fact-count: [dynamic]f64
+  planning-schema-lookup-count: [dynamic]f64
+  planning-cardinality-lookup-count: [dynamic]f64
+  planning-unique-lookup-count: [dynamic]f64
+  planning-retraction-count: [dynamic]f64
+  planning-owned-op-count: [dynamic]f64
   db-after: [dynamic]f64
   report-ownership: [dynamic]f64
   canonical-append: [dynamic]f64
@@ -59,8 +80,29 @@
     native-cleanup: (make [dynamic]f64 0 capacity)
     parsing: (make [dynamic]f64 0 capacity)
     resolution: (make [dynamic]f64 0 capacity)
+    resolution-lookup-ref: (make [dynamic]f64 0 capacity)
+    resolution-ident: (make [dynamic]f64 0 capacity)
+    resolution-tempid: (make [dynamic]f64 0 capacity)
+    resolution-op-generation: (make [dynamic]f64 0 capacity)
+    resolution-lookup-ref-count: (make [dynamic]f64 0 capacity)
+    resolution-ident-count: (make [dynamic]f64 0 capacity)
+    resolution-tempid-count: (make [dynamic]f64 0 capacity)
+    resolution-current-tx-count: (make [dynamic]f64 0 capacity)
+    resolution-generated-op-count: (make [dynamic]f64 0 capacity)
     validation: (make [dynamic]f64 0 capacity)
     planning: (make [dynamic]f64 0 capacity)
+    planning-current-fact: (make [dynamic]f64 0 capacity)
+    planning-schema: (make [dynamic]f64 0 capacity)
+    planning-cardinality: (make [dynamic]f64 0 capacity)
+    planning-unique: (make [dynamic]f64 0 capacity)
+    planning-normalization: (make [dynamic]f64 0 capacity)
+    planning-ownership: (make [dynamic]f64 0 capacity)
+    planning-current-fact-count: (make [dynamic]f64 0 capacity)
+    planning-schema-lookup-count: (make [dynamic]f64 0 capacity)
+    planning-cardinality-lookup-count: (make [dynamic]f64 0 capacity)
+    planning-unique-lookup-count: (make [dynamic]f64 0 capacity)
+    planning-retraction-count: (make [dynamic]f64 0 capacity)
+    planning-owned-op-count: (make [dynamic]f64 0 capacity)
     db-after: (make [dynamic]f64 0 capacity)
     report-ownership: (make [dynamic]f64 0 capacity)
     canonical-append: (make [dynamic]f64 0 capacity)
@@ -85,8 +127,29 @@
   (delete samples^.native-cleanup)
   (delete samples^.parsing)
   (delete samples^.resolution)
+  (delete samples^.resolution-lookup-ref)
+  (delete samples^.resolution-ident)
+  (delete samples^.resolution-tempid)
+  (delete samples^.resolution-op-generation)
+  (delete samples^.resolution-lookup-ref-count)
+  (delete samples^.resolution-ident-count)
+  (delete samples^.resolution-tempid-count)
+  (delete samples^.resolution-current-tx-count)
+  (delete samples^.resolution-generated-op-count)
   (delete samples^.validation)
   (delete samples^.planning)
+  (delete samples^.planning-current-fact)
+  (delete samples^.planning-schema)
+  (delete samples^.planning-cardinality)
+  (delete samples^.planning-unique)
+  (delete samples^.planning-normalization)
+  (delete samples^.planning-ownership)
+  (delete samples^.planning-current-fact-count)
+  (delete samples^.planning-schema-lookup-count)
+  (delete samples^.planning-cardinality-lookup-count)
+  (delete samples^.planning-unique-lookup-count)
+  (delete samples^.planning-retraction-count)
+  (delete samples^.planning-owned-op-count)
   (delete samples^.db-after)
   (delete samples^.report-ownership)
   (delete samples^.canonical-append)
@@ -359,6 +422,15 @@
         (panic (fmt.tprintf "transaction profile field is not a float: %s" key)))
       number)))
 
+(defn profile-int [profile: native.Value, key: string] -> f64
+  (let [[value value-ok] (native.get profile key)]
+    (when (not value-ok)
+      (panic (fmt.tprintf "transaction profile is missing %s" key)))
+    (let [[number number-ok] (native.as-int value)]
+      (when (not number-ok)
+        (panic (fmt.tprintf "transaction profile field is not an integer: %s" key)))
+      (f64 number))))
+
 (defn append-profile! [samples: ^Samples, conn: ^native.Durable-Connection]
   (native.disable-tx-profile conn)
   (let [[profile-data data-ok] (native.tx-profile conn)]
@@ -380,8 +452,50 @@
         (profile-float profile ":native-cleanup-us"))
       (arr.push! samples^.parsing (profile-float profile ":parsing-us"))
       (arr.push! samples^.resolution (profile-float profile ":resolution-us"))
+      (arr.push! samples^.resolution-lookup-ref
+        (profile-float profile ":resolution-lookup-ref-us"))
+      (arr.push! samples^.resolution-ident
+        (profile-float profile ":resolution-ident-us"))
+      (arr.push! samples^.resolution-tempid
+        (profile-float profile ":resolution-tempid-us"))
+      (arr.push! samples^.resolution-op-generation
+        (profile-float profile ":resolution-op-generation-us"))
+      (arr.push! samples^.resolution-lookup-ref-count
+        (profile-int profile ":resolution-lookup-ref-count"))
+      (arr.push! samples^.resolution-ident-count
+        (profile-int profile ":resolution-ident-count"))
+      (arr.push! samples^.resolution-tempid-count
+        (profile-int profile ":resolution-tempid-count"))
+      (arr.push! samples^.resolution-current-tx-count
+        (profile-int profile ":resolution-current-tx-count"))
+      (arr.push! samples^.resolution-generated-op-count
+        (profile-int profile ":resolution-generated-op-count"))
       (arr.push! samples^.validation (profile-float profile ":validation-us"))
       (arr.push! samples^.planning (profile-float profile ":planning-us"))
+      (arr.push! samples^.planning-current-fact
+        (profile-float profile ":planning-current-fact-us"))
+      (arr.push! samples^.planning-schema
+        (profile-float profile ":planning-schema-us"))
+      (arr.push! samples^.planning-cardinality
+        (profile-float profile ":planning-cardinality-us"))
+      (arr.push! samples^.planning-unique
+        (profile-float profile ":planning-unique-us"))
+      (arr.push! samples^.planning-normalization
+        (profile-float profile ":planning-normalization-us"))
+      (arr.push! samples^.planning-ownership
+        (profile-float profile ":planning-ownership-us"))
+      (arr.push! samples^.planning-current-fact-count
+        (profile-int profile ":planning-current-fact-count"))
+      (arr.push! samples^.planning-schema-lookup-count
+        (profile-int profile ":planning-schema-lookup-count"))
+      (arr.push! samples^.planning-cardinality-lookup-count
+        (profile-int profile ":planning-cardinality-lookup-count"))
+      (arr.push! samples^.planning-unique-lookup-count
+        (profile-int profile ":planning-unique-lookup-count"))
+      (arr.push! samples^.planning-retraction-count
+        (profile-int profile ":planning-retraction-count"))
+      (arr.push! samples^.planning-owned-op-count
+        (profile-int profile ":planning-owned-op-count"))
       (arr.push! samples^.db-after (profile-float profile ":db-after-us"))
       (arr.push! samples^.report-ownership
         (profile-float profile ":report-ownership-us"))
@@ -491,8 +605,29 @@
   (print-phase database entities workload "abi-input-copy" (slice samples.abi-input-copy 0))
   (print-phase database entities workload "vev-edn-parse" (slice samples.parsing 0))
   (print-phase database entities workload "resolution" (slice samples.resolution 0))
+  (print-phase database entities workload "resolution-lookup-ref" (slice samples.resolution-lookup-ref 0))
+  (print-phase database entities workload "resolution-ident" (slice samples.resolution-ident 0))
+  (print-phase database entities workload "resolution-tempid" (slice samples.resolution-tempid 0))
+  (print-phase database entities workload "resolution-op-generation" (slice samples.resolution-op-generation 0))
+  (print-phase database entities workload "resolution-lookup-ref-count" (slice samples.resolution-lookup-ref-count 0))
+  (print-phase database entities workload "resolution-ident-count" (slice samples.resolution-ident-count 0))
+  (print-phase database entities workload "resolution-tempid-count" (slice samples.resolution-tempid-count 0))
+  (print-phase database entities workload "resolution-current-tx-count" (slice samples.resolution-current-tx-count 0))
+  (print-phase database entities workload "resolution-generated-op-count" (slice samples.resolution-generated-op-count 0))
   (print-phase database entities workload "validation" (slice samples.validation 0))
   (print-phase database entities workload "planning" (slice samples.planning 0))
+  (print-phase database entities workload "planning-current-fact" (slice samples.planning-current-fact 0))
+  (print-phase database entities workload "planning-schema" (slice samples.planning-schema 0))
+  (print-phase database entities workload "planning-cardinality" (slice samples.planning-cardinality 0))
+  (print-phase database entities workload "planning-unique" (slice samples.planning-unique 0))
+  (print-phase database entities workload "planning-normalization" (slice samples.planning-normalization 0))
+  (print-phase database entities workload "planning-ownership" (slice samples.planning-ownership 0))
+  (print-phase database entities workload "planning-current-fact-count" (slice samples.planning-current-fact-count 0))
+  (print-phase database entities workload "planning-schema-lookup-count" (slice samples.planning-schema-lookup-count 0))
+  (print-phase database entities workload "planning-cardinality-lookup-count" (slice samples.planning-cardinality-lookup-count 0))
+  (print-phase database entities workload "planning-unique-lookup-count" (slice samples.planning-unique-lookup-count 0))
+  (print-phase database entities workload "planning-retraction-count" (slice samples.planning-retraction-count 0))
+  (print-phase database entities workload "planning-owned-op-count" (slice samples.planning-owned-op-count 0))
   (print-phase database entities workload "db-after" (slice samples.db-after 0))
   (print-phase database entities workload "core-report-ownership" (slice samples.report-ownership 0))
   (print-phase database entities workload "canonical-append" (slice samples.canonical-append 0))

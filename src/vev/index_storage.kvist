@@ -863,7 +863,9 @@
   (when (not (or (shared-write-state-schema-unique? state attr)
                  (shared-write-state-schema-fact-before-index? tx-data attr ":db/unique" data-index)))
     (return false))
-  (let [[_ lookup-ok lookup-error] (db-read-source-resolve-lookup-ref source attr value)]
+  (let [lookup-start (tx-phase-profile-start state^.conn.tx-phase-profile)
+        [_ lookup-ok lookup-error] (db-read-source-resolve-lookup-ref source attr value)]
+    (tx-phase-profile-add-resolution-lookup-ref! state^.conn.tx-phase-profile lookup-start)
     (and lookup-ok (= lookup-error ""))))
 
 (defn source-tx-unique-key [attr: string, value: Value] -> [key: string, ok: bool]
@@ -886,8 +888,10 @@
       (when cached-ok
         (delete key)
         (return cached)))
-    (let [[_ lookup-ok lookup-error] (db-read-source-resolve-lookup-ref source attr value)
+    (let [lookup-start (tx-phase-profile-start state^.conn.tx-phase-profile)
+          [_ lookup-ok lookup-error] (db-read-source-resolve-lookup-ref source attr value)
           resolved (and lookup-ok (= lookup-error ""))]
+      (tx-phase-profile-add-resolution-lookup-ref! state^.conn.tx-phase-profile lookup-start)
       (mmap.assoc! source-results^ key resolved)
       (arr.push! owned-source-keys^ key)
       resolved)))
@@ -1359,7 +1363,9 @@
                       (set! found local-entity)
                       (set! has-found true))))
             (when (not (set.contains? resolve-index^.batch-resolved-attrs data.a))
-              (let [[entity entity-ok lookup-error] (db-read-source-resolve-lookup-ref source data.a value)]
+              (let [lookup-start (tx-phase-profile-start state^.conn.tx-phase-profile)
+                    [entity entity-ok lookup-error] (db-read-source-resolve-lookup-ref source data.a value)]
+                (tx-phase-profile-add-resolution-lookup-ref! state^.conn.tx-phase-profile lookup-start)
                 (when (not (= lookup-error ""))
                   (return 0 false false lookup-error))
                 (when entity-ok
@@ -1848,7 +1854,9 @@
     (when (or tuple-ok
               (not (= tuple-error "")))
       (return tuple-e tuple-ok tuple-error)))
-  (let [[source-e source-ok source-error] (db-read-source-resolve-lookup-ref source attr value)]
+  (let [lookup-start (tx-phase-profile-start state^.conn.tx-phase-profile)
+        [source-e source-ok source-error] (db-read-source-resolve-lookup-ref source attr value)]
+    (tx-phase-profile-add-resolution-lookup-ref! state^.conn.tx-phase-profile lookup-start)
     (when (and (= source-error "")
                (not (= resolve-index nil)))
       (let [[key key-ok] (source-tx-unique-key attr value)]
@@ -1871,7 +1879,9 @@
         (when (or local-ok
                   (not (= local-error "")))
           (return local-e local-ok false local-error))))
-    (let [[ident-e ident-ok ident-error] (db-read-source-schema-entity-for-attr source data.ident)]
+    (let [ident-start (tx-phase-profile-start state^.conn.tx-phase-profile)
+          [ident-e ident-ok ident-error] (db-read-source-schema-entity-for-attr source data.ident)]
+      (tx-phase-profile-add-resolution-ident! state^.conn.tx-phase-profile ident-start)
       (when ident-ok
         (return ident-e true false ""))
       (if (and (shared-write-state-retract-like-op? data.op)
@@ -2040,7 +2050,8 @@
         declared-schema? (shared-write-state-tx-declares-validation-schema? tx-data)
         declared-tuple-schema? (and declared-schema?
                                     (shared-write-state-declares-tuple-schema? tx-data))
-        next-e (shared-write-state-source-simple-next-entity-id state tx-data)]
+        next-e (shared-write-state-source-simple-next-entity-id state tx-data)
+        tempid-start (tx-phase-profile-start state^.conn.tx-phase-profile)]
     (defer
       (do
         (delete-source-tx-resolve-index resolve-index)
@@ -2053,6 +2064,7 @@
                               tx-meta: resolved-meta
                               tempids: resolved-tempids}))))
     (let [[prepared-ok prepared-error] (shared-write-state-prepare-source-simple-tempids! state source tx-data (addr tempid-index) (addr resolved-tempids) (addr next-e) declared-schema? (addr resolve-index))]
+      (tx-phase-profile-add-resolution-tempids! state^.conn.tx-phase-profile tempid-start (count resolved-tempids))
       (when (not prepared-ok)
         (return (Resolved-Tx {ok: false
                               error: prepared-error
@@ -2079,6 +2091,7 @@
         (when (and data.has-tempid
                    (current-tx-tempid? data.tempid)
                    (= data.op ":db/add"))
+          (tx-phase-profile-note-resolution-current-tx! state^.conn.tx-phase-profile)
           (arr.push! resolved-meta (Tx-Meta {a: data.a v: data.v})))
         (when (= data.op ":db/retractEntity")
           (let [start-index (count resolved-ops)
@@ -2152,7 +2165,8 @@
                                   tempids: resolved-tempids})))
           (when skip-value
             (continue))
-          (let [start-index (count resolved-ops)]
+          (let [start-index (count resolved-ops)
+                generation-start (tx-phase-profile-start state^.conn.tx-phase-profile)]
             (if (reverse-attr? data.a)
               (if (= value.kind .Entity)
                 (let [forward-attr (forward-attr-for-reverse data.a)
@@ -2177,7 +2191,9 @@
                                       error: tuple-error
                                       ops: resolved-ops
                                       tx-meta: resolved-meta
-                                      tempids: resolved-tempids}))))))))
+                                      tempids: resolved-tempids}))))
+            (tx-phase-profile-add-resolution-op-generation!
+              state^.conn.tx-phase-profile generation-start (- (count resolved-ops) start-index))))))
     (Resolved-Tx {ok: true error: "" ops: resolved-ops tx-meta: resolved-meta tempids: resolved-tempids})))
 
 (defn shared-write-state-resolve-tx-data [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data] -> Resolved-Tx

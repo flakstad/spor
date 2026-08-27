@@ -758,37 +758,49 @@
         (return false "invalid component schema"))))
   (return true ""))
 
-(defn append-source-overlay-op! [out: ^[dynamic]Tx-Op, source: DB-Read-Source, op: Tx-Op] -> [ok: bool, error: string]
+(defn append-source-overlay-op! [out: ^[dynamic]Tx-Op, source: DB-Read-Source, op: Tx-Op, profile: ^Tx-Phase-Profile = nil] -> [ok: bool, error: string]
   (when (= op.kind .Retract)
-    (let [[touched current] (source-overlay-prior-fact-state (slice out^ 0) op)]
+    (let [normalization-start (tx-phase-profile-start profile)
+          [touched current] (source-overlay-prior-fact-state (slice out^ 0) op)]
+      (tx-phase-profile-add-planning-normalization! profile normalization-start)
       (when touched
         (when current
           (remove-source-overlay-prior-fact-additions! out op))
         (return true ""))
       (when (not touched)
-        (let [[exists exists-ok exists-error] (source-overlay-existing-current-fact? source op)]
+        (let [current-start (tx-phase-profile-start profile)
+              [exists exists-ok exists-error] (source-overlay-existing-current-fact? source op)]
+          (tx-phase-profile-add-planning-current-fact! profile current-start)
           (when (not exists-ok)
             (return false exists-error))
           (when (not exists)
             (return true ""))))))
   (when (= op.kind .Add)
-    (let [[many many-ok many-error] (db-read-source-schema-cardinality-many? source op.a)]
+    (let [cardinality-start (tx-phase-profile-start profile)
+          [many many-ok many-error] (db-read-source-schema-cardinality-many? source op.a)]
+      (tx-phase-profile-add-planning-cardinality! profile cardinality-start)
       (when (not many-ok)
         (return false many-error))
       (when (and (not many)
                  (not (overlay-ops-declare-cardinality-many? (slice out^ 0) op.a)))
         (remove-source-overlay-prior-cardinality-one-additions! out op)))
-    (let [[touched current] (source-overlay-prior-fact-state (slice out^ 0) op)]
+    (let [normalization-start (tx-phase-profile-start profile)
+          [touched current] (source-overlay-prior-fact-state (slice out^ 0) op)]
+      (tx-phase-profile-add-planning-normalization! profile normalization-start)
       (when current
         (return true ""))
       (when touched
         (remove-source-overlay-prior-fact-retractions! out op))
-      (let [[exists exists-ok exists-error] (source-overlay-existing-current-fact? source op)]
+      (let [current-start (tx-phase-profile-start profile)
+            [exists exists-ok exists-error] (source-overlay-existing-current-fact? source op)]
+        (tx-phase-profile-add-planning-current-fact! profile current-start)
         (when (not exists-ok)
           (return false exists-error))
         (when exists
           (return true ""))))
-    (let [[schema-type has-type type-ok type-error] (db-read-source-schema-value-type source op.a)]
+    (let [schema-start (tx-phase-profile-start profile)
+          [schema-type has-type type-ok type-error] (db-read-source-schema-value-type source op.a)]
+      (tx-phase-profile-add-planning-schema! profile schema-start)
       (when (not type-ok)
         (return false type-error))
       (when (and (not op.derived)
@@ -801,30 +813,48 @@
           (delete schema-type)
           (when (not matches)
             (return false "schema value type mismatch")))))
-    (let [[unique-kind unique unique-ok unique-error] (source-overlay-schema-unique-kind source (slice out^ 0) op.a)]
+    (let [schema-start (tx-phase-profile-start profile)
+          [unique-kind unique unique-ok unique-error] (source-overlay-schema-unique-kind source (slice out^ 0) op.a)]
+      (tx-phase-profile-add-planning-schema! profile schema-start)
       (when (not unique-ok)
         (return false unique-error))
       (when unique
         (delete unique-kind)
-        (when (source-overlay-prior-unique-conflict? (slice out^ 0) op)
-          (let [[error-text error-ok] (source-overlay-unique-error source (slice out^ 0) op)]
+        (let [prior-unique-start (tx-phase-profile-start profile)
+              prior-conflict (source-overlay-prior-unique-conflict? (slice out^ 0) op)]
+          (tx-phase-profile-add-planning-unique! profile prior-unique-start)
+          (when prior-conflict
+            (let [[error-text error-ok] (source-overlay-unique-error source (slice out^ 0) op)]
             (return false (if error-ok error-text "schema unique conflict"))))
-        (let [[conflict conflict-ok conflict-error] (source-overlay-existing-unique-conflict? source op)]
+        (let [source-unique-start (tx-phase-profile-start profile)
+              [conflict conflict-ok conflict-error] (source-overlay-existing-unique-conflict? source op)]
+          (tx-phase-profile-add-planning-unique! profile source-unique-start)
           (when (not conflict-ok)
             (return false conflict-error))
           (when conflict
             (let [[error-text error-ok] (source-overlay-unique-error source (slice out^ 0) op)]
-              (return false (if error-ok error-text "schema unique conflict")))))))
-    (let [[many many-ok many-error] (db-read-source-schema-cardinality-many? source op.a)]
+              (return false (if error-ok error-text "schema unique conflict"))))))))
+    (let [cardinality-start (tx-phase-profile-start profile)
+          [many many-ok many-error] (db-read-source-schema-cardinality-many? source op.a)]
+      (tx-phase-profile-add-planning-cardinality! profile cardinality-start)
       (when (not many-ok)
         (return false many-error))
       (when (and (not many)
                  (not (overlay-ops-declare-cardinality-many? (slice out^ 0) op.a)))
-        (let [[source-ok source-error] (append-source-cardinality-one-retractions! out source op)]
+        (let [cardinality-start (tx-phase-profile-start profile)
+              before-count (count out^)
+              [source-ok source-error] (append-source-cardinality-one-retractions! out source op)]
+          (tx-phase-profile-add-planning-cardinality! profile cardinality-start)
+          (for [_ (arr.range before-count (count out^))]
+            (tx-phase-profile-note-planning-retraction! profile))
           (when (not source-ok)
             (return false source-error)))
-        (append-overlay-cardinality-one-retractions! out op))))
-  (arr.push! out^ (tx-op-owned op))
+        (let [normalization-start (tx-phase-profile-start profile)]
+          (append-overlay-cardinality-one-retractions! out op)
+          (tx-phase-profile-add-planning-normalization! profile normalization-start)))))
+  (let [ownership-start (tx-phase-profile-start profile)]
+    (arr.push! out^ (tx-op-owned op))
+    (tx-phase-profile-add-planning-ownership! profile ownership-start))
   (return true ""))
 
 (defn append-source-new-entity-overlay-op! [out: ^[dynamic]Tx-Op, source: DB-Read-Source, op: Tx-Op] -> [ok: bool, error: string]
@@ -1121,7 +1151,7 @@
   (let [out (make [dynamic]Tx-Op 0 (count ops))
         planning-start (tx-phase-profile-start profile)]
     (for [op ops]
-      (let [[append-ok append-error] (append-source-overlay-op! (addr out) source op)]
+      (let [[append-ok append-error] (append-source-overlay-op! (addr out) source op profile)]
         (when (not append-ok)
           (tx-phase-profile-add-planning! profile planning-start)
           (delete-owned-tx-ops out)
