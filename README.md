@@ -6,6 +6,8 @@
 
 **A native, embedded Datalog database built around immutable database values.**
 
+[Website](https://vevdb.com/) · [Documentation](https://vevdb.com/docs/)
+
 VevDB weaves immutable facts into a durable fabric of attributed entities and
 values. Facts accumulate through append-only transactions, producing immutable
 database snapshots that applications can query declaratively and pass around
