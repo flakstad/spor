@@ -3,7 +3,7 @@
 The benchmark scripts compare local builds and check performance regressions.
 They do not define published performance numbers.
 
-See the [2026-07-29 benchmark snapshot](../bench/results/2026-07-29.md) for
+See the [2026-08-27 benchmark snapshot](../bench/results/2026-08-27.md) for
 the latest dated local results.
 
 ## C ABI overhead
