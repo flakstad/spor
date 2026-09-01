@@ -196,13 +196,13 @@
 (defn persist-conn-sqlite [path: string, conn: Conn] -> [ok: bool, error: string]
   (persist-conn-sqlite-resident path conn))
 
-(defstruct SQLite-Tx-Meta-Row {
+(defstruct SQLite-Tx-Meta-Row [
   tx: u64
   a: string
   v: Value
-})
+])
 
-(defstruct SQLite-Direct-Write-Profile {
+(defstruct SQLite-Direct-Write-Profile [
   writes: u64
   direct-call-us: f64
   open-before-us: f64
@@ -228,9 +228,9 @@
   report-open-us: f64
   auto-maintenance-us: f64
   listener-us: f64
-})
+])
 
-(defstruct SQLite-Direct-Attr-Info {
+(defstruct SQLite-Direct-Attr-Info [
   attr: string
   has-type: bool
   schema-type: string
@@ -238,77 +238,77 @@
   unique-kind: string
   cardinality-many: bool
   fulltext: bool
-})
+])
 
-(defstruct SQLite-Index-Root-Page {
+(defstruct SQLite-Index-Root-Page [
   root-id: u64
   manifest-id: u64
-})
+])
 
-(defstruct SQLite-Index-Root-Set {
+(defstruct SQLite-Index-Root-Set [
   eavt: SQLite-Index-Root-Page
   aevt: SQLite-Index-Root-Page
   avet: SQLite-Index-Root-Page
   vaet: SQLite-Index-Root-Page
-})
+])
 
-(defstruct SQLite-Index-Root-Publish {
+(defstruct SQLite-Index-Root-Publish [
   root-id: u64
   manifest-id: u64
   append-mode: bool
-})
+])
 
-(defstruct SQLite-Index-Root-Publish-Set {
+(defstruct SQLite-Index-Root-Publish-Set [
   eavt: SQLite-Index-Root-Publish
   aevt: SQLite-Index-Root-Publish
   avet: SQLite-Index-Root-Publish
   vaet: SQLite-Index-Root-Publish
-})
+])
 
-(defstruct SQLite-Index-Append-Modes {
+(defstruct SQLite-Index-Append-Modes [
   eavt: bool
   aevt: bool
   avet: bool
   vaet: bool
-})
+])
 
-(defstruct SQLite-Index-Append-Page {
+(defstruct SQLite-Index-Append-Page [
   index-name: string
   entries: [dynamic]int
   append-mode: bool
-})
+])
 
-(defstruct SQLite-Index-Append-Delta {
+(defstruct SQLite-Index-Append-Delta [
   pages: [dynamic]SQLite-Index-Append-Page
-})
+])
 
-(defstruct SQLite-Prepared-Index-Append {
+(defstruct SQLite-Prepared-Index-Append [
   delta: SQLite-Index-Append-Delta
   modes: SQLite-Index-Append-Modes
-})
+])
 
-(defstruct SQLite-Durable-Append-Plan {
+(defstruct SQLite-Durable-Append-Plan [
   start-index: int
   prepared: SQLite-Prepared-Index-Append
-})
+])
 
-(defstruct SQLite-Durable-Append-Publication {
+(defstruct SQLite-Durable-Append-Publication [
   publishes: SQLite-Index-Root-Publish-Set
   roots: SQLite-Index-Root-Set
   modes: SQLite-Index-Append-Modes
-})
+])
 
-(defstruct SQLite-Durable-Published-Root {
+(defstruct SQLite-Durable-Published-Root [
   root-row-id: u64
   basis-tx: u64
   roots: SQLite-Index-Root-Set
   modes: SQLite-Index-Append-Modes
-})
+])
 
 (defn sqlite-index-append-page [index-name: string, entries: [dynamic]int, append-mode: bool] -> SQLite-Index-Append-Page
-  (SQLite-Index-Append-Page {index-name: index-name
-                             entries: entries
-                             append-mode: append-mode}))
+  (SQLite-Index-Append-Page :index-name index-name
+                             :entries entries
+                             :append-mode append-mode))
 
 (defn sqlite-index-append-delta [eavt: [dynamic]int, aevt: [dynamic]int, avet: [dynamic]int, vaet: [dynamic]int, modes: SQLite-Index-Append-Modes] -> SQLite-Index-Append-Delta
   (let [pages (make [dynamic]SQLite-Index-Append-Page 0 4)]
@@ -316,7 +316,7 @@
     (arr.push! pages (sqlite-index-append-page ":aevt" aevt modes.aevt))
     (arr.push! pages (sqlite-index-append-page ":avet" avet modes.avet))
     (arr.push! pages (sqlite-index-append-page ":vaet" vaet modes.vaet))
-    (SQLite-Index-Append-Delta {pages: pages})))
+    (SQLite-Index-Append-Delta :pages pages)))
 
 (defn delete-sqlite-index-append-delta [delta: SQLite-Index-Append-Delta]
   (for [page delta.pages]
@@ -327,32 +327,32 @@
   delta.pages[offset])
 
 (defn sqlite-index-append-delta-modes [delta: SQLite-Index-Append-Delta] -> SQLite-Index-Append-Modes
-  (SQLite-Index-Append-Modes {eavt: delta.pages[0].append-mode
-                              aevt: delta.pages[1].append-mode
-                              avet: delta.pages[2].append-mode
-                              vaet: delta.pages[3].append-mode}))
+  (SQLite-Index-Append-Modes :eavt delta.pages[0].append-mode
+                              :aevt delta.pages[1].append-mode
+                              :avet delta.pages[2].append-mode
+                              :vaet delta.pages[3].append-mode))
 
 (defn sqlite-prepared-index-append-from-modes [appended: []Datom, start-index: int, modes: SQLite-Index-Append-Modes, profile: ^SQLite-Direct-Write-Profile] -> SQLite-Prepared-Index-Append
   (let [delta (sqlite-index-append-delta-from-appended appended start-index modes profile)]
-    (SQLite-Prepared-Index-Append {delta: delta
-                                   modes: modes})))
+    (SQLite-Prepared-Index-Append :delta delta
+                                   :modes modes)))
 
 (defn delete-sqlite-prepared-index-append [prepared: SQLite-Prepared-Index-Append]
   (delete-sqlite-index-append-delta prepared.delta))
 
 (defn sqlite-durable-append-plan-from-modes [appended: []Datom, start-index: int, modes: SQLite-Index-Append-Modes, profile: ^SQLite-Direct-Write-Profile] -> SQLite-Durable-Append-Plan
-  (SQLite-Durable-Append-Plan {start-index: start-index
-                               prepared: (sqlite-prepared-index-append-from-modes appended start-index modes profile)}))
+  (SQLite-Durable-Append-Plan :start-index start-index
+                               :prepared (sqlite-prepared-index-append-from-modes appended start-index modes profile)))
 
 (defn delete-sqlite-durable-append-plan [plan: SQLite-Durable-Append-Plan]
   (delete-sqlite-prepared-index-append plan.prepared))
 
 (defn sqlite-durable-append-plan-from-delta [start-index: int, delta: SQLite-Index-Append-Delta] -> SQLite-Durable-Append-Plan
-  (SQLite-Durable-Append-Plan {start-index: start-index
-                               prepared: (SQLite-Prepared-Index-Append {delta: delta
-                                                                         modes: (sqlite-index-append-delta-modes delta)})}))
+  (SQLite-Durable-Append-Plan :start-index start-index
+                               :prepared (SQLite-Prepared-Index-Append :delta delta
+                                                                         :modes (sqlite-index-append-delta-modes delta))))
 
-(defstruct SQLite-Conn {
+(defstruct SQLite-Conn [
   path: string
   conn: Conn
   handle: rawptr
@@ -378,7 +378,7 @@
   direct-write-profile: SQLite-Direct-Write-Profile
   tx-phase-profile: Tx-Phase-Profile
   direct-attr-cache: [dynamic]SQLite-Direct-Attr-Info
-})
+])
 
 (defn sqlite-conn-direct-write-stmts [store: ^SQLite-Conn] -> [stmts: ^SQLite-Direct-Write-Stmts, ok: bool, error: string]
   (when store^.direct-write-stmts-valid
@@ -416,7 +416,7 @@
   Shared
 ])
 
-(defstruct Store-Conn {
+(defstruct Store-Conn [
   kind: Store-Conn-Kind
   sqlite: SQLite-Conn
   shared: Shared-Conn
@@ -425,7 +425,7 @@
   auto-maintenance-steps: int
   auto-maintenance-target: u64
   auto-maintenance-trigger: u64
-})
+])
 
 (defn sqlite-direct-frontier-log-indexes-for-test [store: ^Store-Conn, order-text: string, entities: []u64, attr: string] -> [entries: [dynamic]int, ok: bool, error: string]
   (when (not (= store^.kind .SQLite))
@@ -442,10 +442,10 @@
     (return (make [dynamic]int) (make [dynamic]u64) (make [dynamic]string) (make [dynamic]string) (make [dynamic]u64) (make [dynamic]bool) false "batch datom test lookup requires a SQLite store"))
   (vev.sqlite-load-datoms-by-log-indexes-parts-raw store^.sqlite.handle entries))
 
-(defstruct Store-Tx-Listener {
+(defstruct Store-Tx-Listener [
   name: string
   reports: ^[dynamic]Store-Tx-Report
-})
+])
 
 (defenum Store-DB-Kind [
   Empty
@@ -463,7 +463,7 @@
   Shared-Datom-Log-Overlay
 ])
 
-(defstruct Store-DB {
+(defstruct Store-DB [
   kind: Store-DB-Kind
   resident: DB
   filtered-base: ^Store-DB
@@ -483,34 +483,34 @@
   overlay-datoms: [dynamic]Datom
   overlay-log: Shared-Datom-Log
   overlay-tx: u64
-})
+])
 
-(defstruct Store-Entity {
+(defstruct Store-Entity [
   db: Store-DB
   e: u64
   found: bool
-})
+])
 
 (defn sqlite-tx-meta-row-from-edn-node [doc: EDN-Doc, node-index: int] -> [row: SQLite-Tx-Meta-Row, ok: bool, error: string]
   (when (or (= node-index -1)
             (not (= doc.nodes[node-index].kind .Vector))
             (not (= doc.nodes[node-index].child-count 3)))
-    (return (SQLite-Tx-Meta-Row {}) false "expected serialized tx metadata vector [tx a v]"))
+    (return (SQLite-Tx-Meta-Row []) false "expected serialized tx metadata vector [tx a v]"))
   (let [tx-node (edn-child-at doc node-index 0)
         a-node (edn-child-at doc node-index 1)
         v-node (edn-child-at doc node-index 2)
         [tx tx-ok tx-error] (edn-int-u64 doc tx-node "tx")
         [attr attr-ok] (edn-attr-text doc a-node)]
     (when (not tx-ok)
-      (return (SQLite-Tx-Meta-Row {}) false tx-error))
+      (return (SQLite-Tx-Meta-Row []) false tx-error))
     (when (not attr-ok)
-      (return (SQLite-Tx-Meta-Row {}) false "expected tx metadata attribute keyword or string"))
+      (return (SQLite-Tx-Meta-Row []) false "expected tx metadata attribute keyword or string"))
     (let [[value value-ok value-error] (serial-value-from-edn-node doc v-node)]
       (when (not value-ok)
-        (return (SQLite-Tx-Meta-Row {}) false value-error))
+        (return (SQLite-Tx-Meta-Row []) false value-error))
       (let [owned (value-owned value)]
         (delete-value-containers-shallow value)
-        (return (SQLite-Tx-Meta-Row {tx: tx a: (string-owned attr) v: owned}) true "")))))
+        (return (SQLite-Tx-Meta-Row :tx tx :a (string-owned attr) :v owned) true "")))))
 
 (defn delete-sqlite-tx-meta-rows [rows: [dynamic]SQLite-Tx-Meta-Row]
   (for [row rows]
@@ -542,45 +542,45 @@
           (return out true ""))))))
 
 (defn create-sqlite-conn [path: string] -> SQLite-Conn
-  (SQLite-Conn {path: (string-owned path)
-                conn: (create-conn)
-                resident-loaded: true
-                direct-attr-cache: (make [dynamic]SQLite-Direct-Attr-Info)}))
+  (SQLite-Conn :path (string-owned path)
+                :conn (create-conn)
+                :resident-loaded true
+                :direct-attr-cache (make [dynamic]SQLite-Direct-Attr-Info)))
 
 (defn open-sqlite-conn [path: string] -> [store: SQLite-Conn, ok: bool, error: string]
   (let [[handle handle-ok handle-error] (vev.sqlite-open-live-raw path)]
     (if handle-ok
-      (return (SQLite-Conn {path: (string-owned path)
-                            conn: (create-conn)
-                            handle: handle
-                            source-only: false
-                            resident-loaded: false
-                            direct-attr-cache: (make [dynamic]SQLite-Direct-Attr-Info)})
+      (return (SQLite-Conn :path (string-owned path)
+                            :conn (create-conn)
+                            :handle handle
+                            :source-only false
+                            :resident-loaded false
+                            :direct-attr-cache (make [dynamic]SQLite-Direct-Attr-Info))
               true
               "")
-      (return (SQLite-Conn {path: (string-owned path)
-                            conn: (create-conn)
-                            resident-loaded: true
-                            direct-attr-cache: (make [dynamic]SQLite-Direct-Attr-Info)})
+      (return (SQLite-Conn :path (string-owned path)
+                            :conn (create-conn)
+                            :resident-loaded true
+                            :direct-attr-cache (make [dynamic]SQLite-Direct-Attr-Info))
               false
               (string-owned handle-error)))))
 
 (defn open-sqlite-source-conn [path: string] -> [store: SQLite-Conn, ok: bool, error: string]
   (let [[handle handle-ok handle-error] (vev.sqlite-open-live-raw path)]
     (if handle-ok
-      (return (SQLite-Conn {path: (string-owned path)
-                            conn: (create-conn)
-                            handle: handle
-                            source-only: true
-                            resident-loaded: false
-                            direct-attr-cache: (make [dynamic]SQLite-Direct-Attr-Info)})
+      (return (SQLite-Conn :path (string-owned path)
+                            :conn (create-conn)
+                            :handle handle
+                            :source-only true
+                            :resident-loaded false
+                            :direct-attr-cache (make [dynamic]SQLite-Direct-Attr-Info))
               true
               "")
-      (return (SQLite-Conn {path: (string-owned path)
-                            conn: (create-conn)
-                            source-only: true
-                            resident-loaded: false
-                            direct-attr-cache: (make [dynamic]SQLite-Direct-Attr-Info)})
+      (return (SQLite-Conn :path (string-owned path)
+                            :conn (create-conn)
+                            :source-only true
+                            :resident-loaded false
+                            :direct-attr-cache (make [dynamic]SQLite-Direct-Attr-Info))
               false
               (string-owned handle-error)))))
 
@@ -636,7 +636,7 @@
 (defn sqlite-conn-drop-resident-cache! [store: ^SQLite-Conn]
   (when store^.shared-resident-loaded
     (delete-shared-conn store^.shared-resident)
-    (set! store^.shared-resident (Shared-Conn {}))
+    (set! store^.shared-resident (Shared-Conn []))
     (set! store^.shared-resident-loaded false))
   (delete store^.conn.listeners)
   (delete-resident-db store^.conn.db)
@@ -714,16 +714,16 @@
   (time.duration_microseconds (time.since start)))
 
 (defn reset-sqlite-direct-write-profile! [store: ^SQLite-Conn]
-  (set! store^.direct-write-profile (SQLite-Direct-Write-Profile {})))
+  (set! store^.direct-write-profile (SQLite-Direct-Write-Profile [])))
 
 (defn sqlite-direct-write-profile [store: ^SQLite-Conn] -> SQLite-Direct-Write-Profile
   store^.direct-write-profile)
 
 (defn reset-sqlite-tx-phase-profile! [store: ^SQLite-Conn]
-  (set! store^.tx-phase-profile (Tx-Phase-Profile {enabled: true})))
+  (set! store^.tx-phase-profile (Tx-Phase-Profile :enabled true)))
 
 (defn disable-sqlite-tx-phase-profile! [store: ^SQLite-Conn]
-  (set! store^.tx-phase-profile (Tx-Phase-Profile {})))
+  (set! store^.tx-phase-profile (Tx-Phase-Profile [])))
 
 (defn sqlite-tx-phase-profile [store: ^SQLite-Conn] -> Tx-Phase-Profile
   store^.tx-phase-profile)
@@ -1236,11 +1236,11 @@
 (defn sqlite-conn-datom-at-log-index [store: ^SQLite-Conn, log-index: int] -> [datom: Datom, ok: bool, error: string]
   (let [[text loaded-ok loaded-error] (vev.sqlite-load-datom-by-log-index-text-raw store^.handle (i64 log-index))]
     (when (not loaded-ok)
-      (return (Datom {}) false loaded-error))
+      (return (Datom []) false loaded-error))
     (defer (delete text))
     (let [[value read-error read-ok] (edn.try-read text)]
       (when (not read-ok)
-        (return (Datom {}) false read-error.message))
+        (return (Datom []) false read-error.message))
       (let [doc (edn-doc-from-data value)]
         (defer (delete doc.nodes))
         (datom-from-edn-node doc doc.root)))))
@@ -1586,8 +1586,8 @@
       (return total total-ok total-error))))
 
 (defn shared-store-db [conn: ^Shared-Conn] -> Store-DB
-  (Store-DB {kind: .Shared-Snapshot
-             shared-snapshot: (retain-shared-db-snapshot conn^.snapshot)}))
+  (Store-DB :kind .Shared-Snapshot
+             :shared-snapshot (retain-shared-db-snapshot conn^.snapshot)))
 
 (defn with-store-db-tx-data [snapshot: ^Store-DB, tx-data: []Tx-Data] -> Tx-Report
   (when (source-backed-store-db? snapshot)
@@ -1628,7 +1628,7 @@
           (set! report.db-after filtered-after)))
       (return report)))
   (when (source-backed-store-db? snapshot)
-    (let [report (Store-Tx-Report {})
+    (let [report (Store-Tx-Report [])
           used false
           ok false
           error ""]
@@ -1657,27 +1657,27 @@
   (let [resident-report (with-store-db-tx-data snapshot tx-data)
         before-datoms (clone-owned-datom-slice (slice resident-report.db-before.datoms 0))
         after-datoms (clone-owned-datom-slice (slice resident-report.db-after.datoms 0))
-        before (Store-DB {kind: .Resident
-                          resident: (build-db before-datoms)})
-        after (Store-DB {kind: .Resident
-                         resident: (build-db after-datoms)})
+        before (Store-DB :kind .Resident
+                          :resident (build-db before-datoms))
+        after (Store-DB :kind .Resident
+                         :resident (build-db after-datoms))
         tempids (clone-tempids-owned (slice resident-report.tempids 0))
-        report (Store-Tx-Report {ok: resident-report.ok
-                                 error: (string-owned resident-report.error)
-                                 db-before: before
-                                 db-after: after
-                                 tx-data: (clone-owned-datom-slice (slice resident-report.tx-data 0))
-                                 tx: resident-report.tx
-                                 tx-meta: (clone-tx-meta (slice resident-report.tx-meta 0))
-                                 tempids: tempids
-                                 source-append-metadata-known: false
-                                 source-new-entities-after-existing: false
-                                 source-eavt-append-mode: false
-                                 source-aevt-append-mode: false
-                                 source-avet-append-mode: false
-                                 source-vaet-append-mode: false
-                                 source-published-root-known: false
-                                 source-published-root: (SQLite-Durable-Published-Root {})})]
+        report (Store-Tx-Report :ok resident-report.ok
+                                 :error (string-owned resident-report.error)
+                                 :db-before before
+                                 :db-after after
+                                 :tx-data (clone-owned-datom-slice (slice resident-report.tx-data 0))
+                                 :tx resident-report.tx
+                                 :tx-meta (clone-tx-meta (slice resident-report.tx-meta 0))
+                                 :tempids tempids
+                                 :source-append-metadata-known false
+                                 :source-new-entities-after-existing false
+                                 :source-eavt-append-mode false
+                                 :source-aevt-append-mode false
+                                 :source-avet-append-mode false
+                                 :source-vaet-append-mode false
+                                 :source-published-root-known false
+                                 :source-published-root (SQLite-Durable-Published-Root []))]
     (delete-store-db-temp-tx-report resident-report)
     report))
 
@@ -1707,8 +1707,8 @@
     (let [[source-snapshot source-used source-ok _] (shared-db-snapshot-db-with-source-append-tx-data snapshot^.shared-snapshot tx-data)]
       (when source-ok
         (when source-used
-          (return (Store-DB {kind: .Shared-Snapshot
-                             shared-snapshot: source-snapshot}))))
+          (return (Store-DB :kind .Shared-Snapshot
+                             :shared-snapshot source-snapshot))))
       (let [[overlay-snapshot overlay-used overlay-ok _] (shared-store-db-with-source-overlay-tx-data snapshot^.shared-snapshot tx-data)]
         (when overlay-ok
           (when overlay-used
@@ -1754,12 +1754,12 @@
             (delete-store-db-temp-tx-report report)
             out))
       (if report.ok
-        (let [out (Store-DB {kind: .Resident
-                             resident: (clone-db report.db-after)})]
+        (let [out (Store-DB :kind .Resident
+                             :resident (clone-db report.db-after))]
           (delete-store-db-temp-tx-report report)
           out)
-        (let [out (Store-DB {kind: .Resident
-                             resident: (clone-db report.db-before)})]
+        (let [out (Store-DB :kind .Resident
+                             :resident (clone-db report.db-before))]
           (delete-store-db-temp-tx-report report)
           out)))))
 
@@ -1801,10 +1801,10 @@
       (retain-store-db snapshot^))))
 
 (defn store-tx-report-source-append-modes [report: Store-Tx-Report] -> SQLite-Index-Append-Modes
-  (SQLite-Index-Append-Modes {eavt: report.source-eavt-append-mode
-                              aevt: report.source-aevt-append-mode
-                              avet: report.source-avet-append-mode
-                              vaet: report.source-vaet-append-mode}))
+  (SQLite-Index-Append-Modes :eavt report.source-eavt-append-mode
+                              :aevt report.source-aevt-append-mode
+                              :avet report.source-avet-append-mode
+                              :vaet report.source-vaet-append-mode))
 
 (defn source-append-modes-for-store-report [source: DB-Read-Source, report: Store-Tx-Report, start-index: int] -> [modes: SQLite-Index-Append-Modes, ok: bool, error: string]
   (if report.source-append-metadata-known
@@ -1812,22 +1812,22 @@
     (source-append-index-modes-for-persist source (slice report.tx-data 0) start-index report.source-new-entities-after-existing)))
 
 (defn sqlite-committed-source-store-tx-report-with-before [path: string, before: Store-DB, tx: u64, tx-data: []Datom, tx-meta: []Tx-Meta, tempids: []Tempid, new-entities-after-existing: bool, published-root: SQLite-Durable-Published-Root] -> Store-Tx-Report
-  (Store-Tx-Report {ok: true
-                    error: ""
-                    db-before: (retain-store-db before)
-                    db-after: (sqlite-root-store-db path published-root)
-                    tx-data: (clone-owned-datom-slice tx-data)
-                    tx: tx
-                    tx-meta: (clone-tx-meta tx-meta)
-                    tempids: (store-report-tempids-with-current-tx tempids tx)
-                    source-append-metadata-known: true
-                    source-new-entities-after-existing: new-entities-after-existing
-                    source-eavt-append-mode: published-root.modes.eavt
-                    source-aevt-append-mode: published-root.modes.aevt
-                    source-avet-append-mode: published-root.modes.avet
-                    source-vaet-append-mode: published-root.modes.vaet
-                    source-published-root-known: true
-                    source-published-root: published-root}))
+  (Store-Tx-Report :ok true
+                    :error ""
+                    :db-before (retain-store-db before)
+                    :db-after (sqlite-root-store-db path published-root)
+                    :tx-data (clone-owned-datom-slice tx-data)
+                    :tx tx
+                    :tx-meta (clone-tx-meta tx-meta)
+                    :tempids (store-report-tempids-with-current-tx tempids tx)
+                    :source-append-metadata-known true
+                    :source-new-entities-after-existing new-entities-after-existing
+                    :source-eavt-append-mode published-root.modes.eavt
+                    :source-aevt-append-mode published-root.modes.aevt
+                    :source-avet-append-mode published-root.modes.avet
+                    :source-vaet-append-mode published-root.modes.vaet
+                    :source-published-root-known true
+                    :source-published-root published-root))
 
 (defn sqlite-committed-source-store-tx-report [path: string, tx: u64, tx-data: []Datom, tx-meta: []Tx-Meta, tempids: []Tempid, new-entities-after-existing: bool, published-root: SQLite-Durable-Published-Root] -> Store-Tx-Report
   (let [before (sqlite-root-store-db-at-basis-or-lazy path (- tx 1))
@@ -1839,22 +1839,22 @@
   [before: Store-DB, after: Store-DB, tx: u64, tx-data: []Datom,
    tx-meta: []Tx-Meta, tempids: []Tempid, new-entities-after-existing: bool]
   -> Store-Tx-Report
-  (Store-Tx-Report {ok: true
-                    error: ""
-                    db-before: (retain-store-db before)
-                    db-after: (retain-store-db after)
-                    tx-data: (clone-owned-datom-slice tx-data)
-                    tx: tx
-                    tx-meta: (clone-tx-meta tx-meta)
-                    tempids: (store-report-tempids-with-current-tx tempids tx)
-                    source-append-metadata-known: false
-                    source-new-entities-after-existing: new-entities-after-existing
-                    source-eavt-append-mode: false
-                    source-aevt-append-mode: false
-                    source-avet-append-mode: false
-                    source-vaet-append-mode: false
-                    source-published-root-known: false
-                    source-published-root: (SQLite-Durable-Published-Root {})}))
+  (Store-Tx-Report :ok true
+                    :error ""
+                    :db-before (retain-store-db before)
+                    :db-after (retain-store-db after)
+                    :tx-data (clone-owned-datom-slice tx-data)
+                    :tx tx
+                    :tx-meta (clone-tx-meta tx-meta)
+                    :tempids (store-report-tempids-with-current-tx tempids tx)
+                    :source-append-metadata-known false
+                    :source-new-entities-after-existing new-entities-after-existing
+                    :source-eavt-append-mode false
+                    :source-aevt-append-mode false
+                    :source-avet-append-mode false
+                    :source-vaet-append-mode false
+                    :source-published-root-known false
+                    :source-published-root (SQLite-Durable-Published-Root [])))
 
 (defn sqlite-commit-source-overlay-report-mode [store: ^SQLite-Conn, overlay-report: Store-Tx-Report, owns-sqlite-tx: bool] -> Store-Tx-Report
   (when (not overlay-report.ok)
@@ -1897,7 +1897,7 @@
         (return failed)))
     (let [source-view (db-read-source-index-view before-source .EAVT)
           start-index (db-index-view-count source-view)
-          out (Store-Tx-Report {})
+          out (Store-Tx-Report [])
           append-ok false
           append-error ""]
       (if use-log-tail
@@ -1987,11 +1987,11 @@
 (defn sqlite-open-db-snapshot [path: string, page-size: int] -> [snapshot: SQLite-DB-Snapshot, ok: bool, error: string]
   (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
     (when (not open-ok)
-      (return (SQLite-DB-Snapshot {}) false open-error))
+      (return (SQLite-DB-Snapshot []) false open-error))
     (let [[read-started read-ok read-error] (vev.sqlite-begin-query-read-raw handle)]
       (when (not read-ok)
         (vev.sqlite-close-live-raw handle)
-        (return (SQLite-DB-Snapshot {}) false read-error))
+        (return (SQLite-DB-Snapshot []) false read-error))
       (discard read-started))
     (let [[opened-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot-handle handle page-size)]
       (when (not snapshot-ok)
@@ -2005,11 +2005,11 @@
 (defn sqlite-open-db-snapshot-at-basis [path: string, basis-tx: u64, page-size: int] -> [snapshot: SQLite-DB-Snapshot, ok: bool, error: string]
   (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
     (when (not open-ok)
-      (return (SQLite-DB-Snapshot {}) false open-error))
+      (return (SQLite-DB-Snapshot []) false open-error))
     (let [[read-started read-ok read-error] (vev.sqlite-begin-query-read-raw handle)]
       (when (not read-ok)
         (vev.sqlite-close-live-raw handle)
-        (return (SQLite-DB-Snapshot {}) false read-error))
+        (return (SQLite-DB-Snapshot []) false read-error))
       (discard read-started))
     (let [[opened-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot-handle-at-basis handle basis-tx page-size)]
       (when (not snapshot-ok)
@@ -2026,7 +2026,7 @@
   (delete-sqlite-db-snapshot-datom-cache! snapshot)
   (delete-sqlite-db-snapshot-schema-ref-cache! snapshot)
   (delete snapshot^.path)
-  (set! snapshot^ (SQLite-DB-Snapshot {})))
+  (set! snapshot^ (SQLite-DB-Snapshot [])))
 
 (defn close-sqlite-db-snapshot [snapshot: SQLite-DB-Snapshot]
   (let [owned snapshot]
@@ -2086,7 +2086,7 @@
         (delete-shared-db-snapshot snapshot^.shared-snapshot)
         (delete-shared-datom-log snapshot^.overlay-log))
      (do))
-  (set! snapshot^ (Store-DB {})))
+  (set! snapshot^ (Store-DB [])))
 
 (defn close-store-db [snapshot: Store-DB]
   (let [owned snapshot]
@@ -2094,7 +2094,7 @@
 
 (defn close-store-entity! [entity: ^Store-Entity]
   (close-store-db! (addr entity^.db))
-  (set! entity^ (Store-Entity {})))
+  (set! entity^ (Store-Entity [])))
 
 (defn close-store-entity [entity: Store-Entity]
   (let [owned entity]
@@ -2135,8 +2135,8 @@
 (defn sqlite-conn-invalidate-current-root-cache! [store: ^SQLite-Conn]
   (when store^.current-root-cache-valid
     (release-sqlite-index-page-cache! store^.current-root-cache-page-cache)
-    (set! store^.current-root-cache-page-cache (SQLite-Index-Page-Cache {}))
-    (set! store^.current-root-cache-published (SQLite-Durable-Published-Root {}))
+    (set! store^.current-root-cache-page-cache (SQLite-Index-Page-Cache []))
+    (set! store^.current-root-cache-published (SQLite-Durable-Published-Root []))
     (set! store^.current-root-cache-basis 0)
     (set! store^.current-root-cache-valid false)))
 
@@ -2176,7 +2176,7 @@
       (return true)))
   false)
 
-(defstruct SQLite-Logical-Group-State {
+(defstruct SQLite-Logical-Group-State [
   datom-count: u64
   has-retractions: bool
   current-basis-tx: u64
@@ -2187,56 +2187,56 @@
   carried-before-published-root: SQLite-Durable-Published-Root
   carried-before-published-root-known: bool
   has-carried-before: bool
-})
+])
 
 (defn sqlite-logical-group-state-open [store: ^SQLite-Conn] -> [state: SQLite-Logical-Group-State, ok: bool, error: string]
   (let [[datom-count has-retractions log-ok log-error] (sqlite-conn-datom-count-and-retractions store)]
     (when (not log-ok)
-      (return (SQLite-Logical-Group-State {}) false log-error))
+      (return (SQLite-Logical-Group-State []) false log-error))
     (let [[basis basis-ok basis-error] (sqlite-conn-current-root-basis store)]
       (when (not basis-ok)
         (if (= basis-error "sqlite DB has no Vev index roots")
-          (return (SQLite-Logical-Group-State {datom-count: datom-count
-                                               has-retractions: has-retractions
-                                               current-basis-tx: 0
-                                               has-current-basis: false
-                                               current-published-root: (SQLite-Durable-Published-Root {})
-                                               current-published-root-known: false
-                                               carried-before-basis-tx: 0
-                                               carried-before-published-root: (SQLite-Durable-Published-Root {})
-                                               carried-before-published-root-known: false
-                                               has-carried-before: false})
+          (return (SQLite-Logical-Group-State :datom-count datom-count
+                                               :has-retractions has-retractions
+                                               :current-basis-tx 0
+                                               :has-current-basis false
+                                               :current-published-root (SQLite-Durable-Published-Root [])
+                                               :current-published-root-known false
+                                               :carried-before-basis-tx 0
+                                               :carried-before-published-root (SQLite-Durable-Published-Root [])
+                                               :carried-before-published-root-known false
+                                               :has-carried-before false)
                   true
                   "")
-          (return (SQLite-Logical-Group-State {}) false basis-error)))
+          (return (SQLite-Logical-Group-State []) false basis-error)))
       (let [[roots roots-ok roots-error] (sqlite-index-root-set-at-basis store^.handle basis)]
         (when (not roots-ok)
-          (return (SQLite-Logical-Group-State {}) false roots-error))
+          (return (SQLite-Logical-Group-State []) false roots-error))
         (let [[root-row-id row-ok row-error] (sqlite-index-root-row-id-at-basis store^.handle basis)]
           (when (not row-ok)
-            (return (SQLite-Logical-Group-State {}) false row-error))
-      (return (SQLite-Logical-Group-State {datom-count: datom-count
-                                           has-retractions: has-retractions
-                                           current-basis-tx: basis
-                                           has-current-basis: true
-                                           current-published-root: (SQLite-Durable-Published-Root {root-row-id: root-row-id
-                                                                                                  basis-tx: basis
-                                                                                                  roots: roots
-                                                                                                  modes: (SQLite-Index-Append-Modes {})})
-                                           current-published-root-known: true
-                                           carried-before-basis-tx: 0
-                                           carried-before-published-root: (SQLite-Durable-Published-Root {})
-                                           carried-before-published-root-known: false
-                                           has-carried-before: false})
+            (return (SQLite-Logical-Group-State []) false row-error))
+      (return (SQLite-Logical-Group-State :datom-count datom-count
+                                           :has-retractions has-retractions
+                                           :current-basis-tx basis
+                                           :has-current-basis true
+                                           :current-published-root (SQLite-Durable-Published-Root :root-row-id root-row-id
+                                                                                                  :basis-tx basis
+                                                                                                  :roots roots
+                                                                                                  :modes (SQLite-Index-Append-Modes []))
+                                           :current-published-root-known true
+                                           :carried-before-basis-tx 0
+                                           :carried-before-published-root (SQLite-Durable-Published-Root [])
+                                           :carried-before-published-root-known false
+                                           :has-carried-before false)
               true
               ""))))))
 
 (defn sqlite-logical-group-state-close! [state: ^SQLite-Logical-Group-State]
   (set! state^.current-published-root-known false)
-  (set! state^.current-published-root (SQLite-Durable-Published-Root {}))
+  (set! state^.current-published-root (SQLite-Durable-Published-Root []))
   (set! state^.has-carried-before false)
   (set! state^.carried-before-published-root-known false)
-  (set! state^.carried-before-published-root (SQLite-Durable-Published-Root {}))
+  (set! state^.carried-before-published-root (SQLite-Durable-Published-Root []))
   (set! state^.carried-before-basis-tx 0))
 
 (defn sqlite-logical-group-state-advance-after-report! [state: ^SQLite-Logical-Group-State, report: Store-Tx-Report]
@@ -2252,7 +2252,7 @@
       (set! state^.carried-before-published-root report.source-published-root)
       (set! state^.carried-before-published-root-known true))
     (do
-      (set! state^.carried-before-published-root (SQLite-Durable-Published-Root {}))
+      (set! state^.carried-before-published-root (SQLite-Durable-Published-Root []))
       (set! state^.carried-before-published-root-known false)))
   (set! state^.has-carried-before true)
   (return true ""))
@@ -2267,9 +2267,9 @@
                                           has-retractions)]
     (set! store^.direct-write-profile.open-before-us (+ store^.direct-write-profile.open-before-us (sqlite-profile-elapsed-us open-before-start)))
     (when (not opened-ok)
-      (return (Store-DB {}) false opened-error))
+      (return (Store-DB []) false opened-error))
     (set! opened.path (string-owned store^.path))
-    (return (Store-DB {kind: .SQLite-Snapshot sqlite-snapshot: opened}) true "")))
+    (return (Store-DB :kind .SQLite-Snapshot :sqlite-snapshot opened) true "")))
 
 (defn sqlite-logical-group-state-store-db-at-published-root [store: ^SQLite-Conn, published: SQLite-Durable-Published-Root, datom-count: u64, has-retractions: bool] -> [snapshot: Store-DB, ok: bool, error: string]
   (let [open-before-start (time.now)
@@ -2281,13 +2281,13 @@
                                           has-retractions)]
     (set! store^.direct-write-profile.open-before-us (+ store^.direct-write-profile.open-before-us (sqlite-profile-elapsed-us open-before-start)))
     (when (not opened-ok)
-      (return (Store-DB {}) false opened-error))
+      (return (Store-DB []) false opened-error))
     (set! opened.path (string-owned store^.path))
-    (return (Store-DB {kind: .SQLite-Snapshot sqlite-snapshot: opened}) true "")))
+    (return (Store-DB :kind .SQLite-Snapshot :sqlite-snapshot opened) true "")))
 
 (defn sqlite-logical-group-state-current-before-store-db [store: ^SQLite-Conn, state: ^SQLite-Logical-Group-State] -> [snapshot: Store-DB, ok: bool, error: string]
   (when (not state^.has-current-basis)
-    (return (Store-DB {}) false "logical group state has no current basis"))
+    (return (Store-DB []) false "logical group state has no current basis"))
   (if state^.current-published-root-known
     (sqlite-logical-group-state-store-db-at-published-root
       store
@@ -2302,7 +2302,7 @@
 
 (defn sqlite-logical-group-state-take-carried-before-store-db! [store: ^SQLite-Conn, state: ^SQLite-Logical-Group-State] -> [snapshot: Store-DB, ok: bool, error: string]
   (when (not state^.has-carried-before)
-    (return (Store-DB {}) false "logical group state has no carried before basis"))
+    (return (Store-DB []) false "logical group state has no carried before basis"))
   (let [basis-tx state^.carried-before-basis-tx
         datom-count state^.datom-count
         has-retractions state^.has-retractions
@@ -2568,9 +2568,9 @@
 
 (defn transact-sqlite-store-report-tx-data-with-source-string-fns-mode [store: ^SQLite-Conn, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String, owns-sqlite-tx: bool] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (when store^.source-only
-    (return (Store-Tx-Report {}) false false "SQLite source connection is read-only; open a writable SQLite connection to transact"))
+    (return (Store-Tx-Report []) false false "SQLite source connection is read-only; open a writable SQLite connection to transact"))
   (when store^.resident-loaded
-    (return (Store-Tx-Report {}) false true ""))
+    (return (Store-Tx-Report []) false true ""))
   (let [[snapshot snapshot-ok snapshot-error] (sqlite-store-db-current-root-open-cached store)]
     (when (not snapshot-ok)
       (if (or (= snapshot-error "sqlite DB has no Vev index roots")
@@ -2582,7 +2582,7 @@
                   (addr store^.tx-phase-profile))]
           (close-store-db before)
           (return (sqlite-commit-initial-source-overlay-report-mode store overlay-report owns-sqlite-tx) true true ""))
-        (return (Store-Tx-Report {}) false false snapshot-error)))
+        (return (Store-Tx-Report []) false false snapshot-error)))
     (let [report-before (retain-store-db snapshot)
           overlay-report
             (with-store-db-report-tx-data-with-source-string-fns
@@ -2596,19 +2596,19 @@
 (defn- transact-sqlite-store-report-tx-data-with-source-string-fns-before-mode [store: ^SQLite-Conn, before: Store-DB, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String, owns-sqlite-tx: bool] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (when store^.source-only
     (close-store-db before)
-    (return (Store-Tx-Report {}) false false "SQLite source connection is read-only; open a writable SQLite connection to transact"))
+    (return (Store-Tx-Report []) false false "SQLite source connection is read-only; open a writable SQLite connection to transact"))
   (when store^.resident-loaded
     (close-store-db before)
-    (return (Store-Tx-Report {}) false true ""))
+    (return (Store-Tx-Report []) false true ""))
   (let [snapshot before
         [source source-ok source-error] (store-db-read-source (addr snapshot))]
     (when (not source-ok)
       (close-store-db snapshot)
-      (return (Store-Tx-Report {}) false false source-error))
+      (return (Store-Tx-Report []) false false source-error))
     (let [[state-ok state-error] (sqlite-conn-ensure-write-state-cache! store source)]
       (when (not state-ok)
         (close-store-db snapshot)
-        (return (Store-Tx-Report {}) false false state-error)))
+        (return (Store-Tx-Report []) false false state-error)))
     (let [overlay-report
             (with-store-db-report-tx-data-with-source-string-fns-state
               (addr snapshot) source (addr store^.write-state-cache)
@@ -2657,22 +2657,22 @@
     (transact-sqlite-store-report-tx-data-with-source-string-fns store (slice prepared.tx-data 0) registry)))
 
 (defn store-from-sqlite-conn [store: SQLite-Conn] -> Store-Conn
-  (Store-Conn {kind: .SQLite
-               sqlite: store
-               listeners: (make [dynamic]Store-Tx-Listener)
-               auto-maintenance-enabled: true
-               auto-maintenance-steps: sqlite-index-auto-maintenance-steps
-               auto-maintenance-target: sqlite-index-auto-maintenance-target
-               auto-maintenance-trigger: sqlite-index-auto-maintenance-trigger}))
+  (Store-Conn :kind .SQLite
+               :sqlite store
+               :listeners (make [dynamic]Store-Tx-Listener)
+               :auto-maintenance-enabled true
+               :auto-maintenance-steps sqlite-index-auto-maintenance-steps
+               :auto-maintenance-target sqlite-index-auto-maintenance-target
+               :auto-maintenance-trigger sqlite-index-auto-maintenance-trigger))
 
 (defn create-shared-store [chunk-size: int] -> Store-Conn
-  (Store-Conn {kind: .Shared
-               shared: (create-shared-conn chunk-size)
-               listeners: (make [dynamic]Store-Tx-Listener)
-               auto-maintenance-enabled: false
-               auto-maintenance-steps: 0
-               auto-maintenance-target: 0
-               auto-maintenance-trigger: 1}))
+  (Store-Conn :kind .Shared
+               :shared (create-shared-conn chunk-size)
+               :listeners (make [dynamic]Store-Tx-Listener)
+               :auto-maintenance-enabled false
+               :auto-maintenance-steps 0
+               :auto-maintenance-target 0
+               :auto-maintenance-trigger 1))
 
 (defn open-store [uri: string] -> [store: Store-Conn, ok: bool, error: string]
   (let [[sqlite sqlite-ok sqlite-error] (open-sqlite-conn uri)
@@ -2744,7 +2744,7 @@
                 (return (empty-shared-store-db-for-sqlite-bootstrap) true ""))
               (return snapshot snapshot-ok snapshot-error))
     .Shared (return (shared-store-db (addr store^.shared)) true "")
-     (return (Store-DB {}) false "store is not open")))
+     (return (Store-DB []) false "store is not open")))
 
 (defn store-current-root-page-cache-count [store: ^Store-Conn] -> int
   (case store^.kind
@@ -2787,7 +2787,7 @@
 (defn store-direct-write-profile [store: ^Store-Conn] -> SQLite-Direct-Write-Profile
   (case store^.kind
     .SQLite (sqlite-direct-write-profile (addr store^.sqlite))
-     (SQLite-Direct-Write-Profile {})))
+     (SQLite-Direct-Write-Profile [])))
 
 (defn reset-store-tx-phase-profile! [store: ^Store-Conn]
   (case store^.kind
@@ -2802,7 +2802,7 @@
 (defn store-tx-phase-profile [store: ^Store-Conn] -> Tx-Phase-Profile
   (case store^.kind
     .SQLite (sqlite-tx-phase-profile (addr store^.sqlite))
-     (Tx-Phase-Profile {})))
+     (Tx-Phase-Profile [])))
 
 (defn store-latest-index-merge-run-count [store: ^Store-Conn, index-name: string] -> [run-count: int, is-merge: bool, ok: bool, error: string]
   (case store^.kind
@@ -3014,7 +3014,7 @@
       (case store^.kind
         .SQLite (return (failed-sqlite-store-tx-report (addr store^.sqlite) "transaction fn not registered"))
         .Shared (return (failed-store-tx-report (shared-store-db (addr store^.shared)) "transaction fn not registered"))
-        (return (failed-store-tx-report (Store-DB {}) "store is not open")))))
+        (return (failed-store-tx-report (Store-DB []) "store is not open")))))
   (case store^.kind
     .SQLite
       (let [direct-start (time.now)
@@ -3036,43 +3036,43 @@
       (let [report (shared-conn-transact-report (addr store^.shared) tx-data)]
         (when report.ok
           (let [tempids (clone-tempids-owned (slice report.tempids 0))]
-            (let [out (Store-Tx-Report {ok: true
-                                         error: ""
-                                         db-before: (Store-DB {kind: .Shared-Snapshot shared-snapshot: report.db-before})
-                                         db-after: (Store-DB {kind: .Shared-Snapshot shared-snapshot: report.db-after})
-                                         tx-data: (clone-owned-datom-slice (slice report.tx-data 0))
-                                         tx: report.tx
-                                         tx-meta: (clone-tx-meta (slice report.tx-meta 0))
-                                         tempids: tempids
-                                         source-append-metadata-known: false
-                                         source-new-entities-after-existing: false
-                                         source-eavt-append-mode: false
-                                         source-aevt-append-mode: false
-                                         source-avet-append-mode: false
-                                         source-vaet-append-mode: false
-                                         source-published-root-known: false
-                                         source-published-root: (SQLite-Durable-Published-Root {})})]
+            (let [out (Store-Tx-Report :ok true
+                                         :error ""
+                                         :db-before (Store-DB :kind .Shared-Snapshot :shared-snapshot report.db-before)
+                                         :db-after (Store-DB :kind .Shared-Snapshot :shared-snapshot report.db-after)
+                                         :tx-data (clone-owned-datom-slice (slice report.tx-data 0))
+                                         :tx report.tx
+                                         :tx-meta (clone-tx-meta (slice report.tx-meta 0))
+                                         :tempids tempids
+                                         :source-append-metadata-known false
+                                         :source-new-entities-after-existing false
+                                         :source-eavt-append-mode false
+                                         :source-aevt-append-mode false
+                                         :source-avet-append-mode false
+                                         :source-vaet-append-mode false
+                                         :source-published-root-known false
+                                         :source-published-root (SQLite-Durable-Published-Root []))]
               (notify-store-report-listeners! store out)
               (return out))))
-        (let [out (Store-Tx-Report {ok: false
-                                    error: report.error
-                                    db-before: (Store-DB {kind: .Shared-Snapshot shared-snapshot: report.db-before})
-                                    db-after: (Store-DB {kind: .Shared-Snapshot shared-snapshot: report.db-after})
-                                    tx-data: (make [dynamic]Datom)
-                                    tx: 0
-                                    tx-meta: (make [dynamic]Tx-Meta)
-                                    tempids: (make [dynamic]Tempid)
-                                    source-append-metadata-known: false
-                                    source-new-entities-after-existing: false
-                                    source-eavt-append-mode: false
-                                    source-aevt-append-mode: false
-                                    source-avet-append-mode: false
-                                    source-vaet-append-mode: false
-                                    source-published-root-known: false
-                                    source-published-root: (SQLite-Durable-Published-Root {})})]
+        (let [out (Store-Tx-Report :ok false
+                                    :error report.error
+                                    :db-before (Store-DB :kind .Shared-Snapshot :shared-snapshot report.db-before)
+                                    :db-after (Store-DB :kind .Shared-Snapshot :shared-snapshot report.db-after)
+                                    :tx-data (make [dynamic]Datom)
+                                    :tx 0
+                                    :tx-meta (make [dynamic]Tx-Meta)
+                                    :tempids (make [dynamic]Tempid)
+                                    :source-append-metadata-known false
+                                    :source-new-entities-after-existing false
+                                    :source-eavt-append-mode false
+                                    :source-aevt-append-mode false
+                                    :source-avet-append-mode false
+                                    :source-vaet-append-mode false
+                                    :source-published-root-known false
+                                    :source-published-root (SQLite-Durable-Published-Root []))]
           (notify-store-report-listeners! store out)
           out))
-     (failed-store-tx-report (Store-DB {}) "store is not open")))
+     (failed-store-tx-report (Store-DB []) "store is not open")))
 
 (defn transact-store-report-tx-data-groups [store: ^Store-Conn, groups: []Store-Tx-Data-Group] -> Store-Tx-Report
   (let [tx-data (flatten-store-tx-data-groups groups) :defer]
@@ -3104,7 +3104,7 @@
     ;; Capture the exact committed checkpoint + novelty value before taking the
     ;; writer lock. Each group retains its immutable db-after as the next
     ;; group's basis, so exact reports do not require internal durable roots.
-    (let [initial-before (Store-DB {})
+    (let [initial-before (Store-DB [])
           initial-ok false
           initial-error ""
           initial-is-empty-root false
@@ -3150,11 +3150,11 @@
     (let [next-before initial-before
           has-next-before has-initial]
       (for [group groups]
-        (let [report (Store-Tx-Report {})
+        (let [report (Store-Tx-Report [])
               direct-used false
               direct-ok false
               direct-error ""
-              next-basis-override (Store-DB {})
+              next-basis-override (Store-DB [])
               has-next-basis-override false
               group-uses-source-fns (and use-source-fns (tx-data-has-source-fn-call? (slice group.tx-data 0)))]
         (if has-next-before
@@ -3175,7 +3175,7 @@
                 (set! direct-ok next-ok)
                 (set! direct-error next-error)))
             ;; Both before-mode helpers consume this owned basis.
-            (set! next-before (Store-DB {}))
+            (set! next-before (Store-DB []))
             (set! has-next-before false))
           ;; Empty-store bootstrap publishes the first broad root. Preserve the
           ;; independently owned shared db-after as the next uncommitted basis;
@@ -3392,40 +3392,40 @@
     (if report.ok
       (let [after-snapshot (retain-shared-db-snapshot store^.shared.snapshot)
             tempids (clone-tempids-owned (slice report.tempids 0))
-            out (Store-Tx-Report {ok: true
-                                  error: ""
-                                  db-before: (Store-DB {kind: .Shared-Snapshot shared-snapshot: before-snapshot})
-                                  db-after: (Store-DB {kind: .Shared-Snapshot shared-snapshot: after-snapshot})
-                                  tx-data: (clone-owned-datom-slice (slice report.tx-data 0))
-                                  tx: report.tx
-                                  tx-meta: (clone-tx-meta (slice report.tx-meta 0))
-                                  tempids: tempids
-                                  source-append-metadata-known: false
-                                  source-new-entities-after-existing: false
-                                  source-eavt-append-mode: false
-                                  source-aevt-append-mode: false
-                                  source-avet-append-mode: false
-                                  source-vaet-append-mode: false
-                                  source-published-root-known: false
-                                  source-published-root: (SQLite-Durable-Published-Root {})})]
+            out (Store-Tx-Report :ok true
+                                  :error ""
+                                  :db-before (Store-DB :kind .Shared-Snapshot :shared-snapshot before-snapshot)
+                                  :db-after (Store-DB :kind .Shared-Snapshot :shared-snapshot after-snapshot)
+                                  :tx-data (clone-owned-datom-slice (slice report.tx-data 0))
+                                  :tx report.tx
+                                  :tx-meta (clone-tx-meta (slice report.tx-meta 0))
+                                  :tempids tempids
+                                  :source-append-metadata-known false
+                                  :source-new-entities-after-existing false
+                                  :source-eavt-append-mode false
+                                  :source-aevt-append-mode false
+                                  :source-avet-append-mode false
+                                  :source-vaet-append-mode false
+                                  :source-published-root-known false
+                                  :source-published-root (SQLite-Durable-Published-Root []))]
         (delete-shared-store-source-temp-report report)
         out)
-      (let [out (Store-Tx-Report {ok: false
-                                  error: report.error
-                                  db-before: (Store-DB {kind: .Shared-Snapshot shared-snapshot: before-snapshot})
-                                  db-after: (Store-DB {kind: .Shared-Snapshot shared-snapshot: (retain-shared-db-snapshot before-snapshot)})
-                                  tx-data: (make [dynamic]Datom)
-                                  tx: 0
-                                  tx-meta: (make [dynamic]Tx-Meta)
-                                  tempids: (make [dynamic]Tempid)
-                                  source-append-metadata-known: false
-                                  source-new-entities-after-existing: false
-                                  source-eavt-append-mode: false
-                                  source-aevt-append-mode: false
-                                  source-avet-append-mode: false
-                                  source-vaet-append-mode: false
-                                  source-published-root-known: false
-                                  source-published-root: (SQLite-Durable-Published-Root {})})]
+      (let [out (Store-Tx-Report :ok false
+                                  :error report.error
+                                  :db-before (Store-DB :kind .Shared-Snapshot :shared-snapshot before-snapshot)
+                                  :db-after (Store-DB :kind .Shared-Snapshot :shared-snapshot (retain-shared-db-snapshot before-snapshot))
+                                  :tx-data (make [dynamic]Datom)
+                                  :tx 0
+                                  :tx-meta (make [dynamic]Tx-Meta)
+                                  :tempids (make [dynamic]Tempid)
+                                  :source-append-metadata-known false
+                                  :source-new-entities-after-existing false
+                                  :source-eavt-append-mode false
+                                  :source-aevt-append-mode false
+                                  :source-avet-append-mode false
+                                  :source-vaet-append-mode false
+                                  :source-published-root-known false
+                                  :source-published-root (SQLite-Durable-Published-Root []))]
         (delete-shared-store-source-temp-report report)
         out))))
 
@@ -3451,7 +3451,7 @@
       (let [report (shared-store-report-tx-data-with-source-string-fns store tx-data registry)]
         (notify-store-report-listeners! store report)
         report)
-     (failed-store-tx-report (Store-DB {}) "store is not open")))
+     (failed-store-tx-report (Store-DB []) "store is not open")))
 
 (defn transact-store-report-text [store: ^Store-Conn, text: string] -> Store-Tx-Report
   (case store^.kind
@@ -3469,7 +3469,7 @@
         (when (not prepared.ok)
           (return (failed-store-tx-report (shared-store-db (addr store^.shared)) prepared.error)))
         (transact-store-report-tx-data store (slice prepared.tx-data 0)))
-     (failed-store-tx-report (Store-DB {}) "store is not open")))
+     (failed-store-tx-report (Store-DB []) "store is not open")))
 
 (defn transact-store-report-text-with-source-string-fns [store: ^Store-Conn, text: string, registry: []Tx-Fn-Source-String] -> Store-Tx-Report
   (case store^.kind
@@ -3487,4 +3487,4 @@
         (when (not prepared.ok)
           (return (failed-store-tx-report (shared-store-db (addr store^.shared)) prepared.error)))
         (transact-store-report-tx-data-with-source-string-fns store (slice prepared.tx-data 0) registry))
-     (failed-store-tx-report (Store-DB {}) "store is not open")))
+     (failed-store-tx-report (Store-DB []) "store is not open")))

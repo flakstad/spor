@@ -149,7 +149,7 @@
 (defn parse-index-entries-page-text-window [text: string, base-offset: i64, offset: int, limit: int] -> [entries: [dynamic]int, ok: bool, error: string]
   (parse-index-entries-text-window text (- offset (int base-offset)) limit))
 
-(defstruct SQLite-Index-Write-Stmts {
+(defstruct SQLite-Index-Write-Stmts [
   chunk-stmt: rawptr
   chunk-entry-stmt: rawptr
   edge-stmt: rawptr
@@ -162,34 +162,34 @@
   manifest-run-stmt: rawptr
   manifest-run-bounds-stmt: rawptr
   manifest-attr-range-stmt: rawptr
-})
+])
 
 (defn sqlite-index-write-stmts-open [handle: rawptr] -> [stmts: SQLite-Index-Write-Stmts, ok: bool, error: string]
   (let [[chunk-stmt chunk-ok chunk-error] (vev.sqlite-prepare-insert-index-chunk-raw handle)]
     (when (not chunk-ok)
-      (return (SQLite-Index-Write-Stmts {}) false chunk-error))
+      (return (SQLite-Index-Write-Stmts []) false chunk-error))
     (let [[chunk-entry-stmt chunk-entry-ok chunk-entry-error] (vev.sqlite-prepare-insert-index-chunk-entry-raw handle)]
       (when (not chunk-entry-ok)
         (vev.sqlite-finalize-stmt-raw chunk-stmt)
-        (return (SQLite-Index-Write-Stmts {}) false chunk-entry-error))
+        (return (SQLite-Index-Write-Stmts []) false chunk-entry-error))
     (let [[edge-stmt edge-ok edge-error] (vev.sqlite-prepare-insert-index-chunk-edge-raw handle)]
       (when (not edge-ok)
         (vev.sqlite-finalize-stmt-raw chunk-stmt)
         (vev.sqlite-finalize-stmt-raw chunk-entry-stmt)
-        (return (SQLite-Index-Write-Stmts {}) false edge-error))
+        (return (SQLite-Index-Write-Stmts []) false edge-error))
       (let [[copy-edges-stmt copy-edges-ok copy-edges-error] (vev.sqlite-prepare-copy-index-chunk-edges-raw handle)]
         (when (not copy-edges-ok)
           (vev.sqlite-finalize-stmt-raw chunk-stmt)
           (vev.sqlite-finalize-stmt-raw chunk-entry-stmt)
           (vev.sqlite-finalize-stmt-raw edge-stmt)
-          (return (SQLite-Index-Write-Stmts {}) false copy-edges-error))
+          (return (SQLite-Index-Write-Stmts []) false copy-edges-error))
         (let [[copy-before-stmt copy-before-ok copy-before-error] (vev.sqlite-prepare-copy-index-chunk-edges-before-ordinal-raw handle)]
           (when (not copy-before-ok)
             (vev.sqlite-finalize-stmt-raw chunk-stmt)
             (vev.sqlite-finalize-stmt-raw chunk-entry-stmt)
             (vev.sqlite-finalize-stmt-raw edge-stmt)
             (vev.sqlite-finalize-stmt-raw copy-edges-stmt)
-            (return (SQLite-Index-Write-Stmts {}) false copy-before-error))
+            (return (SQLite-Index-Write-Stmts []) false copy-before-error))
           (let [[root-stmt root-ok root-error] (vev.sqlite-prepare-insert-index-root-with-manifests-raw handle)]
             (when (not root-ok)
               (vev.sqlite-finalize-stmt-raw chunk-stmt)
@@ -197,7 +197,7 @@
               (vev.sqlite-finalize-stmt-raw edge-stmt)
               (vev.sqlite-finalize-stmt-raw copy-edges-stmt)
               (vev.sqlite-finalize-stmt-raw copy-before-stmt)
-              (return (SQLite-Index-Write-Stmts {}) false root-error))
+              (return (SQLite-Index-Write-Stmts []) false root-error))
             (let [[root-copy-stmt root-copy-ok root-copy-error] (vev.sqlite-prepare-insert-index-root-copy-latest-raw handle)]
               (when (not root-copy-ok)
                 (vev.sqlite-finalize-stmt-raw chunk-stmt)
@@ -206,7 +206,7 @@
                 (vev.sqlite-finalize-stmt-raw copy-edges-stmt)
                 (vev.sqlite-finalize-stmt-raw copy-before-stmt)
                 (vev.sqlite-finalize-stmt-raw root-stmt)
-                (return (SQLite-Index-Write-Stmts {}) false root-copy-error))
+                (return (SQLite-Index-Write-Stmts []) false root-copy-error))
             (let [[root-page-stmt root-page-ok root-page-error] (vev.sqlite-prepare-insert-index-root-page-raw handle)]
               (when (not root-page-ok)
                 (vev.sqlite-finalize-stmt-raw chunk-stmt)
@@ -216,7 +216,7 @@
                 (vev.sqlite-finalize-stmt-raw copy-before-stmt)
                 (vev.sqlite-finalize-stmt-raw root-stmt)
                 (vev.sqlite-finalize-stmt-raw root-copy-stmt)
-                (return (SQLite-Index-Write-Stmts {}) false root-page-error))
+                (return (SQLite-Index-Write-Stmts []) false root-page-error))
             (let [[manifest-stmt manifest-ok manifest-error] (vev.sqlite-prepare-insert-index-run-manifest-with-parent-raw handle)]
               (when (not manifest-ok)
                 (vev.sqlite-finalize-stmt-raw chunk-stmt)
@@ -227,7 +227,7 @@
                 (vev.sqlite-finalize-stmt-raw root-stmt)
                 (vev.sqlite-finalize-stmt-raw root-copy-stmt)
                 (vev.sqlite-finalize-stmt-raw root-page-stmt)
-                (return (SQLite-Index-Write-Stmts {}) false manifest-error))
+                (return (SQLite-Index-Write-Stmts []) false manifest-error))
               (let [[manifest-run-stmt manifest-run-ok manifest-run-error] (vev.sqlite-prepare-insert-index-run-manifest-run-raw handle)]
                 (when (not manifest-run-ok)
                   (vev.sqlite-finalize-stmt-raw chunk-stmt)
@@ -239,7 +239,7 @@
                   (vev.sqlite-finalize-stmt-raw root-copy-stmt)
                   (vev.sqlite-finalize-stmt-raw root-page-stmt)
                   (vev.sqlite-finalize-stmt-raw manifest-stmt)
-                  (return (SQLite-Index-Write-Stmts {}) false manifest-run-error))
+                  (return (SQLite-Index-Write-Stmts []) false manifest-run-error))
                 (let [[manifest-run-bounds-stmt manifest-run-bounds-ok manifest-run-bounds-error] (vev.sqlite-prepare-insert-index-run-manifest-run-bounds-raw handle)]
                   (when (not manifest-run-bounds-ok)
                     (vev.sqlite-finalize-stmt-raw chunk-stmt)
@@ -252,7 +252,7 @@
                     (vev.sqlite-finalize-stmt-raw root-page-stmt)
                     (vev.sqlite-finalize-stmt-raw manifest-stmt)
                     (vev.sqlite-finalize-stmt-raw manifest-run-stmt)
-                    (return (SQLite-Index-Write-Stmts {}) false manifest-run-bounds-error))
+                    (return (SQLite-Index-Write-Stmts []) false manifest-run-bounds-error))
                 (let [[attr-range-stmt attr-range-ok attr-range-error] (vev.sqlite-prepare-insert-index-run-manifest-attr-range-raw handle)]
                   (when (not attr-range-ok)
                     (vev.sqlite-finalize-stmt-raw chunk-stmt)
@@ -266,19 +266,19 @@
                     (vev.sqlite-finalize-stmt-raw manifest-stmt)
                     (vev.sqlite-finalize-stmt-raw manifest-run-stmt)
                     (vev.sqlite-finalize-stmt-raw manifest-run-bounds-stmt)
-                    (return (SQLite-Index-Write-Stmts {}) false attr-range-error))
-                  (return (SQLite-Index-Write-Stmts {chunk-stmt: chunk-stmt
-                                                     chunk-entry-stmt: chunk-entry-stmt
-                                                     edge-stmt: edge-stmt
-                                                     copy-edges-stmt: copy-edges-stmt
-                                                     copy-edges-before-stmt: copy-before-stmt
-                                                     root-stmt: root-stmt
-                                                     root-copy-stmt: root-copy-stmt
-                                                     root-page-stmt: root-page-stmt
-                                                     manifest-stmt: manifest-stmt
-                                                     manifest-run-stmt: manifest-run-stmt
-                                                     manifest-run-bounds-stmt: manifest-run-bounds-stmt
-                                                     manifest-attr-range-stmt: attr-range-stmt})
+                    (return (SQLite-Index-Write-Stmts []) false attr-range-error))
+                  (return (SQLite-Index-Write-Stmts :chunk-stmt chunk-stmt
+                                                     :chunk-entry-stmt chunk-entry-stmt
+                                                     :edge-stmt edge-stmt
+                                                     :copy-edges-stmt copy-edges-stmt
+                                                     :copy-edges-before-stmt copy-before-stmt
+                                                     :root-stmt root-stmt
+                                                     :root-copy-stmt root-copy-stmt
+                                                     :root-page-stmt root-page-stmt
+                                                     :manifest-stmt manifest-stmt
+                                                     :manifest-run-stmt manifest-run-stmt
+                                                     :manifest-run-bounds-stmt manifest-run-bounds-stmt
+                                                     :manifest-attr-range-stmt attr-range-stmt)
                           true
                           ""))))))))))))))
 
@@ -296,45 +296,45 @@
   (vev.sqlite-finalize-stmt-raw stmts.manifest-run-bounds-stmt)
   (vev.sqlite-finalize-stmt-raw stmts.manifest-attr-range-stmt))
 
-(defstruct SQLite-Direct-Write-Stmts {
+(defstruct SQLite-Direct-Write-Stmts [
   tx-stmt: rawptr
   datom-stmt: rawptr
   fulltext-stmt: rawptr
   text-term-stmt: rawptr
   tx-meta-stmt: rawptr
-})
+])
 
 (defn sqlite-direct-write-stmts-open [handle: rawptr] -> [stmts: SQLite-Direct-Write-Stmts, ok: bool, error: string]
   (let [[tx-stmt tx-ok tx-error] (vev.sqlite-prepare-insert-tx-raw handle)]
     (when (not tx-ok)
-      (return (SQLite-Direct-Write-Stmts {}) false tx-error))
+      (return (SQLite-Direct-Write-Stmts []) false tx-error))
     (let [[datom-stmt datom-ok datom-error] (vev.sqlite-prepare-insert-datom-raw handle)]
       (when (not datom-ok)
         (vev.sqlite-finalize-stmt-raw tx-stmt)
-        (return (SQLite-Direct-Write-Stmts {}) false datom-error))
+        (return (SQLite-Direct-Write-Stmts []) false datom-error))
       (let [[fulltext-stmt fulltext-ok fulltext-error] (vev.sqlite-prepare-insert-fulltext-datom-raw handle)]
         (when (not fulltext-ok)
           (vev.sqlite-finalize-stmt-raw tx-stmt)
           (vev.sqlite-finalize-stmt-raw datom-stmt)
-          (return (SQLite-Direct-Write-Stmts {}) false fulltext-error))
+          (return (SQLite-Direct-Write-Stmts []) false fulltext-error))
         (let [[text-term-stmt text-term-ok text-term-error] (vev.sqlite-prepare-insert-text-term-raw handle)]
           (when (not text-term-ok)
             (vev.sqlite-finalize-stmt-raw tx-stmt)
             (vev.sqlite-finalize-stmt-raw datom-stmt)
             (vev.sqlite-finalize-stmt-raw fulltext-stmt)
-            (return (SQLite-Direct-Write-Stmts {}) false text-term-error))
+            (return (SQLite-Direct-Write-Stmts []) false text-term-error))
           (let [[tx-meta-stmt tx-meta-ok tx-meta-error] (vev.sqlite-prepare-insert-tx-meta-raw handle)]
             (when (not tx-meta-ok)
               (vev.sqlite-finalize-stmt-raw tx-stmt)
               (vev.sqlite-finalize-stmt-raw datom-stmt)
               (vev.sqlite-finalize-stmt-raw fulltext-stmt)
               (vev.sqlite-finalize-stmt-raw text-term-stmt)
-              (return (SQLite-Direct-Write-Stmts {}) false tx-meta-error))
-            (return (SQLite-Direct-Write-Stmts {tx-stmt: tx-stmt
-                                                datom-stmt: datom-stmt
-                                                fulltext-stmt: fulltext-stmt
-                                                text-term-stmt: text-term-stmt
-                                                tx-meta-stmt: tx-meta-stmt})
+              (return (SQLite-Direct-Write-Stmts []) false tx-meta-error))
+            (return (SQLite-Direct-Write-Stmts :tx-stmt tx-stmt
+                                                :datom-stmt datom-stmt
+                                                :fulltext-stmt fulltext-stmt
+                                                :text-term-stmt text-term-stmt
+                                                :tx-meta-stmt tx-meta-stmt)
                     true
                     "")))))))
 
@@ -450,18 +450,18 @@
     (let [[entries-ok entries-error] (sqlite-insert-index-chunk-entries-with-stmts handle stmts inserted-id items)]
       (return inserted-id entries-ok entries-error))))
 
-(defstruct Persist-Index-Merge-State {
+(defstruct Persist-Index-Merge-State [
   total: int
   has-entry: bool
   first-entry: int
   last-entry: int
-})
+])
 
 (defn persist-small-delta-index-root-sqlite-handle-with-stmts [handle: rawptr, stmts: ^SQLite-Index-Write-Stmts, basis-tx: u64, index-name: string, items: []int] -> [chunk-id: u64, ok: bool, error: string]
   (when (<= (count items) sqlite-index-leaf-chunk-size)
     (return (persist-entry-backed-index-leaf-sqlite-handle-with-stmts handle stmts basis-tx index-name items)))
   (let [leaf-ids (make [dynamic]u64) :defer
-        state (Persist-Index-Merge-State {})
+        state (Persist-Index-Merge-State [])
         leaf-size (if (<= (count items) sqlite-index-entry-backed-delta-limit)
                     sqlite-index-leaf-chunk-size
                     sqlite-index-bulk-leaf-chunk-size)
@@ -1266,7 +1266,7 @@
             page-end2 -1
             page-start3 -1
             page-end3 -1
-            state (Persist-Index-Merge-State {})]
+            state (Persist-Index-Merge-State [])]
         (for [local (arr.range 0 (count selected-roots))]
           (arr.push! positions 0)
           (if (> selected-counts[local] 0)
@@ -1304,7 +1304,7 @@
               (arr.push! current-entries entry)
               (arr.push! has-current true))
             (do
-              (arr.push! current-datoms (Datom {}))
+              (arr.push! current-datoms (Datom []))
               (arr.push! current-entries 0)
               (arr.push! has-current false))))
         (while true
@@ -1674,13 +1674,13 @@
     (return root manifest true "")))
 
 (defn sqlite-index-root-page [root-id: u64, manifest-id: u64] -> SQLite-Index-Root-Page
-  (SQLite-Index-Root-Page {root-id: root-id manifest-id: manifest-id}))
+  (SQLite-Index-Root-Page :root-id root-id :manifest-id manifest-id))
 
 (defn sqlite-index-root-set [eavt: SQLite-Index-Root-Page, aevt: SQLite-Index-Root-Page, avet: SQLite-Index-Root-Page, vaet: SQLite-Index-Root-Page] -> SQLite-Index-Root-Set
-  (SQLite-Index-Root-Set {eavt: eavt
-                          aevt: aevt
-                          avet: avet
-                          vaet: vaet}))
+  (SQLite-Index-Root-Set :eavt eavt
+                          :aevt aevt
+                          :avet avet
+                          :vaet vaet))
 
 (defn sqlite-index-root-set-at-basis [handle: rawptr, basis-tx: u64] -> [roots: SQLite-Index-Root-Set, ok: bool, error: string]
   (let [[page-eavt-root page-aevt-root page-avet-root page-vaet-root page-eavt-manifest page-aevt-manifest page-avet-manifest page-vaet-manifest page-ok page-error] (vev.sqlite-index-root-page-set-at-basis-raw handle basis-tx)]
@@ -1692,10 +1692,10 @@
               true
               ""))
     (when (not (= page-error "sqlite DB has no normalized Vev index root pages for basis"))
-      (return (SQLite-Index-Root-Set {}) false page-error)))
+      (return (SQLite-Index-Root-Set []) false page-error)))
   (let [[eavt-root aevt-root avet-root vaet-root eavt-manifest aevt-manifest avet-manifest vaet-manifest roots-ok roots-error] (vev.sqlite-index-root-set-at-basis-wide-raw handle basis-tx)]
     (when (not roots-ok)
-      (return (SQLite-Index-Root-Set {}) false roots-error))
+      (return (SQLite-Index-Root-Set []) false roots-error))
     (return (sqlite-index-root-set (sqlite-index-root-page eavt-root eavt-manifest)
                                    (sqlite-index-root-page aevt-root aevt-manifest)
                                    (sqlite-index-root-page avet-root avet-manifest)
@@ -1720,16 +1720,16 @@
                          (sqlite-index-root-page vaet.root-id vaet.manifest-id)))
 
 (defn sqlite-index-append-modes-from-publishes [eavt: SQLite-Index-Root-Publish, aevt: SQLite-Index-Root-Publish, avet: SQLite-Index-Root-Publish, vaet: SQLite-Index-Root-Publish] -> SQLite-Index-Append-Modes
-  (SQLite-Index-Append-Modes {eavt: eavt.append-mode
-                              aevt: aevt.append-mode
-                              avet: avet.append-mode
-                              vaet: vaet.append-mode}))
+  (SQLite-Index-Append-Modes :eavt eavt.append-mode
+                              :aevt aevt.append-mode
+                              :avet avet.append-mode
+                              :vaet vaet.append-mode))
 
 (defn sqlite-index-root-publish-set [eavt: SQLite-Index-Root-Publish, aevt: SQLite-Index-Root-Publish, avet: SQLite-Index-Root-Publish, vaet: SQLite-Index-Root-Publish] -> SQLite-Index-Root-Publish-Set
-  (SQLite-Index-Root-Publish-Set {eavt: eavt
-                                  aevt: aevt
-                                  avet: avet
-                                  vaet: vaet}))
+  (SQLite-Index-Root-Publish-Set :eavt eavt
+                                  :aevt aevt
+                                  :avet avet
+                                  :vaet vaet))
 
 (defn sqlite-index-root-set-from-publish-set [publishes: SQLite-Index-Root-Publish-Set] -> SQLite-Index-Root-Set
   (sqlite-index-root-set-from-publishes publishes.eavt publishes.aevt publishes.avet publishes.vaet))
@@ -1762,17 +1762,17 @@
 (defn sqlite-publish-durable-append-publication-with-stmts! [handle: rawptr, stmts: ^SQLite-Index-Write-Stmts, basis-tx: u64, publication: SQLite-Durable-Append-Publication, enqueue-maintenance: bool] -> [published: SQLite-Durable-Published-Root, ok: bool, error: string]
   (if enqueue-maintenance
     (let [[root-row-id root-ok root-error] (sqlite-insert-index-root-set-and-enqueue-maintenance-with-stmts-id! handle stmts basis-tx publication.roots)]
-      (return (SQLite-Durable-Published-Root {root-row-id: root-row-id
-                                              basis-tx: basis-tx
-                                              roots: publication.roots
-                                              modes: publication.modes})
+      (return (SQLite-Durable-Published-Root :root-row-id root-row-id
+                                              :basis-tx basis-tx
+                                              :roots publication.roots
+                                              :modes publication.modes)
               root-ok
               root-error))
     (let [[root-row-id root-ok root-error] (sqlite-insert-index-root-set-with-stmts! handle stmts basis-tx publication.roots)]
-      (return (SQLite-Durable-Published-Root {root-row-id: root-row-id
-                                              basis-tx: basis-tx
-                                              roots: publication.roots
-                                              modes: publication.modes})
+      (return (SQLite-Durable-Published-Root :root-row-id root-row-id
+                                              :basis-tx basis-tx
+                                              :roots publication.roots
+                                              :modes publication.modes)
               root-ok
               root-error))))
 

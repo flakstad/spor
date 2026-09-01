@@ -1,7 +1,7 @@
 (package vev)
 
 (defn db-read-source-bind-rule-args [outer: Binding, call: Rule-Call, rule: Rule] -> [binding: Binding, ok: bool]
-  (let [out (Binding {items: (make [dynamic]Var-Binding)})]
+  (let [out (Binding :items (make [dynamic]Var-Binding))]
     (when (not (= (count call.args) (count rule.params)))
       (return out false))
     (for [param index rule.params]
@@ -37,7 +37,7 @@
                 (if exists
                   (when (not (predicate-value-equal? existing value))
                     (db-read-source-delete-binding-owned out)
-                    (return (Binding {}) false))
+                    (return (Binding []) false))
                   (binding-store! (addr out) arg.name (value-owned value)))))))))
     (return out true)))
 
@@ -101,15 +101,15 @@
         (delete attr-sources)
         (return (query-relation-empty) false "failed to build attr-param same-entity rule relation")))
     (delete-owned-values-array values)
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: (make [dynamic]Binding)
-                             typed-columns: columns
-                             typed-rows: typed-rows
-                             has-typed-columns: true}) true "")))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples (make [dynamic]Binding)
+                             :typed-columns columns
+                             :typed-rows typed-rows
+                             :has-typed-columns true) true "")))
 
-(defn db-read-source-append-bound-attr-param-same-entity-value! [source: DB-Read-Source, columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct {}))), attr: string, bound-left: bool, bound-value: Value, maybe-other-bound: Value, has-other-bound: bool, stats: ^Query-Stats] -> [ok: bool, error: string]
+(defn db-read-source-append-bound-attr-param-same-entity-value! [source: DB-Read-Source, columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct []))), attr: string, bound-left: bool, bound-value: Value, maybe-other-bound: Value, has-other-bound: bool, stats: ^Query-Stats] -> [ok: bool, error: string]
   (let [matching (make [dynamic]Datom)]
     (defer (delete-owned-datoms matching))
     (let [[scan-ok scan-error] (db-read-source-append-attr-value-datoms! (addr matching) source attr bound-value)]
@@ -159,9 +159,9 @@
       (return (query-relation-empty) false ""))
     (defer (delete seen))
     (while (< row rel.typed-rows)
-      (let [left-value (Value {})
+      (let [left-value (Value [])
             left-ok false
-            right-value (Value {})
+            right-value (Value [])
             right-ok false]
         (when (and (= call.args[1].kind .Var) left-bound)
           (let [[value value-ok] (query-relation-typed-row-value rel row call.args[1].name)]
@@ -187,13 +187,13 @@
                 (return (query-relation-empty) false append-error))))))
       (set! row (+ row 1)))
     (query-stats-observe-source-operator! stats)
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: (make [dynamic]Binding)
-                             typed-columns: columns
-                             typed-rows: typed-rows
-                             has-typed-columns: true}) true "")))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples (make [dynamic]Binding)
+                             :typed-columns columns
+                             :typed-rows typed-rows
+                             :has-typed-columns true) true "")))
 
 (defn rule-call-arg-var-name? [call: Rule-Call, index: int, name: string] -> bool
   (and (< index (count call.args))
@@ -285,8 +285,8 @@
 (defn two-hop-attr-param-derived-rule-shape [rules: []Rule, name: string] -> [direct-rule: Rule, hop-rule: Rule, base-rule: Rule, ok: bool]
   (let [found-direct false
         found-hop false
-        direct (Rule {})
-        hop (Rule {})
+        direct (Rule [])
+        hop (Rule [])
         base-name ""]
     (for [rule rules]
       (when (= rule.name name)
@@ -301,14 +301,14 @@
             (set! found-hop true)
             (set! base-name candidate-base)))))
     (when (not (and found-direct found-hop))
-      (return direct hop (Rule {}) false))
+      (return direct hop (Rule []) false))
     (for [rule rules]
       (when (= rule.name base-name)
         (when (attr-param-two-values-same-entity-rule-shape? rule)
           (return direct hop rule true))))
-    (return direct hop (Rule {}) false)))
+    (return direct hop (Rule []) false)))
 
-(defn append-attr-param-three-value-row! [columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct {}))), attr: string, left-value: Value, right-value: Value] -> bool
+(defn append-attr-param-three-value-row! [columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct []))), attr: string, left-value: Value, right-value: Value] -> bool
   (append-attr-param-two-values-row! columns rows seen attr left-value right-value))
 
 (defn db-read-source-query-relation-from-two-hop-attr-param-rule-call [source: DB-Read-Source, rules: []Rule, call: Rule-Call, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
@@ -374,18 +374,18 @@
         (delete-query-relation base-rel)
         (delete-owned-values-array left-values)
         (delete-owned-values-array right-values)
-        (let [derived-rel (Query-Relation {attrs: attrs
-                                           attr-sources: attr-sources
-                                           attr-index: (query-relation-attr-index (slice attrs 0))
-                                           tuples: (make [dynamic]Binding)
-                                           typed-columns: columns
-                                           typed-rows: rows
-                                           has-typed-columns: true})
+        (let [derived-rel (Query-Relation :attrs attrs
+                                           :attr-sources attr-sources
+                                           :attr-index (query-relation-attr-index (slice attrs 0))
+                                           :tuples (make [dynamic]Binding)
+                                           :typed-columns columns
+                                           :typed-rows rows
+                                           :has-typed-columns true)
               [projected projected-ok] (query-relation-project-rule-call-params-typed derived-rel (slice direct-rule.params 0) call)]
           (delete-query-relation derived-rel)
           (return projected projected-ok ""))))))
 
-(defn db-read-source-query-relation-append-reverse-derived-edge-from-left! [source: DB-Read-Source, columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct {}))), left-attr: string, right-attr: string, left-entity: u64, has-right: bool, right-value: Value] -> [ok: bool, error: string]
+(defn db-read-source-query-relation-append-reverse-derived-edge-from-left! [source: DB-Read-Source, columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct []))), left-attr: string, right-attr: string, left-entity: u64, has-right: bool, right-value: Value] -> [ok: bool, error: string]
   (let [[middle-stream middle-ok middle-error] (source-vaet-entity-attr-stream source left-entity left-attr)]
     (when (not middle-ok)
       (return false middle-error))
@@ -415,7 +415,7 @@
     (delete-source-index-datom-stream middle-stream)
     (return true "")))
 
-(defn db-read-source-query-relation-append-reverse-derived-edge-from-right! [source: DB-Read-Source, columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct {}))), left-attr: string, right-attr: string, right-entity: u64] -> [ok: bool, error: string]
+(defn db-read-source-query-relation-append-reverse-derived-edge-from-right! [source: DB-Read-Source, columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct []))), left-attr: string, right-attr: string, right-entity: u64] -> [ok: bool, error: string]
   (let [[middle-stream middle-ok middle-error] (source-eavt-entity-attr-stream source right-entity right-attr)]
     (when (not middle-ok)
       (return false middle-error))
@@ -446,30 +446,30 @@
     (delete-source-index-datom-stream middle-stream)
     (return true "")))
 
-(defstruct Reverse-Derived-Left-Link {
+(defstruct Reverse-Derived-Left-Link [
   left: u64
   next: int
-})
+])
 
-(defstruct Reverse-Derived-Row-Link {
+(defstruct Reverse-Derived-Row-Link [
   row: int
   next: int
-})
+])
 
 (defn append-reverse-derived-left-link! [heads: ^map[u64]int, links: ^[dynamic]Reverse-Derived-Left-Link, middle: u64, left: u64]
   (let [[head found] (mmap.get heads^ middle)
         next (if found head -1)
         index (count links^)]
-    (arr.push! links^ (Reverse-Derived-Left-Link {left: left
-                                                   next: next}))
+    (arr.push! links^ (Reverse-Derived-Left-Link :left left
+                                                   :next next))
     (mmap.assoc! heads^ middle index)))
 
 (defn append-reverse-derived-row-link! [heads: ^map[u64]int, links: ^[dynamic]Reverse-Derived-Row-Link, entity: u64, row: int]
   (let [[head found] (mmap.get heads^ entity)
         next (if found head -1)
         index (count links^)]
-    (arr.push! links^ (Reverse-Derived-Row-Link {row: row
-                                                  next: next}))
+    (arr.push! links^ (Reverse-Derived-Row-Link :row row
+                                                  :next next))
     (mmap.assoc! heads^ entity index)))
 
 (defn query-relation-has-all-attrs? [rel: Query-Relation, attrs: []string] -> bool
@@ -478,7 +478,7 @@
       (return false)))
   true)
 
-(defn db-read-source-query-relation-append-reverse-derived-edge-from-left-frontier! [source: DB-Read-Source, columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct {}))), left-attr: string, right-attr: string, left-entities: []u64] -> [ok: bool, used: bool, error: string]
+(defn db-read-source-query-relation-append-reverse-derived-edge-from-left-frontier! [source: DB-Read-Source, columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct []))), left-attr: string, right-attr: string, left-entities: []u64] -> [ok: bool, used: bool, error: string]
   (when (= (count left-entities) 0)
     (return true true ""))
   (let [middle-heads (make (map u64 int))
@@ -588,13 +588,13 @@
                   (arr.push! left-entities left-entity))))))
         (mut! row += 1))
       (when (= (count left-entities) 0)
-        (return (Query-Relation {attrs: attrs
-                                 attr-sources: attr-sources
-                                 attr-index: (query-relation-attr-index (slice attrs 0))
-                                 tuples: builder.tuples
-                                 typed-columns: builder.typed-columns
-                                 typed-rows: builder.typed-rows
-                                 has-typed-columns: builder.typed-ok}) true true ""))
+        (return (Query-Relation :attrs attrs
+                                 :attr-sources attr-sources
+                                 :attr-index (query-relation-attr-index (slice attrs 0))
+                                 :tuples builder.tuples
+                                 :typed-columns builder.typed-columns
+                                 :typed-rows builder.typed-rows
+                                 :has-typed-columns builder.typed-ok) true true ""))
       (let [middle-heads (make (map u64 int)) :defer
             middle-links (make [dynamic]Reverse-Derived-Row-Link) :defer
             middle-seen (set.empty u64) :defer
@@ -665,13 +665,13 @@
                 (delete attr-sources)
                 (return (query-relation-empty) false true advance-error))))
           (delete-source-index-datom-stream right-stream)))
-      (let [raw (Query-Relation {attrs: attrs
-                                 attr-sources: attr-sources
-                                 attr-index: (query-relation-attr-index (slice attrs 0))
-                                 tuples: builder.tuples
-                                 typed-columns: builder.typed-columns
-                                 typed-rows: builder.typed-rows
-                                 has-typed-columns: builder.typed-ok})
+      (let [raw (Query-Relation :attrs attrs
+                                 :attr-sources attr-sources
+                                 :attr-index (query-relation-attr-index (slice attrs 0))
+                                 :tuples builder.tuples
+                                 :typed-columns builder.typed-columns
+                                 :typed-rows builder.typed-rows
+                                 :has-typed-columns builder.typed-ok)
             deduped (query-relation-dedupe-step raw)]
         (delete-query-relation raw)
         (return deduped deduped.has-typed-columns true "")))))
@@ -697,7 +697,7 @@
       (while left-stream.has-current
         (let [[left-entity left-entity-ok] (value-as-db-entity left-stream.current.v)]
           (when left-entity-ok
-            (let [[append-ok append-error] (db-read-source-query-relation-append-reverse-derived-edge-from-left! source (addr columns) (addr rows) (addr seen) left-attr right-attr left-entity false (Value {}))]
+            (let [[append-ok append-error] (db-read-source-query-relation-append-reverse-derived-edge-from-left! source (addr columns) (addr rows) (addr seen) left-attr right-attr left-entity false (Value []))]
               (when (not append-ok)
                 (delete-source-index-datom-stream left-stream)
                 (delete-relation-columns columns)
@@ -715,13 +715,13 @@
       (query-stats-observe-source-operator! stats)
       (mut! stats^.clauses += 2)
       (mut! stats^.source-index-scans += 2)
-      (let [derived-rel (Query-Relation {attrs: attrs
-                                         attr-sources: attr-sources
-                                         attr-index: (query-relation-attr-index (slice attrs 0))
-                                         tuples: (make [dynamic]Binding)
-                                         typed-columns: columns
-                                         typed-rows: rows
-                                         has-typed-columns: true})
+      (let [derived-rel (Query-Relation :attrs attrs
+                                         :attr-sources attr-sources
+                                         :attr-index (query-relation-attr-index (slice attrs 0))
+                                         :tuples (make [dynamic]Binding)
+                                         :typed-columns columns
+                                         :typed-rows rows
+                                         :has-typed-columns true)
             [projected projected-ok] (query-relation-project-rule-call-params-typed derived-rel (slice rule.params 0) call)]
         (delete-query-relation derived-rel)
         (return projected projected-ok "")))))
@@ -787,9 +787,9 @@
               (when frontier-used
                 (set! row rel.typed-rows)))))
         (while (< row rel.typed-rows)
-          (let [left-value (Value {})
+          (let [left-value (Value [])
                 left-ok false
-                right-value (Value {})
+                right-value (Value [])
                 right-ok false]
             (when (and left-bound (= call.args[0].kind .Var))
               (let [[value value-ok] (query-relation-typed-row-value rel row call.args[0].name)]
@@ -821,13 +821,13 @@
         (query-stats-observe-source-operator! stats)
         (mut! stats^.clauses += 2)
         (mut! stats^.source-index-scans += 2)
-        (let [derived-rel (Query-Relation {attrs: attrs
-                                           attr-sources: attr-sources
-                                           attr-index: (query-relation-attr-index (slice attrs 0))
-                                           tuples: (make [dynamic]Binding)
-                                           typed-columns: columns
-                                           typed-rows: rows
-                                           has-typed-columns: true})
+        (let [derived-rel (Query-Relation :attrs attrs
+                                           :attr-sources attr-sources
+                                           :attr-index (query-relation-attr-index (slice attrs 0))
+                                           :tuples (make [dynamic]Binding)
+                                           :typed-columns columns
+                                           :typed-rows rows
+                                           :has-typed-columns true)
               [projected projected-ok] (query-relation-project-rule-call-params-typed derived-rel (slice rule.params 0) call)]
           (delete-query-relation derived-rel)
           (return projected projected-ok ""))))))
@@ -858,13 +858,13 @@
                   (arr.push! left-entities left-entity))))))
         (mut! row += 1))
       (when (= (count left-entities) 0)
-        (return (Query-Relation {attrs: attrs
-                                 attr-sources: attr-sources
-                                 attr-index: (query-relation-attr-index (slice attrs 0))
-                                 tuples: builder.tuples
-                                 typed-columns: builder.typed-columns
-                                 typed-rows: builder.typed-rows
-                                 has-typed-columns: builder.typed-ok}) true true ""))
+        (return (Query-Relation :attrs attrs
+                                 :attr-sources attr-sources
+                                 :attr-index (query-relation-attr-index (slice attrs 0))
+                                 :tuples builder.tuples
+                                 :typed-columns builder.typed-columns
+                                 :typed-rows builder.typed-rows
+                                 :has-typed-columns builder.typed-ok) true true ""))
       (let [entity-heads (make (map u64 int)) :defer
             entity-links (make [dynamic]Reverse-Derived-Row-Link) :defer
             entity-seen (set.empty u64) :defer
@@ -951,13 +951,13 @@
                 (delete attr-sources)
                 (return (query-relation-empty) false true advance-error))))
           (delete-source-index-datom-stream right-stream)))
-      (let [raw (Query-Relation {attrs: attrs
-                                 attr-sources: attr-sources
-                                 attr-index: (query-relation-attr-index (slice attrs 0))
-                                 tuples: builder.tuples
-                                 typed-columns: builder.typed-columns
-                                 typed-rows: builder.typed-rows
-                                 has-typed-columns: builder.typed-ok})
+      (let [raw (Query-Relation :attrs attrs
+                                 :attr-sources attr-sources
+                                 :attr-index (query-relation-attr-index (slice attrs 0))
+                                 :tuples builder.tuples
+                                 :typed-columns builder.typed-columns
+                                 :typed-rows builder.typed-rows
+                                 :has-typed-columns builder.typed-ok)
             deduped (query-relation-dedupe-step raw)]
         (delete-query-relation raw)
         (return deduped deduped.has-typed-columns true "")))))
@@ -1025,13 +1025,13 @@
           (delete-query-relation direct)
           (delete-query-relation two-hop)
           (query-stats-observe-source-operator! stats)
-          (return (Query-Relation {attrs: attrs
-                                   attr-sources: attr-sources
-                                   attr-index: (query-relation-attr-index (slice attrs 0))
-                                   tuples: (make [dynamic]Binding)
-                                   typed-columns: columns
-                                   typed-rows: rows
-                                   has-typed-columns: true}) true true ""))))))
+          (return (Query-Relation :attrs attrs
+                                   :attr-sources attr-sources
+                                   :attr-index (query-relation-attr-index (slice attrs 0))
+                                   :tuples (make [dynamic]Binding)
+                                   :typed-columns columns
+                                   :typed-rows rows
+                                   :has-typed-columns true) true true ""))))))
 
 (defn db-read-source-query-relation-from-bound-two-hop-attr-param-rule-call [source: DB-Read-Source, rel: Query-Relation, rules: []Rule, call: Rule-Call, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool, error: string]
   (when (not (and rel.has-typed-columns
@@ -1075,9 +1075,9 @@
               (return frontier frontier-ok ""))
             (delete-query-relation frontier)))
         (while (< row rel.typed-rows)
-          (let [left-value (Value {})
+          (let [left-value (Value [])
                 left-ok false
-                right-value (Value {})
+                right-value (Value [])
                 right-ok false]
             (when (and (= call.args[1].kind .Var) left-bound)
               (let [[value value-ok] (query-relation-typed-row-value rel row call.args[1].name)]
@@ -1091,7 +1091,7 @@
               (let [first-columns (relation-columns-for-attrs (slice attrs 0))
                     first-rows 0
                     first-seen (set.empty string)
-                    [first-ok first-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr first-columns) (addr first-rows) (addr first-seen) attr true left-value (Value {}) false stats)]
+                    [first-ok first-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr first-columns) (addr first-rows) (addr first-seen) attr true left-value (Value []) false stats)]
                 (delete first-seen)
                 (when (not first-ok)
                   (delete-relation-columns first-columns)
@@ -1143,7 +1143,7 @@
               (let [first-columns (relation-columns-for-attrs (slice attrs 0))
                     first-rows 0
                     first-seen (set.empty string)
-                    [first-ok first-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr first-columns) (addr first-rows) (addr first-seen) attr false right-value (Value {}) false stats)]
+                    [first-ok first-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr first-columns) (addr first-rows) (addr first-seen) attr false right-value (Value []) false stats)]
                 (delete first-seen)
                 (when (not first-ok)
                   (delete-relation-columns first-columns)
@@ -1164,7 +1164,7 @@
                         (let [second-columns (relation-columns-for-attrs (slice attrs 0))
                               second-rows 0
                               second-seen (set.empty string)
-                              [second-ok second-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr second-columns) (addr second-rows) (addr second-seen) attr false middle-value (Value {}) false stats)]
+                              [second-ok second-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr second-columns) (addr second-rows) (addr second-seen) attr false middle-value (Value []) false stats)]
                           (delete second-seen)
                           (when (not second-ok)
                             (delete-relation-columns second-columns)
@@ -1191,13 +1191,13 @@
                 (delete-relation-columns first-columns))))
           (set! row (+ row 1)))
         (query-stats-observe-source-operator! stats)
-        (let [derived-rel (Query-Relation {attrs: attrs
-                                           attr-sources: attr-sources
-                                           attr-index: (query-relation-attr-index (slice attrs 0))
-                                           tuples: (make [dynamic]Binding)
-                                           typed-columns: columns
-                                           typed-rows: rows
-                                           has-typed-columns: true})
+        (let [derived-rel (Query-Relation :attrs attrs
+                                           :attr-sources attr-sources
+                                           :attr-index (query-relation-attr-index (slice attrs 0))
+                                           :tuples (make [dynamic]Binding)
+                                           :typed-columns columns
+                                           :typed-rows rows
+                                           :has-typed-columns true)
               [projected projected-ok] (query-relation-project-rule-call-params-typed derived-rel (slice direct-rule.params 0) call)]
           (delete-query-relation derived-rel)
           (return projected projected-ok ""))))))

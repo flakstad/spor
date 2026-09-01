@@ -84,13 +84,13 @@
             (delete attr-sources)
             (delete-relation-columns columns)
             (return (query-relation-empty) 0 false))))
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: (make [dynamic]Binding)
-                             typed-columns: columns
-                             typed-rows: row-count
-                             has-typed-columns: true}) row-count true)))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples (make [dynamic]Binding)
+                             :typed-columns columns
+                             :typed-rows row-count
+                             :has-typed-columns true) row-count true)))
 
 (defn db-read-source-query-relation-apply-relation-value-source-clause-with-op [source-value: ^Value, rel: Query-Relation, clause-value: Clause, op: Physical-Op, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (let [source-clause (clause-with-relation-source-width
@@ -140,13 +140,13 @@
               (query-stats-observe-source-operator! stats)
               (set! stats^.clauses (+ stats^.clauses 1))
               (set! stats^.clause-candidates (+ stats^.clause-candidates (count source-value^.items)))
-              (return (Query-Relation {attrs: attrs
-                                       attr-sources: attr-sources
-                                       attr-index: (query-relation-attr-index (slice attrs 0))
-                                       tuples: builder.tuples
-                                       typed-columns: builder.typed-columns
-                                       typed-rows: builder.typed-rows
-                                       has-typed-columns: builder.typed-ok}) true)))
+              (return (Query-Relation :attrs attrs
+                                       :attr-sources attr-sources
+                                       :attr-index (query-relation-attr-index (slice attrs 0))
+                                       :tuples builder.tuples
+                                       :typed-columns builder.typed-columns
+                                       :typed-rows builder.typed-rows
+                                       :has-typed-columns builder.typed-ok) true)))
           (delete filtered-indexes))
         (let [builder (query-relation-builder (slice attrs 0))
               rel-row 0]
@@ -166,13 +166,13 @@
           (query-stats-observe-source-operator! stats)
           (set! stats^.clauses (+ stats^.clauses 1))
           (set! stats^.clause-candidates (+ stats^.clause-candidates (* rel.typed-rows (count source-value^.items))))
-          (return (Query-Relation {attrs: attrs
-                                   attr-sources: attr-sources
-                                   attr-index: (query-relation-attr-index (slice attrs 0))
-                                   tuples: builder.tuples
-                                   typed-columns: builder.typed-columns
-                                   typed-rows: builder.typed-rows
-                                   has-typed-columns: builder.typed-ok}) true))))))
+          (return (Query-Relation :attrs attrs
+                                   :attr-sources attr-sources
+                                   :attr-index (query-relation-attr-index (slice attrs 0))
+                                   :tuples builder.tuples
+                                   :typed-columns builder.typed-columns
+                                   :typed-rows builder.typed-rows
+                                   :has-typed-columns builder.typed-ok) true))))))
 
 (defn db-read-source-query-relation-apply-relation-value-clause-with-op [sources: []DB-Read-Named-Source, rel: Query-Relation, clause-value: Clause, op: Physical-Op, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (let [[source-value source-ok] (db-read-source-relation-value-source-for-clause sources clause-value)]
@@ -181,7 +181,7 @@
     (db-read-source-query-relation-apply-relation-value-source-clause-with-op source-value rel clause-value op stats)))
 
 (defn db-read-source-query-relation-apply-relation-value-clause [sources: []DB-Read-Named-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
-  (db-read-source-query-relation-apply-relation-value-clause-with-op sources rel clause-value (Physical-Op {}) stats))
+  (db-read-source-query-relation-apply-relation-value-clause-with-op sources rel clause-value (Physical-Op []) stats))
 
 (defn db-read-source-query-relation-apply-primary-relation-value-clause-with-op [source: DB-Read-Source, rel: Query-Relation, clause-value: Clause, op: Physical-Op, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (when (not (= source.kind .Relation-Value))
@@ -189,7 +189,7 @@
   (db-read-source-query-relation-apply-relation-value-source-clause-with-op source.relation-value rel clause-value op stats))
 
 (defn db-read-source-query-relation-apply-primary-relation-value-clause [source: DB-Read-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
-  (db-read-source-query-relation-apply-primary-relation-value-clause-with-op source rel clause-value (Physical-Op {}) stats))
+  (db-read-source-query-relation-apply-primary-relation-value-clause-with-op source rel clause-value (Physical-Op []) stats))
 
 (defn db-read-source-query-relation-apply-mixed-source-clause-typed [source: DB-Read-Source, sources: []DB-Read-Named-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (let [[_ relation-source-ok] (db-read-source-relation-value-source-for-clause sources clause-value)]
@@ -235,7 +235,7 @@
       (do
         (when (not (query-relation-predicate-can-run-typed? rel predicates[step.index] registry))
           (return (query-relation-empty) false))
-        (let [out (query-relation-filter-predicate (DB {}) rel predicates[step.index] registry)]
+        (let [out (query-relation-filter-predicate (DB []) rel predicates[step.index] registry)]
           (return out out.has-typed-columns)))
     (= step.kind .Function)
       (let [function functions[step.index]]
@@ -266,7 +266,7 @@
       (return (query-relation-empty) false))
     (when (not (query-relation-predicate-can-run-typed? rel predicate registry))
       (return (query-relation-empty) false))
-    (let [filtered (query-relation-filter-predicate (DB {}) rel predicate registry)]
+    (let [filtered (query-relation-filter-predicate (DB []) rel predicate registry)]
       (return filtered filtered.has-typed-columns))))
 
 (defn db-read-source-query-relation-apply-physical-function-op [source: DB-Read-Source, sources: []DB-Read-Named-Source, rel: Query-Relation, op: Physical-Op, query-value: Query, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
@@ -622,13 +622,13 @@
             (mut! stats^.rule-calls += 1)
             (mut! stats^.rule-iterations += 1)
             (query-stats-observe-source-operator! stats)
-            (let [raw (Query-Relation {attrs: attrs
-                                       attr-sources: attr-sources
-                                       attr-index: (query-relation-attr-index (slice attrs 0))
-                                       tuples: builder.tuples
-                                       typed-columns: builder.typed-columns
-                                       typed-rows: builder.typed-rows
-                                       has-typed-columns: builder.typed-ok})
+            (let [raw (Query-Relation :attrs attrs
+                                       :attr-sources attr-sources
+                                       :attr-index (query-relation-attr-index (slice attrs 0))
+                                       :tuples builder.tuples
+                                       :typed-columns builder.typed-columns
+                                       :typed-rows builder.typed-rows
+                                       :has-typed-columns builder.typed-ok)
                   deduped (query-relation-dedupe-step raw)]
               (delete-query-relation raw)
               (return deduped deduped.has-typed-columns true))))))))
@@ -729,13 +729,13 @@
                   (delete-query-relation-builder builder)
                   (return (query-relation-empty) false))))
             (set! row (+ row 1)))
-          (return (Query-Relation {attrs: attrs
-                                   attr-sources: attr-sources
-                                   attr-index: (query-relation-attr-index (slice attrs 0))
-                                   tuples: builder.tuples
-                                   typed-columns: builder.typed-columns
-                                   typed-rows: builder.typed-rows
-                                   has-typed-columns: builder.typed-ok}) true)))))))))
+          (return (Query-Relation :attrs attrs
+                                   :attr-sources attr-sources
+                                   :attr-index (query-relation-attr-index (slice attrs 0))
+                                   :tuples builder.tuples
+                                   :typed-columns builder.typed-columns
+                                   :typed-rows builder.typed-rows
+                                   :has-typed-columns builder.typed-ok) true)))))))))
 
 (defn db-read-source-query-relation-apply-simple-not-group [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, rel: Query-Relation, group: Not-Group, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (when (not (and rel.has-typed-columns
@@ -784,13 +784,13 @@
               (delete-query-relation-builder builder)
               (return (query-relation-empty) false)))))
       (set! row (+ row 1)))
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: builder.tuples
-                             typed-columns: builder.typed-columns
-                             typed-rows: builder.typed-rows
-                             has-typed-columns: builder.typed-ok}) true)))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples builder.tuples
+                             :typed-columns builder.typed-columns
+                             :typed-rows builder.typed-rows
+                             :has-typed-columns builder.typed-ok) true)))
 
 (defn db-read-source-query-relation-apply-or-branch [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, rel: Query-Relation, row: int, group: Or-Group, branch: Not-Group, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (let [current (query-relation-empty)
@@ -912,13 +912,13 @@
                             (return (query-relation-empty) false))))
                       (set! row (+ row 1))))
                   (delete-query-relation joined)))))))
-      (return (Query-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: (query-relation-attr-index (slice attrs 0))
-                               tuples: builder.tuples
-                               typed-columns: builder.typed-columns
-                               typed-rows: builder.typed-rows
-                               has-typed-columns: builder.typed-ok}) true))))
+      (return (Query-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index (query-relation-attr-index (slice attrs 0))
+                               :tuples builder.tuples
+                               :typed-columns builder.typed-columns
+                               :typed-rows builder.typed-rows
+                               :has-typed-columns builder.typed-ok) true))))
 
 (defn db-read-source-query-relation-apply-simple-or-group [source: DB-Read-Source, sources: []DB-Read-Named-Source, rules: []Rule, rel: Query-Relation, group: Or-Group, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (when (not (and rel.has-typed-columns
@@ -956,13 +956,13 @@
                 (set! branch-row (+ branch-row 1))))
             (delete-query-relation branch-rel)))
         (set! row (+ row 1)))
-      (return (Query-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: (query-relation-attr-index (slice attrs 0))
-                               tuples: builder.tuples
-                               typed-columns: builder.typed-columns
-                               typed-rows: builder.typed-rows
-                               has-typed-columns: builder.typed-ok}) true))))
+      (return (Query-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index (query-relation-attr-index (slice attrs 0))
+                               :tuples builder.tuples
+                               :typed-columns builder.typed-columns
+                               :typed-rows builder.typed-rows
+                               :has-typed-columns builder.typed-ok) true))))
 
 (defn db-read-source-query-relation-value-typed-with-sources-inputs-and-fns-raw [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, registry: []Native-Query-Fn] -> [rel: Query-Relation, stats: Query-Stats, used: bool]
   (let [[inlined inlined-ok] (query-source-inline-simple-rules query-value)]

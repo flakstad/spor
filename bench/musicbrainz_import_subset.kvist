@@ -98,11 +98,11 @@
               start-index (count after-datoms)]
           (for [op compacted]
             (arr.push! after-datoms
-              (vev.Datom {e: op.e
-                          a: op.a
-                          v: op.v
-                          tx: conn^.next-tx
-                          added: true})))
+              (vev.Datom :e op.e
+                          :a op.a
+                          :v op.v
+                          :tx conn^.next-tx
+                          :added true)))
           (let [log-us (elapsed-us log-start)
                 publish-start (time.now)
                 after-db (vev.build-db-append-only conn^.db after-datoms start-index)

@@ -27,7 +27,7 @@
   CompositeResult
 ])
 
-(defstruct Physical-Result-Shape {
+(defstruct Physical-Result-Shape [
   kind: Physical-Result-Shape-Kind
   find-count: int
   value-column-count: int
@@ -35,7 +35,7 @@
   aggregate-count: int
   with-count: int
   has-distinct: bool
-})
+])
 
 (defenum Physical-Result-Column-Kind [
   ValueResultColumn
@@ -44,18 +44,18 @@
   WithDedupeColumn
 ])
 
-(defstruct Physical-Result-Column {
+(defstruct Physical-Result-Column [
   kind: Physical-Result-Column-Kind
   var-name: string
   source-index: int
   output-index: int
-})
+])
 
-(defstruct Physical-Materialization-Plan {
+(defstruct Physical-Materialization-Plan [
   shape: Physical-Result-Shape
   columns: [dynamic]Physical-Result-Column
   trust-unique-bindings: bool
-})
+])
 
 (defenum Physical-Term-Bound-Kind [
   Free
@@ -64,13 +64,13 @@
   LookupRef
 ])
 
-(defstruct Physical-Clause-Scan-Bounds {
+(defstruct Physical-Clause-Scan-Bounds [
   e: Physical-Term-Bound-Kind
   a: Physical-Term-Bound-Kind
   v: Physical-Term-Bound-Kind
   tx: Physical-Term-Bound-Kind
   op: Physical-Term-Bound-Kind
-})
+])
 
 (defenum Physical-Scan-Range-Kind [
   Full
@@ -81,16 +81,16 @@
   AttrValue
 ])
 
-(defstruct Physical-Scan-Range {
+(defstruct Physical-Scan-Range [
   kind: Physical-Scan-Range-Kind
   order: Public-Index-Order
   prefix-width: int
-})
+])
 
-(defstruct Physical-Resolved-Scan-Range {
+(defstruct Physical-Resolved-Scan-Range [
   range: Physical-Scan-Range
   values: [dynamic]Value
-})
+])
 
 (defenum Physical-Scalar-Requirement-Kind [
   NoScalarRequirement
@@ -100,7 +100,7 @@
   UnknownScalarRequirement
 ])
 
-(defstruct Physical-Scalar-Requirement {
+(defstruct Physical-Scalar-Requirement [
   kind: Physical-Scalar-Requirement-Kind
   op: string
   var-name: string
@@ -110,7 +110,7 @@
   is-equality: bool
   is-range: bool
   typed-supported: bool
-})
+])
 
 (defenum Physical-Function-Requirement-Kind [
   NoFunctionRequirement
@@ -120,15 +120,15 @@
   UnknownFunctionRequirement
 ])
 
-(defstruct Physical-Function-Requirement {
+(defstruct Physical-Function-Requirement [
   kind: Physical-Function-Requirement-Kind
   op: string
   arity: int
   output-count: int
   typed-supported: bool
-})
+])
 
-(defstruct Physical-Op {
+(defstruct Physical-Op [
   kind: Physical-Op-Kind
   step: Query-Step
   item-index: int
@@ -142,16 +142,16 @@
   referenced-vars: [dynamic]string
   input-vars: [dynamic]string
   output-vars: [dynamic]string
-})
+])
 
-(defstruct Physical-Plan {
+(defstruct Physical-Plan [
   ops: [dynamic]Physical-Op
   materialization: Physical-Materialization-Plan
   has-project: bool
   project-op: Physical-Op
   has-materialize: bool
   materialize-op: Physical-Op
-})
+])
 
 (defn physical-result-shape-from-query [query: Query] -> Physical-Result-Shape
   (let [find-count (count query.find)
@@ -174,13 +174,13 @@
                                              .AggregateResult
                                            :else
                                              .FlatPrimitiveResult)]
-    (Physical-Result-Shape {kind: kind
-                            find-count: find-count
-                            value-column-count: value-column-count
-                            pull-count: pull-count
-                            aggregate-count: aggregate-count
-                            with-count: with-count
-                            has-distinct: (= with-count 0)})))
+    (Physical-Result-Shape :kind kind
+                            :find-count find-count
+                            :value-column-count value-column-count
+                            :pull-count pull-count
+                            :aggregate-count aggregate-count
+                            :with-count with-count
+                            :has-distinct (= with-count 0))))
 
 (defn physical-result-shape-flat-primitive? [shape: Physical-Result-Shape] -> bool
   (= shape.kind .FlatPrimitiveResult))
@@ -195,34 +195,34 @@
                                                            (count query.with)))
         output-index 0]
     (for [name source-index query.find]
-      (arr.push! columns (Physical-Result-Column {kind: .ValueResultColumn
-                                                  var-name: name
-                                                  source-index: source-index
-                                                  output-index: output-index}))
+      (arr.push! columns (Physical-Result-Column :kind .ValueResultColumn
+                                                  :var-name name
+                                                  :source-index source-index
+                                                  :output-index output-index))
       (set! output-index (+ output-index 1)))
     (for [pull-find source-index query.pulls]
-      (arr.push! columns (Physical-Result-Column {kind: .PullResultColumn
-                                                  var-name: pull-find.var
-                                                  source-index: source-index
-                                                  output-index: output-index}))
+      (arr.push! columns (Physical-Result-Column :kind .PullResultColumn
+                                                  :var-name pull-find.var
+                                                  :source-index source-index
+                                                  :output-index output-index))
       (set! output-index (+ output-index 1)))
     (for [aggregate source-index query.aggregates]
-      (arr.push! columns (Physical-Result-Column {kind: .AggregateResultColumn
-                                                  var-name: aggregate.var
-                                                  source-index: source-index
-                                                  output-index: output-index}))
+      (arr.push! columns (Physical-Result-Column :kind .AggregateResultColumn
+                                                  :var-name aggregate.var
+                                                  :source-index source-index
+                                                  :output-index output-index))
       (set! output-index (+ output-index 1)))
     (for [name source-index query.with]
-      (arr.push! columns (Physical-Result-Column {kind: .WithDedupeColumn
-                                                  var-name: name
-                                                  source-index: source-index
-                                                  output-index: -1})))
+      (arr.push! columns (Physical-Result-Column :kind .WithDedupeColumn
+                                                  :var-name name
+                                                  :source-index source-index
+                                                  :output-index -1)))
     columns))
 
 (defn physical-materialization-plan-from-query [query: Query] -> Physical-Materialization-Plan
-  (Physical-Materialization-Plan {shape: (physical-result-shape-from-query query)
-                                  columns: (physical-result-columns-from-query query)
-                                  trust-unique-bindings: (query-can-trust-unique-bindings? query)}))
+  (Physical-Materialization-Plan :shape (physical-result-shape-from-query query)
+                                  :columns (physical-result-columns-from-query query)
+                                  :trust-unique-bindings (query-can-trust-unique-bindings? query)))
 
 (defn delete-physical-materialization-plan [plan: Physical-Materialization-Plan]
   (delete plan.columns))
@@ -298,23 +298,23 @@
       (physical-term-bound-kind term)))
 
 (defn physical-clause-scan-bounds [clause-value: Clause] -> Physical-Clause-Scan-Bounds
-  (Physical-Clause-Scan-Bounds {e: (physical-term-bound-kind clause-value.e)
-                                a: (physical-term-bound-kind clause-value.a)
-                                v: (physical-term-bound-kind clause-value.v)
-                                tx: (physical-term-bound-kind clause-value.tx-term)
-                                op: (physical-term-bound-kind clause-value.op-term)}))
+  (Physical-Clause-Scan-Bounds :e (physical-term-bound-kind clause-value.e)
+                                :a (physical-term-bound-kind clause-value.a)
+                                :v (physical-term-bound-kind clause-value.v)
+                                :tx (physical-term-bound-kind clause-value.tx-term)
+                                :op (physical-term-bound-kind clause-value.op-term)))
 
 (defn physical-clause-scan-bounds-with-binding [clause-value: Clause, binding: Binding] -> Physical-Clause-Scan-Bounds
-  (Physical-Clause-Scan-Bounds {e: (physical-term-bound-kind-with-binding clause-value.e binding)
-                                a: (physical-term-bound-kind-with-binding clause-value.a binding)
-                                v: (physical-term-bound-kind-with-binding clause-value.v binding)
-                                tx: (physical-term-bound-kind-with-binding clause-value.tx-term binding)
-                                op: (physical-term-bound-kind-with-binding clause-value.op-term binding)}))
+  (Physical-Clause-Scan-Bounds :e (physical-term-bound-kind-with-binding clause-value.e binding)
+                                :a (physical-term-bound-kind-with-binding clause-value.a binding)
+                                :v (physical-term-bound-kind-with-binding clause-value.v binding)
+                                :tx (physical-term-bound-kind-with-binding clause-value.tx-term binding)
+                                :op (physical-term-bound-kind-with-binding clause-value.op-term binding)))
 
 (defn physical-op-scan-bounds-from-query-step [query: Query, step: Query-Step] -> Physical-Clause-Scan-Bounds
   (if (= step.kind .Clause)
     (physical-clause-scan-bounds query.clauses[step.index])
-    (Physical-Clause-Scan-Bounds {})))
+    (Physical-Clause-Scan-Bounds [])))
 
 (defn physical-bound-kind-range-ready? [kind: Physical-Term-Bound-Kind] -> bool
   (or (= kind .Constant)
@@ -324,23 +324,23 @@
   (cond
     (and (physical-bound-kind-range-ready? bounds.e)
          (physical-bound-kind-range-ready? bounds.a))
-      (Physical-Scan-Range {kind: .EntityAttr order: .EAVT prefix-width: 2})
+      (Physical-Scan-Range :kind .EntityAttr :order .EAVT :prefix-width 2)
     (and (physical-bound-kind-range-ready? bounds.a)
          (physical-bound-kind-range-ready? bounds.v))
-      (Physical-Scan-Range {kind: .AttrValue order: .AVET prefix-width: 2})
+      (Physical-Scan-Range :kind .AttrValue :order .AVET :prefix-width 2)
     (physical-bound-kind-range-ready? bounds.e)
-      (Physical-Scan-Range {kind: .Entity order: .EAVT prefix-width: 1})
+      (Physical-Scan-Range :kind .Entity :order .EAVT :prefix-width 1)
     (physical-bound-kind-range-ready? bounds.a)
-      (Physical-Scan-Range {kind: .Attr order: .AEVT prefix-width: 1})
+      (Physical-Scan-Range :kind .Attr :order .AEVT :prefix-width 1)
     (physical-bound-kind-range-ready? bounds.v)
-      (Physical-Scan-Range {kind: .Value order: .VAET prefix-width: 1})
+      (Physical-Scan-Range :kind .Value :order .VAET :prefix-width 1)
     :else
-      (Physical-Scan-Range {kind: .Full order: .EAVT prefix-width: 0})))
+      (Physical-Scan-Range :kind .Full :order .EAVT :prefix-width 0)))
 
 (defn physical-op-scan-range-from-query-step [step: Query-Step, bounds: Physical-Clause-Scan-Bounds] -> Physical-Scan-Range
   (if (= step.kind .Clause)
     (physical-scan-range-from-bounds bounds)
-    (Physical-Scan-Range {})))
+    (Physical-Scan-Range [])))
 
 (defn physical-compare-op-equality? [op: string] -> bool
   (or (= op "=")
@@ -366,21 +366,21 @@
 
 (defn physical-predicate-requirement [predicate: Predicate] -> Physical-Scalar-Requirement
   (when (query-var-name? predicate.op)
-    (return (Physical-Scalar-Requirement {kind: .UnknownScalarRequirement
-                                          op: predicate.op
-                                          arity: (count predicate.terms)})))
+    (return (Physical-Scalar-Requirement :kind .UnknownScalarRequirement
+                                          :op predicate.op
+                                          :arity (count predicate.terms))))
   (when (= (count predicate.terms) 1)
     (let [term predicate.terms[0]]
       (if (= term.kind .Var)
-        (return (Physical-Scalar-Requirement {kind: .UnaryPredicate
-                                              op: predicate.op
-                                              var-name: term.name
-                                              arity: 1
-                                              typed-supported: (predicate-op-supported? predicate.op)}))
-        (return (Physical-Scalar-Requirement {kind: .UnknownScalarRequirement
-                                              op: predicate.op
-                                              arity: 1
-                                              typed-supported: (predicate-op-supported? predicate.op)})))))
+        (return (Physical-Scalar-Requirement :kind .UnaryPredicate
+                                              :op predicate.op
+                                              :var-name term.name
+                                              :arity 1
+                                              :typed-supported (predicate-op-supported? predicate.op)))
+        (return (Physical-Scalar-Requirement :kind .UnknownScalarRequirement
+                                              :op predicate.op
+                                              :arity 1
+                                              :typed-supported (predicate-op-supported? predicate.op))))))
   (when (= (count predicate.terms) 2)
     (let [left predicate.terms[0]
           right predicate.terms[1]
@@ -389,40 +389,40 @@
           typed (predicate-op-supported? predicate.op)]
       (when (and (= left.kind .Var)
                  (= right.kind .Var))
-        (return (Physical-Scalar-Requirement {kind: .VarVarCompare
-                                              op: predicate.op
-                                              var-name: left.name
-                                              other-var: right.name
-                                              arity: 2
-                                              is-equality: equality
-                                              is-range: range
-                                              typed-supported: typed})))
+        (return (Physical-Scalar-Requirement :kind .VarVarCompare
+                                              :op predicate.op
+                                              :var-name left.name
+                                              :other-var right.name
+                                              :arity 2
+                                              :is-equality equality
+                                              :is-range range
+                                              :typed-supported typed)))
       (when (and (= left.kind .Var)
                  (not (= right.kind .Var)))
-        (return (Physical-Scalar-Requirement {kind: .VarValueCompare
-                                              op: predicate.op
-                                              var-name: left.name
-                                              value-term: right
-                                              arity: 2
-                                              is-equality: equality
-                                              is-range: range
-                                              typed-supported: typed})))
+        (return (Physical-Scalar-Requirement :kind .VarValueCompare
+                                              :op predicate.op
+                                              :var-name left.name
+                                              :value-term right
+                                              :arity 2
+                                              :is-equality equality
+                                              :is-range range
+                                              :typed-supported typed)))
       (when (and (= right.kind .Var)
                  (not (= left.kind .Var)))
         (let [[inverted inverted-ok] (physical-inverted-compare-op predicate.op)]
           (when inverted-ok
-            (return (Physical-Scalar-Requirement {kind: .VarValueCompare
-                                                  op: inverted
-                                                  var-name: right.name
-                                                  value-term: left
-                                                  arity: 2
-                                                  is-equality: equality
-                                                  is-range: range
-                                                  typed-supported: typed})))))))
-  (Physical-Scalar-Requirement {kind: .UnknownScalarRequirement
-                                op: predicate.op
-                                arity: (count predicate.terms)
-                                typed-supported: (predicate-op-supported? predicate.op)}))
+            (return (Physical-Scalar-Requirement :kind .VarValueCompare
+                                                  :op inverted
+                                                  :var-name right.name
+                                                  :value-term left
+                                                  :arity 2
+                                                  :is-equality equality
+                                                  :is-range range
+                                                  :typed-supported typed)))))))
+  (Physical-Scalar-Requirement :kind .UnknownScalarRequirement
+                                :op predicate.op
+                                :arity (count predicate.terms)
+                                :typed-supported (predicate-op-supported? predicate.op)))
 
 (defn physical-function-output-count [function: Function-Clause] -> int
   (let [out-count 0]
@@ -435,57 +435,57 @@
 
 (defn physical-function-requirement [function: Function-Clause] -> Physical-Function-Requirement
   (when (query-var-name? function.op)
-    (return (Physical-Function-Requirement {kind: .UnknownFunctionRequirement
-                                            op: function.op
-                                            arity: (count function.terms)
-                                            output-count: (physical-function-output-count function)})))
+    (return (Physical-Function-Requirement :kind .UnknownFunctionRequirement
+                                            :op function.op
+                                            :arity (count function.terms)
+                                            :output-count (physical-function-output-count function))))
   (let [output-count (physical-function-output-count function)
         typed (or (typed-function-op-supported? function.op)
                   (source-function-op? function.op))]
     (cond
       (not (= function.out-binding.kind .None))
-        (Physical-Function-Requirement {kind: .BindingFunction
-                                        op: function.op
-                                        arity: (count function.terms)
-                                        output-count: output-count
-                                        typed-supported: typed})
+        (Physical-Function-Requirement :kind .BindingFunction
+                                        :op function.op
+                                        :arity (count function.terms)
+                                        :output-count output-count
+                                        :typed-supported typed)
       function.is-tuple
-        (Physical-Function-Requirement {kind: .TupleFunction
-                                        op: function.op
-                                        arity: (count function.terms)
-                                        output-count: output-count
-                                        typed-supported: typed})
+        (Physical-Function-Requirement :kind .TupleFunction
+                                        :op function.op
+                                        :arity (count function.terms)
+                                        :output-count output-count
+                                        :typed-supported typed)
       (> output-count 0)
-        (Physical-Function-Requirement {kind: .ScalarFunction
-                                        op: function.op
-                                        arity: (count function.terms)
-                                        output-count: output-count
-                                        typed-supported: typed})
+        (Physical-Function-Requirement :kind .ScalarFunction
+                                        :op function.op
+                                        :arity (count function.terms)
+                                        :output-count output-count
+                                        :typed-supported typed)
       :else
-        (Physical-Function-Requirement {kind: .NoFunctionRequirement
-                                        op: function.op
-                                        arity: (count function.terms)
-                                        typed-supported: typed}))))
+        (Physical-Function-Requirement :kind .NoFunctionRequirement
+                                        :op function.op
+                                        :arity (count function.terms)
+                                        :typed-supported typed))))
 
 (defn physical-op-scalar-requirement-from-query-step [query: Query, step: Query-Step] -> Physical-Scalar-Requirement
   (if (= step.kind .Predicate)
     (physical-predicate-requirement query.predicates[step.index])
-    (Physical-Scalar-Requirement {})))
+    (Physical-Scalar-Requirement [])))
 
 (defn physical-op-function-requirement-from-query-step [query: Query, step: Query-Step] -> Physical-Function-Requirement
   (if (= step.kind .Function)
     (physical-function-requirement query.function-clauses[step.index])
-    (Physical-Function-Requirement {})))
+    (Physical-Function-Requirement [])))
 
 (defn physical-normalized-scan-pushdown-requirement [requirement: Physical-Scalar-Requirement, output-vars: []string] -> [normalized: Physical-Scalar-Requirement, ok: bool]
   (when (not requirement.typed-supported)
-    (return (Physical-Scalar-Requirement {}) false))
+    (return (Physical-Scalar-Requirement []) false))
   (case requirement.kind
     .VarValueCompare
       (if (and (= requirement.value-term.kind .Value)
                (string-slice-contains? output-vars requirement.var-name))
         (return requirement true)
-        (return (Physical-Scalar-Requirement {}) false))
+        (return (Physical-Scalar-Requirement []) false))
     .VarVarCompare
       (cond
         (and (string-slice-contains? output-vars requirement.var-name)
@@ -495,23 +495,23 @@
              (not (string-slice-contains? output-vars requirement.var-name)))
           (let [[inverted inverted-ok] (physical-inverted-compare-op requirement.op)]
             (if inverted-ok
-              (return (Physical-Scalar-Requirement {kind: .VarVarCompare
-                                                    op: inverted
-                                                    var-name: requirement.other-var
-                                                    other-var: requirement.var-name
-                                                    arity: requirement.arity
-                                                    is-equality: requirement.is-equality
-                                                    is-range: requirement.is-range
-                                                    typed-supported: requirement.typed-supported})
+              (return (Physical-Scalar-Requirement :kind .VarVarCompare
+                                                    :op inverted
+                                                    :var-name requirement.other-var
+                                                    :other-var requirement.var-name
+                                                    :arity requirement.arity
+                                                    :is-equality requirement.is-equality
+                                                    :is-range requirement.is-range
+                                                    :typed-supported requirement.typed-supported)
                       true)
-              (return (Physical-Scalar-Requirement {}) false)))
+              (return (Physical-Scalar-Requirement []) false)))
         :else
-          (return (Physical-Scalar-Requirement {}) false))
+          (return (Physical-Scalar-Requirement []) false))
 
-      (return (Physical-Scalar-Requirement {}) false)))
+      (return (Physical-Scalar-Requirement []) false)))
 
 (defn physical-best-scan-pushdown [query: Query, step-index: int, output-vars: []string] -> [requirement: Physical-Scalar-Requirement, predicate-index: int, ok: bool]
-  (let [best-requirement (Physical-Scalar-Requirement {})
+  (let [best-requirement (Physical-Scalar-Requirement [])
         best-predicate-index -1
         best-score 0
         candidate-index (+ step-index 1)]
@@ -531,7 +531,7 @@
     (return best-requirement best-predicate-index (>= best-predicate-index 0))))
 
 (defn physical-best-scan-pushdown-from-steps [query: Query, steps: []Query-Step, output-vars: []string] -> [requirement: Physical-Scalar-Requirement, predicate-index: int, ok: bool]
-  (let [best-requirement (Physical-Scalar-Requirement {})
+  (let [best-requirement (Physical-Scalar-Requirement [])
         best-predicate-index -1
         best-score 0]
     (for [candidate steps]
@@ -550,26 +550,26 @@
 (defn physical-op-pushdown-from-query-step [query: Query, step: Query-Step, step-index: int, output-vars: []string] -> [requirement: Physical-Scalar-Requirement, predicate-index: int, ok: bool]
   (if (= step.kind .Clause)
     (physical-best-scan-pushdown query step-index output-vars)
-    (return (Physical-Scalar-Requirement {}) -1 false)))
+    (return (Physical-Scalar-Requirement []) -1 false)))
 
 (defn physical-op-pushdown-from-query-step-and-remaining [query: Query, step: Query-Step, remaining: []Query-Step, output-vars: []string] -> [requirement: Physical-Scalar-Requirement, predicate-index: int, ok: bool]
   (if (= step.kind .Clause)
     (physical-best-scan-pushdown-from-steps query remaining output-vars)
-    (return (Physical-Scalar-Requirement {}) -1 false)))
+    (return (Physical-Scalar-Requirement []) -1 false)))
 
 (defn physical-pushdown-op-from-clause-and-steps [query: Query, clause-value: Clause, steps: []Query-Step] -> Physical-Op
   (let [output-vars (make [dynamic]string) :defer
         seen (set.empty string) :defer]
     (append-clause-vars-indexed! (addr output-vars) (addr seen) clause-value)
     (let [[requirement predicate-index pushdown-ok] (physical-best-scan-pushdown-from-steps query steps (slice output-vars 0))]
-      (Physical-Op {kind: .PrimaryScan
-                    has-pushdown-scalar: pushdown-ok
-                    pushdown-predicate-index: predicate-index
-                    pushdown-scalar-requirement: requirement}))))
+      (Physical-Op :kind .PrimaryScan
+                    :has-pushdown-scalar pushdown-ok
+                    :pushdown-predicate-index predicate-index
+                    :pushdown-scalar-requirement requirement))))
 
 (defn physical-resolved-scan-range-empty [range: Physical-Scan-Range] -> Physical-Resolved-Scan-Range
-  (Physical-Resolved-Scan-Range {range: range
-                                 values: (make [dynamic]Value)}))
+  (Physical-Resolved-Scan-Range :range range
+                                 :values (make [dynamic]Value)))
 
 (defn delete-physical-resolved-scan-range [resolved: Physical-Resolved-Scan-Range]
   (delete-owned-values-array resolved.values))
@@ -702,7 +702,7 @@
     (physical-op-available-input-vars (slice group.join-vars 0) available)
     (physical-op-available-input-vars referenced-vars available)))
 
-(defn append-branch-input-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), branch: Not-Group, available: []string]
+(defn append-branch-input-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), branch: Not-Group, available: []string]
   (let [referenced (make [dynamic]string) :defer
         output (make [dynamic]string) :defer
         referenced-seen (set.empty string) :defer
@@ -766,21 +766,21 @@
         (append-var-once! (addr vars) column.var-name)))
     (let [referenced-vars (arr.into [dynamic]string (slice vars 0))
           input-vars (arr.into [dynamic]string (slice vars 0))]
-      (Physical-Op {kind: .Project
-                    item-index: -1
-                    referenced-vars: referenced-vars
-                    input-vars: input-vars
-                    output-vars: vars}))))
+      (Physical-Op :kind .Project
+                    :item-index -1
+                    :referenced-vars referenced-vars
+                    :input-vars input-vars
+                    :output-vars vars))))
 
 (defn physical-materialize-op-from-materialization [materialization: Physical-Materialization-Plan] -> Physical-Op
   (let [vars (physical-terminal-op-vars-from-materialization materialization)
         referenced-vars (arr.into [dynamic]string (slice vars 0))
         input-vars (arr.into [dynamic]string (slice vars 0))]
-    (Physical-Op {kind: .Materialize
-                  item-index: -1
-                  referenced-vars: referenced-vars
-                  input-vars: input-vars
-                  output-vars: vars})))
+    (Physical-Op :kind .Materialize
+                  :item-index -1
+                  :referenced-vars referenced-vars
+                  :input-vars input-vars
+                  :output-vars vars)))
 
 (defn query-primary-source-star-join-physical-op? [query: Query] -> bool
   (when (not (db-read-source-query-star-attr-entity-projection? query))
@@ -794,11 +794,11 @@
   (let [vars (arr.into [dynamic]string (slice query.find 0))
         referenced-vars (arr.into [dynamic]string (slice query.find 0))
         input-vars (make [dynamic]string)]
-    (Physical-Op {kind: .StarJoin
-                  item-index: 0
-                  referenced-vars: referenced-vars
-                  input-vars: input-vars
-                  output-vars: vars})))
+    (Physical-Op :kind .StarJoin
+                  :item-index 0
+                  :referenced-vars referenced-vars
+                  :input-vars input-vars
+                  :output-vars vars)))
 
 (defn physical-plan-step-ready? [query: Query, step: Query-Step, available: []string] -> bool
   (case step.kind
@@ -844,7 +844,7 @@
 (defn physical-plan-step-score [query: Query, remaining: []Query-Step, step: Query-Step, available: []string] -> [score: int, unlocked-predicate-score: int]
   (case step.kind
     .Clause
-      (let [binding (Binding {items: (make [dynamic]Var-Binding)})
+      (let [binding (Binding :items (make [dynamic]Var-Binding))
             clause-value query.clauses[step.index]]
         (let [score (clause-selectivity-score clause-value binding)
               unlocked (physical-plan-clause-unlocked-predicate-score query remaining available clause-value)]
@@ -876,7 +876,7 @@
 (defn physical-source-candidate-count-for-step [source: DB-Read-Source, sources: []DB-Read-Named-Source, query: Query, step: Query-Step] -> [count-value: int, ok: bool, error: string]
   (when (not (= step.kind .Clause))
     (return 0 true ""))
-  (let [binding (Binding {items: (make [dynamic]Var-Binding)})
+  (let [binding (Binding :items (make [dynamic]Var-Binding))
         [estimated-count count-ok count-error] (db-read-source-clause-candidate-count-estimate source sources query.clauses[step.index] binding)]
     (delete binding.items)
     (return estimated-count count-ok count-error)))
@@ -942,19 +942,19 @@
         input-vars (physical-op-input-vars-from-query-step query rule-index step (slice referenced-vars 0) (slice output-vars 0) available)
         scan-bounds (physical-op-scan-bounds-from-query-step query step)
         [pushdown-requirement pushdown-predicate-index pushdown-ok] (physical-op-pushdown-from-query-step-and-remaining query step remaining-after-step (slice output-vars 0))]
-    (arr.push! ops^ (Physical-Op {kind: (physical-op-kind-from-query-step-and-available query step available)
-                                  step: step
-                                  item-index: step.index
-                                  scan-bounds: scan-bounds
-                                  scan-range: (physical-op-scan-range-from-query-step step scan-bounds)
-                                  scalar-requirement: (physical-op-scalar-requirement-from-query-step query step)
-                                  function-requirement: (physical-op-function-requirement-from-query-step query step)
-                                  has-pushdown-scalar: pushdown-ok
-                                  pushdown-predicate-index: pushdown-predicate-index
-                                  pushdown-scalar-requirement: pushdown-requirement
-                                  referenced-vars: referenced-vars
-                                  input-vars: input-vars
-                                  output-vars: output-vars}))))
+    (arr.push! ops^ (Physical-Op :kind (physical-op-kind-from-query-step-and-available query step available)
+                                  :step step
+                                  :item-index step.index
+                                  :scan-bounds scan-bounds
+                                  :scan-range (physical-op-scan-range-from-query-step step scan-bounds)
+                                  :scalar-requirement (physical-op-scalar-requirement-from-query-step query step)
+                                  :function-requirement (physical-op-function-requirement-from-query-step query step)
+                                  :has-pushdown-scalar pushdown-ok
+                                  :pushdown-predicate-index pushdown-predicate-index
+                                  :pushdown-scalar-requirement pushdown-requirement
+                                  :referenced-vars referenced-vars
+                                  :input-vars input-vars
+                                  :output-vars output-vars))))
 
 (defn physical-plan-append-source-ordered-ops! [ops: ^[dynamic]Physical-Op, query: Query, rule-index: []Rule-Name-Index-Entry, available: ^[dynamic]string]
   (for [step step-index query.where-steps]
@@ -1023,20 +1023,20 @@
           has-materialize (physical-materialization-materializable? materialization)
           project-op (if has-project
                        (physical-project-op-from-materialization materialization)
-                       (Physical-Op {referenced-vars: (make [dynamic]string)
-                                     input-vars: (make [dynamic]string)
-                                     output-vars: (make [dynamic]string)}))
+                       (Physical-Op :referenced-vars (make [dynamic]string)
+                                     :input-vars (make [dynamic]string)
+                                     :output-vars (make [dynamic]string)))
           materialize-op (if has-materialize
                            (physical-materialize-op-from-materialization materialization)
-                           (Physical-Op {referenced-vars: (make [dynamic]string)
-                                         input-vars: (make [dynamic]string)
-                                         output-vars: (make [dynamic]string)}))]
-      (Physical-Plan {ops: ops
-                      materialization: materialization
-                      has-project: has-project
-                      project-op: project-op
-                      has-materialize: has-materialize
-                      materialize-op: materialize-op}))))
+                           (Physical-Op :referenced-vars (make [dynamic]string)
+                                         :input-vars (make [dynamic]string)
+                                         :output-vars (make [dynamic]string)))]
+      (Physical-Plan :ops ops
+                      :materialization materialization
+                      :has-project has-project
+                      :project-op project-op
+                      :has-materialize has-materialize
+                      :materialize-op materialize-op))))
 
 (defn physical-plan-from-query-for-source [source: DB-Read-Source, sources: []DB-Read-Named-Source, query: Query] -> [plan: Physical-Plan, ok: bool, error: string]
   (let [ops (make [dynamic]Physical-Op 0 (count query.where-steps))
@@ -1055,20 +1055,20 @@
           has-materialize (physical-materialization-materializable? materialization)
           project-op (if has-project
                        (physical-project-op-from-materialization materialization)
-                       (Physical-Op {referenced-vars: (make [dynamic]string)
-                                     input-vars: (make [dynamic]string)
-                                     output-vars: (make [dynamic]string)}))
+                       (Physical-Op :referenced-vars (make [dynamic]string)
+                                     :input-vars (make [dynamic]string)
+                                     :output-vars (make [dynamic]string)))
           materialize-op (if has-materialize
                            (physical-materialize-op-from-materialization materialization)
-                           (Physical-Op {referenced-vars: (make [dynamic]string)
-                                         input-vars: (make [dynamic]string)
-                                         output-vars: (make [dynamic]string)}))]
-      (return (Physical-Plan {ops: ops
-                              materialization: materialization
-                              has-project: has-project
-                              project-op: project-op
-                              has-materialize: has-materialize
-                              materialize-op: materialize-op})
+                           (Physical-Op :referenced-vars (make [dynamic]string)
+                                         :input-vars (make [dynamic]string)
+                                         :output-vars (make [dynamic]string)))]
+      (return (Physical-Plan :ops ops
+                              :materialization materialization
+                              :has-project has-project
+                              :project-op project-op
+                              :has-materialize has-materialize
+                              :materialize-op materialize-op)
               true
               ""))))
 

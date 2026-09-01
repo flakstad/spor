@@ -361,8 +361,8 @@
                    [(vev.tx-add 1 ":user/email" (vev.value-string "a@example.com"))
                     (vev.tx-add 1 ":user/name" (vev.value-string "Andreas"))])
                  ([]vev.Tx-Meta
-                   [(vev.Tx-Meta {a: ":request/id" v: (vev.value-string "req-1")})
-                    (vev.Tx-Meta {a: ":tx/reason" v: (vev.value-keyword ":profile-edit")})]))]
+                   [(vev.Tx-Meta :a ":request/id" :v (vev.value-string "req-1"))
+                    (vev.Tx-Meta :a ":tx/reason" :v (vev.value-keyword ":profile-edit"))]))]
     (t.is (= report.tx vev.tx-partition-base))
     (t.is (= conn.next-tx (+ vev.tx-partition-base 1)))
     (t.is (= (count report.db-before.datoms) 0))
@@ -463,7 +463,7 @@
                  ([]vev.Tx-Op
                    [(vev.tx-add 1 ":name" (vev.value-string "Petr"))])
                  ([]vev.Tx-Meta
-                   [(vev.Tx-Meta {a: ":request/id" v: (vev.value-string "req-1")})]))
+                   [(vev.Tx-Meta :a ":request/id" :v (vev.value-string "req-1"))]))
         rendered (vev.tx-report-value report)
         prepared (vev.prepare-tx-text "[[:db/add \"person\" :name \"Ada\"]]")
         prepared-rendered (vev.transact-prepared-value (addr conn) prepared)
@@ -613,7 +613,7 @@
                 ([]vev.Tx-Op [(vev.tx-add 3 ":name" (vev.value-string "Dima"))
                                (vev.tx-add 3 ":age" (vev.value-int 19))
                                (vev.tx-add 4 ":name" (vev.value-string "Evgeny"))])
-                ([]vev.Tx-Meta [(vev.Tx-Meta {a: ":some-metadata" v: (vev.value-int 1)})]))
+                ([]vev.Tx-Meta [(vev.Tx-Meta :a ":some-metadata" :v (vev.value-int 1))]))
         second (vev.transact
                  (addr conn)
                  [[:db/add 5 :name "Fedor"]
@@ -3593,7 +3593,7 @@
         failed (vev.with-tx-data
                  second-db
                  ([]vev.Tx-Data
-                   [(vev.Tx-Data {op: ":db/nope" e: 1 a: ":name" v: (vev.value-string "Bad")})]))
+                   [(vev.Tx-Data :op ":db/nope" :e 1 :a ":name" :v (vev.value-string "Bad"))]))
         after-failed (vev.q-collection failed.db-after
                        [:find [?name ...]
                         :where
@@ -4180,7 +4180,7 @@
                  (addr conn)
                  next-db
                  ([]vev.Tx-Meta
-                   [(vev.Tx-Meta {a: ":reset/reason" v: (vev.value-string "test")})]))
+                   [(vev.Tx-Meta :a ":reset/reason" :v (vev.value-string "test"))]))
         attrs (vev.q conn.db
                 [:find ?a ?v
                  :where
@@ -10230,7 +10230,7 @@
         unknown-op (vev.transact-tx-data
                      (addr unknown-op-conn)
                      ([]vev.Tx-Data
-                       [(vev.Tx-Data {op: ":db/nope" e: 1 a: ":name" v: (vev.value-string "Ivan")})]))
+                       [(vev.Tx-Data :op ":db/nope" :e 1 :a ":name" :v (vev.value-string "Ivan"))]))
         bad-attr-conn (vev.create-conn)
         bad-attr (vev.transact-tx-data
                    (addr bad-attr-conn)
@@ -13399,9 +13399,9 @@
   (let [conn (vev.create-conn)
         report (vev.seed-people (addr conn))
         clauses ([]vev.Clause
-                  [(vev.Clause {e: (vev.term-entity 1)
-                                a: (vev.term-var "attr")
-                                v: (vev.term-string "Ada")})])
+                  [(vev.Clause :e (vev.term-entity 1)
+                                :a (vev.term-var "attr")
+                                :v (vev.term-string "Ada"))])
         query (vev.query ([]string ["attr"]) ([]string []) ([]string []) ([]string []) ([]vev.Tuple-Input []) ([]vev.Relation-Input []) clauses ([]vev.Predicate []) ([]vev.Function-Clause []) ([]vev.Rule []) ([]vev.Rule-Call []) ([]vev.Get-Else []) ([]vev.Get-Some []) ([]vev.Ground []) ([]vev.Not-Group []) ([]vev.Or-Group []) ([]vev.Pull-Find []) ([]vev.Aggregate-Find []))
         result (vev.q report.db-after query)]
       (t.is (= (count result.rows) 1))

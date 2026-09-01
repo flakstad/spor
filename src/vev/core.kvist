@@ -27,7 +27,7 @@
   Instant
 ])
 
-(defstruct Value {
+(defstruct Value [
   kind: Value-Kind
   entity: u64
   text: string
@@ -35,7 +35,7 @@
   float-value: f64
   bool-value: bool
   items: [dynamic]Value
-})
+])
 
 (defenum Term-Kind [
   Value
@@ -44,40 +44,40 @@
   LookupRef
 ])
 
-(defstruct Term {
+(defstruct Term [
   kind: Term-Kind
   value: Value
   name: string
   lookup-attr: string
   lookup-value: Value
-})
+])
 
-(defstruct Datom {
+(defstruct Datom [
   e: u64
   a: string
   v: Value
   tx: u64
   added: bool
-})
+])
 
-(defstruct Datom-Result {
+(defstruct Datom-Result [
   found: bool
   datom: Datom
-})
+])
 
-(defstruct Datoms-Result {
+(defstruct Datoms-Result [
   ok: bool
   error: string
   datoms: [dynamic]Datom
-})
+])
 
-(defstruct DB-Diff {
+(defstruct DB-Diff [
   only-left: [dynamic]Datom
   only-right: [dynamic]Datom
   both: [dynamic]Datom
-})
+])
 
-(defstruct DB {
+(defstruct DB [
   datoms: [dynamic]Datom
   current: [dynamic]int
   eavt: [dynamic]int
@@ -87,21 +87,21 @@
   avet: [dynamic]int
   vaet: [dynamic]int
   schema-value-types: map[string]string
-  schema-cardinality-many: (map string (struct {}))
-  schema-unique: (map string (struct {}))
-  schema-ref: (map string (struct {}))
-})
+  schema-cardinality-many: (map string (struct []))
+  schema-unique: (map string (struct []))
+  schema-ref: (map string (struct []))
+])
 
-(defstruct Serializable-DB {
+(defstruct Serializable-DB [
   datoms: [dynamic]Datom
-})
+])
 
-(defstruct Tx-Listener {
+(defstruct Tx-Listener [
   name: string
   reports: ^[dynamic]Tx-Report
-})
+])
 
-(defstruct Tx-Phase-Profile {
+(defstruct Tx-Phase-Profile [
   enabled: bool
   transactions: u64
   effective-datoms: u64
@@ -138,20 +138,20 @@
   append-db-after: u64
   incremental-db-after: u64
   full-db-after: u64
-})
+])
 
-(defstruct Conn {
+(defstruct Conn [
   db: DB
   next-tx: u64
   listeners: [dynamic]Tx-Listener
   tx-phase-profile: ^Tx-Phase-Profile
   force-full-db-after: bool
-})
+])
 
 (defn tx-phase-profile-start [profile: ^Tx-Phase-Profile] -> time.Time
   (if (and (not (= profile nil)) profile^.enabled)
     (time.now)
-    (time.Time {})))
+    (time.Time [])))
 
 (defn tx-phase-profile-elapsed-us [profile: ^Tx-Phase-Profile, start: time.Time] -> f64
   (if (and (not (= profile nil)) profile^.enabled)
@@ -292,7 +292,7 @@
   Retract
 ])
 
-(defstruct Tx-Op {
+(defstruct Tx-Op [
   kind: Tx-Op-Kind
   e: u64
   a: string
@@ -302,9 +302,9 @@
   derived: bool
   tuple-identity: bool
   map-group: string
-})
+])
 
-(defstruct Tx-Data {
+(defstruct Tx-Data [
   op: string
   e: u64
   tempid: string
@@ -330,17 +330,17 @@
   has-nested-map: bool
   from-map-collection: bool
   map-group: string
-})
+])
 
-(defstruct Tempid {
+(defstruct Tempid [
   tempid: string
   e: u64
-})
+])
 
 (defn clone-tempids-owned [tempids: []Tempid] -> [dynamic]Tempid
   (let [out (make [dynamic]Tempid 0 (count tempids))]
     (for [item tempids]
-      (arr.push! out (Tempid {tempid: (string-owned item.tempid) e: item.e})))
+      (arr.push! out (Tempid :tempid (string-owned item.tempid) :e item.e)))
     out))
 
 (defn delete-owned-tempids [tempids: [dynamic]Tempid]
@@ -348,20 +348,20 @@
     (delete item.tempid))
   (delete tempids))
 
-(defstruct Resolved-Tx {
+(defstruct Resolved-Tx [
   ok: bool
   error: string
   ops: [dynamic]Tx-Op
   tx-meta: [dynamic]Tx-Meta
   tempids: [dynamic]Tempid
-})
+])
 
-(defstruct Tx-Meta {
+(defstruct Tx-Meta [
   a: string
   v: Value
-})
+])
 
-(defstruct Tx-Publish-Plan {
+(defstruct Tx-Publish-Plan [
   append-only: bool
   new-entities-after-existing: bool
   start-index: int
@@ -370,9 +370,9 @@
   aevt: [dynamic]int
   avet: [dynamic]int
   vaet: [dynamic]int
-})
+])
 
-(defstruct Tx-Apply-Result {
+(defstruct Tx-Apply-Result [
   ok: bool
   error: string
   after-datoms: [dynamic]Datom
@@ -382,9 +382,9 @@
   append-only: bool
   new-entities-after-existing: bool
   publish-plan: Tx-Publish-Plan
-})
+])
 
-(defstruct Tx-Report {
+(defstruct Tx-Report [
   ok: bool
   error: string
   db-before: DB
@@ -401,27 +401,27 @@
   append-only: bool
   new-entities-after-existing: bool
   publish-plan: Tx-Publish-Plan
-})
+])
 
-(defstruct Tx-Fn-Result {
+(defstruct Tx-Fn-Result [
   ok: bool
   error: string
   tx-data: [dynamic]Tx-Data
-})
+])
 
-(defstruct Tx-Fn-String {
+(defstruct Tx-Fn-String [
   ident: string
   f: fn [db: DB, arg: string] -> Tx-Fn-Result
   has-values-fn: bool
   values-f: fn [db: DB, args: []Value] -> Tx-Fn-Result
-})
+])
 
-(defstruct Native-Query-Function-Result {
+(defstruct Native-Query-Function-Result [
   ok: bool
   value: Value
-})
+])
 
-(defstruct Native-Query-Fn {
+(defstruct Native-Query-Fn [
   name: string
   target: string
   has-predicate-callback: bool
@@ -434,7 +434,7 @@
   aggregate-callback: fn [values: []Value] -> Native-Query-Function-Result
   has-pull-xform-callback: bool
   pull-xform-callback: fn [value: Value] -> Native-Query-Function-Result
-})
+])
 
 (defenum Tx-EDN-Entity-Kind [
   Invalid
@@ -444,21 +444,21 @@
   Ident
 ])
 
-(defstruct Tx-EDN-Entity {
+(defstruct Tx-EDN-Entity [
   kind: Tx-EDN-Entity-Kind
   e: u64
   tempid: string
   lookup-attr: string
   lookup-value: Value
   ident: string
-})
+])
 
-(defstruct Tuple-Schema {
+(defstruct Tuple-Schema [
   attr: string
   attrs: [dynamic]string
-})
+])
 
-(defstruct Schema-Attr {
+(defstruct Schema-Attr [
   attr: string
   value-type: string
   has-value-type: bool
@@ -472,9 +472,9 @@
   has-component: bool
   tuple-attrs: [dynamic]string
   has-tuple-attrs: bool
-})
+])
 
-(defstruct Clause {
+(defstruct Clause [
   e: Term
   a: Term
   v: Term
@@ -483,21 +483,21 @@
   source: string
   has-source: bool
   source-width: int
-})
+])
 
-(defstruct Predicate {
+(defstruct Predicate [
   op: string
   terms: []Term
-})
+])
 
-(defstruct Function-Clause {
+(defstruct Function-Clause [
   op: string
   terms: []Term
   out: string
   out-vars: []string
   out-binding: Input-Binding
   is-tuple: bool
-})
+])
 
 (defenum Query-Step-Kind [
   Clause
@@ -511,12 +511,12 @@
   Or
 ])
 
-(defstruct Query-Step {
+(defstruct Query-Step [
   kind: Query-Step-Kind
   index: int
-})
+])
 
-(defstruct Rule {
+(defstruct Rule [
   name: string
   required-param-count: int
   params: [dynamic]string
@@ -530,31 +530,31 @@
   not-groups: [dynamic]Not-Group
   or-groups: [dynamic]Or-Group
   body-steps: [dynamic]Query-Step
-})
+])
 
-(defstruct Rule-Call {
+(defstruct Rule-Call [
   name: string
   source: string
   has-source: bool
   args: [dynamic]Term
-})
+])
 
-(defstruct Rule-Dependency {
+(defstruct Rule-Dependency [
   name: string
   deps: [dynamic]string
-})
+])
 
-(defstruct Rule-Name-Index-Entry {
+(defstruct Rule-Name-Index-Entry [
   name: string
   indexes: [dynamic]int
-})
+])
 
-(defstruct Rule-Component {
+(defstruct Rule-Component [
   names: [dynamic]string
   recursive: bool
-})
+])
 
-(defstruct Rule-Call-Plan {
+(defstruct Rule-Call-Plan [
   rules: [dynamic]Rule
   recursive: bool
   acyclic-depth: int
@@ -569,9 +569,9 @@
   alternating-left-attr: string
   alternating-right-name: string
   alternating-right-attr: string
-})
+])
 
-(defstruct Not-Group {
+(defstruct Not-Group [
   clauses: [dynamic]Clause
   predicates: [dynamic]Predicate
   function-clauses: [dynamic]Function-Clause
@@ -583,15 +583,15 @@
   steps: [dynamic]Query-Step
   has-join: bool
   join-vars: [dynamic]string
-})
+])
 
-(defstruct Or-Group {
+(defstruct Or-Group [
   branches: [dynamic]Not-Group
   has-join: bool
   join-vars: [dynamic]string
-})
+])
 
-(defstruct Pull-Find {
+(defstruct Pull-Find [
   var: string
   source: string
   has-source: bool
@@ -599,9 +599,9 @@
   pattern-var: string
   attrs: []string
   pattern: [dynamic]Pull-Spec
-})
+])
 
-(defstruct Aggregate-Find {
+(defstruct Aggregate-Find [
   op: string
   var: string
   args: []Term
@@ -611,7 +611,7 @@
   has-limit-var: bool
   function-var: string
   has-function-var: bool
-})
+])
 
 (defenum Input-Binding-Kind [
   None
@@ -621,11 +621,11 @@
   Collection
 ])
 
-(defstruct Input-Binding {
+(defstruct Input-Binding [
   kind: Input-Binding-Kind
   name: string
   items: [dynamic]Input-Binding
-})
+])
 
 (defn function-output-binding [binding: Input-Binding] -> Input-Binding
   ;; Datomic function clauses spell relation binding as [[?x ?y]], without
@@ -637,15 +637,15 @@
       (set! out.kind .Collection))
     out))
 
-(defstruct Tuple-Input {
+(defstruct Tuple-Input [
   vars: []string
   binding: Input-Binding
-})
+])
 
-(defstruct Relation-Input {
+(defstruct Relation-Input [
   vars: []string
   binding: Input-Binding
-})
+])
 
 (defenum Query-Input-Spec-Kind [
   Scalar
@@ -655,32 +655,32 @@
   Ignore
 ])
 
-(defstruct Query-Input-Spec {
+(defstruct Query-Input-Spec [
   kind: Query-Input-Spec-Kind
   name: string
   tuple: Tuple-Input
   relation: Relation-Input
-})
+])
 
-(defstruct Get-Else {
+(defstruct Get-Else [
   source: string
   has-source: bool
   e: Term
   a: string
   default-value: Value
   out: string
-})
+])
 
-(defstruct Get-Some {
+(defstruct Get-Some [
   source: string
   has-source: bool
   e: Term
   attrs: [dynamic]string
   out-attr: string
   out-value: string
-})
+])
 
-(defstruct Ground {
+(defstruct Ground [
   source: Term
   out: string
   tuple-vars: []string
@@ -689,9 +689,9 @@
   is-tuple: bool
   is-relation: bool
   width: int
-})
+])
 
-(defstruct Query {
+(defstruct Query [
   find: [dynamic]string
   with: [dynamic]string
   inputs: [dynamic]string
@@ -718,9 +718,9 @@
   has-return-map: bool
   return-map-marker: string
   return-map-keys: [dynamic]string
-})
+])
 
-(defstruct Prepared-Query {
+(defstruct Prepared-Query [
   ok: bool
   error: string
   query: Query
@@ -728,33 +728,33 @@
   owns-source: bool
   rules-source-owner: Data
   owns-rules-source: bool
-})
+])
 
-(defstruct Prepared-Binding {
+(defstruct Prepared-Binding [
   ok: bool
   error: string
   binding: Input-Binding
   source-owner: Data
   owns-source: bool
-})
+])
 
-(defstruct Prepared-In {
+(defstruct Prepared-In [
   ok: bool
   error: string
   bindings: [dynamic]Input-Binding
   source-owner: Data
   owns-source: bool
-})
+])
 
-(defstruct Prepared-With {
+(defstruct Prepared-With [
   ok: bool
   error: string
   vars: [dynamic]string
   source-owner: Data
   owns-source: bool
-})
+])
 
-(defstruct Prepared-Clause {
+(defstruct Prepared-Clause [
   ok: bool
   error: string
   clauses: [dynamic]Clause
@@ -769,30 +769,30 @@
   where-steps: [dynamic]Query-Step
   source-owner: Data
   owns-source: bool
-})
+])
 
-(defstruct Prepared-Rules {
+(defstruct Prepared-Rules [
   ok: bool
   error: string
   rules: [dynamic]Rule
   source-owner: Data
   owns-source: bool
-})
+])
 
-(defstruct Prepared-Tx-Data {
+(defstruct Prepared-Tx-Data [
   ok: bool
   error: string
   tx-data: [dynamic]Tx-Data
-})
+])
 
-(defstruct Var-Binding {
+(defstruct Var-Binding [
   name: string
   value: Value
-})
+])
 
-(defstruct Binding {
+(defstruct Binding [
   items: [dynamic]Var-Binding
-})
+])
 
 (defenum Relation-Column-Kind [
   Nil
@@ -808,7 +808,7 @@
   Instant
 ])
 
-(defstruct Relation-Column {
+(defstruct Relation-Column [
   kind: Relation-Column-Kind
   has-kind: bool
   entities: [dynamic]u64
@@ -817,9 +817,9 @@
   floats: [dynamic]f64
   bools: [dynamic]bool
   values: [dynamic]Value
-})
+])
 
-(defstruct Query-Relation {
+(defstruct Query-Relation [
   attrs: [dynamic]string
   attr-sources: [dynamic]string
   attr-index: map[string]int
@@ -827,45 +827,45 @@
   typed-columns: [dynamic]Relation-Column
   typed-rows: int
   has-typed-columns: bool
-})
+])
 
-(defstruct Typed-Flat-Result-Plan {
+(defstruct Typed-Flat-Result-Plan [
   ok: bool
   find-indexes: [dynamic]int
   with-indexes: [dynamic]int
   column-kinds: [dynamic]Relation-Column-Kind
   rows: int
-})
+])
 
-(defstruct Typed-Relation {
+(defstruct Typed-Relation [
   attrs: [dynamic]string
   attr-sources: [dynamic]string
   attr-index: map[string]int
   columns: [dynamic]Relation-Column
   rows: int
-})
+])
 
-(defstruct Query-Context {
+(defstruct Query-Context [
   rels: [dynamic]Query-Relation
-})
+])
 
-(defstruct Result-Row {
+(defstruct Result-Row [
   values: [dynamic]Value
   pulls: [dynamic]Pull-Result
-})
+])
 
-(defstruct Result-Set {
+(defstruct Result-Set [
   ok: bool
   error: string
   rows: [dynamic]Result-Row
-})
+])
 
-(defstruct Query-Result {
+(defstruct Query-Result [
   result: Result-Set
   ownsValues: bool
-})
+])
 
-(defstruct Query-Stats {
+(defstruct Query-Stats [
   input-bindings: int
   steps: int
   clauses: int
@@ -879,21 +879,21 @@
   rule-iterations: int
   max-intermediate-bindings: int
   output-rows: int
-})
+])
 
-(defstruct Profiled-Result-Set {
+(defstruct Profiled-Result-Set [
   result: Result-Set
   stats: Query-Stats
-})
+])
 
 (defn query-stats-empty [] -> Query-Stats
-  (Query-Stats {}))
+  (Query-Stats []))
 
 (defn result-set-ok [rows: [dynamic]Result-Row] -> Result-Set
-  (Result-Set {ok: true error: "" rows: rows}))
+  (Result-Set :ok true :error "" :rows rows))
 
 (defn result-set-error [error: string] -> Result-Set
-  (Result-Set {ok: false error: error rows: (make [dynamic]Result-Row)}))
+  (Result-Set :ok false :error error :rows (make [dynamic]Result-Row)))
 
 (defenum EDN-Kind [
   Nil
@@ -911,7 +911,7 @@
   Instant
 ])
 
-(defstruct EDN-Node {
+(defstruct EDN-Node [
   kind: EDN-Kind
   text: string
   int-value: i64
@@ -920,12 +920,12 @@
   first-child: int
   next-sibling: int
   child-count: int
-})
+])
 
-(defstruct EDN-Doc {
+(defstruct EDN-Doc [
   nodes: [dynamic]EDN-Node
   root: int
-})
+])
 
 (defenum Key-Kind [
   Keyword
@@ -933,46 +933,46 @@
   Symbol
 ])
 
-(defstruct Keyed-Value {
+(defstruct Keyed-Value [
   kind: Key-Kind
   key: string
   value: Value
-})
+])
 
-(defstruct Keyed-Row {
+(defstruct Keyed-Row [
   items: [dynamic]Keyed-Value
-})
+])
 
-(defstruct Pull-Attr {
+(defstruct Pull-Attr [
   a: string
   a-owned: bool
   key-kind: Key-Kind
   v: Value
   attrs: [dynamic]Pull-Attr
   has-explicit-pattern: bool
-})
+])
 
-(defstruct Pull-Result {
+(defstruct Pull-Result [
   e: u64
   attrs: [dynamic]Pull-Attr
-})
+])
 
-(defstruct Pull-Visit {
+(defstruct Pull-Visit [
   kind: string
   has-e: bool
   e: u64
   a: string
   has-v: bool
   v-entity: u64
-})
+])
 
-(defstruct Entity {
+(defstruct Entity [
   db: DB
   e: u64
   found: bool
-})
+])
 
-(defstruct Pull-Spec {
+(defstruct Pull-Spec [
   a: string
   pattern: [dynamic]Pull-Spec
   limit: int
@@ -986,15 +986,15 @@
   xform: string
   has-recursion: bool
   recursion-depth: int
-})
+])
 
-(defstruct Prepared-Pull-Pattern {
+(defstruct Prepared-Pull-Pattern [
   ok: bool
   error: string
   pattern: [dynamic]Pull-Spec
   source-owner: Data
   owns-source: bool
-})
+])
 
 (defenum Query-Input-Kind [
   Scalar
@@ -1004,7 +1004,7 @@
   PullPattern
 ])
 
-(defstruct Query-Input {
+(defstruct Query-Input [
   kind: Query-Input-Kind
   owns-values: bool
   value: Value
@@ -1016,64 +1016,64 @@
   lookup-value: Value
   lookup-attrs: []string
   lookup-values: []Value
-})
+])
 
-(defstruct DB-Source {
+(defstruct DB-Source [
   name: string
   db: DB
-})
+])
 
-(defstruct Index-Arg {
+(defstruct Index-Arg [
   value: Value
   has-lookup-ref: bool
   lookup-attr: string
   lookup-value: Value
-})
+])
 
 (defn value-entity [id: u64] -> Value
-  (Value {kind: .Entity entity: id}))
+  (Value :kind .Entity :entity id))
 
 (defn value-string [text: string] -> Value
-  (Value {kind: .String text: text}))
+  (Value :kind .String :text text))
 
 (defn value-int [value: i64] -> Value
-  (Value {kind: .Int int-value: value}))
+  (Value :kind .Int :int-value value))
 
 (defn value-float [value: f64] -> Value
-  (Value {kind: .Float float-value: value}))
+  (Value :kind .Float :float-value value))
 
 (defn value-bool [value: bool] -> Value
-  (Value {kind: .Bool bool-value: value}))
+  (Value :kind .Bool :bool-value value))
 
 (defn keyword-text [kw: keyword] -> string
   (string kw))
 
 (defn value-keyword [text: string] -> Value
-  (Value {kind: .Keyword text: text}))
+  (Value :kind .Keyword :text text))
 
 (defn value-kw [kw: keyword] -> Value
   (value-keyword (keyword-text kw)))
 
 (defn value-symbol [text: string] -> Value
-  (Value {kind: .Symbol text: text}))
+  (Value :kind .Symbol :text text))
 
 (defn value-uuid [text: string] -> Value
-  (Value {kind: .Uuid text: text}))
+  (Value :kind .Uuid :text text))
 
 (defn value-instant [unix-millis: i64] -> Value
-  (Value {kind: .Instant int-value: unix-millis}))
+  (Value :kind .Instant :int-value unix-millis))
 
 (defn value-nil [] -> Value
-  (Value {kind: .Nil}))
+  (Value :kind .Nil))
 
 (defn value-vector-owned [items: [dynamic]Value] -> Value
-  (Value {kind: .Vector items: items}))
+  (Value :kind .Vector :items items))
 
 (defn value-map-owned [items: [dynamic]Value] -> Value
-  (Value {kind: .Map items: items}))
+  (Value :kind .Map :items items))
 
 (defn value-set-owned [items: [dynamic]Value] -> Value
-  (Value {kind: .Set items: items}))
+  (Value :kind .Set :items items))
 
 (defn value-vector [items: []Value] -> Value
   (let [owned (arr.into [dynamic]Value items)]
@@ -1277,7 +1277,7 @@
       (< (count left-indexes) (count right-indexes)))))
 
 (defn term-value [value: Value] -> Term
-  (Term {kind: .Value value: value}))
+  (Term :kind .Value :value value))
 
 (defn term-entity [id: u64] -> Term
   (term-value (value-entity id)))
@@ -1301,13 +1301,13 @@
   (term-value (value-symbol text)))
 
 (defn term-var [name: string] -> Term
-  (Term {kind: .Var name: name}))
+  (Term :kind .Var :name name))
 
 (defn term-wildcard [] -> Term
-  (Term {kind: .Wildcard}))
+  (Term :kind .Wildcard))
 
 (defn term-lookup-ref [attr: string, value: Value] -> Term
-  (Term {kind: .LookupRef lookup-attr: attr lookup-value: value}))
+  (Term :kind .LookupRef :lookup-attr attr :lookup-value value))
 
 (defn attr [name: string] -> Term
   (term-keyword name))
@@ -1316,26 +1316,26 @@
   (term-kw kw))
 
 (defn clause [e: Term, a: string, v: Term] -> Clause
-  (Clause {e: e
-           a: (attr a)
-           v: v
-           tx-term: (term-wildcard)
-           op-term: (term-wildcard)
-           source: ""
-           has-source: false
-           source-width: 0}))
+  (Clause :e e
+           :a (attr a)
+           :v v
+           :tx-term (term-wildcard)
+           :op-term (term-wildcard)
+           :source ""
+           :has-source false
+           :source-width 0))
 
 (defn clause-kw [e: Term, a: keyword, v: Term] -> Clause
   (clause e (keyword-text a) v))
 
 (defn tx-add [e: u64, a: string, v: Value] -> Tx-Op
-  (Tx-Op {kind: .Add e: e a: a v: v}))
+  (Tx-Op :kind .Add :e e :a a :v v))
 
 (defn tx-add-kw [e: u64, a: keyword, v: Value] -> Tx-Op
   (tx-add e (keyword-text a) v))
 
 (defn tx-add-derived [e: u64, a: string, v: Value] -> Tx-Op
-  (Tx-Op {kind: .Add e: e a: a v: v derived: true}))
+  (Tx-Op :kind .Add :e e :a a :v v :derived true))
 
 (defn tx-data-with-map-group [data: Tx-Data, group: string] -> Tx-Data
   (let [out data]
@@ -1343,7 +1343,7 @@
     out))
 
 (defn tx-retract [e: u64, a: string, v: Value] -> Tx-Op
-  (Tx-Op {kind: .Retract e: e a: a v: v}))
+  (Tx-Op :kind .Retract :e e :a a :v v))
 
 (defn tx-retract-kw [e: u64, a: keyword, v: Value] -> Tx-Op
   (tx-retract e (keyword-text a) v))
@@ -1361,133 +1361,133 @@
   (arr.push! ops^ op))
 
 (defn add [e: u64, a: string, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db/add" e: e a: a v: v}))
+  (Tx-Data :op ":db/add" :e e :a a :v v))
 
 (defn add-kw [e: u64, a: keyword, v: Value] -> Tx-Data
   (add e (keyword-text a) v))
 
 (defn add-map-collection [e: u64, a: string, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db/add" e: e a: a v: v from-map-collection: true}))
+  (Tx-Data :op ":db/add" :e e :a a :v v :from-map-collection true))
 
 (defn retract [e: u64, a: string, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db/retract" e: e a: a v: v}))
+  (Tx-Data :op ":db/retract" :e e :a a :v v))
 
 (defn retract-kw [e: u64, a: keyword, v: Value] -> Tx-Data
   (retract e (keyword-text a) v))
 
 (defn cas [e: u64, a: string, expected: Value, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db.fn/cas" e: e a: a expected: expected v: v}))
+  (Tx-Data :op ":db.fn/cas" :e e :a a :expected expected :v v))
 
 (defn cas-kw [e: u64, a: keyword, expected: Value, v: Value] -> Tx-Data
   (cas e (keyword-text a) expected v))
 
 (defn cas-tempid [tempid: string, a: string, expected: Value, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db.fn/cas" tempid: tempid has-tempid: true a: a expected: expected v: v}))
+  (Tx-Data :op ":db.fn/cas" :tempid tempid :has-tempid true :a a :expected expected :v v))
 
 (defn cas-lookup-ref [lookup-attr: string, lookup-value: Value, a: string, expected: Value, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db.fn/cas" lookup-attr: lookup-attr lookup-value: lookup-value has-lookup-ref: true a: a expected: expected v: v}))
+  (Tx-Data :op ":db.fn/cas" :lookup-attr lookup-attr :lookup-value lookup-value :has-lookup-ref true :a a :expected expected :v v))
 
 (defn cas-expected-lookup-ref [e: u64, a: string, expected-attr: string, expected-value: Value, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db.fn/cas" e: e a: a expected-lookup-attr: expected-attr expected-lookup-value: expected-value has-expected-lookup-ref: true v: v}))
+  (Tx-Data :op ":db.fn/cas" :e e :a a :expected-lookup-attr expected-attr :expected-lookup-value expected-value :has-expected-lookup-ref true :v v))
 
 (defn cas-value-lookup-ref [e: u64, a: string, expected: Value, value-attr: string, value-value: Value] -> Tx-Data
-  (Tx-Data {op: ":db.fn/cas" e: e a: a expected: expected value-lookup-attr: value-attr value-lookup-value: value-value has-value-lookup-ref: true}))
+  (Tx-Data :op ":db.fn/cas" :e e :a a :expected expected :value-lookup-attr value-attr :value-lookup-value value-value :has-value-lookup-ref true))
 
 (defn call-ident-string [ident: string, arg: string] -> Tx-Data
-  (Tx-Data {op: ":db.fn/call-ident" ident: ident has-ident: true v: (value-string arg)}))
+  (Tx-Data :op ":db.fn/call-ident" :ident ident :has-ident true :v (value-string arg)))
 
 (defn call-ident-values [ident: string, args: []Value] -> Tx-Data
-  (Tx-Data {op: ":db.fn/call-ident" ident: ident has-ident: true v: (value-vector args)}))
+  (Tx-Data :op ":db.fn/call-ident" :ident ident :has-ident true :v (value-vector args)))
 
 (defn call-ident-values-kw [ident: keyword, args: []Value] -> Tx-Data
   (call-ident-values (keyword-text ident) args))
 
 (defn call-ident-arg-vector [ident: string, args: Value] -> Tx-Data
-  (Tx-Data {op: ":db.fn/call-ident" ident: ident has-ident: true v: args}))
+  (Tx-Data :op ":db.fn/call-ident" :ident ident :has-ident true :v args))
 
 (defn call-ident-arg-vector-kw [ident: keyword, args: Value] -> Tx-Data
   (call-ident-arg-vector (keyword-text ident) args))
 
 (defn retract-attr [e: u64, a: string] -> Tx-Data
-  (Tx-Data {op: ":db/retractAttr" e: e a: a}))
+  (Tx-Data :op ":db/retractAttr" :e e :a a))
 
 (defn retract-attr-kw [e: u64, a: keyword] -> Tx-Data
   (retract-attr e (keyword-text a)))
 
 (defn retract-entity [e: u64] -> Tx-Data
-  (Tx-Data {op: ":db/retractEntity" e: e}))
+  (Tx-Data :op ":db/retractEntity" :e e))
 
 (defn add-tempid [tempid: string, a: string, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db/add" tempid: tempid has-tempid: true a: a v: v}))
+  (Tx-Data :op ":db/add" :tempid tempid :has-tempid true :a a :v v))
 
 (defn add-tempid-kw [tempid: string, a: keyword, v: Value] -> Tx-Data
   (add-tempid tempid (keyword-text a) v))
 
 (defn add-value-tempid [e: u64, a: string, value-tempid: string] -> Tx-Data
-  (Tx-Data {op: ":db/add" e: e a: a value-tempid: value-tempid has-value-tempid: true}))
+  (Tx-Data :op ":db/add" :e e :a a :value-tempid value-tempid :has-value-tempid true))
 
 (defn add-value-lookup-ref [e: u64, a: string, lookup-attr: string, lookup-value: Value] -> Tx-Data
-  (Tx-Data {op: ":db/add" e: e a: a value-lookup-attr: lookup-attr value-lookup-value: lookup-value has-value-lookup-ref: true}))
+  (Tx-Data :op ":db/add" :e e :a a :value-lookup-attr lookup-attr :value-lookup-value lookup-value :has-value-lookup-ref true))
 
 (defn add-nested-map [e: u64, a: string, nested-map: Value, nested-tempid: string] -> Tx-Data
-  (Tx-Data {op: ":db/add" e: e a: a nested-map: nested-map nested-tempid: nested-tempid has-nested-map: true}))
+  (Tx-Data :op ":db/add" :e e :a a :nested-map nested-map :nested-tempid nested-tempid :has-nested-map true))
 
 (defn add-tempid-value-lookup-ref [tempid: string, a: string, lookup-attr: string, lookup-value: Value] -> Tx-Data
-  (Tx-Data {op: ":db/add" tempid: tempid has-tempid: true a: a value-lookup-attr: lookup-attr value-lookup-value: lookup-value has-value-lookup-ref: true}))
+  (Tx-Data :op ":db/add" :tempid tempid :has-tempid true :a a :value-lookup-attr lookup-attr :value-lookup-value lookup-value :has-value-lookup-ref true))
 
 (defn add-tempid-nested-map [tempid: string, a: string, nested-map: Value, nested-tempid: string] -> Tx-Data
-  (Tx-Data {op: ":db/add" tempid: tempid has-tempid: true a: a nested-map: nested-map nested-tempid: nested-tempid has-nested-map: true}))
+  (Tx-Data :op ":db/add" :tempid tempid :has-tempid true :a a :nested-map nested-map :nested-tempid nested-tempid :has-nested-map true))
 
 (defn retract-value-lookup-ref [e: u64, a: string, lookup-attr: string, lookup-value: Value] -> Tx-Data
-  (Tx-Data {op: ":db/retract" e: e a: a value-lookup-attr: lookup-attr value-lookup-value: lookup-value has-value-lookup-ref: true}))
+  (Tx-Data :op ":db/retract" :e e :a a :value-lookup-attr lookup-attr :value-lookup-value lookup-value :has-value-lookup-ref true))
 
 (defn add-tempid-value-tempid [tempid: string, a: string, value-tempid: string] -> Tx-Data
-  (Tx-Data {op: ":db/add" tempid: tempid has-tempid: true a: a value-tempid: value-tempid has-value-tempid: true}))
+  (Tx-Data :op ":db/add" :tempid tempid :has-tempid true :a a :value-tempid value-tempid :has-value-tempid true))
 
 (defn retract-tempid [tempid: string, a: string, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db/retract" tempid: tempid has-tempid: true a: a v: v}))
+  (Tx-Data :op ":db/retract" :tempid tempid :has-tempid true :a a :v v))
 
 (defn retract-attr-tempid [tempid: string, a: string] -> Tx-Data
-  (Tx-Data {op: ":db/retractAttr" tempid: tempid has-tempid: true a: a}))
+  (Tx-Data :op ":db/retractAttr" :tempid tempid :has-tempid true :a a))
 
 (defn retract-entity-tempid [tempid: string] -> Tx-Data
-  (Tx-Data {op: ":db/retractEntity" tempid: tempid has-tempid: true}))
+  (Tx-Data :op ":db/retractEntity" :tempid tempid :has-tempid true))
 
 (defn add-lookup-ref [lookup-attr: string, lookup-value: Value, a: string, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db/add" lookup-attr: lookup-attr lookup-value: lookup-value has-lookup-ref: true a: a v: v}))
+  (Tx-Data :op ":db/add" :lookup-attr lookup-attr :lookup-value lookup-value :has-lookup-ref true :a a :v v))
 
 (defn add-lookup-ref-value-tempid [lookup-attr: string, lookup-value: Value, a: string, value-tempid: string] -> Tx-Data
-  (Tx-Data {op: ":db/add" lookup-attr: lookup-attr lookup-value: lookup-value has-lookup-ref: true a: a value-tempid: value-tempid has-value-tempid: true}))
+  (Tx-Data :op ":db/add" :lookup-attr lookup-attr :lookup-value lookup-value :has-lookup-ref true :a a :value-tempid value-tempid :has-value-tempid true))
 
 (defn add-lookup-ref-nested-map [lookup-attr: string, lookup-value: Value, a: string, nested-map: Value, nested-tempid: string] -> Tx-Data
-  (Tx-Data {op: ":db/add" lookup-attr: lookup-attr lookup-value: lookup-value has-lookup-ref: true a: a nested-map: nested-map nested-tempid: nested-tempid has-nested-map: true}))
+  (Tx-Data :op ":db/add" :lookup-attr lookup-attr :lookup-value lookup-value :has-lookup-ref true :a a :nested-map nested-map :nested-tempid nested-tempid :has-nested-map true))
 
 (defn retract-lookup-ref [lookup-attr: string, lookup-value: Value, a: string, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db/retract" lookup-attr: lookup-attr lookup-value: lookup-value has-lookup-ref: true a: a v: v}))
+  (Tx-Data :op ":db/retract" :lookup-attr lookup-attr :lookup-value lookup-value :has-lookup-ref true :a a :v v))
 
 (defn retract-attr-lookup-ref [lookup-attr: string, lookup-value: Value, a: string] -> Tx-Data
-  (Tx-Data {op: ":db/retractAttr" lookup-attr: lookup-attr lookup-value: lookup-value has-lookup-ref: true a: a}))
+  (Tx-Data :op ":db/retractAttr" :lookup-attr lookup-attr :lookup-value lookup-value :has-lookup-ref true :a a))
 
 (defn retract-entity-lookup-ref [lookup-attr: string, lookup-value: Value] -> Tx-Data
-  (Tx-Data {op: ":db/retractEntity" lookup-attr: lookup-attr lookup-value: lookup-value has-lookup-ref: true}))
+  (Tx-Data :op ":db/retractEntity" :lookup-attr lookup-attr :lookup-value lookup-value :has-lookup-ref true))
 
 (defn add-ident [ident: string, a: string, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db/add" ident: ident has-ident: true a: a v: v}))
+  (Tx-Data :op ":db/add" :ident ident :has-ident true :a a :v v))
 
 (defn add-ident-value-tempid [ident: string, a: string, value-tempid: string] -> Tx-Data
-  (Tx-Data {op: ":db/add" ident: ident has-ident: true a: a value-tempid: value-tempid has-value-tempid: true}))
+  (Tx-Data :op ":db/add" :ident ident :has-ident true :a a :value-tempid value-tempid :has-value-tempid true))
 
 (defn add-ident-nested-map [ident: string, a: string, nested-map: Value, nested-tempid: string] -> Tx-Data
-  (Tx-Data {op: ":db/add" ident: ident has-ident: true a: a nested-map: nested-map nested-tempid: nested-tempid has-nested-map: true}))
+  (Tx-Data :op ":db/add" :ident ident :has-ident true :a a :nested-map nested-map :nested-tempid nested-tempid :has-nested-map true))
 
 (defn retract-ident [ident: string, a: string, v: Value] -> Tx-Data
-  (Tx-Data {op: ":db/retract" ident: ident has-ident: true a: a v: v}))
+  (Tx-Data :op ":db/retract" :ident ident :has-ident true :a a :v v))
 
 (defn retract-attr-ident [ident: string, a: string] -> Tx-Data
-  (Tx-Data {op: ":db/retractAttr" ident: ident has-ident: true a: a}))
+  (Tx-Data :op ":db/retractAttr" :ident ident :has-ident true :a a))
 
 (defn retract-entity-ident [ident: string] -> Tx-Data
-  (Tx-Data {op: ":db/retractEntity" ident: ident has-ident: true}))
+  (Tx-Data :op ":db/retractEntity" :ident ident :has-ident true))
 
 (defn tempid-lookup [tempids: []Tempid, tempid: string] -> [e: u64, ok: bool]
   (for [item tempids]
@@ -1507,7 +1507,7 @@
 (defn ensure-tempid! [tempids: ^[dynamic]Tempid, tempid: string, e: u64]
   (let [[_ ok] (tempid-lookup (slice tempids^ 0) tempid)]
     (when (not ok)
-      (arr.push! tempids^ (Tempid {tempid: (string-owned tempid) e: e})))))
+      (arr.push! tempids^ (Tempid :tempid (string-owned tempid) :e e)))))
 
 (defn next-entity-id [datoms: []Datom] -> u64
   (let [next: u64 1]
@@ -1773,42 +1773,42 @@
         aevt (make [dynamic]int)
         avet (make [dynamic]int)
         vaet (make [dynamic]int)]
-    (Tx-Publish-Plan {append-only: false
-                      new-entities-after-existing: false
-                      start-index: start-index
-                      appended-count: appended-count
-                      eavt: eavt
-                      aevt: aevt
-                      avet: avet
-                      vaet: vaet})))
+    (Tx-Publish-Plan :append-only false
+                      :new-entities-after-existing false
+                      :start-index start-index
+                      :appended-count appended-count
+                      :eavt eavt
+                      :aevt aevt
+                      :avet avet
+                      :vaet vaet)))
 
 (defn tx-publish-plan-for-append [datoms: []Datom, start-index: int, new-entities-after-existing: bool] -> Tx-Publish-Plan
   (let [eavt (sorted-appended-datom-slice-indexes datoms start-index "eavt")
         aevt (sorted-appended-datom-slice-indexes datoms start-index "aevt")
         avet (sorted-appended-datom-slice-indexes datoms start-index "avet")
         vaet (sorted-appended-datom-slice-indexes datoms start-index "vaet")]
-    (Tx-Publish-Plan {append-only: true
-                      new-entities-after-existing: new-entities-after-existing
-                      start-index: start-index
-                      appended-count: (count datoms)
-                      eavt: eavt
-                      aevt: aevt
-                      avet: avet
-                      vaet: vaet})))
+    (Tx-Publish-Plan :append-only true
+                      :new-entities-after-existing new-entities-after-existing
+                      :start-index start-index
+                      :appended-count (count datoms)
+                      :eavt eavt
+                      :aevt aevt
+                      :avet avet
+                      :vaet vaet)))
 
 (defn clone-tx-publish-plan [plan: Tx-Publish-Plan] -> Tx-Publish-Plan
   (let [eavt (arr.into [dynamic]int (slice plan.eavt 0))
         aevt (arr.into [dynamic]int (slice plan.aevt 0))
         avet (arr.into [dynamic]int (slice plan.avet 0))
         vaet (arr.into [dynamic]int (slice plan.vaet 0))]
-    (Tx-Publish-Plan {append-only: plan.append-only
-                      new-entities-after-existing: plan.new-entities-after-existing
-                      start-index: plan.start-index
-                      appended-count: plan.appended-count
-                      eavt: eavt
-                      aevt: aevt
-                      avet: avet
-                      vaet: vaet})))
+    (Tx-Publish-Plan :append-only plan.append-only
+                      :new-entities-after-existing plan.new-entities-after-existing
+                      :start-index plan.start-index
+                      :appended-count plan.appended-count
+                      :eavt eavt
+                      :aevt aevt
+                      :avet avet
+                      :vaet vaet)))
 
 (defn delete-tx-publish-plan [plan: Tx-Publish-Plan]
   (delete plan.eavt)
@@ -1935,7 +1935,7 @@
         (let [datom right.datoms[datom-index]]
           (when (not (current-fact-exists? left datom))
             (arr.push! only-right datom)))))
-    (DB-Diff {only-left: only-left only-right: only-right both: both})))
+    (DB-Diff :only-left only-left :only-right only-right :both both)))
 
 (defn datom-current-in-log? [datoms: []Datom, index: int] -> bool
   (let [datom datoms[index]]
@@ -1965,7 +1965,7 @@
     (arr.sort! current)
     current))
 
-(defn build-schema-caches [datoms: []Datom, current: []int] -> [value-types: map[string]string, cardinality-many: (map string (struct {})), unique: (map string (struct {})), refs: (map string (struct {}))]
+(defn build-schema-caches [datoms: []Datom, current: []int] -> [value-types: map[string]string, cardinality-many: (map string (struct [])), unique: (map string (struct [])), refs: (map string (struct []))]
   (let [out-value-types (mmap.empty string string)
         out-cardinality-many (set.empty string)
         out-unique (set.empty string)
@@ -2015,18 +2015,18 @@
         [eavt-entities eavt-entity-starts] (build-eavt-entities slice-datoms (slice eavt 0))
         current (build-current-index slice-datoms)
         [schema-value-types schema-cardinality-many schema-unique schema-ref] (build-schema-caches slice-datoms (slice current 0))]
-    (DB {datoms: datoms
-         current: current
-         eavt: eavt
-         eavt-entities: eavt-entities
-         eavt-entity-starts: eavt-entity-starts
-         aevt: aevt
-         avet: avet
-         vaet: vaet
-         schema-value-types: schema-value-types
-         schema-cardinality-many: schema-cardinality-many
-         schema-unique: schema-unique
-         schema-ref: schema-ref})))
+    (DB :datoms datoms
+         :current current
+         :eavt eavt
+         :eavt-entities eavt-entities
+         :eavt-entity-starts eavt-entity-starts
+         :aevt aevt
+         :avet avet
+         :vaet vaet
+         :schema-value-types schema-value-types
+         :schema-cardinality-many schema-cardinality-many
+         :schema-unique schema-unique
+         :schema-ref schema-ref)))
 
 (def small-incremental-db-after-max-datoms 64)
 
@@ -2081,29 +2081,29 @@
         [eavt-entities eavt-entity-starts]
           (build-eavt-entities slice-datoms (slice eavt 0))
         current (build-current-index-with-appended-datoms before slice-datoms start-index)]
-    (DB {datoms: datoms
-         current: current
-         eavt: eavt
-         eavt-entities: eavt-entities
-         eavt-entity-starts: eavt-entity-starts
-         aevt: aevt
-         avet: avet
-         vaet: vaet
-         schema-value-types: (clone-schema-value-types before.schema-value-types)
-         schema-cardinality-many: (clone-schema-cardinality-many before.schema-cardinality-many)
-         schema-unique: (clone-schema-unique before.schema-unique)
-         schema-ref: (clone-schema-ref before.schema-ref)})))
+    (DB :datoms datoms
+         :current current
+         :eavt eavt
+         :eavt-entities eavt-entities
+         :eavt-entity-starts eavt-entity-starts
+         :aevt aevt
+         :avet avet
+         :vaet vaet
+         :schema-value-types (clone-schema-value-types before.schema-value-types)
+         :schema-cardinality-many (clone-schema-cardinality-many before.schema-cardinality-many)
+         :schema-unique (clone-schema-unique before.schema-unique)
+         :schema-ref (clone-schema-ref before.schema-ref))))
 
 (defn clone-schema-value-types [schema: map[string]string] -> map[string]string
   (mmap.merge schema (mmap.empty string string)))
 
-(defn clone-schema-cardinality-many [schema: (map string (struct {}))] -> (map string (struct {}))
+(defn clone-schema-cardinality-many [schema: (map string (struct []))] -> (map string (struct []))
   (set.union schema (set.empty string)))
 
-(defn clone-schema-unique [schema: (map string (struct {}))] -> (map string (struct {}))
+(defn clone-schema-unique [schema: (map string (struct []))] -> (map string (struct []))
   (set.union schema (set.empty string)))
 
-(defn clone-schema-ref [schema: (map string (struct {}))] -> (map string (struct {}))
+(defn clone-schema-ref [schema: (map string (struct []))] -> (map string (struct []))
   (set.union schema (set.empty string)))
 
 (defn clone-db [db: DB] -> DB
@@ -2119,18 +2119,18 @@
         schema-cardinality-many (clone-schema-cardinality-many db.schema-cardinality-many)
         schema-unique (clone-schema-unique db.schema-unique)
         schema-ref (clone-schema-ref db.schema-ref)]
-    (DB {datoms: datoms
-         current: current
-         eavt: eavt
-         eavt-entities: eavt-entities
-         eavt-entity-starts: eavt-entity-starts
-         aevt: aevt
-         avet: avet
-         vaet: vaet
-         schema-value-types: schema-value-types
-         schema-cardinality-many: schema-cardinality-many
-         schema-unique: schema-unique
-         schema-ref: schema-ref})))
+    (DB :datoms datoms
+         :current current
+         :eavt eavt
+         :eavt-entities eavt-entities
+         :eavt-entity-starts eavt-entity-starts
+         :aevt aevt
+         :avet avet
+         :vaet vaet
+         :schema-value-types schema-value-types
+         :schema-cardinality-many schema-cardinality-many
+         :schema-unique schema-unique
+         :schema-ref schema-ref)))
 
 (defn build-current-index-appended-range [current: []int, start-index: int, end-index: int] -> [dynamic]int
   (let [out (arr.into [dynamic]int current)
@@ -2158,18 +2158,18 @@
         schema-cardinality-many (clone-schema-cardinality-many db.schema-cardinality-many)
         schema-unique (clone-schema-unique db.schema-unique)
         schema-ref (clone-schema-ref db.schema-ref)]
-    (DB {datoms: datoms
-         current: current
-         eavt: eavt
-         eavt-entities: eavt-entities
-         eavt-entity-starts: eavt-entity-starts
-         aevt: aevt
-         avet: avet
-         vaet: vaet
-         schema-value-types: schema-value-types
-         schema-cardinality-many: schema-cardinality-many
-         schema-unique: schema-unique
-         schema-ref: schema-ref})))
+    (DB :datoms datoms
+         :current current
+         :eavt eavt
+         :eavt-entities eavt-entities
+         :eavt-entity-starts eavt-entity-starts
+         :aevt aevt
+         :avet avet
+         :vaet vaet
+         :schema-value-types schema-value-types
+         :schema-cardinality-many schema-cardinality-many
+         :schema-unique schema-unique
+         :schema-ref schema-ref)))
 
 (defn build-db-append-only-new-entities [db: DB, datoms: [dynamic]Datom, start-index: int] -> DB
   (let [plan (tx-publish-plan-for-append (slice datoms start-index) start-index true)]
@@ -2192,18 +2192,18 @@
         schema-cardinality-many (clone-schema-cardinality-many db.schema-cardinality-many)
         schema-unique (clone-schema-unique db.schema-unique)
         schema-ref (clone-schema-ref db.schema-ref)]
-    (DB {datoms: datoms
-         current: current
-         eavt: eavt
-         eavt-entities: eavt-entities
-         eavt-entity-starts: eavt-entity-starts
-         aevt: aevt
-         avet: avet
-         vaet: vaet
-         schema-value-types: schema-value-types
-         schema-cardinality-many: schema-cardinality-many
-         schema-unique: schema-unique
-         schema-ref: schema-ref})))
+    (DB :datoms datoms
+         :current current
+         :eavt eavt
+         :eavt-entities eavt-entities
+         :eavt-entity-starts eavt-entity-starts
+         :aevt aevt
+         :avet avet
+         :vaet vaet
+         :schema-value-types schema-value-types
+         :schema-cardinality-many schema-cardinality-many
+         :schema-unique schema-unique
+         :schema-ref schema-ref)))
 
 (defn build-db-append-only-with-publish-plan [db: DB, datoms: [dynamic]Datom, plan: Tx-Publish-Plan] -> DB
   (if plan.new-entities-after-existing
@@ -2219,10 +2219,10 @@
   (arr.into [dynamic]Datom datoms))
 
 (defn make-datom [e: u64, a: string, v: Value] -> Datom
-  (Datom {e: e a: a v: v tx: 0 added: true}))
+  (Datom :e e :a a :v v :tx 0 :added true))
 
 (defn datom-tx [e: u64, a: string, v: Value, tx: u64, added: bool] -> Datom
-  (Datom {e: e a: a v: v tx: tx added: added}))
+  (Datom :e e :a a :v v :tx tx :added added))
 
 (defn init-db [datoms: []Datom] -> DB
   (let [owned-datoms (clone-datom-slice datoms)]
@@ -2250,9 +2250,9 @@
     (+ latest 1)))
 
 (defn conn-from-db [db: DB] -> Conn
-  (Conn {db: (clone-db db)
-         next-tx: (next-transaction-id (max-tx (slice db.datoms 0)))
-         listeners: (make [dynamic]Tx-Listener)}))
+  (Conn :db (clone-db db)
+         :next-tx (next-transaction-id (max-tx (slice db.datoms 0)))
+         :listeners (make [dynamic]Tx-Listener)))
 
 (defn conn-from-datoms [datoms: []Datom] -> Conn
   (conn-from-db (init-db datoms)))
@@ -2322,7 +2322,7 @@
         (value-keyword datom.a)
         (if (= position 2)
           datom.v
-          (Value {}))))
+          (Value []))))
     (if (or (= order ":aevt") (= order "aevt"))
       (if (= position 0)
         (value-keyword datom.a)
@@ -2330,7 +2330,7 @@
           (value-entity datom.e)
           (if (= position 2)
             datom.v
-            (Value {}))))
+            (Value []))))
       (if (or (= order ":avet") (= order "avet"))
         (if (= position 0)
           (value-keyword datom.a)
@@ -2338,14 +2338,14 @@
             datom.v
             (if (= position 2)
               (value-entity datom.e)
-              (Value {}))))
+              (Value []))))
         (if (= position 0)
           datom.v
           (if (= position 1)
             (value-keyword datom.a)
             (if (= position 2)
               (value-entity datom.e)
-              (Value {}))))))))
+              (Value []))))))))
 
 (defn index-position-compare-core [actual: Value, expected: Value] -> int
   (if (and (= actual.kind .Entity) (= expected.kind .Int))
@@ -2394,6 +2394,6 @@
   ;; reported as an allocator-provenance violation by the tracking allocator.
   ;; Nil containers support the same reads, iteration, and first append while
   ;; retaining an unambiguous no-allocation/no-free lifetime.
-  (Conn {db: (DB {})
-         next-tx: tx-partition-base
-         listeners: nil}))
+  (Conn :db (DB [])
+         :next-tx tx-partition-base
+         :listeners nil))

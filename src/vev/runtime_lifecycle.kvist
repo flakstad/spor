@@ -123,11 +123,11 @@
      value))
 
 (defn datom-owned [datom: Datom] -> Datom
-  (Datom {e: datom.e
-          a: (string-owned datom.a)
-          v: (value-owned datom.v)
-          tx: datom.tx
-          added: datom.added}))
+  (Datom :e datom.e
+          :a (string-owned datom.a)
+          :v (value-owned datom.v)
+          :tx datom.tx
+          :added datom.added))
 
 (defn delete-owned-datom [datom: Datom]
   (delete datom.a)
@@ -245,31 +245,31 @@
      (do)))
 
 (defn tx-data-owned [data: Tx-Data] -> Tx-Data
-  (Tx-Data {op: (string-owned data.op)
-            e: data.e
-            tempid: (string-owned data.tempid)
-            has-tempid: data.has-tempid
-            lookup-attr: (string-owned data.lookup-attr)
-            lookup-value: (value-owned data.lookup-value)
-            has-lookup-ref: data.has-lookup-ref
-            ident: (string-owned data.ident)
-            has-ident: data.has-ident
-            a: (string-owned data.a)
-            v: (value-owned data.v)
-            expected: (value-owned data.expected)
-            expected-lookup-attr: (string-owned data.expected-lookup-attr)
-            expected-lookup-value: (value-owned data.expected-lookup-value)
-            has-expected-lookup-ref: data.has-expected-lookup-ref
-            value-tempid: (string-owned data.value-tempid)
-            has-value-tempid: data.has-value-tempid
-            value-lookup-attr: (string-owned data.value-lookup-attr)
-            value-lookup-value: (value-owned data.value-lookup-value)
-            has-value-lookup-ref: data.has-value-lookup-ref
-            nested-map: (value-owned data.nested-map)
-            nested-tempid: (string-owned data.nested-tempid)
-            has-nested-map: data.has-nested-map
-            from-map-collection: data.from-map-collection
-            map-group: (string-owned data.map-group)}))
+  (Tx-Data :op (string-owned data.op)
+            :e data.e
+            :tempid (string-owned data.tempid)
+            :has-tempid data.has-tempid
+            :lookup-attr (string-owned data.lookup-attr)
+            :lookup-value (value-owned data.lookup-value)
+            :has-lookup-ref data.has-lookup-ref
+            :ident (string-owned data.ident)
+            :has-ident data.has-ident
+            :a (string-owned data.a)
+            :v (value-owned data.v)
+            :expected (value-owned data.expected)
+            :expected-lookup-attr (string-owned data.expected-lookup-attr)
+            :expected-lookup-value (value-owned data.expected-lookup-value)
+            :has-expected-lookup-ref data.has-expected-lookup-ref
+            :value-tempid (string-owned data.value-tempid)
+            :has-value-tempid data.has-value-tempid
+            :value-lookup-attr (string-owned data.value-lookup-attr)
+            :value-lookup-value (value-owned data.value-lookup-value)
+            :has-value-lookup-ref data.has-value-lookup-ref
+            :nested-map (value-owned data.nested-map)
+            :nested-tempid (string-owned data.nested-tempid)
+            :has-nested-map data.has-nested-map
+            :from-map-collection data.from-map-collection
+            :map-group (string-owned data.map-group)))
 
 (defn tx-data-slice-owned [tx-data: []Tx-Data] -> [dynamic]Tx-Data
   (let [out (make [dynamic]Tx-Data 0 (count tx-data))]
@@ -301,12 +301,12 @@
   (delete tx-data))
 
 (defn get-some-owned [clause: Get-Some] -> Get-Some
-  (let [out (Get-Some {source: clause.source
-                       has-source: clause.has-source
-                       e: clause.e
-                       attrs: (make [dynamic]string 0 (count clause.attrs))
-                       out-attr: clause.out-attr
-                       out-value: clause.out-value})]
+  (let [out (Get-Some :source clause.source
+                       :has-source clause.has-source
+                       :e clause.e
+                       :attrs (make [dynamic]string 0 (count clause.attrs))
+                       :out-attr clause.out-attr
+                       :out-value clause.out-value)]
     (for [attr clause.attrs]
       (arr.push! out.attrs attr))
     out))
@@ -360,32 +360,32 @@
         pulls (arr.into [dynamic]Pull-Find (slice query.pulls 0))
         aggregates (arr.into [dynamic]Aggregate-Find (slice query.aggregates 0))
         return-map-keys (arr.into [dynamic]string (slice query.return-map-keys 0))]
-    (Query {find: find
-            with: with
-            inputs: inputs
-            collection-inputs: collection-inputs
-            tuple-inputs: tuple-inputs
-            relation-inputs: relation-inputs
-            input-specs: input-specs
-            has-default-source-input: query.has-default-source-input
-            has-rules-input: query.has-rules-input
-            clauses: clauses
-            predicates: predicates
-            function-clauses: function-clauses
-            rules: rules
-            rule-calls: rule-calls
-            rule-call-plans: rule-call-plans
-            get-elses: get-elses
-            get-somes: get-somes
-            grounds: grounds
-            not-groups: not-groups
-            or-groups: or-groups
-            where-steps: where-steps
-            pulls: pulls
-            aggregates: aggregates
-            has-return-map: query.has-return-map
-            return-map-marker: query.return-map-marker
-            return-map-keys: return-map-keys})))
+    (Query :find find
+            :with with
+            :inputs inputs
+            :collection-inputs collection-inputs
+            :tuple-inputs tuple-inputs
+            :relation-inputs relation-inputs
+            :input-specs input-specs
+            :has-default-source-input query.has-default-source-input
+            :has-rules-input query.has-rules-input
+            :clauses clauses
+            :predicates predicates
+            :function-clauses function-clauses
+            :rules rules
+            :rule-calls rule-calls
+            :rule-call-plans rule-call-plans
+            :get-elses get-elses
+            :get-somes get-somes
+            :grounds grounds
+            :not-groups not-groups
+            :or-groups or-groups
+            :where-steps where-steps
+            :pulls pulls
+            :aggregates aggregates
+            :has-return-map query.has-return-map
+            :return-map-marker query.return-map-marker
+            :return-map-keys return-map-keys)))
 
 (defn query-copy-with-rules [query: Query, rules: []Rule] -> Query
   (query-with-rules (clone-query-shallow query) rules))
@@ -604,8 +604,8 @@
   (let [out (make [dynamic]Tx-Meta 0 (count meta))]
     (for [item meta]
       (arr.push! out
-        (Tx-Meta {a: (string-owned item.a)
-                  v: (value-owned item.v)})))
+        (Tx-Meta :a (string-owned item.a)
+                  :v (value-owned item.v))))
     out))
 
 (defn delete-owned-tx-meta [meta: [dynamic]Tx-Meta]
@@ -618,26 +618,26 @@
   (let [tx-data (arr.into [dynamic]Datom (slice report.tx-data 0))
         tx-meta (clone-tx-meta (slice report.tx-meta 0))
         tempids (clone-tempids-owned (slice report.tempids 0))]
-    (Tx-Report {ok: report.ok
-                error: (string-owned report.error)
-                db-before: (clone-db report.db-before)
-                db-after: (clone-db report.db-after)
-                owns-db-after: true
-                tx-data: tx-data
-                tx: report.tx
-                tx-meta: tx-meta
-                tempids: tempids
-                datom-start-index: report.datom-start-index
-                append-only: report.append-only
-                new-entities-after-existing: report.new-entities-after-existing
-                publish-plan: (clone-tx-publish-plan report.publish-plan)})))
+    (Tx-Report :ok report.ok
+                :error (string-owned report.error)
+                :db-before (clone-db report.db-before)
+                :db-after (clone-db report.db-after)
+                :owns-db-after true
+                :tx-data tx-data
+                :tx report.tx
+                :tx-meta tx-meta
+                :tempids tempids
+                :datom-start-index report.datom-start-index
+                :append-only report.append-only
+                :new-entities-after-existing report.new-entities-after-existing
+                :publish-plan (clone-tx-publish-plan report.publish-plan))))
 
 (defn listen! [conn: ^Conn, name: string, reports: ^[dynamic]Tx-Report] -> bool
   (for [listener index conn^.listeners]
     (when (= listener.name name)
-      (set! conn^.listeners[index] (Tx-Listener {name: name reports: reports}))
+      (set! conn^.listeners[index] (Tx-Listener :name name :reports reports))
       (return true)))
-  (arr.push! conn^.listeners (Tx-Listener {name: name reports: reports}))
+  (arr.push! conn^.listeners (Tx-Listener :name name :reports reports))
   true)
 
 (defn unlisten! [conn: ^Conn, name: string] -> bool
@@ -654,7 +654,7 @@
 (defn query-context-singleton [] -> Query-Context
   (let [rels (make [dynamic]Query-Relation)]
     (arr.push! rels (query-relation-singleton))
-    (Query-Context {rels: rels})))
+    (Query-Context :rels rels)))
 
 (defn delete-query-context [ctx: Query-Context]
   (for [rel ctx.rels]
@@ -723,18 +723,18 @@
   (let [children (make [dynamic]Pull-Attr 0 (count pulled.attrs))]
     (for [child pulled.attrs]
       (arr.push! children (pull-attr-owned child)))
-    (Pull-Attr {a: (string-owned pulled.a)
-                a-owned: true
-                key-kind: pulled.key-kind
-                v: (value-owned pulled.v)
-                attrs: children
-                has-explicit-pattern: pulled.has-explicit-pattern})))
+    (Pull-Attr :a (string-owned pulled.a)
+                :a-owned true
+                :key-kind pulled.key-kind
+                :v (value-owned pulled.v)
+                :attrs children
+                :has-explicit-pattern pulled.has-explicit-pattern)))
 
 (defn pull-result-owned [result: Pull-Result] -> Pull-Result
   (let [attrs (make [dynamic]Pull-Attr 0 (count result.attrs))]
     (for [pulled result.attrs]
       (arr.push! attrs (pull-attr-owned pulled)))
-    (Pull-Result {e: result.e attrs: attrs})))
+    (Pull-Result :e result.e :attrs attrs)))
 
 (defn result-row-owned [row: Result-Row] -> Result-Row
   (let [values (make [dynamic]Value 0 (count row.values))
@@ -743,19 +743,19 @@
       (arr.push! values (value-owned value)))
     (for [pull row.pulls]
       (arr.push! pulls (pull-result-owned pull)))
-    (Result-Row {values: values pulls: pulls})))
+    (Result-Row :values values :pulls pulls)))
 
 (defn result-set-owned [result: Result-Set] -> Result-Set
   (let [rows (make [dynamic]Result-Row 0 (count result.rows))]
     (for [row result.rows]
       (arr.push! rows (result-row-owned row)))
-    (Result-Set {ok: result.ok error: result.error rows: rows})))
+    (Result-Set :ok result.ok :error result.error :rows rows)))
 
 (defn query-result-shallow [result: Result-Set] -> Query-Result
-  (Query-Result {result: result ownsValues: false}))
+  (Query-Result :result result :ownsValues false))
 
 (defn query-result-owned-values [result: Result-Set] -> Query-Result
-  (Query-Result {result: result ownsValues: true}))
+  (Query-Result :result result :ownsValues true))
 
 (defn query-result-owns-values? [result: Query-Result] -> bool
   result.ownsValues)

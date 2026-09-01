@@ -28,14 +28,14 @@
     (= name projection.entity-var) (value-entity datom.e)
     (= name projection.attr-var) (value-keyword datom.a)
     (= name projection.value-var) datom.v
-    :else (Value {})))
+    :else (Value [])))
 
 (defn db-read-source-entity-attr-value-projection-owned-value [projection: Source-Entity-Attr-Value-Projection, datom: Datom, name: string] -> Value
   (cond
     (= name projection.entity-var) (value-entity datom.e)
     (= name projection.attr-var) (value-keyword (string-owned datom.a))
     (= name projection.value-var) (value-owned datom.v)
-    :else (Value {})))
+    :else (Value [])))
 
 (defn append-db-read-source-entity-attr-value-projection-row! [rows: ^[dynamic]Result-Row, query: Query, projection: Source-Entity-Attr-Value-Projection, datom: Datom]
   (let [first-value (db-read-source-entity-attr-value-projection-value projection datom query.find[0])
@@ -356,7 +356,7 @@
             (= projection.op "<=") (return range-view attr-low bound-high true "")
             :else (return range-view 0 0 false "unsupported range predicate")))))))
 
-(defn append-db-read-source-range-value-row-if-new! [rows: ^[dynamic]Result-Row, seen: (ptr (map string (struct {}))), projection: Source-Attr-Range-Value-Projection, datom: Datom]
+(defn append-db-read-source-range-value-row-if-new! [rows: ^[dynamic]Result-Row, seen: (ptr (map string (struct []))), projection: Source-Attr-Range-Value-Projection, datom: Datom]
   (when (and (= datom.a projection.attr)
              (predicate-pair-matches? projection.op datom.v projection.value))
     (append-distinct-single-value-row-if-new! rows seen datom.v)))
@@ -379,7 +379,7 @@
       (delete-source-index-datom-stream stream))
     (result-set-ok rows)))
 
-(defn append-source-entity-column-if-new! [out: ^[dynamic]u64, seen: (ptr (map u64 (struct {}))), entity: u64]
+(defn append-source-entity-column-if-new! [out: ^[dynamic]u64, seen: (ptr (map u64 (struct []))), entity: u64]
   (when (not (set.contains? seen^ entity))
     (set.add! seen^ entity)
     (arr.push! out^ entity)))
@@ -433,7 +433,7 @@
               (return out true ""))))))
     (return out false "")))
 
-(defn source-text-column-append-if-new! [out: ^[dynamic]string, seen: (ptr (map string (struct {}))), value: Value] -> [ok: bool, type-ok: bool]
+(defn source-text-column-append-if-new! [out: ^[dynamic]string, seen: (ptr (map string (struct []))), value: Value] -> [ok: bool, type-ok: bool]
   (when (not (or (= value.kind .String)
                  (= value.kind .Keyword)
                  (= value.kind .Symbol)
@@ -447,7 +447,7 @@
       (arr.push! out^ (string-owned value.text)))
     (return true true)))
 
-(defn source-int-column-append-if-new! [out: ^[dynamic]i64, seen: (ptr (map string (struct {}))), value: Value] -> [ok: bool, type-ok: bool]
+(defn source-int-column-append-if-new! [out: ^[dynamic]i64, seen: (ptr (map string (struct []))), value: Value] -> [ok: bool, type-ok: bool]
   (when (not (= value.kind .Int))
     (return true false))
   (let [[key key-ok] (primitive-value-dedupe-key value)]
@@ -468,16 +468,16 @@
   String
 ])
 
-(defstruct Source-Scalar-Column {
+(defstruct Source-Scalar-Column [
   kind: Source-Scalar-Column-Kind
   ints: [dynamic]i64
   strings: [dynamic]string
-})
+])
 
 (defn empty-source-scalar-column [kind: Source-Scalar-Column-Kind] -> Source-Scalar-Column
-  (Source-Scalar-Column {kind: kind
-                         ints: (make [dynamic]i64)
-                         strings: (make [dynamic]string)}))
+  (Source-Scalar-Column :kind kind
+                         :ints (make [dynamic]i64)
+                         :strings (make [dynamic]string)))
 
 (defn delete-source-scalar-column [column: Source-Scalar-Column]
   (delete column.ints)
@@ -491,7 +491,7 @@
   (delete column.ints)
   column.strings)
 
-(defn source-scalar-column-append-if-new! [column: ^Source-Scalar-Column, seen: (ptr (map string (struct {}))), value: Value] -> [ok: bool, type-ok: bool]
+(defn source-scalar-column-append-if-new! [column: ^Source-Scalar-Column, seen: (ptr (map string (struct []))), value: Value] -> [ok: bool, type-ok: bool]
   (if (= column^.kind .Int)
     (source-int-column-append-if-new! (addr column^.ints) seen value)
     (source-text-column-append-if-new! (addr column^.strings) seen value)))
@@ -640,7 +640,7 @@
 (defn source-string-string-pair-dedupe-key [first: string, second: string] -> string
   (fmt.tprintf "s1:%s/s2:%s" first second))
 
-(defn source-entity-string-pair-append-if-new! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct {}))), entity: u64, value: Value] -> bool
+(defn source-entity-string-pair-append-if-new! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct []))), entity: u64, value: Value] -> bool
   (when (not (= value.kind .String))
     (return false))
   (let [key (source-entity-string-pair-dedupe-key entity value.text)]
@@ -649,7 +649,7 @@
       (append-owned-entity-string-pair-column! columns entity value.text))
     true))
 
-(defn source-entity-string-int-triple-append-if-new! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct {}))), entity: u64, text-value: Value, int-value: Value] -> bool
+(defn source-entity-string-int-triple-append-if-new! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct []))), entity: u64, text-value: Value, int-value: Value] -> bool
   (when (not (and (= text-value.kind .String)
                   (= int-value.kind .Int)))
     (return false))
@@ -659,7 +659,7 @@
       (append-owned-entity-string-int-triple! columns entity text-value.text int-value.int-value))
     true))
 
-(defn source-string-int-pair-append-if-new! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct {}))), text-value: Value, int-value: Value] -> bool
+(defn source-string-int-pair-append-if-new! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct []))), text-value: Value, int-value: Value] -> bool
   (when (not (and (= text-value.kind .String)
                   (= int-value.kind .Int)))
     (return false))
@@ -669,7 +669,7 @@
       (append-owned-entity-string-int-triple! columns 0 text-value.text int-value.int-value))
     true))
 
-(defn source-string-string-pair-append-if-new! [columns: ^String-String-Pair-Columns, seen: (ptr (map string (struct {}))), first-value: Value, second-value: Value] -> bool
+(defn source-string-string-pair-append-if-new! [columns: ^String-String-Pair-Columns, seen: (ptr (map string (struct []))), first-value: Value, second-value: Value] -> bool
   (when (not (and (= first-value.kind .String)
                   (= second-value.kind .String)))
     (return false))
@@ -679,7 +679,7 @@
       (append-owned-string-string-pair-column! columns first-value.text second-value.text))
     true))
 
-(defn source-entity-int-pair-append-if-new! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct {}))), entity: u64, value: Value] -> bool
+(defn source-entity-int-pair-append-if-new! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct []))), entity: u64, value: Value] -> bool
   (when (not (= value.kind .Int))
     (return false))
   (let [key (source-entity-int-pair-dedupe-key entity value.int-value)]
@@ -688,7 +688,7 @@
       (append-entity-int-pair-column! columns entity value.int-value))
     true))
 
-(defn source-entity-int-pair-append-values-for-entity! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, entity: u64, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-int-pair-append-values-for-entity! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, entity: u64, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
   (if many
     (if (db-read-source-has-overlay? source)
       (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity value-attr)]
@@ -723,10 +723,10 @@
             (return true false ""))))
       (return true true ""))))
 
-(defn source-entity-int-pair-append-filter-datom! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, filter-datom: Datom, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-int-pair-append-filter-datom! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, filter-datom: Datom, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
   (source-entity-int-pair-append-values-for-entity! columns seen source filter-datom.e value-attr many))
 
-(defn source-entity-int-pair-append-filter-datoms! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, datoms: []Datom, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-int-pair-append-filter-datoms! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, datoms: []Datom, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
   (for [datom datoms]
     (let [[append-ok type-ok append-error] (source-entity-int-pair-append-filter-datom! columns seen source datom value-attr many)]
       (when (not append-ok)
@@ -735,7 +735,7 @@
         (return true false ""))))
   (return true true ""))
 
-(defn source-entity-string-pair-append-values-for-entity! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, entity: u64, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-string-pair-append-values-for-entity! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, entity: u64, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
   (if many
     (if (db-read-source-has-overlay? source)
       (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity value-attr)]
@@ -770,10 +770,10 @@
             (return true false ""))))
       (return true true ""))))
 
-(defn source-entity-string-pair-append-filter-datom! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, filter-datom: Datom, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-string-pair-append-filter-datom! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, filter-datom: Datom, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
   (source-entity-string-pair-append-values-for-entity! columns seen source filter-datom.e value-attr many))
 
-(defn source-entity-string-pair-append-filter-datoms! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, datoms: []Datom, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-string-pair-append-filter-datoms! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, datoms: []Datom, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
   (for [datom datoms]
     (let [[append-ok type-ok append-error] (source-entity-string-pair-append-filter-datom! columns seen source datom value-attr many)]
       (when (not append-ok)
@@ -782,13 +782,13 @@
         (return true false ""))))
   (return true true ""))
 
-(defn source-entity-int-pair-append-range-datom! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct {}))), projection: Source-Attr-Range-Value-Projection, datom: Datom] -> [matched: bool, type-ok: bool]
+(defn source-entity-int-pair-append-range-datom! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct []))), projection: Source-Attr-Range-Value-Projection, datom: Datom] -> [matched: bool, type-ok: bool]
   (when (not (and (= datom.a projection.attr)
                   (predicate-pair-matches? projection.op datom.v projection.value)))
     (return false true))
   (return true (source-entity-int-pair-append-if-new! columns seen datom.e datom.v)))
 
-(defn source-entity-string-int-triple-append-values-for-entity! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct {}))), source: DB-Read-Source, entity: u64, first-attr: string, second-attr: string] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-string-int-triple-append-values-for-entity! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct []))), source: DB-Read-Source, entity: u64, first-attr: string, second-attr: string] -> [ok: bool, type-ok: bool, error: string]
   (let [[first-value first-ok first-error] (db-read-source-cardinality-one-value-fast-all-current source entity first-attr)]
     (when (not (= first-error ""))
       (return false false first-error))
@@ -810,7 +810,7 @@
       (delete-owned-value first-value)))
   (return true true ""))
 
-(defn source-string-int-pair-append-values-for-entity! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct {}))), source: DB-Read-Source, entity: u64, first-attr: string, second-attr: string] -> [ok: bool, type-ok: bool, error: string]
+(defn source-string-int-pair-append-values-for-entity! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct []))), source: DB-Read-Source, entity: u64, first-attr: string, second-attr: string] -> [ok: bool, type-ok: bool, error: string]
   (let [[first-value first-ok first-error] (db-read-source-cardinality-one-value-fast-all-current source entity first-attr)]
     (when (not (= first-error ""))
       (return false false first-error))
@@ -832,7 +832,7 @@
       (delete-owned-value first-value)))
   (return true true ""))
 
-(defn source-string-string-pair-append-values-for-entity! [columns: ^String-String-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, entity: u64, first-attr: string, second-attr: string] -> [ok: bool, type-ok: bool, error: string]
+(defn source-string-string-pair-append-values-for-entity! [columns: ^String-String-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, entity: u64, first-attr: string, second-attr: string] -> [ok: bool, type-ok: bool, error: string]
   (let [[first-value first-ok first-error] (db-read-source-cardinality-one-value-fast-all-current source entity first-attr)]
     (when (not (= first-error ""))
       (return false false first-error))
@@ -854,7 +854,7 @@
       (delete-owned-value first-value)))
   (return true true ""))
 
-(defn source-entity-string-int-triple-append-filter-datom! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct {}))), source: DB-Read-Source, filter-datom: Datom, plan: Entity-Two-Value-Plan, best-filter-index: int] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-string-int-triple-append-filter-datom! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct []))), source: DB-Read-Source, filter-datom: Datom, plan: Entity-Two-Value-Plan, best-filter-index: int] -> [ok: bool, type-ok: bool, error: string]
   (let [[filters-match filters-ok filters-error] (db-read-source-entity-two-value-plan-filters-match? source filter-datom.e plan best-filter-index)]
     (when (not filters-ok)
       (return false false filters-error))
@@ -862,7 +862,7 @@
       (return (source-entity-string-int-triple-append-values-for-entity! columns seen source filter-datom.e plan.first-attr plan.second-attr))))
   (return true true ""))
 
-(defn source-entity-string-int-triple-append-driver-datom! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct {}))), source: DB-Read-Source, driver-datom: Datom, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-string-int-triple-append-driver-datom! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct []))), source: DB-Read-Source, driver-datom: Datom, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
   (let [[filters-match filters-ok filters-error] (db-read-source-entity-two-value-plan-filters-match? source driver-datom.e plan -1)]
     (when (not filters-ok)
       (return false false filters-error))
@@ -870,7 +870,7 @@
       (return (source-string-int-pair-append-values-for-entity! columns seen source driver-datom.e plan.first-attr plan.second-attr))))
   (return true true ""))
 
-(defn source-string-string-pair-append-driver-datom! [columns: ^String-String-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, driver-datom: Datom, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
+(defn source-string-string-pair-append-driver-datom! [columns: ^String-String-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, driver-datom: Datom, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
   (let [[filters-match filters-ok filters-error] (db-read-source-entity-two-value-plan-filters-match? source driver-datom.e plan -1)]
     (when (not filters-ok)
       (return false false filters-error))
@@ -918,10 +918,10 @@
               (not (= clause-value.op-term.kind .Wildcard)))
       (return "" (empty-source-attr-range-value-projection) false))
     (return clause-value.e.name
-            (Source-Attr-Range-Value-Projection {attr: clause-value.a.value.text
-                                                 value-var: clause-value.v.name
-                                                 op: filter-op
-                                                 value: filter-value})
+            (Source-Attr-Range-Value-Projection :attr clause-value.a.value.text
+                                                 :value-var clause-value.v.name
+                                                 :op filter-op
+                                                 :value filter-value)
             true)))
 
 (defn q-db-read-source-entity-int-range-pair-columns [source: DB-Read-Source, query: Query, inputs: []Query-Input] -> [columns: Entity-Int-Pair-Columns, ok: bool, error: string]
@@ -1004,7 +1004,7 @@
                 (set! second-attr item.a.value.text))
             :else (return out false ""))
           (if (= item.v.kind .Value)
-            (arr.push! out.filters (Entity-Int-Pair-Filter {attr: item.a.value.text value: item.v.value}))
+            (arr.push! out.filters (Entity-Int-Pair-Filter :attr item.a.value.text :value item.v.value))
             (return out false ""))))
       (when (or (not first-found)
                 (not second-found)
@@ -1089,7 +1089,7 @@
                 (set! second-attr item.a.value.text))
             :else (return out false ""))
           (if (= item.v.kind .Value)
-            (arr.push! out.filters (Entity-Int-Pair-Filter {attr: item.a.value.text value: item.v.value}))
+            (arr.push! out.filters (Entity-Int-Pair-Filter :attr item.a.value.text :value item.v.value))
             (return out false ""))))
       (when (or (= entity-var "")
                 (not first-found)
@@ -1168,7 +1168,7 @@
         (set! i (+ i 1))))
     (return best-attr best-has-value best-value true "")))
 
-(defn source-entity-string-int-triple-append-driver-stream! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Index-Datom-Stream, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-string-int-triple-append-driver-stream! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct []))), source: DB-Read-Source, stream: ^Source-Index-Datom-Stream, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
   (while stream^.has-current
     (let [[append-ok type-ok append-error] (source-entity-string-int-triple-append-driver-datom! columns seen source stream^.current plan)]
       (when (not append-ok)
@@ -1180,7 +1180,7 @@
         (return false false advance-error))))
   (return true true ""))
 
-(defn source-entity-string-int-triple-append-driver-match-stream! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-string-int-triple-append-driver-match-stream! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct []))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
   (while stream^.has-current
     (let [driver-datom (source-attr-value-match-current stream^)
           [append-ok type-ok append-error] (source-entity-string-int-triple-append-driver-datom! columns seen source driver-datom plan)]
@@ -1193,7 +1193,7 @@
         (return false false advance-error))))
   (return true true ""))
 
-(defn source-string-string-pair-append-driver-stream! [columns: ^String-String-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Index-Datom-Stream, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
+(defn source-string-string-pair-append-driver-stream! [columns: ^String-String-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, stream: ^Source-Index-Datom-Stream, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
   (while stream^.has-current
     (let [[append-ok type-ok append-error] (source-string-string-pair-append-driver-datom! columns seen source stream^.current plan)]
       (when (not append-ok)
@@ -1205,7 +1205,7 @@
         (return false false advance-error))))
   (return true true ""))
 
-(defn source-string-string-pair-append-driver-match-stream! [columns: ^String-String-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
+(defn source-string-string-pair-append-driver-match-stream! [columns: ^String-String-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, plan: Entity-Two-Value-Plan] -> [ok: bool, type-ok: bool, error: string]
   (while stream^.has-current
     (let [driver-datom (source-attr-value-match-current stream^)
           [append-ok type-ok append-error] (source-string-string-pair-append-driver-datom! columns seen source driver-datom plan)]
@@ -1470,10 +1470,10 @@
         [many many-ok many-error] (db-read-source-schema-cardinality-many? source projection.value-attr)]
     (when (not many-ok)
       (return (result-set-error many-error)))
-    (let [range-projection (Source-Attr-Range-Value-Projection {attr: projection.filter-attr
-                                                                value-var: projection.filter-var
-                                                                op: projection.filter-op
-                                                                value: projection.filter-value})
+    (let [range-projection (Source-Attr-Range-Value-Projection :attr projection.filter-attr
+                                                                :value-var projection.filter-var
+                                                                :op projection.filter-op
+                                                                :value projection.filter-value)
           [filter-stream filter-ok filter-error] (source-index-datom-stream-for-attr-range source range-projection)]
       (when (not filter-ok)
         (delete-result-rows-owned-values rows)
@@ -1516,7 +1516,7 @@
 (defn db-read-source-range-star-options-for-find-var [source: DB-Read-Source, query: Query, projection: Source-Range-Star-Projection, filter-datom: Datom, find-var: string] -> [option-row: Result-Row, ok: bool, error: string]
   (let [values (make [dynamic]Value)
         pulls (make [dynamic]Pull-Result)
-        out-row (Result-Row {values: values pulls: pulls})
+        out-row (Result-Row :values values :pulls pulls)
         [clause-index entity? clause-ok] (source-range-star-clause-index-for-var query projection.entity-var find-var)]
     (when (not clause-ok)
       (delete out-row.values)
@@ -1557,10 +1557,10 @@
 
 (defn q-db-read-source-range-star-projection [source: DB-Read-Source, query: Query, projection: Source-Range-Star-Projection] -> Result-Set
   (let [rows (make [dynamic]Result-Row)
-        range-projection (Source-Attr-Range-Value-Projection {attr: projection.filter-attr
-                                                              value-var: projection.filter-var
-                                                              op: projection.filter-op
-                                                              value: projection.filter-value})]
+        range-projection (Source-Attr-Range-Value-Projection :attr projection.filter-attr
+                                                              :value-var projection.filter-var
+                                                              :op projection.filter-op
+                                                              :value projection.filter-value)]
     (let [[filter-stream filter-ok filter-error] (source-index-datom-stream-for-attr-range source range-projection)]
       (when (not filter-ok)
         (delete-result-rows-owned-values rows)
@@ -1631,14 +1631,14 @@
   (or (not projection.has-entity-filter)
       (predicate-value-equal? (value-entity datom.e) projection.entity-filter)))
 
-(defn append-db-read-source-entity-pull-rows! [rows: ^[dynamic]Result-Row, seen: (ptr (map u64 (struct {}))), pull-source: DB-Read-Source, query: Query, projection: Source-Entity-Pull-Projection, pattern: []Pull-Spec, datoms: []Datom, registry: []Native-Query-Fn] -> [ok: bool, error: string]
+(defn append-db-read-source-entity-pull-rows! [rows: ^[dynamic]Result-Row, seen: (ptr (map u64 (struct []))), pull-source: DB-Read-Source, query: Query, projection: Source-Entity-Pull-Projection, pattern: []Pull-Spec, datoms: []Datom, registry: []Native-Query-Fn] -> [ok: bool, error: string]
   (for [datom datoms]
     (let [[append-ok append-error] (append-db-read-source-entity-pull-row! rows seen pull-source query projection pattern datom registry)]
       (when (not append-ok)
         (return false append-error))))
   (return true ""))
 
-(defn append-db-read-source-entity-pull-row! [rows: ^[dynamic]Result-Row, seen: (ptr (map u64 (struct {}))), pull-source: DB-Read-Source, query: Query, projection: Source-Entity-Pull-Projection, pattern: []Pull-Spec, datom: Datom, registry: []Native-Query-Fn] -> [ok: bool, error: string]
+(defn append-db-read-source-entity-pull-row! [rows: ^[dynamic]Result-Row, seen: (ptr (map u64 (struct []))), pull-source: DB-Read-Source, query: Query, projection: Source-Entity-Pull-Projection, pattern: []Pull-Spec, datom: Datom, registry: []Native-Query-Fn] -> [ok: bool, error: string]
   (when (and (source-entity-pull-datom-matches-filter? projection datom)
              (not (set.contains? seen^ datom.e)))
     (set.add! seen datom.e)
@@ -1650,7 +1650,7 @@
         (when (= (count query.find) 1)
           (arr.push! values (value-entity datom.e)))
         (arr.push! pulls pull)
-        (arr.push! rows^ (Result-Row {values: values pulls: pulls})))))
+        (arr.push! rows^ (Result-Row :values values :pulls pulls)))))
   (return true ""))
 
 (defn q-db-read-source-entity-pull-projection [scan-source: DB-Read-Source, pull-source: DB-Read-Source, query: Query, inputs: []Query-Input, projection: Source-Entity-Pull-Projection, pull-find: Pull-Find, registry: []Native-Query-Fn] -> Result-Set
@@ -1689,13 +1689,13 @@
   (if many
     (let [[attr-value attr-ok attr-error] (db-read-source-pull-attr-value source entity attr)]
       (when (not (= attr-error ""))
-        (return (Value {}) false attr-error))
+        (return (Value []) false attr-error))
       (if attr-ok
         (return attr-value true "")
         (return (value-owned default-value) true "")))
     (let [[attr-value attr-ok attr-error] (db-read-source-cardinality-one-value-fast-all-current source entity attr)]
       (when (not (= attr-error ""))
-        (return (Value {}) false attr-error))
+        (return (Value []) false attr-error))
       (if attr-ok
         (return attr-value true "")
         (return (value-owned default-value) true "")))))
@@ -1748,10 +1748,10 @@
   (for [attr attrs]
     (let [[value value-ok value-error] (db-read-source-pull-attr-value source entity attr)]
       (when (not (= value-error ""))
-        (return (Value {}) (Value {}) false value-error))
+        (return (Value []) (Value []) false value-error))
       (when value-ok
         (return (value-keyword (string-owned attr)) value true ""))))
-  (return (Value {}) (Value {}) false ""))
+  (return (Value []) (Value []) false ""))
 
 (defn append-db-read-source-entity-get-some-rows! [rows: ^[dynamic]Result-Row, get-some-source: DB-Read-Source, query: Query, projection: Source-Entity-Get-Some-Projection, get-some: Get-Some, datoms: []Datom] -> [ok: bool, error: string]
   (for [datom datoms]
@@ -1861,13 +1861,13 @@
   (cond
     (= name projection.attr-var) (value-keyword datom.a)
     (= name projection.value-var) datom.v
-    :else (Value {})))
+    :else (Value [])))
 
 (defn db-read-source-fixed-entity-attr-value-projection-owned-value [projection: Source-Fixed-Entity-Attr-Value-Projection, datom: Datom, name: string] -> Value
   (cond
     (= name projection.attr-var) (value-keyword (string-owned datom.a))
     (= name projection.value-var) (value-owned datom.v)
-    :else (Value {})))
+    :else (Value [])))
 
 (defn append-db-read-source-fixed-entity-attr-value-projection-row! [rows: ^[dynamic]Result-Row, query: Query, projection: Source-Fixed-Entity-Attr-Value-Projection, datom: Datom]
   (let [first-value (db-read-source-fixed-entity-attr-value-projection-value projection datom query.find[0])
@@ -1953,7 +1953,7 @@
   (when (not projection.has-anchor-input)
     (return projection.anchor-value true ""))
   (when (not (= (count inputs) 1))
-    (return (Value {}) false "wrong number of query inputs for source value/ref/value projection"))
+    (return (Value []) false "wrong number of query inputs for source value/ref/value projection"))
   (db-read-source-query-input-scalar-value source inputs[0]))
 
 (defn q-db-read-source-value-ref-attr-projection [source: DB-Read-Source, projection: Source-Value-Ref-Attr-Projection, inputs: []Query-Input] -> Result-Set
@@ -2091,13 +2091,13 @@
                 (delete-query-relation-builder builder)
                 (return (query-relation-empty) false anchor-advance-error))))
           (delete-source-attr-value-match-stream anchor-stream)
-          (return (Query-Relation {attrs: attrs
-                                   attr-sources: attr-sources
-                                   attr-index: (query-relation-attr-index (slice attrs 0))
-                                   tuples: builder.tuples
-                                   typed-columns: builder.typed-columns
-                                   typed-rows: builder.typed-rows
-                                   has-typed-columns: builder.typed-ok})
+          (return (Query-Relation :attrs attrs
+                                   :attr-sources attr-sources
+                                   :attr-index (query-relation-attr-index (slice attrs 0))
+                                   :tuples builder.tuples
+                                   :typed-columns builder.typed-columns
+                                   :typed-rows builder.typed-rows
+                                   :has-typed-columns builder.typed-ok)
                   true
                   ""))))))
 
@@ -2115,7 +2115,7 @@
 (defn db-read-source-value-ref-star-options-for-find-var [source: DB-Read-Source, query: Query, projection: Source-Value-Ref-Star-Projection, ref-entity: u64, find-var: string] -> [option-row: Result-Row, ok: bool, error: string]
   (let [values (make [dynamic]Value)
         pulls (make [dynamic]Pull-Result)
-        out-row (Result-Row {values: values pulls: pulls})
+        out-row (Result-Row :values values :pulls pulls)
         [clause-index entity? clause-ok] (source-value-ref-star-clause-index-for-find-var query projection find-var)]
     (when (not clause-ok)
       (delete out-row.values)
@@ -2214,7 +2214,7 @@
   (when (not projection.has-anchor-input)
     (return projection.anchor-value true ""))
   (when (not (= (count inputs) 1))
-    (return (Value {}) false "wrong number of query inputs for source value/ref/star projection"))
+    (return (Value []) false "wrong number of query inputs for source value/ref/star projection"))
   (db-read-source-query-input-scalar-value source inputs[0]))
 
 (defn db-read-source-query-relation-value-ref-star-projection [source: DB-Read-Source, query: Query, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
@@ -2260,13 +2260,13 @@
               (delete attr-sources)
               (delete-query-relation-builder builder)
               (return (query-relation-empty) false frontier-error)))
-          (return (Query-Relation {attrs: attrs
-                                   attr-sources: attr-sources
-                                   attr-index: (query-relation-attr-index (slice attrs 0))
-                                   tuples: builder.tuples
-                                   typed-columns: builder.typed-columns
-                                   typed-rows: builder.typed-rows
-                                   has-typed-columns: builder.typed-ok})
+          (return (Query-Relation :attrs attrs
+                                   :attr-sources attr-sources
+                                   :attr-index (query-relation-attr-index (slice attrs 0))
+                                   :tuples builder.tuples
+                                   :typed-columns builder.typed-columns
+                                   :typed-rows builder.typed-rows
+                                   :has-typed-columns builder.typed-ok)
                   true
                   "")))))))
 

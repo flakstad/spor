@@ -48,10 +48,10 @@
                    (and (= query.find[0] second.v.name)
                         (= query.find[1] first.v.name))))
       (return (empty-two-attr-entity-projection) false))
-    (return (Two-Attr-Entity-Projection {first-attr: first.a.value.text
-                                         first-var: first.v.name
-                                         second-attr: second.a.value.text
-                                         second-var: second.v.name})
+    (return (Two-Attr-Entity-Projection :first-attr first.a.value.text
+                                         :first-var first.v.name
+                                         :second-attr second.a.value.text
+                                         :second-var second.v.name)
             true)))
 
 (defn db-read-source-query-entity-attr-value-projection [query: Query] -> [projection: Source-Entity-Value-Projection, ok: bool]
@@ -91,9 +91,9 @@
                    (and (= query.find[0] clause-value.v.name)
                         (= query.find[1] clause-value.e.name))))
       (return (empty-source-entity-value-projection) false))
-    (return (Source-Entity-Value-Projection {entity-var: clause-value.e.name
-                                             attr: clause-value.a.value.text
-                                             value-var: clause-value.v.name})
+    (return (Source-Entity-Value-Projection :entity-var clause-value.e.name
+                                             :attr clause-value.a.value.text
+                                             :value-var clause-value.v.name)
             true)))
 
 (defn db-read-source-query-entity-attr-value-vars-projection [query: Query] -> [projection: Source-Entity-Attr-Value-Projection, ok: bool]
@@ -134,9 +134,9 @@
                      (= find-var clause-value.a.name)
                      (= find-var clause-value.v.name)))
         (return (empty-source-entity-attr-value-projection) false)))
-    (return (Source-Entity-Attr-Value-Projection {entity-var: clause-value.e.name
-                                                  attr-var: clause-value.a.name
-                                                  value-var: clause-value.v.name})
+    (return (Source-Entity-Attr-Value-Projection :entity-var clause-value.e.name
+                                                  :attr-var clause-value.a.name
+                                                  :value-var clause-value.v.name)
             true)))
 
 (defn db-read-source-query-attr-value-entity-projection [query: Query] -> [projection: Source-Attr-Value-Entity-Projection, ok: bool]
@@ -169,9 +169,9 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-attr-value-entity-projection) false))
-    (return (Source-Attr-Value-Entity-Projection {entity-var: clause-value.e.name
-                                                  attr: clause-value.a.value.text
-                                                  value: clause-value.v.value})
+    (return (Source-Attr-Value-Entity-Projection :entity-var clause-value.e.name
+                                                  :attr clause-value.a.value.text
+                                                  :value clause-value.v.value)
             true)))
 
 (defn db-read-source-query-has-one-scalar-input? [query: Query, name: string] -> bool
@@ -216,9 +216,9 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-attr-input-entity-projection) false))
-    (return (Source-Attr-Input-Entity-Projection {entity-var: clause-value.e.name
-                                                  attr: clause-value.a.value.text
-                                                  input-var: clause-value.v.name})
+    (return (Source-Attr-Input-Entity-Projection :entity-var clause-value.e.name
+                                                  :attr clause-value.a.value.text
+                                                  :input-var clause-value.v.name)
             true)))
 
 (defn db-read-source-query-attr-value-projection [query: Query] -> [projection: Source-Attr-Value-Projection, ok: bool]
@@ -253,8 +253,8 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-attr-value-projection) false))
-    (return (Source-Attr-Value-Projection {attr: clause-value.a.value.text
-                                           value-var: clause-value.v.name})
+    (return (Source-Attr-Value-Projection :attr clause-value.a.value.text
+                                           :value-var clause-value.v.name)
             true)))
 
 (defn source-var-equality-filter [predicate: Predicate, var-name: string] -> [value: Value, ok: bool]
@@ -263,7 +263,7 @@
                     (= requirement.op "=")
                     (= requirement.var-name var-name)
                     (= requirement.value-term.kind .Value)))
-      (return (Value {}) false))
+      (return (Value []) false))
     (return requirement.value-term.value true)))
 
 (defn range-predicate-op? [op: string] -> bool
@@ -278,7 +278,7 @@
                     requirement.is-range
                     (= requirement.var-name var-name)
                     (= requirement.value-term.kind .Value)))
-      (return "" (Value {}) false))
+      (return "" (Value []) false))
     (return requirement.op requirement.value-term.value true)))
 
 (defn source-var-term-equality-filter [predicate: Predicate, var-name: string] -> [term: Term, ok: bool]
@@ -286,7 +286,7 @@
     (when (not (and (= requirement.kind .VarValueCompare)
                     (= requirement.op "=")
                     (= requirement.var-name var-name)))
-      (return (Term {}) false))
+      (return (Term []) false))
     (return requirement.value-term true)))
 
 (defn source-var-term-range-filter [predicate: Predicate, var-name: string] -> [op: string, term: Term, ok: bool]
@@ -294,25 +294,25 @@
     (when (not (and (= requirement.kind .VarValueCompare)
                     requirement.is-range
                     (= requirement.var-name var-name)))
-      (return "" (Term {}) false))
+      (return "" (Term []) false))
     (return requirement.op requirement.value-term true)))
 
 (defn source-var-literal-equality-filter [predicate: Predicate, var-name: string] -> [value: Value, ok: bool]
   (let [[term term-ok] (source-var-term-equality-filter predicate var-name)]
     (when (not (and term-ok (= term.kind .Value)))
-      (return (Value {}) false))
+      (return (Value []) false))
     (return term.value true)))
 
 (defn source-var-literal-range-filter [predicate: Predicate, var-name: string] -> [op: string, value: Value, ok: bool]
   (let [[filter-op term term-ok] (source-var-term-range-filter predicate var-name)]
     (when (not (and term-ok (= term.kind .Value)))
-      (return "" (Value {}) false))
+      (return "" (Value []) false))
     (return filter-op term.value true)))
 
 (defn legacy-source-var-equality-filter [predicate: Predicate, var-name: string] -> [value: Value, ok: bool]
   (when (not (and (= predicate.op "=")
                   (= (count predicate.terms) 2)))
-    (return (Value {}) false))
+    (return (Value []) false))
   (let [left predicate.terms[0]
         right predicate.terms[1]]
     (cond
@@ -324,12 +324,12 @@
            (= right.name var-name)
            (= left.kind .Value))
         (return left.value true)
-      :else (return (Value {}) false))))
+      :else (return (Value []) false))))
 
 (defn legacy-source-var-range-filter [predicate: Predicate, var-name: string] -> [op: string, value: Value, ok: bool]
   (when (not (and (range-predicate-op? predicate.op)
                   (= (count predicate.terms) 2)))
-    (return "" (Value {}) false))
+    (return "" (Value []) false))
   (let [left predicate.terms[0]
         right predicate.terms[1]]
     (cond
@@ -343,8 +343,8 @@
         (let [[inverted inverted-ok] (inverted-range-predicate-op predicate.op)]
           (if inverted-ok
             (return inverted left.value true)
-            (return "" (Value {}) false)))
-      :else (return "" (Value {}) false))))
+            (return "" (Value []) false)))
+      :else (return "" (Value []) false))))
 
 (defn db-read-source-query-attr-filtered-value-projection [query: Query] -> [projection: Source-Attr-Filtered-Value-Projection, ok: bool]
   (when (not (and (= (count query.find) 1)
@@ -384,9 +384,9 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-attr-filtered-value-projection) false))
-    (return (Source-Attr-Filtered-Value-Projection {attr: clause-value.a.value.text
-                                                    value-var: clause-value.v.name
-                                                    value: filter-value})
+    (return (Source-Attr-Filtered-Value-Projection :attr clause-value.a.value.text
+                                                    :value-var clause-value.v.name
+                                                    :value filter-value)
             true)))
 
 (defn db-read-source-query-attr-range-value-projection [query: Query] -> [projection: Source-Attr-Range-Value-Projection, ok: bool]
@@ -427,10 +427,10 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-attr-range-value-projection) false))
-    (return (Source-Attr-Range-Value-Projection {attr: clause-value.a.value.text
-                                                 value-var: clause-value.v.name
-                                                 op: filter-op
-                                                 value: filter-value})
+    (return (Source-Attr-Range-Value-Projection :attr clause-value.a.value.text
+                                                 :value-var clause-value.v.name
+                                                 :op filter-op
+                                                 :value filter-value)
             true)))
 
 (defn query-find-entity-value-vars? [query: Query, entity-var: string, value-var: string] -> bool
@@ -497,7 +497,7 @@
           filter-clause left
           value-clause right
           filter-op ""
-          filter-value (Value {})
+          filter-value (Value [])
           filter-ok false]
       (cond
         (and left-ok (not right-ok))
@@ -518,13 +518,13 @@
       (when (or (not filter-ok)
                 (not (query-find-entity-value-vars? query filter-clause.e.name value-clause.v.name)))
         (return (empty-source-range-filtered-entity-attr-value-projection) false))
-      (return (Source-Range-Filtered-Entity-Attr-Value-Projection {entity-var: filter-clause.e.name
-                                                                   filter-attr: filter-clause.a.value.text
-                                                                   filter-var: filter-clause.v.name
-                                                                   filter-op: filter-op
-                                                                   filter-value: filter-value
-                                                                   value-attr: value-clause.a.value.text
-                                                                   value-var: value-clause.v.name})
+      (return (Source-Range-Filtered-Entity-Attr-Value-Projection :entity-var filter-clause.e.name
+                                                                   :filter-attr filter-clause.a.value.text
+                                                                   :filter-var filter-clause.v.name
+                                                                   :filter-op filter-op
+                                                                   :filter-value filter-value
+                                                                   :value-attr value-clause.a.value.text
+                                                                   :value-var value-clause.v.name)
               true))))
 
 (defn query-find-var-known-for-range-star? [query: Query, entity-var: string, find-var: string] -> bool
@@ -587,7 +587,7 @@
   (let [first query.clauses[0]
         filter-index -1
         filter-op ""
-        filter-value (Value {})
+        filter-value (Value [])
         i 0]
     (when (not (and (= first.e.kind .Var)
                     (= first.a.kind .Value)
@@ -625,12 +625,12 @@
     (for [find-var query.find]
       (when (not (query-find-var-known-for-range-star? query first.e.name find-var))
         (return (empty-source-range-star-projection) false)))
-    (return (Source-Range-Star-Projection {entity-var: first.e.name
-                                           filter-index: filter-index
-                                           filter-attr: query.clauses[filter-index].a.value.text
-                                           filter-var: query.clauses[filter-index].v.name
-                                           filter-op: filter-op
-                                           filter-value: filter-value})
+    (return (Source-Range-Star-Projection :entity-var first.e.name
+                                           :filter-index filter-index
+                                           :filter-attr query.clauses[filter-index].a.value.text
+                                           :filter-var query.clauses[filter-index].v.name
+                                           :filter-op filter-op
+                                           :filter-value filter-value)
             true)))
 
 (defn db-read-source-query-attr-entity-projection [query: Query] -> [projection: Source-Attr-Entity-Projection, ok: bool]
@@ -666,8 +666,8 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-attr-entity-projection) false))
-    (return (Source-Attr-Entity-Projection {entity-var: clause-value.e.name
-                                            attr: clause-value.a.value.text})
+    (return (Source-Attr-Entity-Projection :entity-var clause-value.e.name
+                                            :attr clause-value.a.value.text)
             true)))
 
 (defn source-entity-pull-equality-filter [predicate: Predicate, entity-var: string] -> [value: Value, ok: bool]
@@ -714,7 +714,7 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-entity-pull-projection) false))
-    (let [entity-filter (Value {})
+    (let [entity-filter (Value [])
           has-entity-filter false]
       (when (= (count query.predicates) 1)
         (when (not (= query.where-steps[1].kind .Predicate))
@@ -724,12 +724,12 @@
             (return (empty-source-entity-pull-projection) false))
           (set! entity-filter filter-value)
           (set! has-entity-filter true)))
-    (return (Source-Entity-Pull-Projection {entity-var: clause-value.e.name
-                                            attr: clause-value.a.value.text
-                                            value: clause-value.v.value
-                                            has-value: (= clause-value.v.kind .Value)
-                                            entity-filter: entity-filter
-                                            has-entity-filter: has-entity-filter})
+    (return (Source-Entity-Pull-Projection :entity-var clause-value.e.name
+                                            :attr clause-value.a.value.text
+                                            :value clause-value.v.value
+                                            :has-value (= clause-value.v.kind .Value)
+                                            :entity-filter entity-filter
+                                            :has-entity-filter has-entity-filter)
             true))))
 
 (defn db-read-source-query-entity-get-else-projection [query: Query] -> [projection: Source-Entity-Get-Else-Projection, ok: bool]
@@ -774,12 +774,12 @@
                    (and (= query.find[0] get-else.out)
                         (= query.find[1] clause-value.v.name))))
       (return (empty-source-entity-get-else-projection) false))
-    (return (Source-Entity-Get-Else-Projection {entity-var: clause-value.e.name
-                                                value-attr: clause-value.a.value.text
-                                                value-var: clause-value.v.name
-                                                get-else-attr: get-else.a
-                                                get-else-var: get-else.out
-                                                default-value: get-else.default-value})
+    (return (Source-Entity-Get-Else-Projection :entity-var clause-value.e.name
+                                                :value-attr clause-value.a.value.text
+                                                :value-var clause-value.v.name
+                                                :get-else-attr get-else.a
+                                                :get-else-var get-else.out
+                                                :default-value get-else.default-value)
             true)))
 
 (defn db-read-source-query-entity-get-some-projection [query: Query] -> [projection: Source-Entity-Get-Some-Projection, ok: bool]
@@ -825,12 +825,12 @@
                    (and (= query.find[0] get-some.out-value)
                         (= query.find[1] get-some.out-attr))))
       (return (empty-source-entity-get-some-projection) false))
-    (return (Source-Entity-Get-Some-Projection {entity-var: clause-value.e.name
-                                                attr: clause-value.a.value.text
-                                                value: clause-value.v.value
-                                                has-value: (= clause-value.v.kind .Value)
-                                                out-attr: get-some.out-attr
-                                                out-value: get-some.out-value})
+    (return (Source-Entity-Get-Some-Projection :entity-var clause-value.e.name
+                                                :attr clause-value.a.value.text
+                                                :value clause-value.v.value
+                                                :has-value (= clause-value.v.kind .Value)
+                                                :out-attr get-some.out-attr
+                                                :out-value get-some.out-value)
             true)))
 
 (defn db-read-source-query-ground-fixed-entity-get-else-projection [query: Query] -> [projection: Source-Fixed-Entity-Get-Else-Projection, ok: bool]
@@ -871,10 +871,10 @@
               (not (= ground.out get-else.e.name))
               (not (= query.find[0] get-else.out)))
       (return (empty-source-fixed-entity-get-else-projection) false))
-    (return (Source-Fixed-Entity-Get-Else-Projection {entity: entity
-                                                      get-else-attr: get-else.a
-                                                      get-else-var: get-else.out
-                                                      default-value: get-else.default-value})
+    (return (Source-Fixed-Entity-Get-Else-Projection :entity entity
+                                                      :get-else-attr get-else.a
+                                                      :get-else-var get-else.out
+                                                      :default-value get-else.default-value)
             true)))
 
 (defn db-read-source-query-ground-fixed-entity-get-some-projection [query: Query] -> [projection: Source-Fixed-Entity-Get-Some-Projection, ok: bool]
@@ -918,9 +918,9 @@
                        (and (= query.find[0] get-some.out-value)
                             (= query.find[1] get-some.out-attr)))))
       (return (empty-source-fixed-entity-get-some-projection) false))
-    (return (Source-Fixed-Entity-Get-Some-Projection {entity: entity
-                                                      out-attr: get-some.out-attr
-                                                      out-value: get-some.out-value})
+    (return (Source-Fixed-Entity-Get-Some-Projection :entity entity
+                                                      :out-attr get-some.out-attr
+                                                      :out-value get-some.out-value)
             true)))
 
 (defn db-read-source-query-missing-attr-projection [query: Query] -> [projection: Missing-Attr-Projection-Plan, ok: bool]
@@ -978,10 +978,10 @@
                   (reverse-attr? missing-clause.a.value.text)
                   (not (= missing-clause.v.kind .Wildcard)))
           (return out false))
-        (return (Missing-Attr-Projection-Plan {entity-var: value-clause.e.name
-                                               value-var: value-clause.v.name
-                                               value-attr: value-clause.a.value.text
-                                               missing-attr: missing-clause.a.value.text})
+        (return (Missing-Attr-Projection-Plan :entity-var value-clause.e.name
+                                               :value-var value-clause.v.name
+                                               :value-attr value-clause.a.value.text
+                                               :missing-attr missing-clause.a.value.text)
                 true)))))
 
 (defn db-read-source-query-filtered-entity-attr-value-projection [query: Query] -> [projection: Entity-Attr-Value-Projection, ok: bool]
@@ -1036,11 +1036,11 @@
                            (and (= query.find[0] value-clause.v.name)
                                 (= query.find[1] filter-clause.e.name))))))
         (return (empty-entity-attr-value-projection) false))
-      (return (Entity-Attr-Value-Projection {entity-var: filter-clause.e.name
-                                             filter-attr: filter-clause.a.value.text
-                                             filter-value: filter-clause.v.value
-                                             value-attr: value-clause.a.value.text
-                                             value-var: value-clause.v.name})
+      (return (Entity-Attr-Value-Projection :entity-var filter-clause.e.name
+                                             :filter-attr filter-clause.a.value.text
+                                             :filter-value filter-clause.v.value
+                                             :value-attr value-clause.a.value.text
+                                             :value-var value-clause.v.name)
               true))))
 
 (defn query-entity-term-literal [term: Term] -> [entity: u64, ok: bool]
@@ -1085,9 +1085,9 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-fixed-entity-attr-projection) false))
-    (return (Source-Fixed-Entity-Attr-Projection {entity: entity
-                                                  attr: clause-value.a.value.text
-                                                  value-var: clause-value.v.name})
+    (return (Source-Fixed-Entity-Attr-Projection :entity entity
+                                                  :attr clause-value.a.value.text
+                                                  :value-var clause-value.v.name)
             true)))
 
 (defn db-read-source-query-ground-fixed-entity-attr-projection [query: Query] -> [projection: Source-Fixed-Entity-Attr-Projection, ok: bool]
@@ -1134,9 +1134,9 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-fixed-entity-attr-projection) false))
-    (return (Source-Fixed-Entity-Attr-Projection {entity: entity
-                                                  attr: clause-value.a.value.text
-                                                  value-var: clause-value.v.name})
+    (return (Source-Fixed-Entity-Attr-Projection :entity entity
+                                                  :attr clause-value.a.value.text
+                                                  :value-var clause-value.v.name)
             true)))
 
 (defn db-read-source-query-fixed-reverse-entity-attr-projection [query: Query] -> [projection: Source-Fixed-Reverse-Entity-Attr-Projection, ok: bool]
@@ -1173,9 +1173,9 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-fixed-reverse-entity-attr-projection) false))
-    (return (Source-Fixed-Reverse-Entity-Attr-Projection {entity: entity
-                                                          attr: clause-value.a.value.text
-                                                          value-var: clause-value.v.name})
+    (return (Source-Fixed-Reverse-Entity-Attr-Projection :entity entity
+                                                          :attr clause-value.a.value.text
+                                                          :value-var clause-value.v.name)
             true)))
 
 (defn db-read-source-query-fixed-entity-attr-value-projection [query: Query] -> [projection: Source-Fixed-Entity-Attr-Value-Projection, ok: bool]
@@ -1215,9 +1215,9 @@
                    (and (= query.find[0] clause-value.v.name)
                         (= query.find[1] clause-value.a.name))))
       (return (empty-source-fixed-entity-attr-value-projection) false))
-    (return (Source-Fixed-Entity-Attr-Value-Projection {entity: entity
-                                                        attr-var: clause-value.a.name
-                                                        value-var: clause-value.v.name})
+    (return (Source-Fixed-Entity-Attr-Value-Projection :entity entity
+                                                        :attr-var clause-value.a.name
+                                                        :value-var clause-value.v.name)
             true)))
 
 (defn db-read-source-query-fixed-entity-two-attr-projection [query: Query] -> [projection: Source-Fixed-Entity-Two-Attr-Projection, ok: bool]
@@ -1270,11 +1270,11 @@
                    (and (= query.find[0] second.v.name)
                         (= query.find[1] first.v.name))))
       (return (empty-source-fixed-entity-two-attr-projection) false))
-    (return (Source-Fixed-Entity-Two-Attr-Projection {entity: first-entity
-                                                      first-attr: first.a.value.text
-                                                      first-var: first.v.name
-                                                      second-attr: second.a.value.text
-                                                      second-var: second.v.name})
+    (return (Source-Fixed-Entity-Two-Attr-Projection :entity first-entity
+                                                      :first-attr first.a.value.text
+                                                      :first-var first.v.name
+                                                      :second-attr second.a.value.text
+                                                      :second-var second.v.name)
             true)))
 
 (defn query-find-three-vars? [query: Query, first-var: string, second-var: string, third-var: string] -> bool
@@ -1357,13 +1357,13 @@
               (not (= third.op-term.kind .Wildcard))
               (not (query-find-three-vars? query first.v.name second.v.name third.v.name)))
       (return (empty-source-three-attr-entity-projection) false))
-    (return (Source-Three-Attr-Entity-Projection {entity-var: first.e.name
-                                                  first-attr: first.a.value.text
-                                                  first-var: first.v.name
-                                                  second-attr: second.a.value.text
-                                                  second-var: second.v.name
-                                                  third-attr: third.a.value.text
-                                                  third-var: third.v.name})
+    (return (Source-Three-Attr-Entity-Projection :entity-var first.e.name
+                                                  :first-attr first.a.value.text
+                                                  :first-var first.v.name
+                                                  :second-attr second.a.value.text
+                                                  :second-var second.v.name
+                                                  :third-attr third.a.value.text
+                                                  :third-var third.v.name)
             true)))
 
 (defn query-find-vars-match-clause-value-vars? [query: Query] -> bool
@@ -1496,11 +1496,11 @@
               (not (= first.op-term.kind .Wildcard))
               (not (= second.op-term.kind .Wildcard)))
       (return (empty-source-fixed-entity-ref-attr-projection) false))
-    (return (Source-Fixed-Entity-Ref-Attr-Projection {entity: entity
-                                                      ref-attr: first.a.value.text
-                                                      ref-var: first.v.name
-                                                      value-attr: second.a.value.text
-                                                      value-var: second.v.name})
+    (return (Source-Fixed-Entity-Ref-Attr-Projection :entity entity
+                                                      :ref-attr first.a.value.text
+                                                      :ref-var first.v.name
+                                                      :value-attr second.a.value.text
+                                                      :value-var second.v.name)
             true)))
 
 (defn db-read-source-query-value-ref-attr-projection [query: Query] -> [projection: Source-Value-Ref-Attr-Projection, ok: bool]
@@ -1564,15 +1564,15 @@
               (not (= ref.op-term.kind .Wildcard))
               (not (= value-clause.op-term.kind .Wildcard)))
       (return (empty-source-value-ref-attr-projection) false))
-    (return (Source-Value-Ref-Attr-Projection {anchor-var: anchor.e.name
-                                               anchor-attr: anchor.a.value.text
-                                               anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
-                                               anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
-                                               has-anchor-input: (= anchor.v.kind .Var)
-                                               ref-entity-var: ref.e.name
-                                               ref-attr: ref.a.value.text
-                                               value-attr: value-clause.a.value.text
-                                               value-var: value-clause.v.name})
+    (return (Source-Value-Ref-Attr-Projection :anchor-var anchor.e.name
+                                               :anchor-attr anchor.a.value.text
+                                               :anchor-value (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                               :anchor-input-name (if (= anchor.v.kind .Var) anchor.v.name "")
+                                               :has-anchor-input (= anchor.v.kind .Var)
+                                               :ref-entity-var ref.e.name
+                                               :ref-attr ref.a.value.text
+                                               :value-attr value-clause.a.value.text
+                                               :value-var value-clause.v.name)
             true)))
 
 (defn query-value-ref-star-find-var-known? [query: Query, ref-entity-var: string, find-var: string] -> bool
@@ -1665,11 +1665,11 @@
     (for [find-var query.find]
       (when (not (query-value-ref-star-find-var-known? query ref.e.name find-var))
         (return (empty-source-value-ref-star-projection) false)))
-    (return (Source-Value-Ref-Star-Projection {anchor-var: anchor.e.name
-                                               anchor-attr: anchor.a.value.text
-                                               anchor-value: anchor.v.value
-                                               anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
-                                               has-anchor-input: (= anchor.v.kind .Var)
-                                               ref-entity-var: ref.e.name
-                                               ref-attr: ref.a.value.text})
+    (return (Source-Value-Ref-Star-Projection :anchor-var anchor.e.name
+                                               :anchor-attr anchor.a.value.text
+                                               :anchor-value anchor.v.value
+                                               :anchor-input-name (if (= anchor.v.kind .Var) anchor.v.name "")
+                                               :has-anchor-input (= anchor.v.kind .Var)
+                                               :ref-entity-var ref.e.name
+                                               :ref-attr ref.a.value.text)
             true)))

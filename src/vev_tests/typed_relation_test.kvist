@@ -230,11 +230,11 @@
   (defer (free_all context.allocator))
   (let [conn (vev.create-conn)
         report (vev.seed-people (addr conn))
-        clause (vev.Clause {e: (vev.term-entity 1)
-                            a: (vev.term-var "attr")
-                            v: (vev.term-string "Ada")
-                            tx-term: (vev.term-wildcard)
-                            op-term: (vev.term-wildcard)})
+        clause (vev.Clause :e (vev.term-entity 1)
+                            :a (vev.term-var "attr")
+                            :v (vev.term-string "Ada")
+                            :tx-term (vev.term-wildcard)
+                            :op-term (vev.term-wildcard))
         rel (vev.query-relation-from-db-clause report.db-after clause "")]
     (t.is rel.has-typed-columns)
     (t.is (= rel.typed-rows 1))
@@ -248,11 +248,11 @@
   (defer (free_all context.allocator))
   (let [conn (vev.create-conn)
         report (vev.seed-people (addr conn))
-        clause (vev.Clause {e: (vev.term-entity 1)
-                            a: (vev.term-var "attr")
-                            v: (vev.term-string "Ada")
-                            tx-term: (vev.term-wildcard)
-                            op-term: (vev.term-wildcard)})
+        clause (vev.Clause :e (vev.term-entity 1)
+                            :a (vev.term-var "attr")
+                            :v (vev.term-string "Ada")
+                            :tx-term (vev.term-wildcard)
+                            :op-term (vev.term-wildcard))
         left (vev.query-relation-singleton)
         right (vev.query-relation-from-db-clause report.db-after clause "")
         joined (vev.query-relation-join report.db-after ([]vev.DB-Source []) left right)]
@@ -270,11 +270,11 @@
   (defer (free_all context.allocator))
   (let [conn (vev.create-conn)
         report (vev.seed-people (addr conn))
-        clause (vev.Clause {e: (vev.term-entity 1)
-                            a: (vev.term-var "attr")
-                            v: (vev.term-string "Ada")
-                            tx-term: (vev.term-wildcard)
-                            op-term: (vev.term-wildcard)})
+        clause (vev.Clause :e (vev.term-entity 1)
+                            :a (vev.term-var "attr")
+                            :v (vev.term-string "Ada")
+                            :tx-term (vev.term-wildcard)
+                            :op-term (vev.term-wildcard))
         left (vev.query-relation-singleton)
         right (vev.query-relation-from-db-clause report.db-after clause "")
         joined (vev.query-relation-join report.db-after ([]vev.DB-Source []) left right)
@@ -293,11 +293,11 @@
   (defer (free_all context.allocator))
   (let [conn (vev.create-conn)
         report (vev.seed-people (addr conn))
-        clause (vev.Clause {e: (vev.term-entity 1)
-                            a: (vev.term-var "attr")
-                            v: (vev.term-string "Ada")
-                            tx-term: (vev.term-wildcard)
-                            op-term: (vev.term-wildcard)})
+        clause (vev.Clause :e (vev.term-entity 1)
+                            :a (vev.term-var "attr")
+                            :v (vev.term-string "Ada")
+                            :tx-term (vev.term-wildcard)
+                            :op-term (vev.term-wildcard))
         query (vev.query ([]string ["attr"]) ([]string []) ([]string []) ([]string []) ([]vev.Tuple-Input []) ([]vev.Relation-Input []) ([]vev.Clause [clause]) ([]vev.Predicate []) ([]vev.Function-Clause []) ([]vev.Rule []) ([]vev.Rule-Call []) ([]vev.Get-Else []) ([]vev.Get-Some []) ([]vev.Ground []) ([]vev.Not-Group []) ([]vev.Or-Group []) ([]vev.Pull-Find []) ([]vev.Aggregate-Find []))
         stats (vev.query-stats-empty)
         rel (vev.relation-engine-relation-profiled report.db-after query ([]vev.Query-Input []) ([]vev.DB-Source []) ([]vev.Native-Query-Fn []) (addr stats))
@@ -314,14 +314,14 @@
   (let [source (vev.value-vector
                  ([]vev.Value [(vev.value-vector3 (vev.value-int 1) (vev.value-keyword ":name") (vev.value-string "Ada"))
                                (vev.value-vector3 (vev.value-int 2) (vev.value-keyword ":name") (vev.value-string "Bob"))]))
-        clause (vev.Clause {e: (vev.term-var "?e")
-                            a: (vev.term-keyword ":name")
-                            v: (vev.term-var "?name")
-                            tx-term: (vev.term-wildcard)
-                            op-term: (vev.term-wildcard)
-                            source: "$rows"
-                            has-source: true
-                            source-width: 3})
+        clause (vev.Clause :e (vev.term-var "?e")
+                            :a (vev.term-keyword ":name")
+                            :v (vev.term-var "?name")
+                            :tx-term (vev.term-wildcard)
+                            :op-term (vev.term-wildcard)
+                            :source "$rows"
+                            :has-source true
+                            :source-width 3)
         rel (vev.query-relation-from-source-value-clause source clause)]
     (t.is rel.has-typed-columns)
     (t.is (= rel.typed-rows 2))
@@ -339,14 +339,14 @@
                  ([]vev.Value [(vev.value-vector3 (vev.value-int 1) (vev.value-keyword ":same") (vev.value-int 1))
                                (vev.value-vector3 (vev.value-int 2) (vev.value-keyword ":same") (vev.value-int 3))
                                (vev.value-vector3 (vev.value-int 4) (vev.value-keyword ":other") (vev.value-int 4))]))
-        clause (vev.Clause {e: (vev.term-var "?e")
-                            a: (vev.term-keyword ":same")
-                            v: (vev.term-var "?e")
-                            tx-term: (vev.term-wildcard)
-                            op-term: (vev.term-wildcard)
-                            source: "$rows"
-                            has-source: true
-                            source-width: 3})
+        clause (vev.Clause :e (vev.term-var "?e")
+                            :a (vev.term-keyword ":same")
+                            :v (vev.term-var "?e")
+                            :tx-term (vev.term-wildcard)
+                            :op-term (vev.term-wildcard)
+                            :source "$rows"
+                            :has-source true
+                            :source-width 3)
         rel (vev.query-relation-from-source-value-clause source clause)]
     (t.is rel.has-typed-columns)
     (t.is (= rel.typed-rows 1))
@@ -366,22 +366,22 @@
                                       (vev.value-vector3 (vev.value-int 1) (vev.value-keyword ":status") (vev.value-keyword ":active"))
                                       (vev.value-vector3 (vev.value-int 2) (vev.value-keyword ":status") (vev.value-keyword ":inactive"))
                                       (vev.value-vector3 (vev.value-int 3) (vev.value-keyword ":status") (vev.value-keyword ":active"))]))
-        people-clause (vev.Clause {e: (vev.term-var "?e")
-                                   a: (vev.term-keyword ":name")
-                                   v: (vev.term-var "?name")
-                                   tx-term: (vev.term-wildcard)
-                                   op-term: (vev.term-wildcard)
-                                   source: "$people"
-                                   has-source: true
-                                   source-width: 3})
-        status-clause (vev.Clause {e: (vev.term-var "?e")
-                                   a: (vev.term-keyword ":status")
-                                   v: (vev.term-var "?status")
-                                   tx-term: (vev.term-wildcard)
-                                   op-term: (vev.term-wildcard)
-                                   source: "$status"
-                                   has-source: true
-                                   source-width: 3})
+        people-clause (vev.Clause :e (vev.term-var "?e")
+                                   :a (vev.term-keyword ":name")
+                                   :v (vev.term-var "?name")
+                                   :tx-term (vev.term-wildcard)
+                                   :op-term (vev.term-wildcard)
+                                   :source "$people"
+                                   :has-source true
+                                   :source-width 3)
+        status-clause (vev.Clause :e (vev.term-var "?e")
+                                   :a (vev.term-keyword ":status")
+                                   :v (vev.term-var "?status")
+                                   :tx-term (vev.term-wildcard)
+                                   :op-term (vev.term-wildcard)
+                                   :source "$status"
+                                   :has-source true
+                                   :source-width 3)
         people-rel (vev.query-relation-from-source-value-clause people-source people-clause)
         [out out-ok] (vev.query-relation-apply-source-input-clause-indexed-typed status-source people-rel status-clause)]
     (t.is out-ok)
@@ -428,14 +428,14 @@
                  ([]vev.Value [(vev.value-vector3 (vev.value-int 1) (vev.value-keyword ":name") (vev.value-string "Ada"))
                                (vev.value-vector3 (vev.value-int 1) (vev.value-keyword ":name") (vev.value-string "Ada"))
                                (vev.value-vector3 (vev.value-int 2) (vev.value-keyword ":name") (vev.value-string "Bob"))]))
-        clause (vev.Clause {e: (vev.term-var "?e")
-                            a: (vev.term-keyword ":name")
-                            v: (vev.term-var "?name")
-                            tx-term: (vev.term-wildcard)
-                            op-term: (vev.term-wildcard)
-                            source: "$rows"
-                            has-source: true
-                            source-width: 3})
+        clause (vev.Clause :e (vev.term-var "?e")
+                            :a (vev.term-keyword ":name")
+                            :v (vev.term-var "?name")
+                            :tx-term (vev.term-wildcard)
+                            :op-term (vev.term-wildcard)
+                            :source "$rows"
+                            :has-source true
+                            :source-width 3)
         rel (vev.query-relation-from-source-value-clause source clause)
         deduped (vev.query-relation-dedupe-step rel)]
     (t.is deduped.has-typed-columns)
@@ -452,25 +452,25 @@
                       ([]vev.Value [(vev.value-vector3 (vev.value-int 1) (vev.value-keyword ":name") (vev.value-string "Ada"))]))
         right-source (vev.value-vector
                        ([]vev.Value [(vev.value-vector3 (vev.value-int 2) (vev.value-keyword ":status") (vev.value-keyword ":active"))]))
-        left-clause (vev.Clause {e: (vev.term-var "?e")
-                                 a: (vev.term-keyword ":name")
-                                 v: (vev.term-var "?x")
-                                 tx-term: (vev.term-wildcard)
-                                 op-term: (vev.term-wildcard)
-                                 source: "$left"
-                                 has-source: true
-                                 source-width: 3})
-        right-clause (vev.Clause {e: (vev.term-var "?other")
-                                  a: (vev.term-keyword ":status")
-                                  v: (vev.term-var "?x")
-                                  tx-term: (vev.term-wildcard)
-                                  op-term: (vev.term-wildcard)
-                                  source: "$right"
-                                  has-source: true
-                                  source-width: 3})
+        left-clause (vev.Clause :e (vev.term-var "?e")
+                                 :a (vev.term-keyword ":name")
+                                 :v (vev.term-var "?x")
+                                 :tx-term (vev.term-wildcard)
+                                 :op-term (vev.term-wildcard)
+                                 :source "$left"
+                                 :has-source true
+                                 :source-width 3)
+        right-clause (vev.Clause :e (vev.term-var "?other")
+                                  :a (vev.term-keyword ":status")
+                                  :v (vev.term-var "?x")
+                                  :tx-term (vev.term-wildcard)
+                                  :op-term (vev.term-wildcard)
+                                  :source "$right"
+                                  :has-source true
+                                  :source-width 3)
         left-rel (vev.query-relation-from-source-value-clause left-source left-clause)
         right-rel (vev.query-relation-from-source-value-clause right-source right-clause)
-        joined (vev.query-relation-join (vev.DB {}) ([]vev.DB-Source []) left-rel right-rel)]
+        joined (vev.query-relation-join (vev.DB []) ([]vev.DB-Source []) left-rel right-rel)]
     (t.is left-rel.has-typed-columns)
     (t.is right-rel.has-typed-columns)
     (t.is (= left-rel.typed-columns[1].kind .String))
@@ -493,8 +493,8 @@
                                         (vev.input-binding-tuple
                                           ([]vev.Input-Binding [(vev.input-binding-var "?b")
                                                                (vev.input-binding-var "?c")]))]))
-        ground (vev.Ground {source: (vev.term-value source)
-                            binding: binding})
+        ground (vev.Ground :source (vev.term-value source)
+                            :binding binding)
         [out out-ok] (vev.query-relation-apply-ground-typed rel ground)]
     (t.is out-ok)
     (t.is out.has-typed-columns)
@@ -518,9 +518,9 @@
                                         (vev.input-binding-tuple
                                           ([]vev.Input-Binding [(vev.input-binding-var "?b")
                                                                (vev.input-binding-var "?c")]))]))
-        function (vev.Function-Clause {op: "vector"
-                                       terms: ([]vev.Term [(vev.term-int 1) (vev.term-value nested)])
-                                       out-binding: binding})
+        function (vev.Function-Clause :op "vector"
+                                       :terms ([]vev.Term [(vev.term-int 1) (vev.term-value nested)])
+                                       :out-binding binding)
         [out out-ok] (vev.query-relation-extend-function-typed rel function ([]vev.Native-Query-Fn []))]
     (t.is out-ok)
     (t.is out.has-typed-columns)
@@ -545,8 +545,8 @@
                                         (vev.input-binding-tuple
                                           ([]vev.Input-Binding [(vev.input-binding-var "?a")
                                                                (vev.input-binding-var "?a")]))]))
-        ground (vev.Ground {source: (vev.term-value source)
-                            binding: binding})
+        ground (vev.Ground :source (vev.term-value source)
+                            :binding binding)
         [out out-ok] (vev.query-relation-apply-ground-typed rel ground)]
     (t.is out-ok)
     (t.is out.has-typed-columns)

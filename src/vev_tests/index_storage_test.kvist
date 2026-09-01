@@ -355,18 +355,18 @@
         tx-data (arr.into [dynamic]vev.Datom (slice after-db.datoms 2))
         tx-meta (make [dynamic]vev.Tx-Meta)
         tempids (make [dynamic]vev.Tempid)
-        report (vev.Tx-Report {ok: true
-                                error: ""
-                                db-before: base-db
-                                db-after: after-db
-                                tx-data: tx-data
-                                tx: 2
-                                tx-meta: tx-meta
-                                tempids: tempids
-                                datom-start-index: 2
-                                append-only: true
-                                new-entities-after-existing: true
-                                publish-plan: (vev.tx-publish-plan-for-append (slice tx-data 0) 2 true)})
+        report (vev.Tx-Report :ok true
+                                :error ""
+                                :db-before base-db
+                                :db-after after-db
+                                :tx-data tx-data
+                                :tx 2
+                                :tx-meta tx-meta
+                                :tempids tempids
+                                :datom-start-index 2
+                                :append-only true
+                                :new-entities-after-existing true
+                                :publish-plan (vev.tx-publish-plan-for-append (slice tx-data 0) 2 true))
         appended-snapshot (vev.shared-db-snapshot-with-tx-report base-snapshot after-db report)
         [base-datom-refs base-datom-refs-ok] (vev.shared-datom-log-ref-count-at base-snapshot.datoms 0)
         [base-current-refs base-current-refs-ok] (vev.shared-int-index-ref-count-at base-snapshot.indexes.current 0)
@@ -561,14 +561,14 @@
                                 (vev.add 2 ":user/name" (vev.value-string "Grace"))]))
         link (vev.shared-conn-transact
                (addr conn)
-               ([]vev.Tx-Data [(vev.Tx-Data {op: ":db/add"
-                                              lookup-attr: ":user/email"
-                                              lookup-value: (vev.value-string "ada@example.com")
-                                              has-lookup-ref: true
-                                              a: ":user/friend"
-                                              value-lookup-attr: ":user/email"
-                                              value-lookup-value: (vev.value-string "grace@example.com")
-                                              has-value-lookup-ref: true})]))
+               ([]vev.Tx-Data [(vev.Tx-Data :op ":db/add"
+                                              :lookup-attr ":user/email"
+                                              :lookup-value (vev.value-string "ada@example.com")
+                                              :has-lookup-ref true
+                                              :a ":user/friend"
+                                              :value-lookup-attr ":user/email"
+                                              :value-lookup-value (vev.value-string "grace@example.com")
+                                              :has-value-lookup-ref true)]))
         missing-retract (vev.shared-conn-transact
                           (addr conn)
                           ([]vev.Tx-Data [(vev.retract-value-lookup-ref 1 ":user/friend" ":user/email" (vev.value-string "missing@example.com"))]))
@@ -666,14 +666,14 @@
                                   (vev.add 101 ":db/ident" (vev.value-keyword ":user/friend"))
                                   (vev.add 101 ":db/valueType" (vev.value-keyword ":db.type/ref"))
                                   (vev.add-lookup-ref ":user/email" (vev.value-string "ada@example.com") ":user/name" (vev.value-string "Ada"))
-                                  (vev.Tx-Data {op: ":db/add"
-                                                lookup-attr: ":user/email"
-                                                lookup-value: (vev.value-string "ada@example.com")
-                                                has-lookup-ref: true
-                                                a: ":user/friend"
-                                                value-lookup-attr: ":user/email"
-                                                value-lookup-value: (vev.value-string "grace@example.com")
-                                                has-value-lookup-ref: true})
+                                  (vev.Tx-Data :op ":db/add"
+                                                :lookup-attr ":user/email"
+                                                :lookup-value (vev.value-string "ada@example.com")
+                                                :has-lookup-ref true
+                                                :a ":user/friend"
+                                                :value-lookup-attr ":user/email"
+                                                :value-lookup-value (vev.value-string "grace@example.com")
+                                                :has-value-lookup-ref true)
                                   (vev.add-tempid "ada" ":user/email" (vev.value-string "ada@example.com"))
                                   (vev.add-tempid "grace" ":user/email" (vev.value-string "grace@example.com"))]))
         source (vev.shared-conn-read-source (addr conn))
@@ -1834,21 +1834,21 @@
   (let [base-db
           (vev.build-db
             ([dynamic]vev.Datom
-              [(vev.Datom {e: 1 a: ":item/name"
-                           v: (vev.value-string "Before")
-                           tx: 10 added: true})
-               (vev.Datom {e: 2 a: ":item/name"
-                           v: (vev.value-string "Untouched")
-                           tx: 10 added: true})]))
+              [(vev.Datom :e 1 :a ":item/name"
+                           :v (vev.value-string "Before")
+                           :tx 10 :added true)
+               (vev.Datom :e 2 :a ":item/name"
+                           :v (vev.value-string "Untouched")
+                           :tx 10 :added true)]))
         base (vev.shared-db-snapshot-from-db base-db 1)
         appended
           ([]vev.Datom
-            [(vev.Datom {e: 1 a: ":item/name"
-                         v: (vev.value-string "Before")
-                         tx: 11 added: false})
-             (vev.Datom {e: 1 a: ":item/name"
-                         v: (vev.value-string "After")
-                         tx: 11 added: true})])
+            [(vev.Datom :e 1 :a ":item/name"
+                         :v (vev.value-string "Before")
+                         :tx 11 :added false)
+             (vev.Datom :e 1 :a ":item/name"
+                         :v (vev.value-string "After")
+                         :tx 11 :added true)])
         after (vev.shared-db-snapshot-with-transaction-datoms
                 base appended base.datoms.count)
         base-source (vev.shared-db-snapshot-read-source (addr base))
@@ -1909,42 +1909,42 @@
   (let [base-datoms (make [dynamic]vev.Datom)]
     (for [entity (arr.range 1 20)]
       (arr.push! base-datoms
-        (vev.Datom {e: (u64 entity) a: ":item/name"
-                    v: (vev.value-string (fmt.tprintf "base-%d" entity))
-                    tx: 100 added: true}))
+        (vev.Datom :e (u64 entity) :a ":item/name"
+                    :v (vev.value-string (fmt.tprintf "base-%d" entity))
+                    :tx 100 :added true))
       (arr.push! base-datoms
-        (vev.Datom {e: (u64 entity) a: ":item/order"
-                    v: (vev.value-int (i64 entity))
-                    tx: 100 added: true})))
+        (vev.Datom :e (u64 entity) :a ":item/order"
+                    :v (vev.value-int (i64 entity))
+                    :tx 100 :added true)))
     ;; A realistic EAVT already ends in the high transaction partition.
     (arr.push! base-datoms
-      (vev.Datom {e: vev.tx-partition-base a: ":db/txInstant"
-                  v: (vev.value-int 100)
-                  tx: vev.tx-partition-base added: true}))
+      (vev.Datom :e vev.tx-partition-base :a ":db/txInstant"
+                  :v (vev.value-int 100)
+                  :tx vev.tx-partition-base :added true))
     (let [base-db (vev.build-db base-datoms)
           base (vev.shared-db-snapshot-from-db base-db 7)
           appended (make [dynamic]vev.Datom)]
       (for [entity (arr.range 20 32)]
         (arr.push! appended
-          (vev.Datom {e: (u64 entity) a: ":item/name"
-                      v: (vev.value-string (fmt.tprintf "new-%d" entity))
-                      tx: 101 added: true}))
+          (vev.Datom :e (u64 entity) :a ":item/name"
+                      :v (vev.value-string (fmt.tprintf "new-%d" entity))
+                      :tx 101 :added true))
         (arr.push! appended
-          (vev.Datom {e: (u64 entity) a: ":item/order"
-                      v: (vev.value-int (i64 (- 40 entity)))
-                      tx: 101 added: true}))
+          (vev.Datom :e (u64 entity) :a ":item/order"
+                      :v (vev.value-int (i64 (- 40 entity)))
+                      :tx 101 :added true))
         (arr.push! appended
-          (vev.Datom {e: (u64 entity) a: ":item/workspace"
-                      v: (vev.value-entity 1)
-                      tx: 101 added: true}))
+          (vev.Datom :e (u64 entity) :a ":item/workspace"
+                      :v (vev.value-entity 1)
+                      :tx 101 :added true))
         (arr.push! appended
-          (vev.Datom {e: (u64 entity) a: ":item/type"
-                      v: (vev.value-keyword ":item.type/example")
-                      tx: 101 added: true}))
+          (vev.Datom :e (u64 entity) :a ":item/type"
+                      :v (vev.value-keyword ":item.type/example")
+                      :tx 101 :added true))
         (arr.push! appended
-          (vev.Datom {e: (u64 entity) a: ":item/builtin"
-                      v: (vev.value-bool false)
-                      tx: 101 added: true})))
+          (vev.Datom :e (u64 entity) :a ":item/builtin"
+                      :v (vev.value-bool false)
+                      :tx 101 :added true)))
       (let [after (vev.shared-db-snapshot-with-appended-datoms-direct
                     base (slice appended 0) base.datoms.count true)
             all (make [dynamic]vev.Datom)]

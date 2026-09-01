@@ -43,7 +43,7 @@
     (when (= stream.output-index output-index)
       (let [datom db.datoms[(entity-star-stream-datom-index stream)]]
         (return datom.v true))))
-  (return (Value {}) false))
+  (return (Value []) false))
 
 (defn entity-star-streams-for-filters-and-outputs [db: DB, filters: []Entity-Int-Pair-Filter, output-attrs: []string] -> [streams: [dynamic]Entity-Star-Stream]
   (let [out (make [dynamic]Entity-Star-Stream)
@@ -52,17 +52,17 @@
     (for [filter filters]
       (let [low (lower-bound-index-view db avet-view "avet" 0 filter.attr filter.value)
             high (upper-bound-index-view db avet-view "avet" 0 filter.attr filter.value)]
-        (arr.push! out (Entity-Star-Stream {view: avet-view
-                                            index: low
-                                            high: high
-                                            output-index: -1}))))
+        (arr.push! out (Entity-Star-Stream :view avet-view
+                                            :index low
+                                            :high high
+                                            :output-index -1))))
     (for [attr output-index output-attrs]
-      (let [low (lower-bound-index-view db aevt-view "aevt" 0 attr (Value {}))
-            high (upper-bound-index-view db aevt-view "aevt" 0 attr (Value {}))]
-        (arr.push! out (Entity-Star-Stream {view: aevt-view
-                                            index: low
-                                            high: high
-                                            output-index: output-index}))))
+      (let [low (lower-bound-index-view db aevt-view "aevt" 0 attr (Value []))
+            high (upper-bound-index-view db aevt-view "aevt" 0 attr (Value []))]
+        (arr.push! out (Entity-Star-Stream :view aevt-view
+                                            :index low
+                                            :high high
+                                            :output-index output-index))))
     out))
 
 (defn relation-add-entity-value-row! [columns: ^[dynamic]Relation-Column, rows: ^int, entity: u64, value: Value] -> bool
@@ -116,13 +116,13 @@
                 (delete-relation-columns typed-columns)
                 (return (query-relation-empty) false))))
           (entity-star-streams-advance-all! (addr streams))))))
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: (make [dynamic]Binding)
-                             typed-columns: typed-columns
-                             typed-rows: typed-rows
-                             has-typed-columns: true}) true)))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples (make [dynamic]Binding)
+                             :typed-columns typed-columns
+                             :typed-rows typed-rows
+                             :has-typed-columns true) true)))
 
 (defn query-relation-from-entity-two-value-star-plan [db: DB, query: Query, plan: Entity-Two-Value-Plan, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool]
   (when (not (and (all-datoms-current? db)
@@ -154,13 +154,13 @@
                 (delete-relation-columns typed-columns)
                 (return (query-relation-empty) false))))
           (entity-star-streams-advance-all! (addr streams))))))
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: (make [dynamic]Binding)
-                             typed-columns: typed-columns
-                             typed-rows: typed-rows
-                             has-typed-columns: true}) true)))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples (make [dynamic]Binding)
+                             :typed-columns typed-columns
+                             :typed-rows typed-rows
+                             :has-typed-columns true) true)))
 
 (defn query-relation-from-entity-star-plan [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, registry: []Native-Query-Fn, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool]
   (when (or (> (count inputs) 0)
@@ -186,7 +186,7 @@
         all-current (all-datoms-current? db)]
     (when (and all-current (schema-value-type-long? db plan.value-attr))
       (let [low (upper-bound-index-view db view "avet" 0 plan.value-attr (value-int plan.threshold))
-            high (lower-bound-index-view db view "avet" 0 plan.value-attr (Value {kind: .Float}))
+            high (lower-bound-index-view db view "avet" 0 plan.value-attr (Value :kind .Float))
             out (entity-int-pair-columns-with-capacity (- high low))
             i low]
         (while (< i high)
@@ -219,8 +219,8 @@
         aevt-view (db-index-view db .AEVT)
         left-low (lower-bound-index-view db avet-view "avet" 0 plan.left-filter-attr plan.left-filter-value)
         left-high (upper-bound-index-view db avet-view "avet" 0 plan.left-filter-attr plan.left-filter-value)
-        output-low (lower-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value {}))
-        output-high (upper-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value {}))]
+        output-low (lower-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value []))
+        output-high (upper-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value []))]
     (defer (delete seen-join-values))
     (defer (delete join-values))
     (defer (delete output-by-entity))
@@ -275,8 +275,8 @@
         aevt-view (db-index-view db .AEVT)
         left-low (lower-bound-index-view db avet-view "avet" 0 plan.left-filter-attr plan.left-filter-value)
         left-high (upper-bound-index-view db avet-view "avet" 0 plan.left-filter-attr plan.left-filter-value)
-        output-low (lower-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value {}))
-        output-high (upper-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value {}))]
+        output-low (lower-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value []))
+        output-high (upper-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value []))]
     (defer (delete seen-join-values))
     (defer (delete join-values))
     (defer (delete output-by-entity))
@@ -305,9 +305,9 @@
         (let [right-low (lower-bound-index-view db avet-view "avet" 0 plan.join-attr join-value)
               right-high (upper-bound-index-view db avet-view "avet" 0 plan.join-attr join-value)]
           (set! right-candidates (+ right-candidates (- right-high right-low)))))
-      (let [out (Entity-String-Int-Triples {entities: (make [dynamic]u64 0 right-candidates)
-                                            strings: (make [dynamic]string 0 right-candidates)
-                                            ints: (make [dynamic]i64 0 right-candidates)})]
+      (let [out (Entity-String-Int-Triples :entities (make [dynamic]u64 0 right-candidates)
+                                            :strings (make [dynamic]string 0 right-candidates)
+                                            :ints (make [dynamic]i64 0 right-candidates))]
         (for [join-value join-values]
           (let [right-low (lower-bound-index-view db avet-view "avet" 0 plan.join-attr join-value)
                 right-high (upper-bound-index-view db avet-view "avet" 0 plan.join-attr join-value)

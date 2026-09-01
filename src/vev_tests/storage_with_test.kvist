@@ -55,11 +55,11 @@
           later (vev.transact-store-report-text
                   (addr store) "[[:db/add 1 :item/link 1]]")
           [snapshot snapshot-ok snapshot-error] (vev.store-db (addr store))
-          args ([1]vev.Index-Arg [(vev.Index-Arg {value: (vev.value-int 1)})])
+          args ([1]vev.Index-Arg [(vev.Index-Arg :value (vev.value-int 1))])
           [datoms datoms-ok datoms-error]
             (vev.store-db-index-datoms (addr snapshot) 0 ":vaet" (slice args 0))
-          bound (vev.Index-Arg {value: (vev.value-int 0)})
-          end-bound (vev.Index-Arg {value: (vev.value-int 1)})
+          bound (vev.Index-Arg :value (vev.value-int 0))
+          end-bound (vev.Index-Arg :value (vev.value-int 1))
           [range range-ok range-error]
             (vev.store-db-index-range-datoms (addr snapshot) ":item/score" bound true end-bound true)]
       (t.is opened-ok opened-error)

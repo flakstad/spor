@@ -10,7 +10,7 @@
 (defn main []
   (let [db (sql.open
              ":memory:"
-             (sql.Open-Options {busy-timeout-ms: 1000}))]
+             (sql.Open-Options :busy-timeout-ms 1000))]
     (defer (sql.close db))
     (let [create (sql.execute-script
                    db

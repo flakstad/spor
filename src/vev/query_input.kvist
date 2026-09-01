@@ -14,7 +14,7 @@
              (= (count value.items) 2)
              (= value.items[0].kind .Keyword))
     (return value.items[0].text value.items[1] true))
-  (return "" (Value {}) false))
+  (return "" (Value []) false))
 
 (defn value-as-entity [db: DB, value: Value] -> [entity: Value, ok: bool]
   (cond
@@ -26,15 +26,15 @@
       (let [[entity found] (schema-entity-for-attr db value.text)]
         (if found
           (return (value-entity entity) true)
-          (return (Value {}) false)))
+          (return (Value []) false)))
     :else
       (let [[attr lookup-value lookup-ok] (value-lookup-ref-parts value)]
         (when lookup-ok
           (let [[entity found] (resolve-lookup-ref db attr lookup-value)]
             (if found
               (return (value-entity entity) true)
-              (return (Value {}) false))))
-        (return (Value {}) false))))
+              (return (Value []) false))))
+        (return (Value []) false))))
 
 (defn lookup-ref-value-as-entity [db: DB, value: Value] -> [entity: Value, ok: bool]
   (let [[attr lookup-value lookup-ok] (value-lookup-ref-parts value)]
@@ -42,8 +42,8 @@
       (let [[entity found] (resolve-lookup-ref db attr lookup-value)]
         (if found
           (return (value-entity entity) true)
-          (return (Value {}) false)))))
-  (return (Value {}) false))
+          (return (Value []) false)))))
+  (return (Value []) false))
 
 (defn entity-value-equal? [db: DB, left: Value, right: Value] -> bool
   (when (predicate-value-equal? left right)
@@ -60,7 +60,7 @@
   (case value.kind
     .Entity (return value true)
     .Int (return (value-entity (u64 value.int-value)) true)
-     (return (Value {}) false)))
+     (return (Value []) false)))
 
 (defn entity-id-value-equal? [left: Value, right: Value] -> bool
   (when (predicate-value-equal? left right)
@@ -95,7 +95,7 @@
     (let [[_ lookup-ok] (resolve-lookup-ref db input.lookup-attr input.lookup-value)]
       (if lookup-ok
         (return (lookup-ref-value input.lookup-attr input.lookup-value) true)
-        (return (Value {}) false))))
+        (return (Value []) false))))
   (return input.value true))
 
 (defn primary-relation-db-source-name [] -> string
@@ -131,7 +131,7 @@
          (or (= input.value.kind .Vector)
              (= input.value.kind .Set)))
       (return input.value true)
-    :else (return (Value {}) false)))
+    :else (return (Value []) false)))
 
 (defn query-input-source-value-owned [input: Query-Input] -> [value: Value, ok: bool]
   (cond
@@ -166,7 +166,7 @@
          (or (= input.value.kind .Vector)
              (= input.value.kind .Set)))
       (return (value-owned input.value) true)
-    :else (return (Value {}) false)))
+    :else (return (Value []) false)))
 
 (defn query-input-bound-value [db: DB, name: string, input: Query-Input] -> [value: Value, ok: bool]
   (when (query-source-input-name? name)
@@ -174,7 +174,7 @@
   (when (or (= input.kind .Scalar)
             (= input.kind .PullPattern))
     (return (query-input-scalar-value db input)))
-  (return (Value {}) false))
+  (return (Value []) false))
 
 (defn db-read-source-query-input-scalar-value [source: DB-Read-Source, input: Query-Input] -> [value: Value, ok: bool, error: string]
   (when (= input.kind .PullPattern)
@@ -183,21 +183,21 @@
     (let [[entity entity-ok lookup-error] (db-read-source-resolve-lookup-ref source input.lookup-attr input.lookup-value)]
       (if entity-ok
         (return (lookup-ref-value input.lookup-attr input.lookup-value) true "")
-        (return (Value {}) false lookup-error))))
+        (return (Value []) false lookup-error))))
   (when (= input.kind .Scalar)
     (return input.value true ""))
-  (return (Value {}) false "cannot bind non-scalar query input"))
+  (return (Value []) false "cannot bind non-scalar query input"))
 
 (defn db-read-source-query-input-bound-value [source: DB-Read-Source, name: string, input: Query-Input] -> [value: Value, ok: bool, error: string]
   (when (query-source-input-name? name)
     (let [[source-value source-ok] (query-input-source-value input)]
       (if source-ok
         (return source-value true "")
-        (return (Value {}) false "cannot bind query input as source"))))
+        (return (Value []) false "cannot bind query input as source"))))
   (when (or (= input.kind .Scalar)
             (= input.kind .PullPattern))
     (return (db-read-source-query-input-scalar-value source input)))
-  (return (Value {}) false "cannot bind query input"))
+  (return (Value []) false "cannot bind query input"))
 
 (defn query-source-input-value? [input: Query-Input] -> bool
   (cond
@@ -212,7 +212,7 @@
     :else false))
 
 (defn binding-from-inputs [db: DB, names: []string, values: []Query-Input] -> [bindings: [dynamic]Binding]
-  (let [binding (Binding {})
+  (let [binding (Binding [])
         out (make [dynamic]Binding)]
     (for [name index names]
       (when (< index (count values))
@@ -340,7 +340,7 @@
                              (= input.kind .Collection) (value-vector (slice input.values 0))
                              (= input.kind .Relation) (query-input-relation-as-vector input width)
                              (and (= input.kind .Scalar) (= input.value.kind .Map)) (query-input-map-as-relation-vector input)
-                             :else (Value {}))]
+                             :else (Value []))]
         (when (= relation-value.kind .Vector)
           (for [binding bindings]
             (let [bound (bind-input-pattern binding relation.binding relation-value)]
@@ -374,7 +374,7 @@
     out))
 
 (defn bindings-from-inputs-in-order [db: DB, query: Query, inputs: []Query-Input] -> [dynamic]Binding
-  (let [binding (Binding {})
+  (let [binding (Binding [])
         bindings (make [dynamic]Binding)]
     (arr.push! bindings binding)
     (for [spec index query.input-specs]
@@ -620,13 +620,13 @@
             (delete attr-sources)
             (delete-relation-columns columns)
             (return (query-relation-empty) 0 false))))
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: (make [dynamic]Binding)
-                             typed-columns: columns
-                             typed-rows: row-count
-                             has-typed-columns: true}) row-count true)))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples (make [dynamic]Binding)
+                             :typed-columns columns
+                             :typed-rows row-count
+                             :has-typed-columns true) row-count true)))
 
 (defn query-relation-from-legacy-simple-inputs [db: DB, query: Query, inputs: []Query-Input] -> [rel: Query-Relation, binding-count: int, ok: bool]
   (when (> (count query.input-specs) 0)
@@ -692,13 +692,13 @@
             (delete attr-sources)
             (delete-relation-columns columns)
             (return (query-relation-empty) 0 false)))))
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: (make [dynamic]Binding)
-                             typed-columns: columns
-                             typed-rows: row-count
-                             has-typed-columns: true}) row-count true)))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples (make [dynamic]Binding)
+                             :typed-columns columns
+                             :typed-rows row-count
+                             :has-typed-columns true) row-count true)))
 
 (defn query-relation-initial-from-inputs [db: DB, query: Query, inputs: []Query-Input] -> [rel: Query-Relation, binding-count: int]
   (let [[ordered ordered-count ordered-ok] (query-relation-from-ordered-simple-inputs db query inputs)]

@@ -12,16 +12,16 @@
 (def backup-source-test-path "/tmp/vev-app-backup-source.sqlite")
 (def backup-destination-test-path "/tmp/vev-app-backup-destination.sqlite")
 
-(defstruct Concurrent-Reader {
+(defstruct Concurrent-Reader [
   conn: d.Conn
   iterations: int
   ok: bool
-})
+])
 
-(defstruct Concurrent-Reopener {
+(defstruct Concurrent-Reopener [
   iterations: int
   ok: bool
-})
+])
 
 (def concurrent-value-query
   '[:find ?value .
@@ -363,7 +363,7 @@
       (let [held-value (d.q concurrent-value-query held)]
         (test.is (= (kdata.int held-value) 0)))
       (d.close held))
-    (let [reader (Concurrent-Reader {conn: conn iterations: 30 ok: true})
+    (let [reader (Concurrent-Reader :conn conn :iterations 30 :ok true)
           worker (thread.create-and-start-with-poly-data (addr reader) concurrent-read-loop)
           index 0]
       (while (< index 30)
@@ -390,7 +390,7 @@
     ;; validates all published index roots. Repeated opens concurrent with a
     ;; writer must never mix a root basis from one SQLite generation with a
     ;; datom log or manifest from another.
-    (let [reopener (Concurrent-Reopener {iterations: 120 ok: true})
+    (let [reopener (Concurrent-Reopener :iterations 120 :ok true)
           worker (thread.create-and-start-with-poly-data
                    (addr reopener) concurrent-reopen-loop)
           index 1]

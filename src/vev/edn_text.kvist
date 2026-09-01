@@ -1,7 +1,7 @@
 (package vev)
 
 (defn db-source [name: string, db: DB] -> DB-Source
-  (DB-Source {name: name db: db}))
+  (DB-Source :name name :db db))
 
 (defn append-db-read-named-sources-from-db-sources! [out: ^[dynamic]DB-Read-Named-Source, db-aliases: ^[dynamic]DB, sources: []DB-Source] -> bool
   (for [source sources]
@@ -549,27 +549,27 @@
       :else (return (input-binding-none) false "unsupported :in binding form"))))
 
 (defn prepared-binding-error [error: string] -> Prepared-Binding
-  (Prepared-Binding {ok: false error: error binding: (input-binding-none)}))
+  (Prepared-Binding :ok false :error error :binding (input-binding-none)))
 
 (defn prepared-in-error [error: string] -> Prepared-In
-  (Prepared-In {ok: false error: error bindings: (make [dynamic]Input-Binding)}))
+  (Prepared-In :ok false :error error :bindings (make [dynamic]Input-Binding)))
 
 (defn prepared-with-error [error: string] -> Prepared-With
-  (Prepared-With {ok: false error: error vars: (make [dynamic]string)}))
+  (Prepared-With :ok false :error error :vars (make [dynamic]string)))
 
 (defn prepared-clause-error [error: string] -> Prepared-Clause
-  (Prepared-Clause {ok: false
-                    error: error
-                    clauses: (make [dynamic]Clause)
-                    predicates: (make [dynamic]Predicate)
-                    function-clauses: (make [dynamic]Function-Clause)
-                    rule-calls: (make [dynamic]Rule-Call)
-                    get-elses: (make [dynamic]Get-Else)
-                    get-somes: (make [dynamic]Get-Some)
-                    grounds: (make [dynamic]Ground)
-                    not-groups: (make [dynamic]Not-Group)
-                    or-groups: (make [dynamic]Or-Group)
-                    where-steps: (make [dynamic]Query-Step)}))
+  (Prepared-Clause :ok false
+                    :error error
+                    :clauses (make [dynamic]Clause)
+                    :predicates (make [dynamic]Predicate)
+                    :function-clauses (make [dynamic]Function-Clause)
+                    :rule-calls (make [dynamic]Rule-Call)
+                    :get-elses (make [dynamic]Get-Else)
+                    :get-somes (make [dynamic]Get-Some)
+                    :grounds (make [dynamic]Ground)
+                    :not-groups (make [dynamic]Not-Group)
+                    :or-groups (make [dynamic]Or-Group)
+                    :where-steps (make [dynamic]Query-Step)))
 
 (defn edn-in-binding-from-node [doc: EDN-Doc, node-index: int] -> [binding: Input-Binding, ok: bool, error: string]
   (when (= node-index -1)
@@ -586,11 +586,11 @@
     (defer (delete doc.nodes))
     (let [[binding binding-ok binding-error] (edn-input-binding-from-node doc doc.root)]
       (if binding-ok
-        (Prepared-Binding {ok: true
-                           error: ""
-                           binding: binding
-                           source-owner: value
-                           owns-source: true})
+        (Prepared-Binding :ok true
+                           :error ""
+                           :binding binding
+                           :source-owner value
+                           :owns-source true)
         (prepared-binding-error binding-error)))))
 
 (defn parse-binding-text [text: string] -> Prepared-Binding
@@ -615,11 +615,11 @@
             (return (prepared-in-error binding-error)))
           (arr.push! bindings binding))
         (set! cursor doc.nodes[cursor].next-sibling))
-      (Prepared-In {ok: true
-                    error: ""
-                    bindings: bindings
-                    source-owner: value
-                    owns-source: true}))))
+      (Prepared-In :ok true
+                    :error ""
+                    :bindings bindings
+                    :source-owner value
+                    :owns-source true))))
 
 (defn parse-in-text [text: string] -> Prepared-In
   (let [[value read-error read-ok] (edn.try-read text)]
@@ -642,11 +642,11 @@
           (return (prepared-with-error "Cannot parse :with clause")))
         (arr.push! vars doc.nodes[cursor].text)
         (set! cursor doc.nodes[cursor].next-sibling))
-      (Prepared-With {ok: true
-                      error: ""
-                      vars: vars
-                      source-owner: value
-                      owns-source: true}))))
+      (Prepared-With :ok true
+                      :error ""
+                      :vars vars
+                      :source-owner value
+                      :owns-source true))))
 
 (defn parse-with-text [text: string] -> Prepared-With
   (let [[value read-error read-ok] (edn.try-read text)]
@@ -683,20 +683,20 @@
                        doc
                        doc.root)]
       (if ok
-        (Prepared-Clause {ok: true
-                          error: ""
-                          clauses: clauses
-                          predicates: predicates
-                          function-clauses: function-clauses
-                          rule-calls: rule-calls
-                          get-elses: get-elses
-                          get-somes: get-somes
-                          grounds: grounds
-                          not-groups: not-groups
-                          or-groups: or-groups
-                          where-steps: where-steps
-                          source-owner: value
-                          owns-source: true})
+        (Prepared-Clause :ok true
+                          :error ""
+                          :clauses clauses
+                          :predicates predicates
+                          :function-clauses function-clauses
+                          :rule-calls rule-calls
+                          :get-elses get-elses
+                          :get-somes get-somes
+                          :grounds grounds
+                          :not-groups not-groups
+                          :or-groups or-groups
+                          :where-steps where-steps
+                          :source-owner value
+                          :owns-source true)
         (do
           (delete clauses)
           (delete predicates)
@@ -729,18 +729,18 @@
         (return true "")
       (and (= node.kind .Symbol) (= node.text "_"))
         (do
-          (arr.push! input-specs^ (Query-Input-Spec {kind: .Ignore}))
+          (arr.push! input-specs^ (Query-Input-Spec :kind .Ignore))
           (return true ""))
       (and (= node.kind .Symbol) (strings.has_prefix node.text "$"))
         (do
           (arr.push! inputs^ node.text)
-          (arr.push! input-specs^ (Query-Input-Spec {kind: .Scalar name: node.text}))
+          (arr.push! input-specs^ (Query-Input-Spec :kind .Scalar :name node.text))
           (return true ""))
       (or (edn-var? doc node-index)
           (edn-named-input-symbol? doc node-index))
         (do
           (arr.push! inputs^ node.text)
-          (arr.push! input-specs^ (Query-Input-Spec {kind: .Scalar name: node.text}))
+          (arr.push! input-specs^ (Query-Input-Spec :kind .Scalar :name node.text))
           (return true ""))
       (= node.kind .Vector)
         (let [first-node node.first-child
@@ -751,7 +751,7 @@
             (and (edn-var? doc first-node) (edn-symbol-text? doc second-node "..."))
               (do
                 (arr.push! collection-inputs^ doc.nodes[first-node].text)
-                (arr.push! input-specs^ (Query-Input-Spec {kind: .Collection name: doc.nodes[first-node].text}))
+                (arr.push! input-specs^ (Query-Input-Spec :kind .Collection :name doc.nodes[first-node].text))
                 (return true ""))
             (= doc.nodes[first-node].kind .Vector)
               (do
@@ -767,9 +767,9 @@
                         relation-binding (if (= parsed.kind .Collection)
                                            parsed
                                            (input-binding-collection row-binding))
-                        relation (Relation-Input {vars: (slice vars 0) binding: relation-binding})]
+                        relation (Relation-Input :vars (slice vars 0) :binding relation-binding)]
                     (arr.push! relation-inputs^ relation)
-                    (arr.push! input-specs^ (Query-Input-Spec {kind: .Relation relation: relation}))))
+                    (arr.push! input-specs^ (Query-Input-Spec :kind .Relation :relation relation))))
                 (return true ""))
             :else
               (do
@@ -777,9 +777,9 @@
                   (when (not binding-ok)
                     (return false binding-error))
                   (let [vars (input-binding-vars binding)
-                        tuple (Tuple-Input {vars: (slice vars 0) binding: binding})]
+                        tuple (Tuple-Input :vars (slice vars 0) :binding binding)]
                     (arr.push! tuple-inputs^ tuple)
-                    (arr.push! input-specs^ (Query-Input-Spec {kind: .Tuple tuple: tuple}))))
+                    (arr.push! input-specs^ (Query-Input-Spec :kind .Tuple :tuple tuple))))
                 (return true ""))))
       :else (return false "query text :in currently supports vars, [?x ...], [?x ?y], and [[?x ?y]]"))))
 
@@ -875,12 +875,12 @@
             (= doc.nodes[node-index].kind .List))
     (let [head (edn-child-at doc node-index 0)]
       (when (= head -1)
-        (return (Pull-Spec {}) false))
+        (return (Pull-Spec []) false))
       (when (or (edn-pull-option-name? doc head "limit")
                 (edn-pull-option-name? doc head "default")
                 (edn-pull-option-name? doc head "xform"))
         (when (not (= doc.nodes[node-index].child-count 3))
-          (return (Pull-Spec {}) false))
+          (return (Pull-Spec []) false))
         (let [attr-node (edn-child-at doc node-index 1)
               value-node (edn-child-at doc node-index 2)
               [base base-ok] (edn-pull-spec-node doc attr-node)]
@@ -902,7 +902,7 @@
                 (set! spec next)
                 (set! option-node doc.nodes[value-node].next-sibling))))
           (return spec true)))))
-  (return (Pull-Spec {}) false))
+  (return (Pull-Spec []) false))
 
 (defn edn-pull-specs [doc: EDN-Doc, vector-node: int] -> [pattern: [dynamic]Pull-Spec, ok: bool, error: string]
   (when (or (= vector-node -1)
@@ -956,13 +956,13 @@
       (when (or (edn-var? doc pattern-node)
                 (edn-named-input-symbol? doc pattern-node))
         (arr.push! out^
-          (Pull-Find {var: doc.nodes[var-node].text
-                      source: source
-                      has-source: has-source
-                      has-pattern-var: true
-                      pattern-var: doc.nodes[pattern-node].text
-                      attrs: ([]string [])
-                      pattern: (make [dynamic]Pull-Spec)}))
+          (Pull-Find :var doc.nodes[var-node].text
+                      :source source
+                      :has-source has-source
+                      :has-pattern-var true
+                      :pattern-var doc.nodes[pattern-node].text
+                      :attrs ([]string [])
+                      :pattern (make [dynamic]Pull-Spec)))
         (return true ""))
       (when (or (= pattern-node -1) (not (= doc.nodes[pattern-node].kind .Vector)))
         (return false "pull find expects a literal vector pattern or pattern variable"))
@@ -970,27 +970,27 @@
         (when (not pattern-ok)
           (return false pattern-error))
         (arr.push! out^
-          (Pull-Find {var: doc.nodes[var-node].text
-                      source: source
-                      has-source: has-source
-                      has-pattern-var: false
-                      pattern-var: ""
-                      attrs: ([]string [])
-                      pattern: pattern}))
+          (Pull-Find :var doc.nodes[var-node].text
+                      :source source
+                      :has-source has-source
+                      :has-pattern-var false
+                      :pattern-var ""
+                      :attrs ([]string [])
+                      :pattern pattern))
         (return true "")))))
 
 (defn prepare-pull-pattern-text [text: string] -> Prepared-Pull-Pattern
   (let [[value read-error read-ok] (edn.try-read text)]
     (if read-ok
       (prepare-pull-pattern-data value)
-      (Prepared-Pull-Pattern {ok: false
-                              error: read-error.message
-                              pattern: (make [dynamic]Pull-Spec)}))))
+      (Prepared-Pull-Pattern :ok false
+                              :error read-error.message
+                              :pattern (make [dynamic]Pull-Spec)))))
 
 (defn pull-prepared-with-fns [db: DB, prepared: Prepared-Pull-Pattern, entity: u64, registry: []Native-Query-Fn] -> Pull-Result
   (if prepared.ok
     (pull-pattern-spec-with-fns db entity (slice prepared.pattern 0) registry)
-    (Pull-Result {e: 0 attrs: (make [dynamic]Pull-Attr)})))
+    (Pull-Result :e 0 :attrs (make [dynamic]Pull-Attr))))
 
 (defn pull-prepared [db: DB, prepared: Prepared-Pull-Pattern, entity: u64] -> Pull-Result
   (pull-prepared-with-fns db prepared entity ([]Native-Query-Fn [])))
@@ -1004,7 +1004,7 @@
 (defn pull-prepared-lookup-ref-with-fns [db: DB, prepared: Prepared-Pull-Pattern, attr: string, value: Value, registry: []Native-Query-Fn] -> Pull-Result
   (if prepared.ok
     (pull-pattern-lookup-ref-with-fns db attr value (slice prepared.pattern 0) registry)
-    (Pull-Result {e: 0 attrs: (make [dynamic]Pull-Attr)})))
+    (Pull-Result :e 0 :attrs (make [dynamic]Pull-Attr))))
 
 (defn pull-prepared-lookup-ref [db: DB, prepared: Prepared-Pull-Pattern, attr: string, value: Value] -> Pull-Result
   (pull-prepared-lookup-ref-with-fns db prepared attr value ([]Native-Query-Fn [])))
@@ -1153,9 +1153,9 @@
                (= second-arg -1))
         (do
           (let [args (aggregate-single-var-args doc.nodes[first-arg].text)]
-            (arr.push! out^ (Aggregate-Find {op: op
-                                             var: doc.nodes[first-arg].text
-                                             args: (slice args 0)})))
+            (arr.push! out^ (Aggregate-Find :op op
+                                             :var doc.nodes[first-arg].text
+                                             :args (slice args 0))))
           (return true ""))
         (when (not (edn-aggregate-op? op))
           (return false "unsupported aggregate find expression")))
@@ -1167,11 +1167,11 @@
                           (edn-var? doc second-arg)))
             (return false "custom aggregate expects (aggregate ?f ?x)"))
           (let [args (aggregate-single-var-args doc.nodes[second-arg].text)]
-            (arr.push! out^ (Aggregate-Find {op: op
-                                             var: doc.nodes[second-arg].text
-                                             args: (slice args 0)
-                                             function-var: doc.nodes[first-arg].text
-                                             has-function-var: true})))
+            (arr.push! out^ (Aggregate-Find :op op
+                                             :var doc.nodes[second-arg].text
+                                             :args (slice args 0)
+                                             :function-var doc.nodes[first-arg].text
+                                             :has-function-var true)))
           (return true ""))
         (if (and (edn-top-n-aggregate-op? op)
                  (not (= second-arg -1))
@@ -1181,18 +1181,18 @@
               (return false "limited aggregate find expressions expect (min n ?x), (max n ?x), (rand n ?x), (sample n ?x), or variable n variants"))
             (if (= doc.nodes[first-arg].kind .Int)
               (let [args (aggregate-single-var-args doc.nodes[second-arg].text)]
-                (arr.push! out^ (Aggregate-Find {op: op
-                                                 var: doc.nodes[second-arg].text
-                                                 args: (slice args 0)
-                                                 limit: (int doc.nodes[first-arg].int-value)
-                                                 has-limit: true})))
+                (arr.push! out^ (Aggregate-Find :op op
+                                                 :var doc.nodes[second-arg].text
+                                                 :args (slice args 0)
+                                                 :limit (int doc.nodes[first-arg].int-value)
+                                                 :has-limit true)))
               (if (edn-var? doc first-arg)
                 (let [args (aggregate-single-var-args doc.nodes[second-arg].text)]
-                  (arr.push! out^ (Aggregate-Find {op: op
-                                                   var: doc.nodes[second-arg].text
-                                                   args: (slice args 0)
-                                                   limit-var: doc.nodes[first-arg].text
-                                                   has-limit-var: true})))
+                  (arr.push! out^ (Aggregate-Find :op op
+                                                   :var doc.nodes[second-arg].text
+                                                   :args (slice args 0)
+                                                   :limit-var doc.nodes[first-arg].text
+                                                   :has-limit-var true)))
                 (return false "limited aggregate limit must be an int or variable")))
             (return true ""))
           (do
@@ -1201,9 +1201,9 @@
             (when (not (edn-var? doc first-arg))
               (return false "aggregate find expression expects variable argument"))
             (let [args (edn-aggregate-args-from doc first-arg)]
-              (arr.push! out^ (Aggregate-Find {op: op
-                                               var: doc.nodes[first-arg].text
-                                               args: (slice args 0)})))
+              (arr.push! out^ (Aggregate-Find :op op
+                                               :var doc.nodes[first-arg].text
+                                               :args (slice args 0))))
             (return true "")))))))
 
 (defn append-edn-find-item! [find: ^[dynamic]string, pulls: ^[dynamic]Pull-Find, aggregates: ^[dynamic]Aggregate-Find, doc: EDN-Doc, item: int] -> [ok: bool, error: string]
@@ -1264,14 +1264,14 @@
           (when (not entity-ok)
             (return false entity-error)))
         (arr.push! out^
-          (Clause {e: (term-from-edn-node doc e-node false)
-                   a: (term-wildcard)
-                   v: (term-wildcard)
-                   tx-term: (term-wildcard)
-                   op-term: (term-wildcard)
-                   source: source
-                   has-source: has-source
-                   source-width: 1}))
+          (Clause :e (term-from-edn-node doc e-node false)
+                   :a (term-wildcard)
+                   :v (term-wildcard)
+                   :tx-term (term-wildcard)
+                   :op-term (term-wildcard)
+                   :source source
+                   :has-source has-source
+                   :source-width 1))
         (return true ""))
       (set! v-node doc.nodes[a-node].next-sibling)
       (when (= v-node -1)
@@ -1279,14 +1279,14 @@
           (when (not entity-ok)
             (return false entity-error)))
         (arr.push! out^
-          (Clause {e: (term-from-edn-node doc e-node false)
-                   a: (term-from-edn-node doc a-node true)
-                   v: (term-wildcard)
-                   tx-term: (term-wildcard)
-                   op-term: (term-wildcard)
-                   source: source
-                   has-source: has-source
-                   source-width: 2}))
+          (Clause :e (term-from-edn-node doc e-node false)
+                   :a (term-from-edn-node doc a-node true)
+                   :v (term-wildcard)
+                   :tx-term (term-wildcard)
+                   :op-term (term-wildcard)
+                   :source source
+                   :has-source has-source
+                   :source-width 2))
         (return true ""))
       (set! tx-node doc.nodes[v-node].next-sibling)
       (when (not (= tx-node -1))
@@ -1299,14 +1299,14 @@
         (when (not entity-ok)
           (return false entity-error)))
       (arr.push! out^
-        (Clause {e: (term-from-edn-node doc e-node false)
-                 a: (term-from-edn-node doc a-node true)
-                 v: (value-term-from-edn-node doc v-node)
-                 tx-term: (if (= tx-node -1) (term-wildcard) (value-term-from-edn-node doc tx-node))
-                 op-term: (if (= op-node -1) (term-wildcard) (value-term-from-edn-node doc op-node))
-                 source: source
-                 has-source: has-source
-                 source-width: (if (= tx-node -1) 3 (if (= op-node -1) 4 5))}))
+        (Clause :e (term-from-edn-node doc e-node false)
+                 :a (term-from-edn-node doc a-node true)
+                 :v (value-term-from-edn-node doc v-node)
+                 :tx-term (if (= tx-node -1) (term-wildcard) (value-term-from-edn-node doc tx-node))
+                 :op-term (if (= op-node -1) (term-wildcard) (value-term-from-edn-node doc op-node))
+                 :source source
+                 :has-source has-source
+                 :source-width (if (= tx-node -1) 3 (if (= op-node -1) 4 5))))
       (return true ""))))
 
 (defn append-edn-predicate! [out: ^[dynamic]Predicate, doc: EDN-Doc, expr: int] -> [ok: bool, error: string]
@@ -1314,8 +1314,8 @@
     (when (= op-node -1)
       (return false "predicate clauses must have shape [(op arg ...)]"))
     (let [terms (edn-terms-from-list-tail doc expr)]
-      (arr.push! out^ (Predicate {op: (edn-node-text doc op-node)
-                                  terms: (slice terms 0)}))
+      (arr.push! out^ (Predicate :op (edn-node-text doc op-node)
+                                  :terms (slice terms 0)))
       (return true ""))))
 
 (defn append-edn-function-clause! [out: ^[dynamic]Function-Clause, doc: EDN-Doc, expr: int, output: int] -> [ok: bool, error: string]
@@ -1329,16 +1329,16 @@
           (when (not binding-ok)
             (return false binding-error))
           (arr.push! out^
-            (Function-Clause {op: (edn-node-text doc op-node)
-                              terms: (slice terms 0)
-                              out-vars: (slice out-vars 0)
-                              out-binding: (function-output-binding binding)
-                              is-tuple: true})))
+            (Function-Clause :op (edn-node-text doc op-node)
+                              :terms (slice terms 0)
+                              :out-vars (slice out-vars 0)
+                              :out-binding (function-output-binding binding)
+                              :is-tuple true)))
         (if (edn-var? doc output)
           (arr.push! out^
-            (Function-Clause {op: (edn-node-text doc op-node)
-                              terms: (slice terms 0)
-                              out: doc.nodes[output].text}))
+            (Function-Clause :op (edn-node-text doc op-node)
+                              :terms (slice terms 0)
+                              :out doc.nodes[output].text))
           (return false "function output must be a variable or vector of variables")))
       (return true ""))))
 
@@ -1387,18 +1387,18 @@
       (edn-symbol-text? doc output "_")
         (do
           (arr.push! out^
-            (Ground {source: source
-                     out: ""
-                     tuple-vars: ([]string [])
-                     binding: (input-binding-none)}))
+            (Ground :source source
+                     :out ""
+                     :tuple-vars ([]string [])
+                     :binding (input-binding-none)))
           (return true ""))
       (edn-var? doc output)
         (do
           (arr.push! out^
-            (Ground {source: source
-                     out: doc.nodes[output].text
-                     tuple-vars: ([]string [])
-                     binding: (input-binding-none)}))
+            (Ground :source source
+                     :out doc.nodes[output].text
+                     :tuple-vars ([]string [])
+                     :binding (input-binding-none)))
           (return true ""))
       (= doc.nodes[output].kind .Vector)
         (let [[binding binding-ok binding-error] (edn-input-binding-from-node doc output)]
@@ -1409,30 +1409,30 @@
               (edn-ground-relation-output? doc output)
                 (let [row (edn-child-at doc output 0)]
                   (arr.push! out^
-                    (Ground {source: source
-                             out: ""
-                             tuple-vars: (slice vars 0)
-                             binding: binding
-                             is-relation: true
-                             width: doc.nodes[row].child-count}))
+                    (Ground :source source
+                             :out ""
+                             :tuple-vars (slice vars 0)
+                             :binding binding
+                             :is-relation true
+                             :width doc.nodes[row].child-count))
                   (return true ""))
               (edn-ground-collection-output? doc output)
                 (do
                   (arr.push! out^
-                    (Ground {source: source
-                             out: (if (> (count vars) 0) vars[0] "")
-                             tuple-vars: (slice vars 0)
-                             binding: binding
-                             is-collection: true}))
+                    (Ground :source source
+                             :out (if (> (count vars) 0) vars[0] "")
+                             :tuple-vars (slice vars 0)
+                             :binding binding
+                             :is-collection true))
                   (return true ""))
               :else
                 (do
                   (arr.push! out^
-                    (Ground {source: source
-                             out: ""
-                             tuple-vars: (slice vars 0)
-                             binding: binding
-                             is-tuple: true}))
+                    (Ground :source source
+                             :out ""
+                             :tuple-vars (slice vars 0)
+                             :binding binding
+                             :is-tuple true))
                   (return true "")))))
       :else (return false "ground output must be a variable, _, or binding vector"))))
 
@@ -1455,12 +1455,12 @@
       (when (not entity-ok)
         (return false entity-error)))
     (arr.push! out^
-      (Get-Else {source: doc.nodes[db-node].text
-                 has-source: true
-                 e: (term-from-edn-node doc entity-node false)
-                 a: attr
-                 default-value: default-value
-                 out: doc.nodes[output].text}))
+      (Get-Else :source doc.nodes[db-node].text
+                 :has-source true
+                 :e (term-from-edn-node doc entity-node false)
+                 :a attr
+                 :default-value default-value
+                 :out doc.nodes[output].text))
     (return true "")))
 
 (defn append-edn-get-some! [out: ^[dynamic]Get-Some, doc: EDN-Doc, expr: int, output: int] -> [ok: bool, error: string]
@@ -1490,12 +1490,12 @@
           (return false entity-error)))
       (let [owned-attrs (arr.into [dynamic]string (slice attrs 0))]
         (arr.push! out^
-          (Get-Some {source: doc.nodes[db-node].text
-                     has-source: true
-                     e: (term-from-edn-node doc entity-node false)
-                     attrs: owned-attrs
-                     out-attr: doc.nodes[first-out].text
-                     out-value: doc.nodes[second-out].text})))
+          (Get-Some :source doc.nodes[db-node].text
+                     :has-source true
+                     :e (term-from-edn-node doc entity-node false)
+                     :attrs owned-attrs
+                     :out-attr doc.nodes[first-out].text
+                     :out-value doc.nodes[second-out].text)))
       (return true ""))))
 
 (defn append-edn-missing-group! [out: ^[dynamic]Not-Group, doc: EDN-Doc, expr: int] -> [ok: bool, error: string]
@@ -1509,9 +1509,9 @@
         (return false entity-error)))
     (arr.push! out^
       (not-group-simple
-        ([]Clause [(Clause {e: (term-from-edn-node doc entity-node false)
-                            a: (term-from-edn-node doc attr-node true)
-                            v: (term-wildcard)})])))
+        ([]Clause [(Clause :e (term-from-edn-node doc entity-node false)
+                            :a (term-from-edn-node doc attr-node true)
+                            :v (term-wildcard))])))
     (return true "")))
 
 (defn append-clause-var-names! [vars: ^[dynamic]string, clause: Clause]
@@ -1826,7 +1826,7 @@
 
 (defn rule-call-from-text-parts [name: string, source: string, has-source: bool, args: []Term] -> Rule-Call
   (let [owned-args (arr.into [dynamic]Term args)]
-    (Rule-Call {name: name source: source has-source: has-source args: owned-args})))
+    (Rule-Call :name name :source source :has-source has-source :args owned-args)))
 
 (defn append-edn-rule-call! [out: ^[dynamic]Rule-Call, doc: EDN-Doc, form: int] -> [ok: bool, error: string]
   (let [head doc.nodes[form].first-child]
@@ -1888,7 +1888,7 @@
     (append-edn-where-item! clauses predicates function-clauses get-elses get-somes grounds not-groups or-groups doc item)))
 
 (defn append-edn-where-step! [steps: ^[dynamic]Query-Step, kind: Query-Step-Kind, index: int]
-  (arr.push! steps^ (Query-Step {kind: kind index: index})))
+  (arr.push! steps^ (Query-Step :kind kind :index index)))
 
 (defn append-edn-where-or-rule-step! [clauses: ^[dynamic]Clause, predicates: ^[dynamic]Predicate, function-clauses: ^[dynamic]Function-Clause, get-elses: ^[dynamic]Get-Else, get-somes: ^[dynamic]Get-Some, grounds: ^[dynamic]Ground, not-groups: ^[dynamic]Not-Group, or-groups: ^[dynamic]Or-Group, rule-calls: ^[dynamic]Rule-Call, steps: ^[dynamic]Query-Step, doc: EDN-Doc, item: int] -> [ok: bool, error: string]
   (when (and (= doc.nodes[item].kind .List)
@@ -2045,9 +2045,9 @@
   (let [[value read-error read-ok] (edn.try-read text)]
     (if read-ok
       (prepare-rules-data value)
-      (Prepared-Rules {ok: false
-                       error: read-error.message
-                       rules: (make [dynamic]Rule)}))))
+      (Prepared-Rules :ok false
+                       :error read-error.message
+                       :rules (make [dynamic]Rule)))))
 
 (defn edn-query-vector-section-rank [doc: EDN-Doc, node: int] -> int
   (cond
@@ -2527,7 +2527,7 @@
   (let [[value read-error read-ok] (edn.try-read text)]
     (if read-ok
       (prepare-query-data-with-sources value sources)
-      (Prepared-Query {ok: false error: (query-read-error-message read-error) query: (empty-query)}))))
+      (Prepared-Query :ok false :error (query-read-error-message read-error) :query (empty-query)))))
 
 (defn prepare-query-text [text: string] -> Prepared-Query
   (prepare-query-text-with-sources text ([]DB-Source [])))
@@ -2638,19 +2638,19 @@
   (let [pattern (make [dynamic]Pull-Spec 0 (count spec.pattern))]
     (for [child spec.pattern]
       (arr.push! pattern (pull-spec-owned child)))
-    (Pull-Spec {a: (string-owned spec.a)
-                pattern: pattern
-                limit: spec.limit
-                has-limit: spec.has-limit
-                has-default: spec.has-default
-                default-value: (value-owned spec.default-value)
-                has-alias: spec.has-alias
-                alias: (string-owned spec.alias)
-                alias-kind: spec.alias-kind
-                has-xform: spec.has-xform
-                xform: (string-owned spec.xform)
-                has-recursion: spec.has-recursion
-                recursion-depth: spec.recursion-depth})))
+    (Pull-Spec :a (string-owned spec.a)
+                :pattern pattern
+                :limit spec.limit
+                :has-limit spec.has-limit
+                :has-default spec.has-default
+                :default-value (value-owned spec.default-value)
+                :has-alias spec.has-alias
+                :alias (string-owned spec.alias)
+                :alias-kind spec.alias-kind
+                :has-xform spec.has-xform
+                :xform (string-owned spec.xform)
+                :has-recursion spec.has-recursion
+                :recursion-depth spec.recursion-depth)))
 
 (defn pull-pattern-owned [pattern: []Pull-Spec] -> [dynamic]Pull-Spec
   (let [out (make [dynamic]Pull-Spec 0 (count pattern))]
@@ -2795,7 +2795,7 @@
 
 (defn edn-value-from-node [doc: EDN-Doc, node-index: int] -> [value: Value, ok: bool, error: string]
   (when (= node-index -1)
-    (return (Value {}) false "expected EDN value"))
+    (return (Value []) false "expected EDN value"))
   (let [node doc.nodes[node-index]]
     (case node.kind
       .Nil (return (value-nil) true "")
@@ -2809,14 +2809,14 @@
       .Instant (let [[instant instant-ok] (instant-from-text node.text)]
                  (if instant-ok
                    (return instant true "")
-                   (return (Value {}) false "invalid #inst value")))
+                   (return (Value []) false "invalid #inst value")))
       .Vector (let [items (make [dynamic]Value) :defer]
                 (for [child (edn-children doc node-index)]
                   (let [[item item-ok item-error] (edn-value-from-node doc child)]
                     (when (not item-ok)
                       (for [parsed items]
                         (delete-value-containers-shallow parsed))
-                      (return (Value {}) false item-error))
+                      (return (Value []) false item-error))
                     (arr.push! items item)))
                 (return (value-vector (slice items 0)) true ""))
       .Set (let [items (make [dynamic]Value) :defer]
@@ -2825,7 +2825,7 @@
                  (when (not item-ok)
                    (for [parsed items]
                      (delete-value-containers-shallow parsed))
-                   (return (Value {}) false item-error))
+                   (return (Value []) false item-error))
                  (arr.push! items item)))
              (return (value-set (slice items 0)) true ""))
       .Map (let [items (make [dynamic]Value) :defer]
@@ -2833,22 +2833,22 @@
                (when (= entry.value -1)
                  (for [parsed items]
                    (delete-value-containers-shallow parsed))
-                 (return (Value {}) false "EDN map value missing"))
+                 (return (Value []) false "EDN map value missing"))
                (let [[key key-ok key-error] (edn-value-from-node doc entry.key)]
                  (when (not key-ok)
                    (for [parsed items]
                      (delete-value-containers-shallow parsed))
-                   (return (Value {}) false key-error))
+                   (return (Value []) false key-error))
                  (let [[value value-ok value-error] (edn-value-from-node doc entry.value)]
                    (when (not value-ok)
                      (delete-value-containers-shallow key)
                      (for [parsed items]
                        (delete-value-containers-shallow parsed))
-                     (return (Value {}) false value-error))
+                     (return (Value []) false value-error))
                    (arr.push! items key)
                    (arr.push! items value))))
              (return (value-map (slice items 0)) true ""))
-       (return (Value {}) false "unsupported EDN value"))))
+       (return (Value []) false "unsupported EDN value"))))
 
 (defn edn-escaped-string-text [text: string] -> string
   (let [builder (kstr.builder)
@@ -2986,7 +2986,7 @@
 
 (defn serial-value-from-edn-node [doc: EDN-Doc, node-index: int] -> [value: Value, ok: bool, error: string]
   (when (= node-index -1)
-    (return (Value {}) false "expected serialized value"))
+    (return (Value []) false "expected serialized value"))
   (let [node doc.nodes[node-index]]
     (when (and (= node.kind .Vector) (= node.child-count 2))
       (let [tag-node (edn-child-at doc node-index 0)
@@ -2997,16 +2997,16 @@
           (let [[entity entity-ok entity-error] (edn-int-u64 doc value-node "entity id")]
             (if entity-ok
               (return (value-entity entity) true "")
-              (return (Value {}) false entity-error))))
+              (return (Value []) false entity-error))))
         (when (and (not (= tag-node -1))
                    (= doc.nodes[tag-node].kind .Keyword)
                    (= doc.nodes[tag-node].text ":vev/float"))
           (when (not (= doc.nodes[value-node].kind .String))
-            (return (Value {}) false "expected serialized float string"))
+            (return (Value []) false "expected serialized float string"))
           (let [[parsed parsed-ok] (serializable-float-from-text doc.nodes[value-node].text)]
             (if parsed-ok
               (return (value-float parsed) true "")
-              (return (Value {}) false "invalid serialized float"))))))
+              (return (Value []) false "invalid serialized float"))))))
     (case node.kind
       .Nil (return (value-nil) true "")
       .Bool (return (value-bool node.bool-value) true "")
@@ -3019,14 +3019,14 @@
       .Instant (let [[instant instant-ok] (instant-from-text node.text)]
                  (if instant-ok
                    (return instant true "")
-                   (return (Value {}) false "invalid serialized instant")))
+                   (return (Value []) false "invalid serialized instant")))
       .Vector (let [items (make [dynamic]Value) :defer]
                 (for [child (edn-children doc node-index)]
                   (let [[item item-ok item-error] (serial-value-from-edn-node doc child)]
                     (when (not item-ok)
                       (for [parsed items]
                         (delete-value-containers-shallow parsed))
-                      (return (Value {}) false item-error))
+                      (return (Value []) false item-error))
                     (arr.push! items item)))
                 (return (value-vector (slice items 0)) true ""))
       .Set (let [items (make [dynamic]Value) :defer]
@@ -3035,7 +3035,7 @@
                  (when (not item-ok)
                    (for [parsed items]
                      (delete-value-containers-shallow parsed))
-                   (return (Value {}) false item-error))
+                   (return (Value []) false item-error))
                  (arr.push! items item)))
              (return (value-set (slice items 0)) true ""))
       .Map (let [items (make [dynamic]Value) :defer]
@@ -3043,22 +3043,22 @@
                (when (= entry.value -1)
                  (for [parsed items]
                    (delete-value-containers-shallow parsed))
-                 (return (Value {}) false "serialized map value missing"))
+                 (return (Value []) false "serialized map value missing"))
                (let [[key key-ok key-error] (serial-value-from-edn-node doc entry.key)]
                  (when (not key-ok)
                    (for [parsed items]
                      (delete-value-containers-shallow parsed))
-                   (return (Value {}) false key-error))
+                   (return (Value []) false key-error))
                  (let [[value value-ok value-error] (serial-value-from-edn-node doc entry.value)]
                    (when (not value-ok)
                      (delete-value-containers-shallow key)
                      (for [parsed items]
                        (delete-value-containers-shallow parsed))
-                     (return (Value {}) false value-error))
+                     (return (Value []) false value-error))
                    (arr.push! items key)
                    (arr.push! items value))))
              (return (value-map (slice items 0)) true ""))
-       (return (Value {}) false "unsupported serialized value"))))
+       (return (Value []) false "unsupported serialized value"))))
 
 (defn delete-parser-datom-value-containers-shallow [datom: Datom]
   (delete-value-containers-shallow datom.v))
@@ -3085,7 +3085,7 @@
   (when (or (= node-index -1)
             (not (= doc.nodes[node-index].kind .Vector))
             (not (= doc.nodes[node-index].child-count 5)))
-    (return (Datom {}) false "expected serialized datom vector [e a v tx added]"))
+    (return (Datom []) false "expected serialized datom vector [e a v tx added]"))
   (let [e-node (edn-child-at doc node-index 0)
         a-node (edn-child-at doc node-index 1)
         v-node (edn-child-at doc node-index 2)
@@ -3094,20 +3094,20 @@
         [e e-ok e-error] (edn-int-u64 doc e-node "entity id")
         [attr attr-ok] (edn-attr-text doc a-node)]
     (when (not e-ok)
-      (return (Datom {}) false e-error))
+      (return (Datom []) false e-error))
     (when (not attr-ok)
-      (return (Datom {}) false "expected datom attribute keyword or string"))
+      (return (Datom []) false "expected datom attribute keyword or string"))
     (let [[value value-ok value-error] (serial-value-from-edn-node doc v-node)]
       (when (not value-ok)
-        (return (Datom {}) false value-error))
+        (return (Datom []) false value-error))
       (let [[tx tx-ok tx-error] (edn-int-u64 doc tx-node "tx")
             added-doc-node doc.nodes[added-node]]
         (when (not tx-ok)
           (delete-value-containers-shallow value)
-          (return (Datom {}) false tx-error))
+          (return (Datom []) false tx-error))
         (when (not (= added-doc-node.kind .Bool))
           (delete-value-containers-shallow value)
-          (return (Datom {}) false "expected datom added boolean"))
+          (return (Datom []) false "expected datom added boolean"))
         (let [owned-value (value-owned value)]
           (delete-value-containers-shallow value)
           (return (datom-tx e (string-owned attr) owned-value tx added-doc-node.bool-value) true ""))))))

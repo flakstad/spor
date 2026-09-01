@@ -1,23 +1,23 @@
 (package vev)
 
 (defn tx-op-owned [op: Tx-Op] -> Tx-Op
-  (Tx-Op {kind: op.kind
-          e: op.e
-          a: (string-owned op.a)
-          owned-attr: true
-          v: (value-owned op.v)
-          owned-value: true
-          derived: op.derived
-          tuple-identity: op.tuple-identity
-          map-group: (string-owned op.map-group)}))
+  (Tx-Op :kind op.kind
+          :e op.e
+          :a (string-owned op.a)
+          :owned-attr true
+          :v (value-owned op.v)
+          :owned-value true
+          :derived op.derived
+          :tuple-identity op.tuple-identity
+          :map-group (string-owned op.map-group)))
 
 (defn tx-op-from-datom-owned [datom: Datom] -> Tx-Op
-  (Tx-Op {kind: (if datom.added .Add .Retract)
-          e: datom.e
-          a: (string-owned datom.a)
-          owned-attr: true
-          v: (value-owned datom.v)
-          owned-value: true}))
+  (Tx-Op :kind (if datom.added .Add .Retract)
+          :e datom.e
+          :a (string-owned datom.a)
+          :owned-attr true
+          :v (value-owned datom.v)
+          :owned-value true))
 
 (defn tx-ops-from-datoms-owned [datoms: []Datom] -> [dynamic]Tx-Op
   (let [out (make [dynamic]Tx-Op 0 (count datoms))]
@@ -65,10 +65,10 @@
       (return false stream-error))
     (while stream.has-current
       (when (not (value-equal? stream.current.v op.v))
-        (let [candidate (Tx-Op {kind: .Retract
-                                e: stream.current.e
-                                a: stream.current.a
-                                v: stream.current.v})
+        (let [candidate (Tx-Op :kind .Retract
+                                :e stream.current.e
+                                :a stream.current.a
+                                :v stream.current.v)
               [touched current] (source-overlay-prior-fact-state (slice out^ 0) candidate)]
           (when (not (and touched (not current)))
             (arr.push! out^ (tx-op-owned candidate)))))
@@ -134,123 +134,123 @@
     (overlay-ops-schema-keyword-property ops schema-e schema-attr)))
 
 (defn shared-store-db-with-overlay [base: Shared-DB-Snapshot, ops: []Tx-Op, tx: u64] -> Store-DB
-  (Store-DB {kind: .Shared-Tx-Ops-Overlay
-             shared-snapshot: (retain-shared-db-snapshot base)
-             overlay-ops: (clone-tx-ops-owned ops)
-             overlay-tx: tx}))
+  (Store-DB :kind .Shared-Tx-Ops-Overlay
+             :shared-snapshot (retain-shared-db-snapshot base)
+             :overlay-ops (clone-tx-ops-owned ops)
+             :overlay-tx tx))
 
 (defn sqlite-store-db-with-overlay [base: SQLite-DB-Snapshot, ops: []Tx-Op, tx: u64] -> Store-DB
   (let [[root-path root-published root-cache root-ok] (sqlite-root-fields-from-open-snapshot base)]
     (if root-ok
-      (Store-DB {kind: .SQLite-Tx-Ops-Overlay
-                 sqlite-root-path: root-path
-                 sqlite-root-published: root-published
-                 sqlite-root-page-cache: root-cache
-                 overlay-ops: (clone-tx-ops-owned ops)
-                 overlay-tx: tx})
-      (Store-DB {kind: .SQLite-Tx-Ops-Overlay
-                 sqlite-snapshot: (retain-sqlite-db-snapshot base)
-                 overlay-ops: (clone-tx-ops-owned ops)
-                 overlay-tx: tx}))))
+      (Store-DB :kind .SQLite-Tx-Ops-Overlay
+                 :sqlite-root-path root-path
+                 :sqlite-root-published root-published
+                 :sqlite-root-page-cache root-cache
+                 :overlay-ops (clone-tx-ops-owned ops)
+                 :overlay-tx tx)
+      (Store-DB :kind .SQLite-Tx-Ops-Overlay
+                 :sqlite-snapshot (retain-sqlite-db-snapshot base)
+                 :overlay-ops (clone-tx-ops-owned ops)
+                 :overlay-tx tx))))
 
 (defn sqlite-root-store-db-with-overlay [base: Store-DB, ops: []Tx-Op, tx: u64] -> Store-DB
-  (Store-DB {kind: .SQLite-Tx-Ops-Overlay
-             sqlite-root-path: (string-owned base.sqlite-root-path)
-             sqlite-root-published: base.sqlite-root-published
-             sqlite-root-page-cache: (retain-sqlite-index-page-cache base.sqlite-root-page-cache)
-             overlay-ops: (clone-tx-ops-owned ops)
-             overlay-tx: tx}))
+  (Store-DB :kind .SQLite-Tx-Ops-Overlay
+             :sqlite-root-path (string-owned base.sqlite-root-path)
+             :sqlite-root-published base.sqlite-root-published
+             :sqlite-root-page-cache (retain-sqlite-index-page-cache base.sqlite-root-page-cache)
+             :overlay-ops (clone-tx-ops-owned ops)
+             :overlay-tx tx))
 
 (defn shared-store-db-with-datom-overlay [base: Shared-DB-Snapshot, datoms: []Datom] -> Store-DB
-  (Store-DB {kind: .Shared-Datom-Overlay
-             shared-snapshot: (retain-shared-db-snapshot base)
-             overlay-datoms: (clone-owned-datom-slice datoms)}))
+  (Store-DB :kind .Shared-Datom-Overlay
+             :shared-snapshot (retain-shared-db-snapshot base)
+             :overlay-datoms (clone-owned-datom-slice datoms)))
 
 (defn sqlite-store-db-with-datom-overlay [base: SQLite-DB-Snapshot, datoms: []Datom] -> Store-DB
   (let [[root-path root-published root-cache root-ok] (sqlite-root-fields-from-open-snapshot base)]
     (if root-ok
-      (Store-DB {kind: .SQLite-Datom-Overlay
-                 sqlite-root-path: root-path
-                 sqlite-root-published: root-published
-                 sqlite-root-page-cache: root-cache
-                 overlay-datoms: (clone-owned-datom-slice datoms)})
-      (Store-DB {kind: .SQLite-Datom-Overlay
-                 sqlite-snapshot: (retain-sqlite-db-snapshot base)
-                 overlay-datoms: (clone-owned-datom-slice datoms)}))))
+      (Store-DB :kind .SQLite-Datom-Overlay
+                 :sqlite-root-path root-path
+                 :sqlite-root-published root-published
+                 :sqlite-root-page-cache root-cache
+                 :overlay-datoms (clone-owned-datom-slice datoms))
+      (Store-DB :kind .SQLite-Datom-Overlay
+                 :sqlite-snapshot (retain-sqlite-db-snapshot base)
+                 :overlay-datoms (clone-owned-datom-slice datoms)))))
 
 (defn shared-store-db-with-datom-log-overlay [base: Shared-DB-Snapshot, datoms: []Datom] -> Store-DB
-  (Store-DB {kind: .Shared-Datom-Log-Overlay
-             shared-snapshot: (retain-shared-db-snapshot base)
-             overlay-log: (shared-datom-log-from-slice datoms base.datoms.chunk-size)}))
+  (Store-DB :kind .Shared-Datom-Log-Overlay
+             :shared-snapshot (retain-shared-db-snapshot base)
+             :overlay-log (shared-datom-log-from-slice datoms base.datoms.chunk-size)))
 
 (defn sqlite-store-db-with-datom-log-overlay [base: SQLite-DB-Snapshot, datoms: []Datom] -> Store-DB
   (let [[root-path root-published root-cache root-ok] (sqlite-root-fields-from-open-snapshot base)]
     (if root-ok
-      (Store-DB {kind: .SQLite-Datom-Log-Overlay
-                 sqlite-root-path: root-path
-                 sqlite-root-published: root-published
-                 sqlite-root-page-cache: root-cache
-                 overlay-log: (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)
-                 overlay-tx: base.basis-tx})
-      (Store-DB {kind: .SQLite-Datom-Log-Overlay
-                 sqlite-snapshot: (retain-sqlite-db-snapshot base)
-                 overlay-log: (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)
-                 overlay-tx: base.basis-tx}))))
+      (Store-DB :kind .SQLite-Datom-Log-Overlay
+                 :sqlite-root-path root-path
+                 :sqlite-root-published root-published
+                 :sqlite-root-page-cache root-cache
+                 :overlay-log (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)
+                 :overlay-tx base.basis-tx)
+      (Store-DB :kind .SQLite-Datom-Log-Overlay
+                 :sqlite-snapshot (retain-sqlite-db-snapshot base)
+                 :overlay-log (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)
+                 :overlay-tx base.basis-tx))))
 
 (defn sqlite-root-store-db-with-datom-log-overlay [base: Store-DB, datoms: []Datom] -> Store-DB
-  (Store-DB {kind: .SQLite-Datom-Log-Overlay
-             sqlite-root-path: (string-owned base.sqlite-root-path)
-             sqlite-root-published: base.sqlite-root-published
-             sqlite-root-page-cache: (retain-sqlite-index-page-cache base.sqlite-root-page-cache)
-             overlay-log: (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)
-             overlay-tx: base.overlay-tx}))
+  (Store-DB :kind .SQLite-Datom-Log-Overlay
+             :sqlite-root-path (string-owned base.sqlite-root-path)
+             :sqlite-root-published base.sqlite-root-published
+             :sqlite-root-page-cache (retain-sqlite-index-page-cache base.sqlite-root-page-cache)
+             :overlay-log (shared-datom-log-from-slice datoms sqlite-index-leaf-chunk-size)
+             :overlay-tx base.overlay-tx))
 
 (defn shared-store-db-with-retained-datom-log-overlay [base: Shared-DB-Snapshot, log: Shared-Datom-Log] -> Store-DB
-  (Store-DB {kind: .Shared-Datom-Log-Overlay
-             shared-snapshot: (retain-shared-db-snapshot base)
-             overlay-log: (retain-shared-datom-log log)}))
+  (Store-DB :kind .Shared-Datom-Log-Overlay
+             :shared-snapshot (retain-shared-db-snapshot base)
+             :overlay-log (retain-shared-datom-log log)))
 
 (defn sqlite-store-db-with-retained-datom-log-overlay [base: SQLite-DB-Snapshot, log: Shared-Datom-Log] -> Store-DB
   (let [[root-path root-published root-cache root-ok] (sqlite-root-fields-from-open-snapshot base)]
     (if root-ok
-      (Store-DB {kind: .SQLite-Datom-Log-Overlay
-                 sqlite-root-path: root-path
-                 sqlite-root-published: root-published
-                 sqlite-root-page-cache: root-cache
-                 overlay-log: (retain-shared-datom-log log)
-                 overlay-tx: base.basis-tx})
-      (Store-DB {kind: .SQLite-Datom-Log-Overlay
-                 sqlite-snapshot: (retain-sqlite-db-snapshot base)
-                 overlay-log: (retain-shared-datom-log log)
-                 overlay-tx: base.basis-tx}))))
+      (Store-DB :kind .SQLite-Datom-Log-Overlay
+                 :sqlite-root-path root-path
+                 :sqlite-root-published root-published
+                 :sqlite-root-page-cache root-cache
+                 :overlay-log (retain-shared-datom-log log)
+                 :overlay-tx base.basis-tx)
+      (Store-DB :kind .SQLite-Datom-Log-Overlay
+                 :sqlite-snapshot (retain-sqlite-db-snapshot base)
+                 :overlay-log (retain-shared-datom-log log)
+                 :overlay-tx base.basis-tx))))
 
 (defn sqlite-root-store-db-with-retained-datom-log-overlay [base: Store-DB, log: Shared-Datom-Log] -> Store-DB
-  (Store-DB {kind: .SQLite-Datom-Log-Overlay
-             sqlite-root-path: (string-owned base.sqlite-root-path)
-             sqlite-root-published: base.sqlite-root-published
-             sqlite-root-page-cache: (retain-sqlite-index-page-cache base.sqlite-root-page-cache)
-             overlay-log: (retain-shared-datom-log log)
-             overlay-tx: base.overlay-tx}))
+  (Store-DB :kind .SQLite-Datom-Log-Overlay
+             :sqlite-root-path (string-owned base.sqlite-root-path)
+             :sqlite-root-published base.sqlite-root-published
+             :sqlite-root-page-cache (retain-sqlite-index-page-cache base.sqlite-root-page-cache)
+             :overlay-log (retain-shared-datom-log log)
+             :overlay-tx base.overlay-tx))
 
 (defn shared-store-db-with-report-overlay [base: Shared-DB-Snapshot, report: Tx-Report] -> Store-DB
-  (Store-DB {kind: .Shared-Tx-Ops-Overlay
-             shared-snapshot: (retain-shared-db-snapshot base)
-             overlay-ops: (tx-ops-from-datoms-owned (slice report.tx-data 0))
-             overlay-tx: report.tx}))
+  (Store-DB :kind .Shared-Tx-Ops-Overlay
+             :shared-snapshot (retain-shared-db-snapshot base)
+             :overlay-ops (tx-ops-from-datoms-owned (slice report.tx-data 0))
+             :overlay-tx report.tx))
 
 (defn sqlite-store-db-with-report-overlay [base: SQLite-DB-Snapshot, report: Tx-Report] -> Store-DB
   (let [[root-path root-published root-cache root-ok] (sqlite-root-fields-from-open-snapshot base)]
     (if root-ok
-      (Store-DB {kind: .SQLite-Tx-Ops-Overlay
-                 sqlite-root-path: root-path
-                 sqlite-root-published: root-published
-                 sqlite-root-page-cache: root-cache
-                 overlay-ops: (tx-ops-from-datoms-owned (slice report.tx-data 0))
-                 overlay-tx: report.tx})
-      (Store-DB {kind: .SQLite-Tx-Ops-Overlay
-                 sqlite-snapshot: (retain-sqlite-db-snapshot base)
-                 overlay-ops: (tx-ops-from-datoms-owned (slice report.tx-data 0))
-                 overlay-tx: report.tx}))))
+      (Store-DB :kind .SQLite-Tx-Ops-Overlay
+                 :sqlite-root-path root-path
+                 :sqlite-root-published root-published
+                 :sqlite-root-page-cache root-cache
+                 :overlay-ops (tx-ops-from-datoms-owned (slice report.tx-data 0))
+                 :overlay-tx report.tx)
+      (Store-DB :kind .SQLite-Tx-Ops-Overlay
+                 :sqlite-snapshot (retain-sqlite-db-snapshot base)
+                 :overlay-ops (tx-ops-from-datoms-owned (slice report.tx-data 0))
+                 :overlay-tx report.tx))))
 
 (defn source-overlay-schema-unique-kind [source: DB-Read-Source, ops: []Tx-Op, attr: string] -> [unique-kind: string, unique: bool, ok: bool, error: string]
   (let [[unique-kind unique-ok unique-error] (db-read-source-schema-keyword source attr ":db/unique")]
@@ -786,7 +786,7 @@
       true true ""))
   (source-overlay-schema-unique-kind source prior attr))
 
-(defn append-source-overlay-op! [out: ^[dynamic]Tx-Op, source: DB-Read-Source, op: Tx-Op, profile: ^Tx-Phase-Profile = nil, state: ^Shared-Write-State = nil] -> [ok: bool, error: string]
+(defn append-source-overlay-op! [out: ^[dynamic]Tx-Op, source: DB-Read-Source, op: Tx-Op, profile: ^Tx-Phase-Profile :default nil, state: ^Shared-Write-State :default nil] -> [ok: bool, error: string]
   (when (= op.kind .Retract)
     (let [normalization-start (tx-phase-profile-start profile)
           [touched current] (source-overlay-prior-fact-state (slice out^ 0) op)]
@@ -946,49 +946,49 @@
       (return entry true "")))
   (let [[schema-type has-type type-ok type-error] (db-read-source-schema-value-type source attr)]
     (when (not type-ok)
-      (return (SQLite-Direct-Attr-Info {}) false type-error))
+      (return (SQLite-Direct-Attr-Info []) false type-error))
     (let [[unique-kind unique unique-ok unique-error] (source-overlay-schema-unique-kind source ([]Tx-Op []) attr)]
       (when (not unique-ok)
         (when has-type
           (delete schema-type))
-        (return (SQLite-Direct-Attr-Info {}) false unique-error))
+        (return (SQLite-Direct-Attr-Info []) false unique-error))
       (let [[many many-ok many-error] (db-read-source-schema-cardinality-many? source attr)]
         (when (not many-ok)
           (when has-type
             (delete schema-type))
           (when unique
             (delete unique-kind))
-          (return (SQLite-Direct-Attr-Info {}) false many-error))
+          (return (SQLite-Direct-Attr-Info []) false many-error))
       (let [[fulltext fulltext-ok fulltext-error] (db-read-source-schema-bool? source attr ":db/fulltext")]
         (when (not fulltext-ok)
           (when has-type
             (delete schema-type))
           (when unique
             (delete unique-kind))
-          (return (SQLite-Direct-Attr-Info {}) false fulltext-error))
-        (let [entry (SQLite-Direct-Attr-Info {attr: (string-owned attr)
-                                               has-type: has-type
-                                               schema-type: (if has-type schema-type "")
-                                               unique: unique
-                                               unique-kind: (if unique unique-kind "")
-                                               cardinality-many: many
-                                               fulltext: fulltext})]
+          (return (SQLite-Direct-Attr-Info []) false fulltext-error))
+        (let [entry (SQLite-Direct-Attr-Info :attr (string-owned attr)
+                                               :has-type has-type
+                                               :schema-type (if has-type schema-type "")
+                                               :unique unique
+                                               :unique-kind (if unique unique-kind "")
+                                               :cardinality-many many
+                                               :fulltext fulltext)]
             (arr.push! store^.direct-attr-cache entry)
             (return entry true "")))))))
 
-(defstruct Source-Overlay-Batch-Index {
+(defstruct Source-Overlay-Batch-Index [
   unique-entity: (map string u64)
   owned-unique-keys: [dynamic]string
   cardinality-op: (map string int)
   owned-cardinality-keys: [dynamic]string
-})
+])
 
 (defn source-overlay-batch-index [] -> Source-Overlay-Batch-Index
   (Source-Overlay-Batch-Index
-    {unique-entity: (make (map string u64))
-     owned-unique-keys: (make [dynamic]string)
-     cardinality-op: (make (map string int))
-     owned-cardinality-keys: (make [dynamic]string)}))
+    :unique-entity (make (map string u64))
+     :owned-unique-keys (make [dynamic]string)
+     :cardinality-op (make (map string int))
+     :owned-cardinality-keys (make [dynamic]string)))
 
 (defn delete-source-overlay-batch-index [index: Source-Overlay-Batch-Index]
   (for [key index.owned-unique-keys]
@@ -1084,19 +1084,19 @@
               (arr.push! batch^.owned-cardinality-keys cardinality-key))))))
     (return true "")))
 
-(defn source-overlay-ops-from-resolved [source: DB-Read-Source, resolved: Resolved-Tx, profile: ^Tx-Phase-Profile = nil] -> [ops: [dynamic]Tx-Op, ok: bool, error: string]
+(defn source-overlay-ops-from-resolved [source: DB-Read-Source, resolved: Resolved-Tx, profile: ^Tx-Phase-Profile :default nil] -> [ops: [dynamic]Tx-Op, ok: bool, error: string]
   (source-overlay-ops-from-ops source (slice resolved.ops 0) profile))
 
 (defn source-overlay-ops-from-resolved-with-state
   [source: DB-Read-Source, resolved: Resolved-Tx,
-   state: ^Shared-Write-State, profile: ^Tx-Phase-Profile = nil]
+   state: ^Shared-Write-State, profile: ^Tx-Phase-Profile :default nil]
   -> [ops: [dynamic]Tx-Op, ok: bool, error: string]
   (source-overlay-ops-from-ops-with-state
     source (slice resolved.ops 0) state profile))
 
 (defn source-overlay-ops-from-ops-with-state
   [source: DB-Read-Source, ops: []Tx-Op,
-   state: ^Shared-Write-State, profile: ^Tx-Phase-Profile = nil]
+   state: ^Shared-Write-State, profile: ^Tx-Phase-Profile :default nil]
   -> [out-ops: [dynamic]Tx-Op, ok: bool, error: string]
   (if (and (not (= state nil))
            state^.schema-cache-complete
@@ -1139,7 +1139,7 @@
         (when (= meta.a ":db/txInstant")
           (set! has-meta true)))
       (when (not has-meta)
-        (arr.push! tx-meta^ (Tx-Meta {a: ":db/txInstant" v: tx-instant}))))
+        (arr.push! tx-meta^ (Tx-Meta :a ":db/txInstant" :v tx-instant))))
     (return true "")))
 
 (defn source-overlay-ops-all-new-entity-adds? [next-entity-id: u64, ops: []Tx-Op] -> bool
@@ -1199,7 +1199,7 @@
         (return (make [dynamic]Tx-Op) false unique-error)))
     (return out true "")))
 
-(defn source-overlay-ops-from-ops [source: DB-Read-Source, ops: []Tx-Op, profile: ^Tx-Phase-Profile = nil, state: ^Shared-Write-State = nil] -> [out-ops: [dynamic]Tx-Op, ok: bool, error: string]
+(defn source-overlay-ops-from-ops [source: DB-Read-Source, ops: []Tx-Op, profile: ^Tx-Phase-Profile :default nil, state: ^Shared-Write-State :default nil] -> [out-ops: [dynamic]Tx-Op, ok: bool, error: string]
   (let [out (make [dynamic]Tx-Op 0 (count ops))
         planning-start (tx-phase-profile-start profile)]
     (for [op ops]
@@ -1246,22 +1246,22 @@
         source (shared-db-snapshot-read-source (addr base))
         [state state-ok state-error] (shared-write-state-from-shared-snapshot-metadata base)]
     (when (not state-ok)
-      (return (Store-DB {}) false false state-error))
+      (return (Store-DB []) false false state-error))
     (let [resolved (shared-write-state-resolve-tx-data-source-only (addr state) source tx-data)]
       (when (not resolved.ok)
         (delete-resolved-tx resolved)
         (delete-shared-write-state-metadata state)
-        (return (Store-DB {}) false true ""))
+        (return (Store-DB []) false true ""))
       (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state.conn.next-tx)]
         (when (not instant-ok)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Store-DB {}) false false instant-error)))
+          (return (Store-DB []) false false instant-error)))
       (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved source resolved)]
         (when (not overlay-ok)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Store-DB {}) false false overlay-error))
+          (return (Store-DB []) false false overlay-error))
         (let [out (shared-store-db-with-overlay base (slice overlay-ops 0) state.conn.next-tx)]
           (delete-owned-tx-ops overlay-ops)
           (delete-resolved-tx resolved)
@@ -1322,30 +1322,30 @@
         (delete-shared-datom-log log)
         (delete-owned-datoms datoms)
         out)
-     (Store-DB {})))
+     (Store-DB [])))
 
 (defn store-db-with-source-overlay-tx-data [snapshot: ^Store-DB, tx-data: []Tx-Data] -> [next: Store-DB, used: bool, ok: bool, error: string]
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
     (when (not source-ok)
-      (return (Store-DB {}) false false source-error))
+      (return (Store-DB []) false false source-error))
     (let [[state state-ok state-error] (shared-write-state-from-source-metadata source)]
       (when (not state-ok)
-        (return (Store-DB {}) false false state-error))
+        (return (Store-DB []) false false state-error))
       (let [resolved (shared-write-state-resolve-tx-data-source-only (addr state) source tx-data)]
         (when (not resolved.ok)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Store-DB {}) false true ""))
+          (return (Store-DB []) false true ""))
         (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state.conn.next-tx)]
           (when (not instant-ok)
             (delete-resolved-tx resolved)
             (delete-shared-write-state-metadata state)
-            (return (Store-DB {}) false false instant-error)))
+            (return (Store-DB []) false false instant-error)))
         (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved source resolved)]
           (when (not overlay-ok)
             (delete-resolved-tx resolved)
             (delete-shared-write-state-metadata state)
-            (return (Store-DB {}) false false overlay-error))
+            (return (Store-DB []) false false overlay-error))
           (let [out (store-db-source-overlay-from-resolved snapshot^ (slice overlay-ops 0) state.conn.next-tx)]
             (delete-owned-tx-ops overlay-ops)
             (delete-resolved-tx resolved)

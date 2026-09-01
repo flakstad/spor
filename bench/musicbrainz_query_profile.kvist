@@ -166,25 +166,25 @@
 (def miles-gid "561d854a-6a28-4aa7-8c99-323e6ce46c2a")
 (def abbey-road-gid "eca8996a-a637-3259-ba07-d2573c601a1b")
 
-(defstruct Profile-Timing {
+(defstruct Profile-Timing [
   profiled: vev.Profiled-Result-Set
   timing: bench.Timing
-})
+])
 
-(defstruct Store-Profile-Timing {
+(defstruct Store-Profile-Timing [
   profiled: vev.Profiled-Result-Set
   timing: bench.Timing
-})
+])
 
-(defstruct Value-Timing {
+(defstruct Value-Timing [
   value: vev.Value
   timing: bench.Timing
-})
+])
 
-(defstruct Keyed-Timing {
+(defstruct Keyed-Timing [
   rows: [dynamic]vev.Keyed-Row
   timing: bench.Timing
-})
+])
 
 (defenum Find-Value-Kind [
   Collection
@@ -192,27 +192,27 @@
   Scalar
 ])
 
-(defstruct Find-Value-Timing {
+(defstruct Find-Value-Timing [
   value: vev.Value
   ok: bool
   kind: Find-Value-Kind
   timing: bench.Timing
-})
+])
 
 (defn profile-timing [profiled: vev.Profiled-Result-Set, timing: bench.Timing] -> Profile-Timing
-  (Profile-Timing {profiled: profiled timing: timing}))
+  (Profile-Timing :profiled profiled :timing timing))
 
 (defn store-profile-timing [profiled: vev.Profiled-Result-Set, timing: bench.Timing] -> Store-Profile-Timing
-  (Store-Profile-Timing {profiled: profiled timing: timing}))
+  (Store-Profile-Timing :profiled profiled :timing timing))
 
 (defn value-timing [value: vev.Value, timing: bench.Timing] -> Value-Timing
-  (Value-Timing {value: value timing: timing}))
+  (Value-Timing :value value :timing timing))
 
 (defn keyed-timing [rows: [dynamic]vev.Keyed-Row, timing: bench.Timing] -> Keyed-Timing
-  (Keyed-Timing {rows: rows timing: timing}))
+  (Keyed-Timing :rows rows :timing timing))
 
 (defn find-value-timing [value: vev.Value, ok: bool, kind: Find-Value-Kind, timing: bench.Timing] -> Find-Value-Timing
-  (Find-Value-Timing {value: value ok: ok kind: kind timing: timing}))
+  (Find-Value-Timing :value value :ok ok :kind kind :timing timing))
 
 (defn seed-mini [] -> vev.Conn
   (let [conn (vev.create-conn)

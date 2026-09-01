@@ -8,12 +8,12 @@
 (import strings "core:strings")
 (import terminal "core:terminal")
 
-(defstruct RunResult {
+(defstruct RunResult [
   state: os.Process_State
   stdout: []byte
   stderr: []byte
   err: os.Error
-})
+])
 
 (defn flag
   "Return true when `args` contains the exact command-line flag `name`."
@@ -127,21 +127,21 @@
 (defn run
   "Run `command` in `working-dir`, capturing stdout and stderr."
   [command: []string, working-dir: string] -> RunResult #force_inline
-  (let [[state stdout stderr err] (os.process_exec (os.Process_Desc {
-                                                      command: command
-                                                      working_dir: working-dir})
+  (let [[state stdout stderr err] (os.process_exec (os.Process_Desc
+                                                      :command command
+                                                      :working_dir working-dir)
                                                     context.allocator)]
-    (RunResult {state: state stdout: stdout stderr: stderr err: err})))
+    (RunResult :state state :stdout stdout :stderr stderr :err err)))
 
 (defn run-with-env
   "Run `command` in `working-dir` with explicit `env`, capturing output."
   [command: []string, working-dir: string, env: []string] -> RunResult #force_inline
-  (let [[state stdout stderr err] (os.process_exec (os.Process_Desc {
-                                                      command: command
-                                                      working_dir: working-dir
-                                                      env: env})
+  (let [[state stdout stderr err] (os.process_exec (os.Process_Desc
+                                                      :command command
+                                                      :working_dir working-dir
+                                                      :env env)
                                                     context.allocator)]
-    (RunResult {state: state stdout: stdout stderr: stderr err: err})))
+    (RunResult :state state :stdout stdout :stderr stderr :err err)))
 
 (defn delete-run-result!
   "Delete captured process output buffers in a `RunResult`."

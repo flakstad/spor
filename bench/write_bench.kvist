@@ -98,7 +98,7 @@
 
 (defn item-single-tx-group [write-index: int, revision: i64] -> vev.Store-Tx-Data-Group
   (let [tx (item-batch-tx write-index 1 revision)]
-    (vev.Store-Tx-Data-Group {tx-data: tx})))
+    (vev.Store-Tx-Data-Group :tx-data tx)))
 
 (defn item-logical-tx-groups [start-index: int, group-size: int, revision: i64] -> [dynamic]vev.Store-Tx-Data-Group
   (let [groups (make [dynamic]vev.Store-Tx-Data-Group 0 group-size)]

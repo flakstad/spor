@@ -72,13 +72,13 @@
           [(vev.value-keyword (vev.string-owned ":a"))
            (vev.value-keyword (vev.string-owned ":b"))])))
     (arr.push! columns column)
-    (vev.Query-Relation {attrs: attrs
-                         attr-sources: sources
-                         attr-index: (vev.query-relation-attr-index (slice attrs 0))
-                         tuples: (make [dynamic]vev.Binding)
-                         typed-columns: columns
-                         typed-rows: 2
-                         has-typed-columns: true})))
+    (vev.Query-Relation :attrs attrs
+                         :attr-sources sources
+                         :attr-index (vev.query-relation-attr-index (slice attrs 0))
+                         :tuples (make [dynamic]vev.Binding)
+                         :typed-columns columns
+                         :typed-rows 2
+                         :has-typed-columns true)))
 
 (defn delete-source-branch-mixed-composite-relation [rel: vev.Query-Relation]
   (vev.delete-query-relation rel))
@@ -2095,8 +2095,8 @@
         (t.is (= aggregate-cell.kind .Int))
         (t.is (= aggregate-cell.int-value 1)))
       (vev.delete-typed-materialized-batch pull-aggregate-batch))
-    (let [store-db (vev.Store-DB {kind: .Resident
-                                  resident: (vev.clone-db conn.db)})
+    (let [store-db (vev.Store-DB :kind .Resident
+                                  :resident (vev.clone-db conn.db))
           [store-source store-source-ok store-source-error] (vev.store-db-read-source (addr store-db))
           [store-pull-rel _ store-pull-used] (vev.db-read-source-query-relation-value-typed-with-sources-inputs-and-fns store-source ([]vev.DB-Read-Named-Source []) pull-prepared.query ([]vev.Query-Input []) ([]vev.Native-Query-Fn []))
           [store-pull-batch store-pull-batch-ok store-pull-batch-error] (vev.materialize-source-typed-pull-batch store-source ([]vev.DB-Read-Named-Source []) pull-prepared.query ([]vev.Query-Input []) store-pull-rel ([]vev.Native-Query-Fn []))

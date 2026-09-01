@@ -59,7 +59,7 @@
           (delete-owned-value lookup-value))
         (return true "")))))
 
-(defstruct Source-Index-Datom-Stream {
+(defstruct Source-Index-Datom-Stream [
   view: DB-Index-View
   owned-datoms: [dynamic]Datom
   owned-order-indexes: [dynamic]int
@@ -80,7 +80,7 @@
   run-loaded-page: SQLite-Loaded-Index-Page
   run-loaded-page-valid: bool
   run-dedupe-entries: bool
-  run-seen-entries: (map int (struct {}))
+  run-seen-entries: (map int (struct []))
   use-sqlite-sparse-prefixes: bool
   sparse-roots: [dynamic]u64
   sparse-counts: [dynamic]int
@@ -95,13 +95,13 @@
   sparse-loaded-page: SQLite-Loaded-Index-Page
   sparse-loaded-page-valid: bool
   sparse-dedupe-entries: bool
-  sparse-seen-entries: (map int (struct {}))
+  sparse-seen-entries: (map int (struct []))
   index: int
   high: int
   current: Datom
   current-owned: bool
   has-current: bool
-})
+])
 
 (defn q-db-read-source-two-attr-entity-projection-cardinality-one-merge [source: DB-Read-Source, query: Query, projection: Two-Attr-Entity-Projection] -> Result-Set
   (let [[first-count first-count-ok _first-count-error] (db-read-source-attr-range-entry-count source projection.first-attr)
@@ -218,13 +218,13 @@
                 (delete-source-index-datom-streams streams)
                 (return (query-relation-empty) false advance-error)))))
         (delete-source-index-datom-streams streams)
-        (return (Query-Relation {attrs: attrs
-                                 attr-sources: attr-sources
-                                 attr-index: (query-relation-attr-index (slice attrs 0))
-                                 tuples: builder.tuples
-                                 typed-columns: builder.typed-columns
-                                 typed-rows: builder.typed-rows
-                                 has-typed-columns: builder.typed-ok})
+        (return (Query-Relation :attrs attrs
+                                 :attr-sources attr-sources
+                                 :attr-index (query-relation-attr-index (slice attrs 0))
+                                 :tuples builder.tuples
+                                 :typed-columns builder.typed-columns
+                                 :typed-rows builder.typed-rows
+                                 :has-typed-columns builder.typed-ok)
                 true
                 "")))))
 
@@ -500,13 +500,13 @@
                 (delete-source-index-datom-streams streams)
                 (return (query-relation-empty) false advance-error)))))
         (delete-source-index-datom-streams streams)
-        (return (Query-Relation {attrs: attrs
-                                 attr-sources: attr-sources
-                                 attr-index: (query-relation-attr-index (slice attrs 0))
-                                 tuples: builder.tuples
-                                 typed-columns: builder.typed-columns
-                                 typed-rows: builder.typed-rows
-                                 has-typed-columns: builder.typed-ok})
+        (return (Query-Relation :attrs attrs
+                                 :attr-sources attr-sources
+                                 :attr-index (query-relation-attr-index (slice attrs 0))
+                                 :tuples builder.tuples
+                                 :typed-columns builder.typed-columns
+                                 :typed-rows builder.typed-rows
+                                 :has-typed-columns builder.typed-ok)
                 true
                 "")))))
 
@@ -582,7 +582,7 @@
 (defn db-read-source-star-attr-options-for-clause [source: DB-Read-Source, query: Query, driver-index: int, driver-datom: Datom, clause-index: int] -> [option-row: Result-Row, ok: bool, error: string]
   (let [values (make [dynamic]Value)
         pulls (make [dynamic]Pull-Result)
-        out-row (Result-Row {values: values pulls: pulls})]
+        out-row (Result-Row :values values :pulls pulls)]
     (if (= clause-index driver-index)
       (arr.push! out-row.values (value-owned driver-datom.v))
       (let [[option-ok option-error] (append-source-entity-attr-option-values! (addr out-row) source driver-datom.e query.clauses[clause-index].a.value.text)]
@@ -599,7 +599,7 @@
             pulls (make [dynamic]Pull-Result)]
         (for [value prefix]
           (arr.push! values (value-owned value)))
-        (arr.push! rows^ (Result-Row {values: values pulls: pulls}))))
+        (arr.push! rows^ (Result-Row :values values :pulls pulls))))
     (return true ""))
   (for [option options[index].values]
     (let [next (make [dynamic]Value 0 (+ (count prefix) 1))]
@@ -671,7 +671,7 @@
       (do
         (delete-owned-values-array values)
         (delete pulls))
-      (arr.push! rows^ (Result-Row {values: values pulls: pulls})))
+      (arr.push! rows^ (Result-Row :values values :pulls pulls)))
     (delete dedupe-values)
     (return true "")))
 
@@ -761,13 +761,13 @@
               (delete-source-index-datom-streams streams)
               (return (query-relation-empty) false advance-error)))))
       (delete-source-index-datom-streams streams)
-      (return (Query-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: (query-relation-attr-index (slice attrs 0))
-                               tuples: builder.tuples
-                               typed-columns: builder.typed-columns
-                               typed-rows: builder.typed-rows
-                               has-typed-columns: builder.typed-ok})
+      (return (Query-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index (query-relation-attr-index (slice attrs 0))
+                               :tuples builder.tuples
+                               :typed-columns builder.typed-columns
+                               :typed-rows builder.typed-rows
+                               :has-typed-columns builder.typed-ok)
               true
               ""))))
 
@@ -846,17 +846,17 @@
                 (delete-query-relation-builder builder)
                 (return (query-relation-empty) false advance-error))))
           (delete-source-index-datom-stream driver-stream)))
-      (return (Query-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: (query-relation-attr-index (slice attrs 0))
-                               tuples: builder.tuples
-                               typed-columns: builder.typed-columns
-                               typed-rows: builder.typed-rows
-                               has-typed-columns: builder.typed-ok})
+      (return (Query-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index (query-relation-attr-index (slice attrs 0))
+                               :tuples builder.tuples
+                               :typed-columns builder.typed-columns
+                               :typed-rows builder.typed-rows
+                               :has-typed-columns builder.typed-ok)
               true
               ""))))
 
-(defstruct Source-Ref-Chain-String-Length-Aggregate-Projection {
+(defstruct Source-Ref-Chain-String-Length-Aggregate-Projection [
   root-var: string
   middle-var: string
   leaf-var: string
@@ -867,4 +867,4 @@
   middle-ref-attr: string
   leaf-value-attr: string
   group-attr: string
-})
+])

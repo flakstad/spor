@@ -10,16 +10,16 @@
 (import vev "../vev")
 
 
-(defstruct ABI-App-SQLite-DB {
+(defstruct ABI-App-SQLite-DB [
   handle: rawptr
   open-code: int
   open-error: string
-})
+])
 
-(defstruct ABI-App-SQLite-Stmt {
+(defstruct ABI-App-SQLite-Stmt [
   handle: rawptr
   database: rawptr
-})
+])
 
 (def Vev-Conn (distinct rawptr))
 (def Vev-Connection (distinct rawptr))
@@ -78,7 +78,7 @@
   (let [profile (abi-sqlite-conn-tx-boundary-profile-ptr (rawptr conn))]
     (if (and (not (= profile nil)) profile^.enabled)
       (time.now)
-      (time.Time {}))))
+      (time.Time []))))
 
 (defn- tx-boundary-profile-elapsed-us
   [conn: Vev-SQLite-Conn, start: time.Time] -> f64
@@ -434,9 +434,9 @@
         (vev.delete-typed-flat-result-plan plan)
         (vev.delete-query-relation aggregate-rel)
         (return (Vev-Column-Batch nil)))
-      (let [resolved (vev.Resolved-Typed-Flat-Materialization {ok: true
-                                                               plan: plan
-                                                               trust-unique-bindings: true})
+      (let [resolved (vev.Resolved-Typed-Flat-Materialization :ok true
+                                                               :plan plan
+                                                               :trust-unique-bindings true)
             out (column-batch-from-typed-relation-generic query aggregate-rel resolved)]
         (vev.delete-resolved-typed-flat-materialization resolved)
         (vev.delete-query-relation aggregate-rel)
@@ -1003,12 +1003,12 @@
       (let [items (make [dynamic]vev.Value 0 (count value.items))]
         (for [item value.items]
           (arr.push! items (value-owned item)))
-        (vev.Value {kind: .Vector items: items}))
+        (vev.Value :kind .Vector :items items))
     .Map
       (let [items (make [dynamic]vev.Value 0 (count value.items))]
         (for [item value.items]
           (arr.push! items (value-owned item)))
-        (vev.Value {kind: .Map items: items}))
+        (vev.Value :kind .Map :items items))
     value))
 
 (defn- delete-pull-spec-containers [specs: []vev.Pull-Spec]
@@ -1025,10 +1025,10 @@
 (defn- tx-report-handle-from-report [report: vev.Tx-Report] -> Vev-Tx-Report
   (tx-report-handle-from-value-with-dbs
     (vev.tx-report-value report)
-    (vev.Store-DB {kind: .Resident
-                   resident: (vev.clone-db report.db-before)})
-    (vev.Store-DB {kind: .Resident
-                   resident: (vev.clone-db report.db-after)})))
+    (vev.Store-DB :kind .Resident
+                   :resident (vev.clone-db report.db-before))
+    (vev.Store-DB :kind .Resident
+                   :resident (vev.clone-db report.db-after))))
 
 (defn- tx-report-handle-from-store-report [report: vev.Store-Tx-Report] -> Vev-Tx-Report
   (tx-report-handle-from-value-with-dbs
@@ -1146,12 +1146,12 @@
 (defn- value-from-edn-text [text: string] -> [value: vev.Value, ok: bool, error: string]
   (let [[source read-error read-ok] (edn.try-read text)]
     (when (not read-ok)
-      (return (vev.Value {}) false read-error.message))
+      (return (vev.Value []) false read-error.message))
     (let [doc (vev.edn-doc-from-data source)]
       (defer (delete doc.nodes))
       (let [[parsed parsed-ok parsed-error] (vev.edn-value-from-node doc doc.root)]
         (when (not parsed-ok)
-          (return (vev.Value {}) false parsed-error))
+          (return (vev.Value []) false parsed-error))
         (let [owned (vev.value-owned parsed)]
           (vev.delete-value-containers-shallow parsed)
           (return owned true ""))))))
@@ -1160,10 +1160,10 @@
   (when (and (= value.kind .Vector)
              (= (count value.items) 2)
              (= value.items[0].kind .Keyword))
-    (return (vev.Index-Arg {has-lookup-ref: true
-                            lookup-attr: value.items[0].text
-                            lookup-value: value.items[1]})))
-  (vev.Index-Arg {value: value}))
+    (return (vev.Index-Arg :has-lookup-ref true
+                            :lookup-attr value.items[0].text
+                            :lookup-value value.items[1])))
+  (vev.Index-Arg :value value))
 
 (defn- index-args-from-value [value: vev.Value] -> [args: [dynamic]vev.Index-Arg, ok: bool]
   (when (not (= value.kind .Vector))
@@ -1234,10 +1234,10 @@
   (abi-stmt-push-input (rawptr stmt) (vev.query-input-scalar value)))
 
 (defn- stmt-push-collection! [stmt: Vev-Stmt, values: [dynamic]vev.Value]
-  (abi-stmt-push-input (rawptr stmt) (vev.Query-Input {kind: .Collection values: values})))
+  (abi-stmt-push-input (rawptr stmt) (vev.Query-Input :kind .Collection :values values)))
 
 (defn- stmt-push-relation! [stmt: Vev-Stmt, values: [dynamic]vev.Value, width: int]
-  (abi-stmt-push-input (rawptr stmt) (vev.Query-Input {kind: .Relation values: values width: width})))
+  (abi-stmt-push-input (rawptr stmt) (vev.Query-Input :kind .Relation :values values :width width)))
 
 (defn- stmt-push-lookup-ref! [stmt: Vev-Stmt, attr: string, value: vev.Value]
   (abi-stmt-push-input (rawptr stmt) (vev.query-input-lookup-ref attr value)))
@@ -1276,8 +1276,8 @@
 
 (defn- abi-tx-fn-dispatch [slot: int, db: vev.DB, args: []vev.Value] -> vev.Tx-Fn-Result
   (let [db-handle (Vev-DB (abi-alloc-db
-                            (vev.Store-DB {kind: .Resident
-                                           resident: (db-owned db)})))
+                            (vev.Store-DB :kind .Resident
+                                           :resident (db-owned db))))
         result-c (abi-tx-fn-call slot (rawptr db-handle) (count args) (tx-fn-args-ptr args))]
     (defer (release-db-handle-owned db-handle))
     (when (= result-c nil)
@@ -1474,11 +1474,11 @@
     :else (vev.query-aggregate-fn ident abi-query-aggregate-slot-15)))
 
 (defn- datom-owned [datom: vev.Datom] -> vev.Datom
-  (vev.Datom {e: datom.e
-              a: (string-owned datom.a)
-              v: (value-owned datom.v)
-              tx: datom.tx
-              added: datom.added}))
+  (vev.Datom :e datom.e
+              :a (string-owned datom.a)
+              :v (value-owned datom.v)
+              :tx datom.tx
+              :added datom.added))
 
 (defn- db-owned [db: vev.DB] -> vev.DB
   (let [datoms (make [dynamic]vev.Datom 0 (count db.datoms))]
@@ -2559,8 +2559,8 @@
     (return (Vev-DB nil)))
   (let [conn-ptr-value (conn-ptr conn)]
     (Vev-DB (abi-alloc-db
-              (vev.Store-DB {kind: .Resident
-                             resident: (db-owned conn-ptr-value^.db)})))))
+              (vev.Store-DB :kind .Resident
+                             :resident (db-owned conn-ptr-value^.db))))))
 
 @export
 (defn vev_conn_from_db :abi "c" [db: Vev-DB] -> Vev-Conn
@@ -3278,7 +3278,7 @@
   (let [[groups groups-ok groups-error] (store-tx-data-groups-from-builders builders builder-count)]
     (when (not groups-ok)
       (delete groups)
-      (let [failed (vev.failed-store-tx-report (vev.Store-DB {}) groups-error)
+      (let [failed (vev.failed-store-tx-report (vev.Store-DB []) groups-error)
             out (tx-report-handle-from-store-report failed)]
         (vev.delete-store-tx-report failed)
         (return out)))
@@ -3299,7 +3299,7 @@
   (let [[groups groups-ok groups-error] (store-tx-data-groups-from-builders builders builder-count)]
     (when (not groups-ok)
       (delete groups)
-      (let [failed (vev.failed-store-tx-report (vev.Store-DB {}) groups-error)
+      (let [failed (vev.failed-store-tx-report (vev.Store-DB []) groups-error)
             out (tx-report-array-handle-from-store-report failed)]
         (vev.delete-store-tx-report failed)
         (return out)))
@@ -3328,7 +3328,7 @@
   (let [[texts texts-ok texts-error] (strings-from-c-array tx-texts tx-count)]
     (when (not texts-ok)
       (delete texts)
-      (let [failed (vev.failed-store-tx-report (vev.Store-DB {}) texts-error)
+      (let [failed (vev.failed-store-tx-report (vev.Store-DB []) texts-error)
             out (tx-report-array-handle-from-store-report failed)]
         (vev.delete-store-tx-report failed)
         (return out)))
@@ -3755,7 +3755,7 @@
           (delete sources)
           (delete query)
           (return (Vev-Prepared-Query nil)))
-        (arr.push! sources (vev.db-source (text-from-c name) (vev.DB {}))))
+        (arr.push! sources (vev.db-source (text-from-c name) (vev.DB []))))
       (set! index (+ index 1)))
     (let [prepared (abi-alloc-prepared-query query)
           ptr (prepared-query-ptr (Vev-Prepared-Query prepared))]
@@ -4668,20 +4668,20 @@
       (delete rows-source)
       (delete inputs-source)
       (let [query-result (vev.query-result-owned-values (vev.result-set-error query-ptr-value^.error))]
-        (return (result-finish-query-result (Vev-Result result) query-result (vev.DB {})))))
+        (return (result-finish-query-result (Vev-Result result) query-result (vev.DB [])))))
     (let [[rows rows-ok rows-error] (value-from-edn-text rows-source)]
       (delete rows-source)
       (when (not rows-ok)
         (delete inputs-source)
         (let [query-result (vev.query-result-owned-values (vev.result-set-error rows-error))]
-          (return (result-finish-query-result (Vev-Result result) query-result (vev.DB {})))))
+          (return (result-finish-query-result (Vev-Result result) query-result (vev.DB [])))))
       (let [[inputs input-ok input-error] (vev.parse-query-inputs-text-for-query query-ptr-value^.query inputs-source)]
         (delete inputs-source)
         (when (not input-ok)
           (vev.delete-owned-value rows)
           (vev.delete-owned-query-inputs inputs)
           (let [query-result (vev.query-result-owned-values (vev.result-set-error input-error))]
-            (return (result-finish-query-result (Vev-Result result) query-result (vev.DB {})))))
+            (return (result-finish-query-result (Vev-Result result) query-result (vev.DB [])))))
         (let [relation-result (vev.q-query-relation-db rows query-ptr-value^.query (slice inputs 0))
               owned-result (vev.result-set-owned relation-result)]
           (vev.delete-result-set-shallow relation-result)
@@ -5180,7 +5180,7 @@
               relation-inputs (arr.into [dynamic]vev.Query-Input (slice inputs 0)) :defer
               empty-datoms (make [dynamic]vev.Datom)
               empty (vev.build-db empty-datoms)
-              stats (vev.Query-Stats {})]
+              stats (vev.Query-Stats [])]
           (if (= rows.kind .Map)
             (arr.push! relation-inputs (vev.query-input-map-relation rows))
             (arr.push! relation-inputs (vev.query-input-scalar rows)))

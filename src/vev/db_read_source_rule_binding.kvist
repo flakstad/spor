@@ -314,13 +314,13 @@
 
 (defn db-read-source-for-rule-call-source [primary: DB-Read-Source, sources: []DB-Read-Named-Source, source-name: string] -> [source: DB-Read-Source, ok: bool]
   (when (not (query-source-input-name? source-name))
-    (return (DB-Read-Source {}) false))
+    (return (DB-Read-Source []) false))
   (when (= source-name "$")
     (return primary true))
   (for [candidate sources]
     (when (= candidate.name source-name)
       (return candidate.source true)))
-  (return (DB-Read-Source {}) false))
+  (return (DB-Read-Source []) false))
 
 (defn db-read-source-relation-value-typed-not-group? [sources: []DB-Read-Named-Source, rules: []Rule, group: Not-Group, registry: []Native-Query-Fn] -> bool
   (when (> (count group.not-groups) 0)

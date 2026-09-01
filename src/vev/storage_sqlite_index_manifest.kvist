@@ -3,30 +3,30 @@
 (defn sqlite-datom-from-persisted-parts [entity: u64, attr: string, value-text: string, tx: u64, added: bool] -> [datom: Datom, ok: bool, error: string]
   (let [[value value-ok value-error] (value-from-owned-serial-text value-text)]
     (when (not value-ok)
-      (return (Datom {}) false value-error))
-    (return (Datom {e: entity a: (string-owned attr) v: value tx: tx added: added}) true "")))
+      (return (Datom []) false value-error))
+    (return (Datom :e entity :a (string-owned attr) :v value :tx tx :added added) true "")))
 
 (defn sqlite-index-root-bound-datoms [handle: rawptr, root-id: u64] -> [first: Datom, last: Datom, ok: bool, error: string]
   (let [[first-bound last-bound bounds-ok bounds-error] (vev.sqlite-index-chunk-bounds-by-id-raw handle root-id)]
     (when (not bounds-ok)
-      (return (Datom {}) (Datom {}) false bounds-error))
+      (return (Datom []) (Datom []) false bounds-error))
     (defer (delete first-bound))
     (defer (delete last-bound))
     (let [[first-entry first-ok] (parse-index-bound-entry first-bound)
           [last-entry last-ok] (parse-index-bound-entry last-bound)]
       (when (not (and first-ok last-ok))
-        (return (Datom {}) (Datom {}) false "sqlite index root had invalid bound entries"))
+        (return (Datom []) (Datom []) false "sqlite index root had invalid bound entries"))
       (let [[datom-stmt datom-stmt-ok datom-stmt-error] (vev.sqlite-prepare-datom-by-log-index-raw handle)]
         (when (not datom-stmt-ok)
-          (return (Datom {}) (Datom {}) false datom-stmt-error))
+          (return (Datom []) (Datom []) false datom-stmt-error))
         (defer (vev.sqlite-finalize-stmt-raw datom-stmt))
         (let [[first-datom first-datom-ok first-datom-error] (sqlite-load-datom-by-log-index-handle-stmt handle datom-stmt first-entry)]
           (when (not first-datom-ok)
-            (return (Datom {}) (Datom {}) false first-datom-error))
+            (return (Datom []) (Datom []) false first-datom-error))
           (let [[last-datom last-datom-ok last-datom-error] (sqlite-load-datom-by-log-index-handle-stmt handle datom-stmt last-entry)]
             (when (not last-datom-ok)
               (delete-owned-datom first-datom)
-              (return (Datom {}) (Datom {}) false last-datom-error))
+              (return (Datom []) (Datom []) false last-datom-error))
             (return first-datom last-datom true "")))))))
 
 (defn sqlite-insert-index-run-manifest-attr-range-from-datoms-with-stmts! [handle: rawptr, stmts: ^SQLite-Index-Write-Stmts, manifest-id: u64, ordinal: u64, first-position: int, first-datom: Datom, last-position: int, last-datom: Datom] -> [ok: bool, error: string]
@@ -149,8 +149,8 @@
     (let [has-range false
           first-position 0
           last-position 0
-          first-datom (Datom {})
-          last-datom (Datom {})]
+          first-datom (Datom [])
+          last-datom (Datom [])]
       (for [entry position entries]
         (let [[datom datom-ok datom-error] (sqlite-load-datom-by-log-index-handle-stmt handle datom-stmt entry)]
           (when (not datom-ok)
@@ -245,8 +245,8 @@
           has-range false
           first-position 0
           last-position 0
-          first-datom (Datom {})
-          last-datom (Datom {})]
+          first-datom (Datom [])
+          last-datom (Datom [])]
       (for [position (arr.range 0 row-count)]
         (let [[entry entry-ok entry-error] (sqlite-index-root-ordered-entry-at-cached handle root-id position row-count sqlite-index-leaf-chunk-size (addr page) (addr page-start) (addr page-end))]
           (when (not entry-ok)

@@ -279,18 +279,18 @@
           value-clause (if (= left.v.kind .Value) right left)]
       (when (or (not (= filter-clause.v.kind .Value))
                 (not (= value-clause.v.kind .Var))
-                (tx-data-modifies-validation-schema? (Tx-Data {a: filter-clause.a.value.text}))
+                (tx-data-modifies-validation-schema? (Tx-Data :a filter-clause.a.value.text))
                 (schema-ref-target? db filter-clause.a.value.text)
                 (not (or (and (= query.find[0] filter-clause.e.name)
                               (= query.find[1] value-clause.v.name))
                          (and (= query.find[0] value-clause.v.name)
                               (= query.find[1] filter-clause.e.name)))))
         (return (empty-entity-attr-value-projection) false))
-      (return (Entity-Attr-Value-Projection {entity-var: filter-clause.e.name
-                                             filter-attr: filter-clause.a.value.text
-                                             filter-value: filter-clause.v.value
-                                             value-attr: value-clause.a.value.text
-                                             value-var: value-clause.v.name})
+      (return (Entity-Attr-Value-Projection :entity-var filter-clause.e.name
+                                             :filter-attr filter-clause.a.value.text
+                                             :filter-value filter-clause.v.value
+                                             :value-attr value-clause.a.value.text
+                                             :value-var value-clause.v.name)
               true))))
 
 (defn query-entity-int-pair-plan [db: DB, query: Query] -> [plan: Entity-Int-Pair-Plan, ok: bool]
@@ -341,7 +341,7 @@
             (set! value-clause-found true)
             (set! value-attr item.a.value.text))
           (if (= item.v.kind .Value)
-            (arr.push! out.filters (Entity-Int-Pair-Filter {attr: item.a.value.text value: item.v.value}))
+            (arr.push! out.filters (Entity-Int-Pair-Filter :attr item.a.value.text :value item.v.value))
             (return out false))))
       (when (or (not value-clause-found)
                 (= (count out.filters) 0))
@@ -410,7 +410,7 @@
                 (set! second-attr item.a.value.text))
             :else (return out false))
           (if (= item.v.kind .Value)
-            (arr.push! out.filters (Entity-Int-Pair-Filter {attr: item.a.value.text value: item.v.value}))
+            (arr.push! out.filters (Entity-Int-Pair-Filter :attr item.a.value.text :value item.v.value))
             (return out false))))
       (when (or (not first-found)
                 (not second-found)
@@ -428,20 +428,20 @@
   (for [input-name index (slice query.inputs 0)]
     (when (= input-name name)
       (when (>= index (count inputs))
-        (return (Value {}) false))
+        (return (Value []) false))
       (let [input inputs[index]]
         (when (= input.kind .Scalar)
           (return input.value true))
-        (return (Value {}) false))))
-  (return (Value {}) false))
+        (return (Value []) false))))
+  (return (Value []) false))
 
 (defn query-input-by-name [query: Query, inputs: []Query-Input, name: string] -> [input: Query-Input, ok: bool]
   (for [input-name index (slice query.inputs 0)]
     (when (= input-name name)
       (when (>= index (count inputs))
-        (return (Query-Input {}) false))
+        (return (Query-Input []) false))
       (return inputs[index] true)))
-  (return (Query-Input {}) false))
+  (return (Query-Input []) false))
 
 (defn query-threshold-term-int [query: Query, inputs: []Query-Input, term: Term] -> [value: i64, ok: bool]
   (when (= term.kind .Value)
@@ -539,7 +539,7 @@
           left-entity-var ""
           join-attr ""
           left-filter-attr ""
-          left-filter-value (Value {})
+          left-filter-value (Value [])
           output-attr ""
           right-join-found false
           left-join-found false
@@ -605,12 +605,12 @@
                 (not left-filter-found)
                 (not output-found))
         (return out false))
-      (return (Entity-Value-Self-Join-Plan {left-entity-var: left-entity-var
-                                            right-entity-var: right-entity-var
-                                            join-var: join-var
-                                            join-attr: join-attr
-                                            left-filter-attr: left-filter-attr
-                                            left-filter-value: left-filter-value
-                                            output-var: output-var
-                                            output-attr: output-attr})
+      (return (Entity-Value-Self-Join-Plan :left-entity-var left-entity-var
+                                            :right-entity-var right-entity-var
+                                            :join-var join-var
+                                            :join-attr join-attr
+                                            :left-filter-attr left-filter-attr
+                                            :left-filter-value left-filter-value
+                                            :output-var output-var
+                                            :output-attr output-attr)
               true))))

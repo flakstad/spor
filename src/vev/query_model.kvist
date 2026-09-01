@@ -12,16 +12,16 @@
 (defn or-group [branches: []Not-Group] -> Or-Group
   (let [owned-branches (arr.into [dynamic]Not-Group branches)
         owned-join-vars (make [dynamic]string)]
-    (Or-Group {branches: owned-branches
-               has-join: false
-               join-vars: owned-join-vars})))
+    (Or-Group :branches owned-branches
+               :has-join false
+               :join-vars owned-join-vars)))
 
 (defn or-join-group [join-vars: []string, branches: []Not-Group] -> Or-Group
   (let [owned-branches (arr.into [dynamic]Not-Group branches)
         owned-join-vars (arr.into [dynamic]string join-vars)]
-    (Or-Group {branches: owned-branches
-               has-join: true
-               join-vars: owned-join-vars})))
+    (Or-Group :branches owned-branches
+               :has-join true
+               :join-vars owned-join-vars)))
 
 (defn query [find: []string, with: []string, inputs: []string, collection-inputs: []string, tuple-inputs: []Tuple-Input, relation-inputs: []Relation-Input, clauses: []Clause, predicates: []Predicate, function-clauses: []Function-Clause, rules: []Rule, rule-calls: []Rule-Call, get-elses: []Get-Else, get-somes: []Get-Some, grounds: []Ground, not-groups: []Not-Group, or-groups: []Or-Group, pulls: []Pull-Find, aggregates: []Aggregate-Find] -> Query
   (let [owned-find (arr.into [dynamic]string find)
@@ -47,49 +47,49 @@
         owned-aggregates (arr.into [dynamic]Aggregate-Find aggregates)
         owned-return-map-keys (make [dynamic]string)]
     (for [_ index clauses]
-      (arr.push! owned-where-steps (Query-Step {kind: .Clause index: index})))
+      (arr.push! owned-where-steps (Query-Step :kind .Clause :index index)))
     (for [_ index rule-calls]
-      (arr.push! owned-where-steps (Query-Step {kind: .RuleCall index: index})))
+      (arr.push! owned-where-steps (Query-Step :kind .RuleCall :index index)))
     (for [_ index grounds]
-      (arr.push! owned-where-steps (Query-Step {kind: .Ground index: index})))
+      (arr.push! owned-where-steps (Query-Step :kind .Ground :index index)))
     (for [_ index get-elses]
-      (arr.push! owned-where-steps (Query-Step {kind: .GetElse index: index})))
+      (arr.push! owned-where-steps (Query-Step :kind .GetElse :index index)))
     (for [_ index get-somes]
-      (arr.push! owned-where-steps (Query-Step {kind: .GetSome index: index})))
+      (arr.push! owned-where-steps (Query-Step :kind .GetSome :index index)))
     (for [_ index function-clauses]
-      (arr.push! owned-where-steps (Query-Step {kind: .Function index: index})))
+      (arr.push! owned-where-steps (Query-Step :kind .Function :index index)))
     (for [_ index predicates]
-      (arr.push! owned-where-steps (Query-Step {kind: .Predicate index: index})))
+      (arr.push! owned-where-steps (Query-Step :kind .Predicate :index index)))
     (for [_ index or-groups]
-      (arr.push! owned-where-steps (Query-Step {kind: .Or index: index})))
+      (arr.push! owned-where-steps (Query-Step :kind .Or :index index)))
     (for [_ index not-groups]
-      (arr.push! owned-where-steps (Query-Step {kind: .Not index: index})))
-    (Query {find: owned-find
-            with: owned-with
-            inputs: owned-inputs
-            collection-inputs: owned-collection-inputs
-            tuple-inputs: owned-tuple-inputs
-            relation-inputs: owned-relation-inputs
-            input-specs: owned-input-specs
-            has-default-source-input: false
-            has-rules-input: false
-            clauses: owned-clauses
-            predicates: owned-predicates
-            function-clauses: owned-function-clauses
-            rules: owned-rules
-            rule-calls: owned-rule-calls
-            rule-call-plans: owned-rule-call-plans
-            get-elses: owned-get-elses
-            get-somes: owned-get-somes
-            grounds: owned-grounds
-            not-groups: owned-not-groups
-            or-groups: owned-or-groups
-            where-steps: owned-where-steps
-            pulls: owned-pulls
-            aggregates: owned-aggregates
-            has-return-map: false
-            return-map-marker: ""
-            return-map-keys: owned-return-map-keys})))
+      (arr.push! owned-where-steps (Query-Step :kind .Not :index index)))
+    (Query :find owned-find
+            :with owned-with
+            :inputs owned-inputs
+            :collection-inputs owned-collection-inputs
+            :tuple-inputs owned-tuple-inputs
+            :relation-inputs owned-relation-inputs
+            :input-specs owned-input-specs
+            :has-default-source-input false
+            :has-rules-input false
+            :clauses owned-clauses
+            :predicates owned-predicates
+            :function-clauses owned-function-clauses
+            :rules owned-rules
+            :rule-calls owned-rule-calls
+            :rule-call-plans owned-rule-call-plans
+            :get-elses owned-get-elses
+            :get-somes owned-get-somes
+            :grounds owned-grounds
+            :not-groups owned-not-groups
+            :or-groups owned-or-groups
+            :where-steps owned-where-steps
+            :pulls owned-pulls
+            :aggregates owned-aggregates
+            :has-return-map false
+            :return-map-marker ""
+            :return-map-keys owned-return-map-keys)))
 
 (defn query-with-rules-input [query-value: Query, has-rules-input: bool] -> Query
   (let [out query-value]
@@ -111,7 +111,7 @@
     (set! out.return-map-keys (arr.into [dynamic]string keys))
     out))
 
-(defstruct Query-Step-Counters {
+(defstruct Query-Step-Counters [
   clause-index: int
   predicate-index: int
   function-index: int
@@ -121,49 +121,49 @@
   ground-index: int
   not-index: int
   or-index: int
-})
+])
 
 (defn append-query-step-kind! [steps: ^[dynamic]Query-Step, counters: ^Query-Step-Counters, kind: Query-Step-Kind]
   (case kind
     .Clause (do
-      (arr.push! steps^ (Query-Step {kind: .Clause index: counters^.clause-index}))
+      (arr.push! steps^ (Query-Step :kind .Clause :index counters^.clause-index))
       (set! counters^.clause-index (+ counters^.clause-index 1)))
     .Predicate (do
-      (arr.push! steps^ (Query-Step {kind: .Predicate index: counters^.predicate-index}))
+      (arr.push! steps^ (Query-Step :kind .Predicate :index counters^.predicate-index))
       (set! counters^.predicate-index (+ counters^.predicate-index 1)))
     .Function (do
-      (arr.push! steps^ (Query-Step {kind: .Function index: counters^.function-index}))
+      (arr.push! steps^ (Query-Step :kind .Function :index counters^.function-index))
       (set! counters^.function-index (+ counters^.function-index 1)))
     .RuleCall (do
-      (arr.push! steps^ (Query-Step {kind: .RuleCall index: counters^.rule-call-index}))
+      (arr.push! steps^ (Query-Step :kind .RuleCall :index counters^.rule-call-index))
       (set! counters^.rule-call-index (+ counters^.rule-call-index 1)))
     .GetElse (do
-      (arr.push! steps^ (Query-Step {kind: .GetElse index: counters^.get-else-index}))
+      (arr.push! steps^ (Query-Step :kind .GetElse :index counters^.get-else-index))
       (set! counters^.get-else-index (+ counters^.get-else-index 1)))
     .GetSome (do
-      (arr.push! steps^ (Query-Step {kind: .GetSome index: counters^.get-some-index}))
+      (arr.push! steps^ (Query-Step :kind .GetSome :index counters^.get-some-index))
       (set! counters^.get-some-index (+ counters^.get-some-index 1)))
     .Ground (do
-      (arr.push! steps^ (Query-Step {kind: .Ground index: counters^.ground-index}))
+      (arr.push! steps^ (Query-Step :kind .Ground :index counters^.ground-index))
       (set! counters^.ground-index (+ counters^.ground-index 1)))
     .Not (do
-      (arr.push! steps^ (Query-Step {kind: .Not index: counters^.not-index}))
+      (arr.push! steps^ (Query-Step :kind .Not :index counters^.not-index))
       (set! counters^.not-index (+ counters^.not-index 1)))
     .Or (do
-      (arr.push! steps^ (Query-Step {kind: .Or index: counters^.or-index}))
+      (arr.push! steps^ (Query-Step :kind .Or :index counters^.or-index))
       (set! counters^.or-index (+ counters^.or-index 1)))
      (do)))
 
 (defn steps-from-kinds [kinds: []Query-Step-Kind] -> [dynamic]Query-Step
   (let [steps (make [dynamic]Query-Step 0 (count kinds))
-        counters (Query-Step-Counters {})]
+        counters (Query-Step-Counters [])]
     (for [kind kinds]
       (append-query-step-kind! (addr steps) (addr counters) kind))
     steps))
 
 (defn not-group-default-steps [clause-count: int, predicate-count: int, function-count: int, get-else-count: int, get-some-count: int, ground-count: int, rule-call-count: int, not-count: int] -> [dynamic]Query-Step
   (let [steps (make [dynamic]Query-Step 0 (+ clause-count predicate-count function-count get-else-count get-some-count ground-count rule-call-count not-count))
-        counters (Query-Step-Counters {})]
+        counters (Query-Step-Counters [])]
     (for [_ (arr.range 0 clause-count)]
       (append-query-step-kind! (addr steps) (addr counters) .Clause))
     (for [_ (arr.range 0 predicate-count)]
@@ -195,17 +195,17 @@
         owned-steps (if (> (count step-kinds) 0)
                       (steps-from-kinds step-kinds)
                       (not-group-default-steps (count clauses) (count predicates) (count function-clauses) (count get-elses) (count get-somes) (count grounds) (count rule-calls) (count not-groups)))]
-    (Not-Group {clauses: owned-clauses
-                predicates: owned-predicates
-                function-clauses: owned-functions
-                get-elses: owned-get-elses
-                get-somes: owned-get-somes
-                grounds: owned-grounds
-                rule-calls: owned-rule-calls
-                not-groups: owned-not-groups
-                steps: owned-steps
-                has-join: has-join
-                join-vars: owned-join-vars})))
+    (Not-Group :clauses owned-clauses
+                :predicates owned-predicates
+                :function-clauses owned-functions
+                :get-elses owned-get-elses
+                :get-somes owned-get-somes
+                :grounds owned-grounds
+                :rule-calls owned-rule-calls
+                :not-groups owned-not-groups
+                :steps owned-steps
+                :has-join has-join
+                :join-vars owned-join-vars)))
 
 (defn not-group-full-with-operators-and-grounds [join-vars: []string, has-join: bool, clauses: []Clause, predicates: []Predicate, function-clauses: []Function-Clause, get-elses: []Get-Else, get-somes: []Get-Some, grounds: []Ground, not-groups: []Not-Group, step-kinds: []Query-Step-Kind] -> Not-Group
   (not-group-full-with-operators-grounds-and-rules join-vars has-join clauses predicates function-clauses get-elses get-somes grounds ([]Rule-Call []) not-groups step-kinds))
@@ -259,19 +259,19 @@
         owned-not-groups (arr.into [dynamic]Not-Group not-groups)
         owned-or-groups (arr.into [dynamic]Or-Group or-groups)
         owned-steps (steps-from-kinds body-step-kinds)]
-    (Rule {name: name
-           required-param-count: required-param-count
-           params: owned-params
-           clauses: owned-clauses
-           predicates: owned-predicates
-           function-clauses: owned-functions
-           get-elses: owned-get-elses
-           get-somes: owned-get-somes
-           grounds: owned-grounds
-           rule-calls: owned-calls
-           not-groups: owned-not-groups
-           or-groups: owned-or-groups
-           body-steps: owned-steps})))
+    (Rule :name name
+           :required-param-count required-param-count
+           :params owned-params
+           :clauses owned-clauses
+           :predicates owned-predicates
+           :function-clauses owned-functions
+           :get-elses owned-get-elses
+           :get-somes owned-get-somes
+           :grounds owned-grounds
+           :rule-calls owned-calls
+           :not-groups owned-not-groups
+           :or-groups owned-or-groups
+           :body-steps owned-steps)))
 
 (defn make-rule [name: string, params: []string, clauses: []Clause, predicates: []Predicate, function-clauses: []Function-Clause, get-elses: []Get-Else, get-somes: []Get-Some, grounds: []Ground, rule-calls: []Rule-Call, not-groups: []Not-Group, or-groups: []Or-Group, body-step-kinds: []Query-Step-Kind] -> Rule
   (make-rule-with-required name 0 params clauses predicates function-clauses get-elses get-somes grounds rule-calls not-groups or-groups body-step-kinds))
@@ -281,10 +281,10 @@
     (query ([]string []) ([]string []) ([]string []) ([]string []) ([]Tuple-Input []) ([]Relation-Input []) ([]Clause []) ([]Predicate []) ([]Function-Clause []) ([]Rule []) ([]Rule-Call []) ([]Get-Else []) (slice get-somes 0) ([]Ground []) ([]Not-Group []) ([]Or-Group []) ([]Pull-Find []) ([]Aggregate-Find []))))
 
 (defn empty-edn-doc [] -> EDN-Doc
-  (EDN-Doc {nodes: (make [dynamic]EDN-Node) root: -1}))
+  (EDN-Doc :nodes (make [dynamic]EDN-Node) :root -1))
 
 (defn edn-node [kind: EDN-Kind, text: string] -> EDN-Node
-  (EDN-Node {kind: kind text: text first-child: -1 next-sibling: -1 child-count: 0}))
+  (EDN-Node :kind kind :text text :first-child -1 :next-sibling -1 :child-count 0))
 
 (defn edn-add-node! [doc: ^EDN-Doc, node: EDN-Node] -> int
   (let [index (count doc^.nodes)]
@@ -328,18 +328,18 @@
       (set! current (+ current 1)))
     child))
 
-(defstruct EDN-Sibling-Source {
+(defstruct EDN-Sibling-Source [
   doc: EDN-Doc
   cursor: int
-})
+])
 
-(defstruct EDN-Child-Pair {
+(defstruct EDN-Child-Pair [
   key: int
   value: int
-})
+])
 
 (defn edn-open-siblings [doc: EDN-Doc, first: int] -> EDN-Sibling-Source
-  (EDN-Sibling-Source {doc: doc cursor: first}))
+  (EDN-Sibling-Source :doc doc :cursor first))
 
 (defn edn-next-sibling [src: ^EDN-Sibling-Source] -> [node: int ok: bool]
   (when (= src.cursor -1)
@@ -361,11 +361,11 @@
 
 (defn edn-next-child-pair [src: ^EDN-Sibling-Source] -> [pair: EDN-Child-Pair ok: bool]
   (when (= src.cursor -1)
-    (return (EDN-Child-Pair {}) false))
+    (return (EDN-Child-Pair []) false))
   (let [key src.cursor
         value src.doc.nodes[key].next-sibling]
     (set! src.cursor (if (= value -1) -1 src.doc.nodes[value].next-sibling))
-    (return (EDN-Child-Pair {key: key value: value}) true)))
+    (return (EDN-Child-Pair :key key :value value) true)))
 
 (defiter edn-child-pairs [doc: EDN-Doc, parent: int] -> EDN-Sibling-Source :yield EDN-Child-Pair
   :next edn-next-child-pair
@@ -403,7 +403,7 @@
   (when (or (= node-index -1)
             (not (= doc.nodes[node-index].kind .Vector))
             (not (= doc.nodes[node-index].child-count 2)))
-    (return (Term {}) false))
+    (return (Term []) false))
   (let [attr-node (edn-child-at doc node-index 0)
         value-node (edn-child-at doc node-index 1)
         attr-doc-node doc.nodes[attr-node]
@@ -411,12 +411,12 @@
     (cond
       (= attr-doc-node.kind .Keyword) (set! attr attr-doc-node.text)
       (= attr-doc-node.kind .String) (set! attr attr-doc-node.text)
-      :else (return (Term {}) false))
+      :else (return (Term []) false))
     (when (not (strings.has_prefix attr ":"))
-      (return (Term {}) false))
+      (return (Term []) false))
     (let [[value value-ok _] (edn-value-from-node doc value-node)]
       (when (not value-ok)
-        (return (Term {}) false))
+        (return (Term []) false))
       (return (term-lookup-ref attr value) true))))
 
 (defn term-from-edn-node [doc: EDN-Doc, node-index: int, attr-position: bool] -> Term
@@ -503,24 +503,24 @@
 
 (defn input-binding-none [] -> Input-Binding
   (let [items (make [dynamic]Input-Binding)]
-    (Input-Binding {kind: .None items: items})))
+    (Input-Binding :kind .None :items items)))
 
 (defn input-binding-ignore [] -> Input-Binding
   (let [items (make [dynamic]Input-Binding)]
-    (Input-Binding {kind: .Ignore items: items})))
+    (Input-Binding :kind .Ignore :items items)))
 
 (defn input-binding-var [name: string] -> Input-Binding
   (let [items (make [dynamic]Input-Binding)]
-    (Input-Binding {kind: .Var name: name items: items})))
+    (Input-Binding :kind .Var :name name :items items)))
 
 (defn input-binding-tuple [items: []Input-Binding] -> Input-Binding
   (let [owned (arr.into [dynamic]Input-Binding items)]
-    (Input-Binding {kind: .Tuple items: owned})))
+    (Input-Binding :kind .Tuple :items owned)))
 
 (defn input-binding-collection [item: Input-Binding] -> Input-Binding
   (let [items (make [dynamic]Input-Binding)]
     (arr.push! items item)
-    (Input-Binding {kind: .Collection items: items})))
+    (Input-Binding :kind .Collection :items items)))
 
 (defn input-binding-first-var [binding: Input-Binding] -> [name: string, ok: bool]
   (when (= binding.kind .Var)
@@ -558,21 +558,21 @@
     out))
 
 (defn query-input-scalar [value: Value] -> Query-Input
-  (Query-Input {kind: .Scalar value: value}))
+  (Query-Input :kind .Scalar :value value))
 
 (defn query-input-collection [values: []Value] -> Query-Input
-  (Query-Input {kind: .Collection values: values}))
+  (Query-Input :kind .Collection :values values))
 
 (defn query-input-relation [values: []Value, width: int] -> Query-Input
-  (Query-Input {kind: .Relation values: values width: width}))
+  (Query-Input :kind .Relation :values values :width width))
 
 (defn query-input-map-relation [value: Value] -> Query-Input
   (if (= value.kind .Map)
-    (Query-Input {kind: .Relation values: (slice value.items 0) width: 2})
-    (Query-Input {kind: .Relation values: ([]Value []) width: 2})))
+    (Query-Input :kind .Relation :values (slice value.items 0) :width 2)
+    (Query-Input :kind .Relation :values ([]Value []) :width 2)))
 
 (defn query-input-lookup-ref [attr: string, value: Value] -> Query-Input
-  (Query-Input {kind: .Scalar has-lookup-ref: true lookup-attr: attr lookup-value: value}))
+  (Query-Input :kind .Scalar :has-lookup-ref true :lookup-attr attr :lookup-value value))
 
 (defn query-input-collection-lookup-refs [attrs: []string, values: []Value] -> Query-Input
-  (Query-Input {kind: .CollectionLookupRefs lookup-attrs: attrs lookup-values: values}))
+  (Query-Input :kind .CollectionLookupRefs :lookup-attrs attrs :lookup-values values))

@@ -78,11 +78,11 @@
 (defmacro- emit-index-arg [form]
   (if (lookup-ref? form)
     (quasiquote
-      (Index-Arg {has-lookup-ref: true
-                  lookup-attr: (unquote (emit-attr (nth form 0)))
-                  lookup-value: (unquote (emit-literal-value (nth form 1)))}))
+      (Index-Arg :has-lookup-ref true
+                  :lookup-attr (unquote (emit-attr (nth form 0)))
+                  :lookup-value (unquote (emit-literal-value (nth form 1)))))
     (quasiquote
-      (Index-Arg {value: (unquote (emit-literal-value form))}))))
+      (Index-Arg :value (unquote (emit-literal-value form))))))
 
 (defmacro- emit-index-args [forms]
   (if (= (count forms) 0)
@@ -341,29 +341,29 @@
 (defmacro- emit-tx-map-collection-call [e a v]
   (if (lookup-ref? e)
     (quasiquote
-      (Tx-Data {op: ":db/add"
-                lookup-attr: (unquote (emit-attr (nth e 0)))
-                lookup-value: (unquote (emit-literal-value (nth e 1)))
-                has-lookup-ref: true
-                a: (unquote (emit-attr a))
-                v: (unquote (emit-literal-value v))
-                from-map-collection: true}))
+      (Tx-Data :op ":db/add"
+                :lookup-attr (unquote (emit-attr (nth e 0)))
+                :lookup-value (unquote (emit-literal-value (nth e 1)))
+                :has-lookup-ref true
+                :a (unquote (emit-attr a))
+                :v (unquote (emit-literal-value v))
+                :from-map-collection true))
     (if (keyword? e)
       (quasiquote
-        (Tx-Data {op: ":db/add"
-                  ident: (unquote (source e))
-                  has-ident: true
-                  a: (unquote (emit-attr a))
-                  v: (unquote (emit-literal-value v))
-                  from-map-collection: true}))
+        (Tx-Data :op ":db/add"
+                  :ident (unquote (source e))
+                  :has-ident true
+                  :a (unquote (emit-attr a))
+                  :v (unquote (emit-literal-value v))
+                  :from-map-collection true))
       (if (string? e)
         (quasiquote
-          (Tx-Data {op: ":db/add"
-                    tempid: (unquote e)
-                    has-tempid: true
-                    a: (unquote (emit-attr a))
-                    v: (unquote (emit-literal-value v))
-                    from-map-collection: true}))
+          (Tx-Data :op ":db/add"
+                    :tempid (unquote e)
+                    :has-tempid true
+                    :a (unquote (emit-attr a))
+                    :v (unquote (emit-literal-value v))
+                    :from-map-collection true))
         (if (literal-int? e)
           (quasiquote
             (add-map-collection
@@ -807,8 +807,8 @@
 (defmacro- emit-tuple-input [form]
   (if (input-tuple? form)
     (quasiquote
-      (Tuple-Input {vars: ([]string [(splice (emit-tuple-vars form))])
-                    binding: (unquote (emit-input-binding form))}))
+      (Tuple-Input :vars ([]string [(splice (emit-tuple-vars form))])
+                    :binding (unquote (emit-input-binding form))))
     (error "tuple inputs must have shape [?a ?b]")))
 
 (defmacro- emit-tuple-inputs [forms]
@@ -825,8 +825,8 @@
 (defmacro- emit-relation-input [form]
   (if (input-relation? form)
     (quasiquote
-      (Relation-Input {vars: ([]string [(splice (emit-tuple-vars (first form)))])
-                       binding: (input-binding-collection (unquote (emit-input-binding (first form))))}))
+      (Relation-Input :vars ([]string [(splice (emit-tuple-vars (first form)))])
+                       :binding (input-binding-collection (unquote (emit-input-binding (first form))))))
     (error "relation inputs must have shape [[?a ?b]]")))
 
 (defmacro- emit-relation-inputs [forms]
@@ -973,87 +973,87 @@
   (if (vector? form)
     (if (= (count form) 2)
       (quasiquote
-        (Clause {e: (unquote (emit-entity-term (nth form 0)))
-                 a: (unquote (emit-attr-term (nth form 1)))
-                 v: (term-wildcard)
-                 tx-term: (term-wildcard)
-                 op-term: (term-wildcard)}))
+        (Clause :e (unquote (emit-entity-term (nth form 0)))
+                 :a (unquote (emit-attr-term (nth form 1)))
+                 :v (term-wildcard)
+                 :tx-term (term-wildcard)
+                 :op-term (term-wildcard)))
       (if (= (count form) 3)
         (if (relation-source? (nth form 0))
           (quasiquote
-            (Clause {e: (unquote (emit-value-term (nth form 1)))
-                     a: (unquote (emit-value-term (nth form 2)))
-                     v: (term-wildcard)
-                     tx-term: (term-wildcard)
-                     op-term: (term-wildcard)
-                     source: (unquote (source (nth form 0)))
-                     has-source: true
-                     source-width: 2}))
+            (Clause :e (unquote (emit-value-term (nth form 1)))
+                     :a (unquote (emit-value-term (nth form 2)))
+                     :v (term-wildcard)
+                     :tx-term (term-wildcard)
+                     :op-term (term-wildcard)
+                     :source (unquote (source (nth form 0)))
+                     :has-source true
+                     :source-width 2))
           (if (input-source? (nth form 0))
           (quasiquote
-            (Clause {e: (unquote (emit-entity-term (nth form 1)))
-                     a: (unquote (emit-attr-term (nth form 2)))
-                     v: (term-wildcard)
-                     tx-term: (term-wildcard)
-                     op-term: (term-wildcard)}))
+            (Clause :e (unquote (emit-entity-term (nth form 1)))
+                     :a (unquote (emit-attr-term (nth form 2)))
+                     :v (term-wildcard)
+                     :tx-term (term-wildcard)
+                     :op-term (term-wildcard)))
           (quasiquote
-            (Clause {e: (unquote (emit-entity-term (nth form 0)))
-                     a: (unquote (emit-attr-term (nth form 1)))
-                     v: (unquote (emit-value-term (nth form 2)))
-                     tx-term: (term-wildcard)
-                     op-term: (term-wildcard)}))))
+            (Clause :e (unquote (emit-entity-term (nth form 0)))
+                     :a (unquote (emit-attr-term (nth form 1)))
+                     :v (unquote (emit-value-term (nth form 2)))
+                     :tx-term (term-wildcard)
+                     :op-term (term-wildcard)))))
         (if (= (count form) 4)
           (if (input-source? (nth form 0))
             (quasiquote
-              (Clause {e: (unquote (emit-entity-term (nth form 1)))
-                       a: (unquote (emit-attr-term (nth form 2)))
-                       v: (unquote (emit-value-term (nth form 3)))
-                       tx-term: (term-wildcard)
-                       op-term: (term-wildcard)}))
+              (Clause :e (unquote (emit-entity-term (nth form 1)))
+                       :a (unquote (emit-attr-term (nth form 2)))
+                       :v (unquote (emit-value-term (nth form 3)))
+                       :tx-term (term-wildcard)
+                       :op-term (term-wildcard)))
             (if (relation-source? (nth form 0))
               (quasiquote
-                (Clause {e: (unquote (emit-value-term (nth form 1)))
-                         a: (unquote (emit-value-term (nth form 2)))
-                         v: (unquote (emit-value-term (nth form 3)))
-                         tx-term: (term-wildcard)
-                         op-term: (term-wildcard)
-                         source: (unquote (source (nth form 0)))
-                         has-source: true
-                         source-width: 3}))
+                (Clause :e (unquote (emit-value-term (nth form 1)))
+                         :a (unquote (emit-value-term (nth form 2)))
+                         :v (unquote (emit-value-term (nth form 3)))
+                         :tx-term (term-wildcard)
+                         :op-term (term-wildcard)
+                         :source (unquote (source (nth form 0)))
+                         :has-source true
+                         :source-width 3))
               (quasiquote
-                (Clause {e: (unquote (emit-entity-term (nth form 0)))
-                         a: (unquote (emit-attr-term (nth form 1)))
-                         v: (unquote (emit-value-term (nth form 2)))
-                         tx-term: (unquote (emit-value-term (nth form 3)))
-                         op-term: (term-wildcard)}))))
+                (Clause :e (unquote (emit-entity-term (nth form 0)))
+                         :a (unquote (emit-attr-term (nth form 1)))
+                         :v (unquote (emit-value-term (nth form 2)))
+                         :tx-term (unquote (emit-value-term (nth form 3)))
+                         :op-term (term-wildcard)))))
           (if (= (count form) 5)
             (if (relation-source? (nth form 0))
               (quasiquote
-                (Clause {e: (unquote (emit-value-term (nth form 1)))
-                         a: (unquote (emit-value-term (nth form 2)))
-                         v: (unquote (emit-value-term (nth form 3)))
-                         tx-term: (unquote (emit-value-term (nth form 4)))
-                         op-term: (term-wildcard)
-                         source: (unquote (source (nth form 0)))
-                         has-source: true
-                         source-width: 4}))
+                (Clause :e (unquote (emit-value-term (nth form 1)))
+                         :a (unquote (emit-value-term (nth form 2)))
+                         :v (unquote (emit-value-term (nth form 3)))
+                         :tx-term (unquote (emit-value-term (nth form 4)))
+                         :op-term (term-wildcard)
+                         :source (unquote (source (nth form 0)))
+                         :has-source true
+                         :source-width 4))
               (quasiquote
-                (Clause {e: (unquote (emit-entity-term (nth form 0)))
-                         a: (unquote (emit-attr-term (nth form 1)))
-                         v: (unquote (emit-value-term (nth form 2)))
-                         tx-term: (unquote (emit-value-term (nth form 3)))
-                         op-term: (unquote (emit-value-term (nth form 4)))})))
+                (Clause :e (unquote (emit-entity-term (nth form 0)))
+                         :a (unquote (emit-attr-term (nth form 1)))
+                         :v (unquote (emit-value-term (nth form 2)))
+                         :tx-term (unquote (emit-value-term (nth form 3)))
+                         :op-term (unquote (emit-value-term (nth form 4))))))
             (if (= (count form) 6)
               (if (relation-source? (nth form 0))
                 (quasiquote
-                  (Clause {e: (unquote (emit-value-term (nth form 1)))
-                           a: (unquote (emit-value-term (nth form 2)))
-                           v: (unquote (emit-value-term (nth form 3)))
-                           tx-term: (unquote (emit-value-term (nth form 4)))
-                           op-term: (unquote (emit-value-term (nth form 5)))
-                           source: (unquote (source (nth form 0)))
-                           has-source: true
-                           source-width: 5}))
+                  (Clause :e (unquote (emit-value-term (nth form 1)))
+                           :a (unquote (emit-value-term (nth form 2)))
+                           :v (unquote (emit-value-term (nth form 3)))
+                           :tx-term (unquote (emit-value-term (nth form 4)))
+                           :op-term (unquote (emit-value-term (nth form 5)))
+                           :source (unquote (source (nth form 0)))
+                           :has-source true
+                           :source-width 5))
                 (error "six-item datalog clauses require a relation source"))
               (error "datalog clauses must have shape [e a], [e a v], [src e a], [src e a v], [src e a v tx], or [src e a v tx op]"))))))
     (error "datalog :where entries must be clauses")))
@@ -1221,54 +1221,54 @@
   (if (vector? form)
     (if (= (count form) 2)
       (quasiquote
-        (Clause {e: (unquote (emit-value-term (nth form 0)))
-                 a: (unquote (emit-value-term (nth form 1)))
-                 v: (term-wildcard)
-                 tx-term: (term-wildcard)
-                 op-term: (term-wildcard)
-                 source: (unquote source-name)
-                 has-source: true
-                 source-width: 2}))
+        (Clause :e (unquote (emit-value-term (nth form 0)))
+                 :a (unquote (emit-value-term (nth form 1)))
+                 :v (term-wildcard)
+                 :tx-term (term-wildcard)
+                 :op-term (term-wildcard)
+                 :source (unquote source-name)
+                 :has-source true
+                 :source-width 2))
       (if (= (count form) 3)
         (if (relation-source? (nth form 0))
           (emit-datalog-clause form)
           (quasiquote
-            (Clause {e: (unquote (emit-value-term (nth form 0)))
-                     a: (unquote (emit-value-term (nth form 1)))
-                     v: (unquote (emit-value-term (nth form 2)))
-                     tx-term: (term-wildcard)
-                     op-term: (term-wildcard)
-                     source: (unquote source-name)
-                     has-source: true
-                     source-width: 3})))
+            (Clause :e (unquote (emit-value-term (nth form 0)))
+                     :a (unquote (emit-value-term (nth form 1)))
+                     :v (unquote (emit-value-term (nth form 2)))
+                     :tx-term (term-wildcard)
+                     :op-term (term-wildcard)
+                     :source (unquote source-name)
+                     :has-source true
+                     :source-width 3)))
         (if (= (count form) 4)
           (if (or (input-source? (nth form 0))
                   (input-db-source? (nth form 0))
                   (relation-source? (nth form 0)))
             (emit-datalog-clause form)
             (quasiquote
-              (Clause {e: (unquote (emit-value-term (nth form 0)))
-                       a: (unquote (emit-value-term (nth form 1)))
-                       v: (unquote (emit-value-term (nth form 2)))
-                       tx-term: (unquote (emit-value-term (nth form 3)))
-                       op-term: (term-wildcard)
-                       source: (unquote source-name)
-                       has-source: true
-                       source-width: 4})))
+              (Clause :e (unquote (emit-value-term (nth form 0)))
+                       :a (unquote (emit-value-term (nth form 1)))
+                       :v (unquote (emit-value-term (nth form 2)))
+                       :tx-term (unquote (emit-value-term (nth form 3)))
+                       :op-term (term-wildcard)
+                       :source (unquote source-name)
+                       :has-source true
+                       :source-width 4)))
           (if (= (count form) 5)
             (if (or (input-source? (nth form 0))
                     (input-db-source? (nth form 0))
                     (relation-source? (nth form 0)))
               (emit-datalog-clause form)
               (quasiquote
-                (Clause {e: (unquote (emit-value-term (nth form 0)))
-                         a: (unquote (emit-value-term (nth form 1)))
-                         v: (unquote (emit-value-term (nth form 2)))
-                         tx-term: (unquote (emit-value-term (nth form 3)))
-                         op-term: (unquote (emit-value-term (nth form 4)))
-                         source: (unquote source-name)
-                         has-source: true
-                         source-width: 5})))
+                (Clause :e (unquote (emit-value-term (nth form 0)))
+                         :a (unquote (emit-value-term (nth form 1)))
+                         :v (unquote (emit-value-term (nth form 2)))
+                         :tx-term (unquote (emit-value-term (nth form 3)))
+                         :op-term (unquote (emit-value-term (nth form 4)))
+                         :source (unquote source-name)
+                         :has-source true
+                         :source-width 5)))
             (emit-datalog-clause form)))))
     (error "source-prefixed clauses currently support data clauses")))
 
@@ -1341,9 +1341,9 @@
       (quasiquote
         (not-group
           ([]Clause
-            [(Clause {e: (unquote (emit-entity-term (nth expr 2)))
-                      a: (unquote (emit-attr-term (nth expr 3)))
-                      v: (term-wildcard)})])
+            [(Clause :e (unquote (emit-entity-term (nth expr 2)))
+                      :a (unquote (emit-attr-term (nth expr 3)))
+                      :v (term-wildcard))])
           ([]Not-Group []))))
     (error "missing? clauses must have shape [(missing? $ ?e :attr)]")))
 
@@ -1459,8 +1459,8 @@
     (let [expr (first form)]
       (if (>= (count expr) 2)
         (quasiquote
-          (Predicate {op: (unquote (source (nth expr 0)))
-                      terms: ([]Term [(splice (emit-predicate-terms (rest expr)))])}))
+          (Predicate :op (unquote (source (nth expr 0)))
+                      :terms ([]Term [(splice (emit-predicate-terms (rest expr)))])))
         (error "predicate clauses must have shape [(op arg arg ...)]")))
     (error "predicate clauses must have shape [(op arg arg ...)]")))
 
@@ -1470,16 +1470,16 @@
           out (nth form 1)]
       (if (vector? out)
         (quasiquote
-          (Function-Clause {op: (unquote (source (nth expr 0)))
-                            terms: ([]Term [(splice (emit-predicate-terms (rest expr)))])
-                            out-vars: ([]string [])
-                            out-binding: (function-output-binding
+          (Function-Clause :op (unquote (source (nth expr 0)))
+                            :terms ([]Term [(splice (emit-predicate-terms (rest expr)))])
+                            :out-vars ([]string [])
+                            :out-binding (function-output-binding
                                            (unquote (emit-input-binding out)))
-                            is-tuple: true}))
+                            :is-tuple true))
         (quasiquote
-          (Function-Clause {op: (unquote (source (nth expr 0)))
-                            terms: ([]Term [(splice (emit-predicate-terms (rest expr)))])
-                            out: (unquote (emit-find-var out))}))))
+          (Function-Clause :op (unquote (source (nth expr 0)))
+                            :terms ([]Term [(splice (emit-predicate-terms (rest expr)))])
+                            :out (unquote (emit-find-var out))))))
     (error "function clauses must have shape [(op arg ...) ?out]")))
 
 (defmacro- emit-datalog-function-out-vars [forms]
@@ -1493,12 +1493,12 @@
   (if (get-else-clause? form)
     (let [expr (first form)]
       (quasiquote
-        (Get-Else {source: (unquote (source (nth expr 1)))
-                   has-source: true
-                   e: (unquote (emit-entity-term (nth expr 2)))
-                   a: (unquote (emit-attr (nth expr 3)))
-                   default-value: (unquote (emit-literal-value (nth expr 4)))
-                   out: (unquote (emit-find-var (nth form 1)))})))
+        (Get-Else :source (unquote (source (nth expr 1)))
+                   :has-source true
+                   :e (unquote (emit-entity-term (nth expr 2)))
+                   :a (unquote (emit-attr (nth expr 3)))
+                   :default-value (unquote (emit-literal-value (nth expr 4)))
+                   :out (unquote (emit-find-var (nth form 1))))))
     (error "get-else clauses must have shape [(get-else $ ?e :attr default) ?out]")))
 
 (defmacro- emit-get-some-attrs [forms]
@@ -1513,12 +1513,12 @@
     (let [expr (first form)
           out (nth form 1)]
       (quasiquote
-        (Get-Some {source: (unquote (source (nth expr 1)))
-                   has-source: true
-                   e: (unquote (emit-entity-term (nth expr 2)))
-                   attrs: ([dynamic]string [(splice (emit-get-some-attrs (slice expr 3)))])
-                   out-attr: (unquote (emit-find-var (nth out 0)))
-                   out-value: (unquote (emit-find-var (nth out 1)))})))
+        (Get-Some :source (unquote (source (nth expr 1)))
+                   :has-source true
+                   :e (unquote (emit-entity-term (nth expr 2)))
+                   :attrs ([dynamic]string [(splice (emit-get-some-attrs (slice expr 3)))])
+                   :out-attr (unquote (emit-find-var (nth out 0)))
+                   :out-value (unquote (emit-find-var (nth out 1))))))
     (error "get-some clauses must have shape [(get-some $ ?e :attr ...) [?a ?v]]")))
 
 (defmacro- emit-ground-tuple-vars [forms]
@@ -1543,39 +1543,39 @@
           out (nth form 1)]
       (if (ground-relation-output? out)
         (quasiquote
-          (Ground {source: (unquote (emit-value-term value))
-                   out: ""
-                   tuple-vars: ([]string [(splice (emit-ground-tuple-vars (nth out 0)))])
-                   binding: (unquote (emit-input-binding out))
-                   is-collection: false
-                   is-tuple: false
-                   is-relation: true
-                   width: (unquote (count (nth out 0)))}))
+          (Ground :source (unquote (emit-value-term value))
+                   :out ""
+                   :tuple-vars ([]string [(splice (emit-ground-tuple-vars (nth out 0)))])
+                   :binding (unquote (emit-input-binding out))
+                   :is-collection false
+                   :is-tuple false
+                   :is-relation true
+                   :width (unquote (count (nth out 0)))))
         (if (input-collection? out)
           (quasiquote
-            (Ground {source: (unquote (emit-value-term value))
-                     out: (unquote (emit-input-var out))
-                     tuple-vars: ([]string [])
-                     binding: (unquote (emit-input-binding out))
-                     is-collection: true
-                     is-tuple: false
-                     is-relation: false}))
+            (Ground :source (unquote (emit-value-term value))
+                     :out (unquote (emit-input-var out))
+                     :tuple-vars ([]string [])
+                     :binding (unquote (emit-input-binding out))
+                     :is-collection true
+                     :is-tuple false
+                     :is-relation false))
         (if (vector? out)
           (quasiquote
-            (Ground {source: (unquote (emit-value-term value))
-                     out: ""
-                     tuple-vars: ([]string [(splice (emit-ground-tuple-vars out))])
-                     binding: (unquote (emit-input-binding out))
-                     is-collection: false
-                     is-tuple: true
-                     is-relation: false}))
+            (Ground :source (unquote (emit-value-term value))
+                     :out ""
+                     :tuple-vars ([]string [(splice (emit-ground-tuple-vars out))])
+                     :binding (unquote (emit-input-binding out))
+                     :is-collection false
+                     :is-tuple true
+                     :is-relation false))
           (quasiquote
-            (Ground {source: (unquote (emit-value-term value))
-                     out: (unquote (if (input-wildcard? out) (quasiquote "") (emit-find-var out)))
-                     tuple-vars: ([]string [])
-                     is-collection: false
-                     is-tuple: false
-                     is-relation: false}))))))
+            (Ground :source (unquote (emit-value-term value))
+                     :out (unquote (if (input-wildcard? out) (quasiquote "") (emit-find-var out)))
+                     :tuple-vars ([]string [])
+                     :is-collection false
+                     :is-tuple false
+                     :is-relation false))))))
     (error "ground clauses must have shape [(ground value) ?out], [(ground [...]) [?out ...]], or [(ground [[...]]) [[?out ...]...]]")))
 
 (defmacro- datalog-non-data-clause? [form]
@@ -1628,13 +1628,13 @@
   (if (rule-call? form)
     (if (relation-source? (first form))
       (quasiquote
-        (Rule-Call {name: (unquote (source (nth form 1)))
-                    source: (unquote (source (first form)))
-                    has-source: true
-                    args: ([dynamic]Term [(splice (emit-rule-call-args (slice form 2)))])}))
+        (Rule-Call :name (unquote (source (nth form 1)))
+                    :source (unquote (source (first form)))
+                    :has-source true
+                    :args ([dynamic]Term [(splice (emit-rule-call-args (slice form 2)))])))
       (quasiquote
-        (Rule-Call {name: (unquote (source (first form)))
-                    args: ([dynamic]Term [(splice (emit-rule-call-args (rest form)))])})))
+        (Rule-Call :name (unquote (source (first form)))
+                    :args ([dynamic]Term [(splice (emit-rule-call-args (rest form)))]))))
     (error "rule calls must have shape (rule ?arg ...)")))
 
 (defmacro- emit-datalog-rule-calls [forms]
@@ -2012,22 +2012,22 @@
           pattern (if (= (count form) 4) (nth form 3) (nth form 2))]
       (if (vector? pattern)
         (quasiquote
-          (Pull-Find {var: (unquote (emit-find-var var))
-                      source: (unquote source-name)
-                      has-source: (unquote (= (count form) 4))
-                      has-pattern-var: false
-                      pattern-var: ""
-                      attrs: ([]string [(splice (emit-pull-attrs pattern))])
-                      pattern: ([dynamic]Pull-Spec [(splice (emit-pull-specs pattern))])}))
+          (Pull-Find :var (unquote (emit-find-var var))
+                      :source (unquote source-name)
+                      :has-source (unquote (= (count form) 4))
+                      :has-pattern-var false
+                      :pattern-var ""
+                      :attrs ([]string [(splice (emit-pull-attrs pattern))])
+                      :pattern ([dynamic]Pull-Spec [(splice (emit-pull-specs pattern))])))
         (if (symbol? pattern)
           (quasiquote
-            (Pull-Find {var: (unquote (emit-find-var var))
-                        source: (unquote source-name)
-                        has-source: (unquote (= (count form) 4))
-                        has-pattern-var: true
-                        pattern-var: (unquote (emit-find-var pattern))
-                        attrs: ([]string [])
-                        pattern: ([dynamic]Pull-Spec [])}))
+            (Pull-Find :var (unquote (emit-find-var var))
+                        :source (unquote source-name)
+                        :has-source (unquote (= (count form) 4))
+                        :has-pattern-var true
+                        :pattern-var (unquote (emit-find-var pattern))
+                        :attrs ([]string [])
+                        :pattern ([dynamic]Pull-Spec [])))
           (error "find pull expects a literal vector pattern or an input pattern var"))))
     (error ":find pull expressions must be (pull ?e pattern) or (pull $ ?e pattern)")))
 
@@ -2057,28 +2057,28 @@
     (if (= (count form) 3)
       (if (= (source (first form)) "aggregate")
         (quasiquote
-          (Aggregate-Find {op: (unquote (source (first form)))
-                           var: (unquote (emit-find-var (nth form 2)))
-                           args: ([]Term [(splice (emit-aggregate-value-args form))])
-                           function-var: (unquote (emit-find-var (nth form 1)))
-                           has-function-var: true}))
+          (Aggregate-Find :op (unquote (source (first form)))
+                           :var (unquote (emit-find-var (nth form 2)))
+                           :args ([]Term [(splice (emit-aggregate-value-args form))])
+                           :function-var (unquote (emit-find-var (nth form 1)))
+                           :has-function-var true))
         (if (literal-int? (nth form 1))
           (quasiquote
-            (Aggregate-Find {op: (unquote (source (first form)))
-                             var: (unquote (emit-find-var (nth form 2)))
-                             args: ([]Term [(splice (emit-aggregate-value-args form))])
-                             limit: (unquote (nth form 1))
-                             has-limit: true}))
+            (Aggregate-Find :op (unquote (source (first form)))
+                             :var (unquote (emit-find-var (nth form 2)))
+                             :args ([]Term [(splice (emit-aggregate-value-args form))])
+                             :limit (unquote (nth form 1))
+                             :has-limit true))
           (quasiquote
-            (Aggregate-Find {op: (unquote (source (first form)))
-                             var: (unquote (emit-find-var (nth form 2)))
-                             args: ([]Term [(splice (emit-aggregate-value-args form))])
-                             limit-var: (unquote (emit-find-var (nth form 1)))
-                             has-limit-var: true}))))
+            (Aggregate-Find :op (unquote (source (first form)))
+                             :var (unquote (emit-find-var (nth form 2)))
+                             :args ([]Term [(splice (emit-aggregate-value-args form))])
+                             :limit-var (unquote (emit-find-var (nth form 1)))
+                             :has-limit-var true))))
       (quasiquote
-        (Aggregate-Find {op: (unquote (source (first form)))
-                         var: (unquote (emit-find-var (nth form 1)))
-                         args: ([]Term [(splice (emit-aggregate-value-args form))])})))
+        (Aggregate-Find :op (unquote (source (first form)))
+                         :var (unquote (emit-find-var (nth form 1)))
+                         :args ([]Term [(splice (emit-aggregate-value-args form))]))))
     (error "aggregate find expressions currently support count, count-distinct, distinct, min, max, sum, avg, median, variance, stddev, rand, sample, and aggregate")))
 
 (defmacro- emit-aggregate-finds [forms]
@@ -2170,8 +2170,8 @@
     (forms)
     (forms
       (quasiquote
-        (Query-Input {kind: .Scalar
-                      value: (unquote (emit-literal-value (first forms)))}))
+        (Query-Input :kind .Scalar
+                      :value (unquote (emit-literal-value (first forms)))))
       (emit-query-inputs (rest forms)))))
 
 (defmacro- emit-query-input-values [forms]
@@ -2228,26 +2228,26 @@
 (defmacro- emit-query-input [form]
   (if (query-input-lookup-ref? form)
     (quasiquote
-      (Query-Input {kind: .Scalar
-                    has-lookup-ref: true
-                    lookup-attr: (unquote (emit-attr (nth form 0)))
-                    lookup-value: (unquote (emit-literal-value (nth form 1)))}))
+      (Query-Input :kind .Scalar
+                    :has-lookup-ref true
+                    :lookup-attr (unquote (emit-attr (nth form 0)))
+                    :lookup-value (unquote (emit-literal-value (nth form 1)))))
     (if (vector? form)
       (if (> (count form) 0)
         (if (vector? (first form))
           (quasiquote
-            (Query-Input {kind: .Relation
-                          values: ([]Value [(splice (emit-query-relation-input-values form))])
-                          width: (unquote (count (first form)))}))
+            (Query-Input :kind .Relation
+                          :values ([]Value [(splice (emit-query-relation-input-values form))])
+                          :width (unquote (count (first form)))))
           (quasiquote
-            (Query-Input {kind: .Collection
-                          values: ([]Value [(splice (emit-query-input-values form))])})))
+            (Query-Input :kind .Collection
+                          :values ([]Value [(splice (emit-query-input-values form))]))))
         (quasiquote
-          (Query-Input {kind: .Collection
-                        values: ([]Value [])})))
+          (Query-Input :kind .Collection
+                        :values ([]Value []))))
       (quasiquote
-        (Query-Input {kind: .Scalar
-                      value: (unquote (emit-literal-value form))})))))
+        (Query-Input :kind .Scalar
+                      :value (unquote (emit-literal-value form)))))))
 
 (defmacro- pull-find-pattern-var-name [form]
   (if (pull-find? form)
@@ -2283,9 +2283,9 @@
 
 (defmacro- emit-query-collection-lookup-ref-input [value]
   (quasiquote
-    (Query-Input {kind: .CollectionLookupRefs
-                  lookup-attrs: ([]string [(splice (emit-query-input-lookup-ref-attrs value))])
-                  lookup-values: ([]Value [(splice (emit-query-input-lookup-ref-values value))])})))
+    (Query-Input :kind .CollectionLookupRefs
+                  :lookup-attrs ([]string [(splice (emit-query-input-lookup-ref-attrs value))])
+                  :lookup-values ([]Value [(splice (emit-query-input-lookup-ref-values value))]))))
 
 (defmacro- collection-lookup-ref-input? [spec value]
   (if (input-collection? spec)
@@ -2310,16 +2310,16 @@
 (defmacro- emit-query-scalar-lookup-ref-input [value]
   (if (keyword? (nth value 0))
     (quasiquote
-      (Query-Input {kind: .Scalar
-                    has-lookup-ref: true
-                    lookup-attr: (unquote (emit-attr (nth value 0)))
-                    lookup-value: (unquote (emit-literal-value (nth value 1)))}))
+      (Query-Input :kind .Scalar
+                    :has-lookup-ref true
+                    :lookup-attr (unquote (emit-attr (nth value 0)))
+                    :lookup-value (unquote (emit-literal-value (nth value 1)))))
     (error "lookup-ref scalar inputs require keyword attrs")))
 
 (defmacro- emit-query-scalar-input [value]
   (quasiquote
-    (Query-Input {kind: .Scalar
-                  value: (unquote (emit-literal-value value))})))
+    (Query-Input :kind .Scalar
+                  :value (unquote (emit-literal-value value)))))
 
 (defmacro- scalar-input-spec? [spec]
   (not (or (input-source? spec)
@@ -2342,9 +2342,9 @@
         (if (and (input-relation? spec) (brace? value))
           (if (= (count (first spec)) 2)
             (quasiquote
-              (Query-Input {kind: .Relation
-                            values: ([]Value [(splice (emit-query-map-relation-input-values value))])
-                            width: 2}))
+              (Query-Input :kind .Relation
+                            :values ([]Value [(splice (emit-query-map-relation-input-values value))])
+                            :width 2))
             (error "map relation inputs require a two-column relation spec"))
           (if (scalar-input-spec? spec)
             (emit-query-scalar-input value)
@@ -2398,7 +2398,7 @@
     (let [spec (first specs)]
       (if (input-db-source? spec)
         (forms
-          (quasiquote (DB-Source {name: (unquote (source spec)) db: (unquote (first values))}))
+          (quasiquote (DB-Source :name (unquote (source spec)) :db (unquote (first values))))
           (emit-query-db-source-list (rest specs) (rest values)))
         (if (input-source? spec)
           (if (= (source spec) "%")

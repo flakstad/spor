@@ -16,7 +16,7 @@
   (case term.kind
     .Value (return term.value true)
     .Var (return (binding-lookup binding term.name))
-     (return (Value {}) false)))
+     (return (Value []) false)))
 
 (defn resolve-entity-term [db: DB, term: Term, binding: Binding] -> [value: Value, ok: bool]
   (when (= term.kind .LookupRef)
@@ -78,28 +78,28 @@
     (query-op-value-name value)))
 
 (defn query-fn [name: string, target: string] -> Native-Query-Fn
-  (Native-Query-Fn {name: name target: target}))
+  (Native-Query-Fn :name name :target target))
 
 (defn query-predicate-fn [name: string, f: fn [args: []Value] -> bool] -> Native-Query-Fn
-  (Native-Query-Fn {name: name has-predicate-callback: true predicate-callback: f}))
+  (Native-Query-Fn :name name :has-predicate-callback true :predicate-callback f))
 
 (defn query-db-predicate-fn [name: string, f: fn [db: DB, args: []Value] -> bool] -> Native-Query-Fn
-  (Native-Query-Fn {name: name has-db-predicate-callback: true db-predicate-callback: f}))
+  (Native-Query-Fn :name name :has-db-predicate-callback true :db-predicate-callback f))
 
 (defn native-query-function-result [value: Value] -> Native-Query-Function-Result
-  (Native-Query-Function-Result {ok: true value: value}))
+  (Native-Query-Function-Result :ok true :value value))
 
 (defn native-query-function-none [] -> Native-Query-Function-Result
-  (Native-Query-Function-Result {ok: false}))
+  (Native-Query-Function-Result :ok false))
 
 (defn query-value-fn [name: string, f: fn [args: []Value] -> Native-Query-Function-Result] -> Native-Query-Fn
-  (Native-Query-Fn {name: name has-function-callback: true function-callback: f}))
+  (Native-Query-Fn :name name :has-function-callback true :function-callback f))
 
 (defn query-aggregate-fn [name: string, f: fn [values: []Value] -> Native-Query-Function-Result] -> Native-Query-Fn
-  (Native-Query-Fn {name: name has-aggregate-callback: true aggregate-callback: f}))
+  (Native-Query-Fn :name name :has-aggregate-callback true :aggregate-callback f))
 
 (defn pull-xform-fn [name: string, f: fn [value: Value] -> Native-Query-Function-Result] -> Native-Query-Fn
-  (Native-Query-Fn {name: name has-pull-xform-callback: true pull-xform-callback: f}))
+  (Native-Query-Fn :name name :has-pull-xform-callback true :pull-xform-callback f))
 
 (defn query-fn-index [registry: []Native-Query-Fn, name: string] -> [index: int, ok: bool]
   (for [entry index registry]
@@ -142,15 +142,15 @@
 (defn re-find-value [pattern: Value, text: Value] -> [value: Value, ok: bool]
   (when (not (and (= pattern.kind .String)
                   (= text.kind .String)))
-    (return (Value {}) false))
+    (return (Value []) false))
   (let [[iter err] (regex.create_iterator text.text pattern.text)]
     (when (!= err nil)
-      (return (Value {}) false))
+      (return (Value []) false))
     (defer (regex.destroy iter))
     (let [[capture _ ok] (regex.match (addr iter))]
       (when (and ok (> (count capture.groups) 0))
         (return (value-string capture.groups[0]) true))))
-  (return (Value {}) false))
+  (return (Value []) false))
 
 (defn value-str [value: Value] -> [text: string, ok: bool]
   (case value.kind
@@ -216,7 +216,7 @@
         (arr.push! parts (fmt.tprintf "%d:%s;" (count part) part))))
     (return (core-strings.concatenate (slice parts 0)) true)))
 
-(defn delete-owned-string-set [values: (map string (struct {}))]
+(defn delete-owned-string-set [values: (map string (struct []))]
   (for [value values]
     (delete value))
   (delete values))
@@ -267,20 +267,20 @@
       (let [values ([]Value [first second])]
         (row-values-dedupe-key values))))
 
-(defstruct Two-Primitive-Seen {
-  generic: (map string (struct {}))
+(defstruct Two-Primitive-Seen [
+  generic: (map string (struct []))
   string-int: map[string]i64
-  string-int-extra: (map string (struct {}))
+  string-int-extra: (map string (struct []))
   int-string: map[i64]string
-  int-string-extra: (map string (struct {}))
-})
+  int-string-extra: (map string (struct []))
+])
 
 (defn two-primitive-seen [] -> Two-Primitive-Seen
-  (Two-Primitive-Seen {generic: (set.empty string)
-                       string-int: (make (map string i64))
-                       string-int-extra: (set.empty string)
-                       int-string: (make (map i64 string))
-                       int-string-extra: (set.empty string)}))
+  (Two-Primitive-Seen :generic (set.empty string)
+                       :string-int (make (map string i64))
+                       :string-int-extra (set.empty string)
+                       :int-string (make (map i64 string))
+                       :int-string-extra (set.empty string)))
 
 (defn delete-two-primitive-seen [seen: Two-Primitive-Seen]
   (delete seen.generic)
@@ -455,11 +455,11 @@
               (return false))
             (return (entry.db-predicate-callback db (slice args 0)))))
         (when (> (count entry.target) 0)
-          (return (predicate-matches? (Predicate {op: entry.target terms: predicate.terms}) binding)))
+          (return (predicate-matches? (Predicate :op entry.target :terms predicate.terms) binding)))
         (return false)))))
 
 (defn predicate-matches-with-fns? [predicate: Predicate, binding: Binding, registry: []Native-Query-Fn] -> bool
-  (predicate-matches-with-db-and-fns? (DB {}) predicate binding registry))
+  (predicate-matches-with-db-and-fns? (DB []) predicate binding registry))
 
 (defn typed-predicate-op-name [predicate: Predicate, registry: []Native-Query-Fn] -> [op: string, ok: bool]
   (when (query-var-name? predicate.op)

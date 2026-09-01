@@ -12,14 +12,14 @@
 (import d "../clients/kvist/vev")
 (import native "../clients/odin/vev")
 
-(defstruct Ro-Demo-Ids {
+(defstruct Ro-Demo-Ids [
   property-value: i64
   item: i64
   property-def: i64
   actor: i64
-})
+])
 
-(defstruct Samples {
+(defstruct Samples [
   public-total: [dynamic]f64
   manual-total: [dynamic]f64
   edn-write: [dynamic]f64
@@ -65,56 +65,56 @@
   canonical-append: [dynamic]f64
   derived-bookkeeping: [dynamic]f64
   sqlite-commit: [dynamic]f64
-})
+])
 
 (defn empty-samples [capacity: int] -> Samples
-  (Samples {
-    public-total: (make [dynamic]f64 0 capacity)
-    manual-total: (make [dynamic]f64 0 capacity)
-    edn-write: (make [dynamic]f64 0 capacity)
-    native-call: (make [dynamic]f64 0 capacity)
-    db-before-retain: (make [dynamic]f64 0 capacity)
-    db-after-retain: (make [dynamic]f64 0 capacity)
-    report-edn-write: (make [dynamic]f64 0 capacity)
-    report-edn-read: (make [dynamic]f64 0 capacity)
-    report-value-materialize: (make [dynamic]f64 0 capacity)
-    abi-input-copy: (make [dynamic]f64 0 capacity)
-    native-engine: (make [dynamic]f64 0 capacity)
-    native-report-handle: (make [dynamic]f64 0 capacity)
-    native-listener: (make [dynamic]f64 0 capacity)
-    native-cleanup: (make [dynamic]f64 0 capacity)
-    effective-datoms: (make [dynamic]f64 0 capacity)
-    parsing: (make [dynamic]f64 0 capacity)
-    resolution: (make [dynamic]f64 0 capacity)
-    resolution-lookup-ref: (make [dynamic]f64 0 capacity)
-    resolution-ident: (make [dynamic]f64 0 capacity)
-    resolution-tempid: (make [dynamic]f64 0 capacity)
-    resolution-op-generation: (make [dynamic]f64 0 capacity)
-    resolution-lookup-ref-count: (make [dynamic]f64 0 capacity)
-    resolution-ident-count: (make [dynamic]f64 0 capacity)
-    resolution-tempid-count: (make [dynamic]f64 0 capacity)
-    resolution-current-tx-count: (make [dynamic]f64 0 capacity)
-    resolution-generated-op-count: (make [dynamic]f64 0 capacity)
-    validation: (make [dynamic]f64 0 capacity)
-    planning: (make [dynamic]f64 0 capacity)
-    planning-current-fact: (make [dynamic]f64 0 capacity)
-    planning-schema: (make [dynamic]f64 0 capacity)
-    planning-cardinality: (make [dynamic]f64 0 capacity)
-    planning-unique: (make [dynamic]f64 0 capacity)
-    planning-normalization: (make [dynamic]f64 0 capacity)
-    planning-ownership: (make [dynamic]f64 0 capacity)
-    planning-current-fact-count: (make [dynamic]f64 0 capacity)
-    planning-schema-lookup-count: (make [dynamic]f64 0 capacity)
-    planning-cardinality-lookup-count: (make [dynamic]f64 0 capacity)
-    planning-unique-lookup-count: (make [dynamic]f64 0 capacity)
-    planning-retraction-count: (make [dynamic]f64 0 capacity)
-    planning-owned-op-count: (make [dynamic]f64 0 capacity)
-    db-after: (make [dynamic]f64 0 capacity)
-    report-ownership: (make [dynamic]f64 0 capacity)
-    canonical-append: (make [dynamic]f64 0 capacity)
-    derived-bookkeeping: (make [dynamic]f64 0 capacity)
-    sqlite-commit: (make [dynamic]f64 0 capacity)
-  }))
+  (Samples
+    :public-total (make [dynamic]f64 0 capacity)
+    :manual-total (make [dynamic]f64 0 capacity)
+    :edn-write (make [dynamic]f64 0 capacity)
+    :native-call (make [dynamic]f64 0 capacity)
+    :db-before-retain (make [dynamic]f64 0 capacity)
+    :db-after-retain (make [dynamic]f64 0 capacity)
+    :report-edn-write (make [dynamic]f64 0 capacity)
+    :report-edn-read (make [dynamic]f64 0 capacity)
+    :report-value-materialize (make [dynamic]f64 0 capacity)
+    :abi-input-copy (make [dynamic]f64 0 capacity)
+    :native-engine (make [dynamic]f64 0 capacity)
+    :native-report-handle (make [dynamic]f64 0 capacity)
+    :native-listener (make [dynamic]f64 0 capacity)
+    :native-cleanup (make [dynamic]f64 0 capacity)
+    :effective-datoms (make [dynamic]f64 0 capacity)
+    :parsing (make [dynamic]f64 0 capacity)
+    :resolution (make [dynamic]f64 0 capacity)
+    :resolution-lookup-ref (make [dynamic]f64 0 capacity)
+    :resolution-ident (make [dynamic]f64 0 capacity)
+    :resolution-tempid (make [dynamic]f64 0 capacity)
+    :resolution-op-generation (make [dynamic]f64 0 capacity)
+    :resolution-lookup-ref-count (make [dynamic]f64 0 capacity)
+    :resolution-ident-count (make [dynamic]f64 0 capacity)
+    :resolution-tempid-count (make [dynamic]f64 0 capacity)
+    :resolution-current-tx-count (make [dynamic]f64 0 capacity)
+    :resolution-generated-op-count (make [dynamic]f64 0 capacity)
+    :validation (make [dynamic]f64 0 capacity)
+    :planning (make [dynamic]f64 0 capacity)
+    :planning-current-fact (make [dynamic]f64 0 capacity)
+    :planning-schema (make [dynamic]f64 0 capacity)
+    :planning-cardinality (make [dynamic]f64 0 capacity)
+    :planning-unique (make [dynamic]f64 0 capacity)
+    :planning-normalization (make [dynamic]f64 0 capacity)
+    :planning-ownership (make [dynamic]f64 0 capacity)
+    :planning-current-fact-count (make [dynamic]f64 0 capacity)
+    :planning-schema-lookup-count (make [dynamic]f64 0 capacity)
+    :planning-cardinality-lookup-count (make [dynamic]f64 0 capacity)
+    :planning-unique-lookup-count (make [dynamic]f64 0 capacity)
+    :planning-retraction-count (make [dynamic]f64 0 capacity)
+    :planning-owned-op-count (make [dynamic]f64 0 capacity)
+    :db-after (make [dynamic]f64 0 capacity)
+    :report-ownership (make [dynamic]f64 0 capacity)
+    :canonical-append (make [dynamic]f64 0 capacity)
+    :derived-bookkeeping (make [dynamic]f64 0 capacity)
+    :sqlite-commit (make [dynamic]f64 0 capacity)
+  ))
 
 (defn delete-samples [samples: ^Samples]
   (delete samples^.public-total)
@@ -252,7 +252,7 @@
     (vector-data items)))
 
 (defn workload-tx
-  [workload: string, sample: int, ro-ids: Ro-Demo-Ids = (Ro-Demo-Ids {})]
+  [workload: string, sample: int, ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids [])]
   -> Data
   (when (or (= workload "ro-demo")
             (= workload "ro-demo-no-provenance"))
@@ -334,7 +334,7 @@
 
 (defn seed-native!
   [conn: ^native.Durable-Connection, entity-count: int,
-   extra-schema-attrs: int = 0, schema-churn: int = 0]
+   extra-schema-attrs: int :default 0, schema-churn: int :default 0]
   (let [schema (schema-tx-with-extra-attrs extra-schema-attrs)]
     (defer (data.release schema))
     (native-transact-data! conn schema))
@@ -353,7 +353,7 @@
 
 (defn seed-public!
   [conn: d.Conn, entity-count: int,
-   extra-schema-attrs: int = 0, schema-churn: int = 0]
+   extra-schema-attrs: int :default 0, schema-churn: int :default 0]
   (let [schema (schema-tx-with-extra-attrs extra-schema-attrs)]
     (defer (data.release schema))
     (let [report (d.transact-data conn schema)]
@@ -429,12 +429,12 @@
   (let [snapshot (d.db conn)]
     (defer (d.close snapshot))
     (Ro-Demo-Ids
-      {property-value:
+      :property-value
          (ro-demo-entid snapshot
            "value-item-demo-plan-property-inbox-priority")
-       item: (ro-demo-entid snapshot "item-demo-plan")
-       property-def: (ro-demo-entid snapshot "property-inbox-priority")
-       actor: (ro-demo-entid snapshot "actor-local")})))
+       :item (ro-demo-entid snapshot "item-demo-plan")
+       :property-def (ro-demo-entid snapshot "property-inbox-priority")
+       :actor (ro-demo-entid snapshot "actor-local"))))
 
 (defn instant-text [unix-millis: i64] -> string
   (let [[datetime ok]
@@ -634,7 +634,7 @@
 
 (defn measure-public!
   [samples: ^Samples, conn: d.Conn, workload: string, sample: int,
-   ro-ids: Ro-Demo-Ids = (Ro-Demo-Ids {})]
+   ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids [])]
   (prepare-public! conn workload sample)
   (let [tx (workload-tx workload sample ro-ids)]
     (defer (data.release tx))
@@ -649,7 +649,7 @@
 (defn measure-manual!
   [samples: ^Samples, conn: ^native.Durable-Connection,
    workload: string, sample: int,
-   ro-ids: Ro-Demo-Ids = (Ro-Demo-Ids {})]
+   ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids [])]
   (prepare-native! conn workload sample)
   (let [tx (workload-tx workload sample ro-ids)]
     (defer (data.release tx))
@@ -702,7 +702,7 @@
 (defn measure-profile!
   [samples: ^Samples, conn: ^native.Durable-Connection,
    workload: string, sample: int,
-   ro-ids: Ro-Demo-Ids = (Ro-Demo-Ids {})]
+   ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids [])]
   (prepare-native! conn workload sample)
   (let [tx (workload-tx workload sample ro-ids)
         tx-text (edn.write tx)]
@@ -775,7 +775,7 @@
 
 (defn run-workload
   [database: string, entities: int, workload: string, sample-count: int,
-   extra-schema-attrs: int = 0, schema-churn: int = 0]
+   extra-schema-attrs: int :default 0, schema-churn: int :default 0]
   (let [public-path (fmt.tprintf "tmp.vev.kvist-boundary.%s.%s.public.sqlite" database workload)
         native-path (fmt.tprintf "tmp.vev.kvist-boundary.%s.%s.native.sqlite" database workload)]
     (remove-sqlite-files public-path)
@@ -839,7 +839,7 @@
           (native-transact-data! (addr native-conn) native-seed-tx)))
       (let [ids (if (= workload "ro-demo-resolved-ids")
                   (ro-demo-ids public-conn)
-                  (Ro-Demo-Ids {}))
+                  (Ro-Demo-Ids []))
             samples (empty-samples sample-count)]
         (for [sample (arr.range 0 sample-count)]
           (measure-public! (addr samples) public-conn workload sample ids)

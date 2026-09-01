@@ -13,11 +13,11 @@
     :else true))
 
 (defn db-read-source-pull-default-attr [spec: Pull-Spec] -> Pull-Attr
-  (Pull-Attr {a: (string-owned (pull-output-attr spec))
-              a-owned: true
-              key-kind: (pull-output-key-kind spec)
-              v: (value-owned spec.default-value)
-              attrs: (make [dynamic]Pull-Attr)}))
+  (Pull-Attr :a (string-owned (pull-output-attr spec))
+              :a-owned true
+              :key-kind (pull-output-key-kind spec)
+              :v (value-owned spec.default-value)
+              :attrs (make [dynamic]Pull-Attr)))
 
 (defn db-read-source-pull-missing-attr [spec: Pull-Spec] -> Pull-Attr
   (if spec.has-default
@@ -84,12 +84,12 @@
         (arr.push! attrs^
           (pull-spec-transform-attr-with-fns
             spec
-            (Pull-Attr {a: (string-owned (pull-output-attr spec))
-                        a-owned: true
-                        key-kind: (pull-output-key-kind spec)
-                        v: (value-entity datom.e)
-                        attrs: children
-                        has-explicit-pattern: (> (count spec.pattern) 0)})
+            (Pull-Attr :a (string-owned (pull-output-attr spec))
+                        :a-owned true
+                        :key-kind (pull-output-key-kind spec)
+                        :v (value-entity datom.e)
+                        :attrs children
+                        :has-explicit-pattern (> (count spec.pattern) 0))
             registry)))
       (delete-pull-attrs-owned-values children)))
   (return true ""))
@@ -130,12 +130,12 @@
         (arr.push! attrs^
           (pull-spec-transform-attr-with-fns
             spec
-            (Pull-Attr {a: (string-owned (pull-output-attr spec))
-                        a-owned: true
-                        key-kind: (pull-output-key-kind spec)
-                        v: (value-owned datom.v)
-                        attrs: children
-                        has-explicit-pattern: (> (count spec.pattern) 0)})
+            (Pull-Attr :a (string-owned (pull-output-attr spec))
+                        :a-owned true
+                        :key-kind (pull-output-key-kind spec)
+                        :v (value-owned datom.v)
+                        :attrs children
+                        :has-explicit-pattern (> (count spec.pattern) 0))
             registry)))
       (delete-pull-attrs-owned-values children)))
   (return true ""))
@@ -148,7 +148,7 @@
         (do
           (when (not (db-read-source-pull-spec-supported? spec registry))
             (delete-pull-attrs-owned-values attrs)
-            (return (Pull-Result {}) false "SQLite DB snapshot source currently supports forward, wildcard, reverse, nested, pattern-input, default, limit, recursion, and built-in xform pull attrs only"))
+            (return (Pull-Result []) false "SQLite DB snapshot source currently supports forward, wildcard, reverse, nested, pattern-input, default, limit, recursion, and built-in xform pull attrs only"))
           (when (not (= spec.a "*"))
             (pull-remove-output-attr-owned-values! (addr attrs) (pull-output-attr spec)))
           (cond
@@ -156,51 +156,51 @@
               (do
                 (when (not (pull-output-has-attr? attrs ":db/id"))
                   (arr.push! attrs
-                    (Pull-Attr {a: ":db/id"
-                                key-kind: .Keyword
-                                v: (value-entity entity)
-                                attrs: (make [dynamic]Pull-Attr)})))
+                    (Pull-Attr :a ":db/id"
+                                :key-kind .Keyword
+                                :v (value-entity entity)
+                                :attrs (make [dynamic]Pull-Attr))))
                 (if (db-read-source-has-overlay? source)
                   (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity source entity)]
                     (when (not datoms-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result {}) false datoms-error))
+                      (return (Pull-Result []) false datoms-error))
                     (for [datom datoms]
                       (arr.push! attrs
-                        (Pull-Attr {a: (string-owned datom.a)
-                                    a-owned: true
-                                    key-kind: .Keyword
-                                    v: (value-owned datom.v)
-                                    attrs: (make [dynamic]Pull-Attr)})))
+                        (Pull-Attr :a (string-owned datom.a)
+                                    :a-owned true
+                                    :key-kind .Keyword
+                                    :v (value-owned datom.v)
+                                    :attrs (make [dynamic]Pull-Attr))))
                     (delete-owned-datoms datoms))
                   (let [[stream stream-ok stream-error] (source-eavt-entity-stream source entity)]
                     (when (not stream-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result {}) false stream-error))
+                      (return (Pull-Result []) false stream-error))
                     (while stream.has-current
                       ;; Keep every current datom. The renderer groups repeated
                       ;; attributes into cardinality-many vectors.
                       (arr.push! attrs
-                        (Pull-Attr {a: (string-owned stream.current.a)
-                                    a-owned: true
-                                    key-kind: .Keyword
-                                    v: (value-owned stream.current.v)
-                                    attrs: (make [dynamic]Pull-Attr)}))
+                        (Pull-Attr :a (string-owned stream.current.a)
+                                    :a-owned true
+                                    :key-kind .Keyword
+                                    :v (value-owned stream.current.v)
+                                    :attrs (make [dynamic]Pull-Attr)))
                       (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
                         (when (not advance-ok)
                           (delete-source-index-datom-stream stream)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result {}) false advance-error))))
+                          (return (Pull-Result []) false advance-error))))
                     (delete-source-index-datom-stream stream))))
             (= spec.a ":db/id")
               (arr.push! attrs
                 (pull-spec-transform-attr-with-fns
                   spec
-                  (Pull-Attr {a: (string-owned (pull-output-attr spec))
-                              a-owned: true
-                              key-kind: (pull-output-key-kind spec)
-                              v: (value-entity entity)
-                              attrs: (make [dynamic]Pull-Attr)})
+                  (Pull-Attr :a (string-owned (pull-output-attr spec))
+                              :a-owned true
+                              :key-kind (pull-output-key-kind spec)
+                              :v (value-entity entity)
+                              :attrs (make [dynamic]Pull-Attr))
                   registry))
             (reverse-attr? spec.a)
               (let [forward-attr (forward-attr-for-reverse spec.a) :defer
@@ -210,29 +210,29 @@
                   (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-reverse-entity-attr source entity forward-attr)]
                     (when (not datoms-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result {}) false datoms-error))
+                      (return (Pull-Result []) false datoms-error))
                     (for [datom datoms]
                       (let [[append-ok append-error] (append-db-read-source-reverse-pull-datom! (addr attrs) source spec root seen-counts registry datom (addr seen) limit)]
                         (when (not append-ok)
                           (delete-owned-datoms datoms)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result {}) false append-error))))
+                          (return (Pull-Result []) false append-error))))
                     (delete-owned-datoms datoms))
                   (let [[stream stream-ok stream-error] (source-vaet-entity-attr-stream source entity forward-attr)]
                     (when (not stream-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result {}) false stream-error))
+                      (return (Pull-Result []) false stream-error))
                     (while (and stream.has-current (< seen limit))
                       (let [[append-ok append-error] (append-db-read-source-reverse-pull-datom! (addr attrs) source spec root seen-counts registry stream.current (addr seen) limit)]
                         (when (not append-ok)
                           (delete-source-index-datom-stream stream)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result {}) false append-error)))
+                          (return (Pull-Result []) false append-error)))
                       (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
                         (when (not advance-ok)
                           (delete-source-index-datom-stream stream)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result {}) false advance-error))))
+                          (return (Pull-Result []) false advance-error))))
                     (delete-source-index-datom-stream stream)))
                 (when (and (= seen 0) (or spec.has-default spec.has-xform))
                   (arr.push! attrs (db-read-source-pull-missing-attr-with-fns spec registry))))
@@ -243,33 +243,33 @@
                   (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity spec.a)]
                     (when (not datoms-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result {}) false datoms-error))
+                      (return (Pull-Result []) false datoms-error))
                     (for [datom datoms]
                       (let [[append-ok append-error] (append-db-read-source-forward-pull-datom! (addr attrs) source spec root seen-counts registry datom (addr seen) limit)]
                         (when (not append-ok)
                           (delete-owned-datoms datoms)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result {}) false append-error))))
+                          (return (Pull-Result []) false append-error))))
                     (delete-owned-datoms datoms))
                   (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity spec.a)]
                     (when (not stream-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result {}) false stream-error))
+                      (return (Pull-Result []) false stream-error))
                     (while (and stream.has-current (< seen limit))
                       (let [[append-ok append-error] (append-db-read-source-forward-pull-datom! (addr attrs) source spec root seen-counts registry stream.current (addr seen) limit)]
                         (when (not append-ok)
                           (delete-source-index-datom-stream stream)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result {}) false append-error)))
+                          (return (Pull-Result []) false append-error)))
                       (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
                         (when (not advance-ok)
                           (delete-source-index-datom-stream stream)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result {}) false advance-error))))
+                          (return (Pull-Result []) false advance-error))))
                     (delete-source-index-datom-stream stream)))
                 (when (and (= seen 0) (or spec.has-default spec.has-xform))
                   (arr.push! attrs (db-read-source-pull-missing-attr-with-fns spec registry))))))))
-    (return (Pull-Result {e: entity attrs: attrs}) true "")))
+    (return (Pull-Result :e entity :attrs attrs) true "")))
 
 (defn db-read-source-pull-result-for-pattern [source: DB-Read-Source, entity: u64, pattern: []Pull-Spec] -> [result: Pull-Result, ok: bool, error: string]
   (db-read-source-pull-result-for-pattern-with-fns source entity pattern ([]Native-Query-Fn [])))
@@ -402,7 +402,7 @@
             pulls (make [dynamic]Pull-Result)]
         (for [aggregate query-value.aggregates]
           (arr.push! values (aggregate-value-for-group-with-fns bindings query-value aggregate ([]Value []) registry)))
-        (arr.push! rows (Result-Row {values: values pulls: pulls}))
+        (arr.push! rows (Result-Row :values values :pulls pulls))
         (return (result-set-ok rows))))
     (for [binding bindings]
       (let [[group-values group-ok] (binding-values-for-vars binding (slice query-value.find 0))]
@@ -427,7 +427,7 @@
                 (for [aggregate query-value.aggregates]
                   (arr.push! values (aggregate-value-for-group-with-fns bindings query-value aggregate (slice group-values 0) registry)))
                 (delete group-values)
-                (arr.push! rows (Result-Row {values: values pulls: pulls}))))))))
+                (arr.push! rows (Result-Row :values values :pulls pulls))))))))
     (result-set-ok rows)))
 
 (defn db-read-source-result-rows-for-bindings-with-sources-and-fns [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, bindings: []Binding, registry: []Native-Query-Fn] -> Result-Set
@@ -474,19 +474,19 @@
           (do
             (if trust-unique-bindings
               (do
-                (arr.push! rows (Result-Row {values: values pulls: pulls}))
+                (arr.push! rows (Result-Row :values values :pulls pulls))
                 (set! pushed true))
               (let [[key key-ok] (result-row-dedupe-key (slice dedupe-values 0) (slice pulls 0))]
                 (if key-ok
                   (let [already-seen (set.contains? seen key)]
                     (when (not already-seen)
                       (set.add! seen key)
-                      (arr.push! rows (Result-Row {values: values pulls: pulls}))
+                      (arr.push! rows (Result-Row :values values :pulls pulls))
                       (set! pushed true))
                     (when already-seen
                       (delete key)))
                   (when (not (row-values-exist? (slice rows 0) (slice dedupe-values 0)))
-                    (arr.push! rows (Result-Row {values: values pulls: pulls}))
+                    (arr.push! rows (Result-Row :values values :pulls pulls))
                     (set! pushed true)))))
             (delete dedupe-values)
             (when (not pushed)

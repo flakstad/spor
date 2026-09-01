@@ -23,22 +23,22 @@
        (= clause-value.e.name name)))
 
 (defn empty-source-same-entity-ref-fanout-projection [] -> Source-Same-Entity-Ref-Fanout-Projection
-  (Source-Same-Entity-Ref-Fanout-Projection {}))
+  (Source-Same-Entity-Ref-Fanout-Projection []))
 
 (defn empty-source-same-value-collaborator-projection [] -> Source-Same-Value-Collaborator-Projection
-  (Source-Same-Value-Collaborator-Projection {}))
+  (Source-Same-Value-Collaborator-Projection []))
 
 (defn empty-source-track-release-projection [] -> Source-Track-Release-Projection
-  (Source-Track-Release-Projection {}))
+  (Source-Track-Release-Projection []))
 
 (defn empty-source-collab-net-two-projection [] -> Source-Collab-Net-Two-Projection
-  (Source-Collab-Net-Two-Projection {}))
+  (Source-Collab-Net-Two-Projection []))
 
 (defn empty-source-input-ref-value-projection [] -> Source-Input-Ref-Value-Projection
-  (Source-Input-Ref-Value-Projection {}))
+  (Source-Input-Ref-Value-Projection []))
 
 (defn empty-source-fulltext-track-info-projection [] -> Source-Fulltext-Track-Info-Projection
-  (Source-Fulltext-Track-Info-Projection {}))
+  (Source-Fulltext-Track-Info-Projection []))
 
 (defn query-two-find-vars? [query: Query, first-var: string, second-var: string] -> bool
   (and (= (count query.find) 2)
@@ -190,18 +190,18 @@
                             (not (= release-medium.v.kind .Var))
                             (not (= release-medium.v.name medium-track.e.name)))
                     (return (empty-source-fulltext-track-info-projection) false))
-                  (return (Source-Fulltext-Track-Info-Projection {search-var: query.inputs[0]
-                                                                  fulltext-attr: fulltext-attr
-                                                                  title-var: info-call.args[1].name
-                                                                  track-artist-attr: track-artist.a.value.text
-                                                                  artist-name-attr: artist-name.a.value.text
-                                                                  artist-var: info-call.args[2].name
-                                                                  medium-track-attr: medium-track.a.value.text
-                                                                  release-medium-attr: release-medium.a.value.text
-                                                                  first-release-attr: first-release.a.value.text
-                                                                  first-release-var: info-call.args[3].name
-                                                                  second-release-attr: second-release.a.value.text
-                                                                  second-release-var: info-call.args[4].name})
+                  (return (Source-Fulltext-Track-Info-Projection :search-var query.inputs[0]
+                                                                  :fulltext-attr fulltext-attr
+                                                                  :title-var info-call.args[1].name
+                                                                  :track-artist-attr track-artist.a.value.text
+                                                                  :artist-name-attr artist-name.a.value.text
+                                                                  :artist-var info-call.args[2].name
+                                                                  :medium-track-attr medium-track.a.value.text
+                                                                  :release-medium-attr release-medium.a.value.text
+                                                                  :first-release-attr first-release.a.value.text
+                                                                  :first-release-var info-call.args[3].name
+                                                                  :second-release-attr second-release.a.value.text
+                                                                  :second-release-var info-call.args[4].name)
                           true))))))))
     (return (empty-source-fulltext-track-info-projection) false)))
 
@@ -270,10 +270,10 @@
                                              (= output.v.kind .Var)
                                              (= output.a.value.text anchor.a.value.text)
                                              (query-same-entity-ref-fanout-find-vars? query input-var output.v.name))
-                                    (return (Source-Same-Entity-Ref-Fanout-Projection {input-var: input-var
-                                                                                    output-var: output.v.name
-                                                                                    name-attr: anchor.a.value.text
-                                                                                    edge-attr: first-edge.a.value.text})
+                                    (return (Source-Same-Entity-Ref-Fanout-Projection :input-var input-var
+                                                                                    :output-var output.v.name
+                                                                                    :name-attr anchor.a.value.text
+                                                                                    :edge-attr first-edge.a.value.text)
                                             true)))
                                 (mut! output-index += 1)))))
                         (mut! second-edge-index += 1))))
@@ -352,15 +352,15 @@
             (return (empty-source-same-value-collaborator-projection) false))))
       (when (not has-entity-distinct)
         (return (empty-source-same-value-collaborator-projection) false)))
-    (return (Source-Same-Value-Collaborator-Projection {input-var: input-var
-                                                        anchor-entity-var: anchor-name.e.name
-                                                        collaborator-entity-var: collaborator-edge.v.name
-                                                        output-var: output-name.v.name
-                                                        shared-value-var: shared-value.v.name
-                                                        anchor-name-attr: anchor-name.a.value.text
-                                                        edge-attr: anchor-edge.a.value.text
-                                                        shared-value-attr: shared-value.a.value.text
-                                                        output-name-attr: output-name.a.value.text})
+    (return (Source-Same-Value-Collaborator-Projection :input-var input-var
+                                                        :anchor-entity-var anchor-name.e.name
+                                                        :collaborator-entity-var collaborator-edge.v.name
+                                                        :output-var output-name.v.name
+                                                        :shared-value-var shared-value.v.name
+                                                        :anchor-name-attr anchor-name.a.value.text
+                                                        :edge-attr anchor-edge.a.value.text
+                                                        :shared-value-attr shared-value.a.value.text
+                                                        :output-name-attr output-name.a.value.text)
             true)))
 
 (defn db-read-source-query-track-release-projection [query: Query] -> [projection: Source-Track-Release-Projection, ok: bool]
@@ -425,17 +425,17 @@
                     (not (= release-media.v.kind .Var))
                     (not (= release-media.v.name medium-track.e.name)))
             (return (empty-source-track-release-projection) false))
-          (return (Source-Track-Release-Projection {input-var: query.inputs[0]
-                                                    title-var: track-name.v.name
-                                                    album-var: release-name.v.name
-                                                    year-var: release-year.v.name
-                                                    artist-name-attr: artist-name.a.value.text
-                                                    track-artist-attr: track-artist.a.value.text
-                                                    track-name-attr: track-name.a.value.text
-                                                    medium-track-attr: medium-track.a.value.text
-                                                    release-media-attr: release-media.a.value.text
-                                                    release-name-attr: release-name.a.value.text
-                                                    release-year-attr: release-year.a.value.text})
+          (return (Source-Track-Release-Projection :input-var query.inputs[0]
+                                                    :title-var track-name.v.name
+                                                    :album-var release-name.v.name
+                                                    :year-var release-year.v.name
+                                                    :artist-name-attr artist-name.a.value.text
+                                                    :track-artist-attr track-artist.a.value.text
+                                                    :track-name-attr track-name.a.value.text
+                                                    :medium-track-attr medium-track.a.value.text
+                                                    :release-media-attr release-media.a.value.text
+                                                    :release-name-attr release-name.a.value.text
+                                                    :release-year-attr release-year.a.value.text)
                   true)))))
   (return (empty-source-track-release-projection) false))
 
@@ -500,11 +500,11 @@
                             (= (count hop-rule.predicates) 1)
                             (rule-attr-param-distinct-predicate? hop-rule hop-rule.params[1] hop-rule.params[2])))
               (return (empty-source-collab-net-two-projection) false)))
-          (return (Source-Collab-Net-Two-Projection {input-var: input-var
-                                                     output-var: query-call.args[1].name
-                                                     anchor-name-attr: anchor-name.a.value.text
-                                                     output-name-attr: output-name.a.value.text
-                                                     edge-attr: net-call.args[0].value.text})
+          (return (Source-Collab-Net-Two-Projection :input-var input-var
+                                                     :output-var query-call.args[1].name
+                                                     :anchor-name-attr anchor-name.a.value.text
+                                                     :output-name-attr output-name.a.value.text
+                                                     :edge-attr net-call.args[0].value.text)
                   true)))))
   (return (empty-source-collab-net-two-projection) false))
 
@@ -543,11 +543,11 @@
                     (= output.v.kind .Var)
                     (= query.find[0] output.v.name)))
       (return (empty-source-input-ref-value-projection) false))
-    (return (Source-Input-Ref-Value-Projection {input-var: query.inputs[0]
-                                                output-var: output.v.name
-                                                anchor-attr: anchor.a.value.text
-                                                ref-attr: edge.a.value.text
-                                                output-attr: output.a.value.text})
+    (return (Source-Input-Ref-Value-Projection :input-var query.inputs[0]
+                                                :output-var output.v.name
+                                                :anchor-attr anchor.a.value.text
+                                                :ref-attr edge.a.value.text
+                                                :output-attr output.a.value.text)
             true)))
 
 (defn source-multi-hop-anchor-clause? [query: Query, clause-value: Clause] -> bool
@@ -660,25 +660,25 @@
                                                                    (not (= final-value.v.name first-value.v.name))
                                                                    (source-query-find-has-var? query final-value.v.name)
                                                                    (query-find-three-vars? query first-value.v.name filter-clause.v.name final-value.v.name))
-                                                          (return (Source-Multi-Hop-Ref-Chain-Projection {anchor-var: anchor.e.name
-                                                                                                          anchor-attr: anchor.a.value.text
-                                                                                                          anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
-                                                                                                          anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
-                                                                                                          has-anchor-input: (= anchor.v.kind .Var)
-                                                                                                          first-entity-var: reverse-ref.e.name
-                                                                                                          reverse-ref-attr: reverse-ref.a.value.text
-                                                                                                          filter-attr: filter-clause.a.value.text
-                                                                                                          filter-var: filter-clause.v.name
-                                                                                                          filter-op: filter-op
-                                                                                                          filter-value: filter-value
-                                                                                                          first-value-attr: first-value.a.value.text
-                                                                                                          first-value-var: first-value.v.name
-                                                                                                          hop1-attr: hop1.a.value.text
-                                                                                                          hop1-var: hop1.v.name
-                                                                                                          hop2-attr: hop2.a.value.text
-                                                                                                          hop2-var: hop2.v.name
-                                                                                                          final-value-attr: final-value.a.value.text
-                                                                                                          final-value-var: final-value.v.name})
+                                                          (return (Source-Multi-Hop-Ref-Chain-Projection :anchor-var anchor.e.name
+                                                                                                          :anchor-attr anchor.a.value.text
+                                                                                                          :anchor-value (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                                                                          :anchor-input-name (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                                                                          :has-anchor-input (= anchor.v.kind .Var)
+                                                                                                          :first-entity-var reverse-ref.e.name
+                                                                                                          :reverse-ref-attr reverse-ref.a.value.text
+                                                                                                          :filter-attr filter-clause.a.value.text
+                                                                                                          :filter-var filter-clause.v.name
+                                                                                                          :filter-op filter-op
+                                                                                                          :filter-value filter-value
+                                                                                                          :first-value-attr first-value.a.value.text
+                                                                                                          :first-value-var first-value.v.name
+                                                                                                          :hop1-attr hop1.a.value.text
+                                                                                                          :hop1-var hop1.v.name
+                                                                                                          :hop2-attr hop2.a.value.text
+                                                                                                          :hop2-var hop2.v.name
+                                                                                                          :final-value-attr final-value.a.value.text
+                                                                                                          :final-value-var final-value.v.name)
                                                                   true)))
                                                         (set! final-value-index (+ final-value-index 1))))))
                                                 (set! first-value-index (+ first-value-index 1))))))
@@ -764,25 +764,25 @@
                      (= find-var first-value.v.name)
                      (= find-var final-value.v.name)))
         (return (empty-source-multi-hop-ref-chain-projection) false)))
-    (return (Source-Multi-Hop-Ref-Chain-Projection {anchor-var: anchor.e.name
-                                                    anchor-attr: anchor.a.value.text
-                                                    anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
-                                                    anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
-                                                    has-anchor-input: (= anchor.v.kind .Var)
-                                                    first-entity-var: reverse-ref.e.name
-                                                    reverse-ref-attr: reverse-ref.a.value.text
-                                                    filter-attr: filter-clause.a.value.text
-                                                    filter-var: filter-clause.v.name
-                                                    filter-op: filter-op
-                                                    filter-value: filter-value
-                                                    first-value-attr: first-value.a.value.text
-                                                    first-value-var: first-value.v.name
-                                                    hop1-attr: hop1.a.value.text
-                                                    hop1-var: hop1.v.name
-                                                    hop2-attr: hop2.a.value.text
-                                                    hop2-var: hop2.v.name
-                                                    final-value-attr: final-value.a.value.text
-                                                    final-value-var: final-value.v.name})
+    (return (Source-Multi-Hop-Ref-Chain-Projection :anchor-var anchor.e.name
+                                                    :anchor-attr anchor.a.value.text
+                                                    :anchor-value (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                    :anchor-input-name (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                    :has-anchor-input (= anchor.v.kind .Var)
+                                                    :first-entity-var reverse-ref.e.name
+                                                    :reverse-ref-attr reverse-ref.a.value.text
+                                                    :filter-attr filter-clause.a.value.text
+                                                    :filter-var filter-clause.v.name
+                                                    :filter-op filter-op
+                                                    :filter-value filter-value
+                                                    :first-value-attr first-value.a.value.text
+                                                    :first-value-var first-value.v.name
+                                                    :hop1-attr hop1.a.value.text
+                                                    :hop1-var hop1.v.name
+                                                    :hop2-attr hop2.a.value.text
+                                                    :hop2-var hop2.v.name
+                                                    :final-value-attr final-value.a.value.text
+                                                    :final-value-var final-value.v.name)
             true)))
 
 (defn source-final-filter-ref-chain-projection-from-candidates [query: Query, anchor: Clause, reverse-ref: Clause, first-value: Clause, hop1: Clause, hop2: Clause, filter-clause: Clause, final-value: Clause] -> [projection: Source-Multi-Hop-Ref-Chain-Projection, ok: bool]
@@ -826,25 +826,25 @@
               (= filter-clause.v.name final-value.v.name)
               (not (query-find-three-vars? query first-value.v.name final-value.v.name filter-clause.v.name)))
       (return (empty-source-multi-hop-ref-chain-projection) false))
-    (return (Source-Multi-Hop-Ref-Chain-Projection {anchor-var: anchor.e.name
-                                                    anchor-attr: anchor.a.value.text
-                                                    anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
-                                                    anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
-                                                    has-anchor-input: (= anchor.v.kind .Var)
-                                                    first-entity-var: reverse-ref.e.name
-                                                    reverse-ref-attr: reverse-ref.a.value.text
-                                                    filter-attr: filter-clause.a.value.text
-                                                    filter-var: filter-clause.v.name
-                                                    filter-op: filter-op
-                                                    filter-value: filter-value
-                                                    first-value-attr: first-value.a.value.text
-                                                    first-value-var: first-value.v.name
-                                                    hop1-attr: hop1.a.value.text
-                                                    hop1-var: hop1.e.name
-                                                    hop2-attr: hop2.a.value.text
-                                                    hop2-var: hop2.e.name
-                                                    final-value-attr: final-value.a.value.text
-                                                    final-value-var: final-value.v.name})
+    (return (Source-Multi-Hop-Ref-Chain-Projection :anchor-var anchor.e.name
+                                                    :anchor-attr anchor.a.value.text
+                                                    :anchor-value (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                    :anchor-input-name (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                    :has-anchor-input (= anchor.v.kind .Var)
+                                                    :first-entity-var reverse-ref.e.name
+                                                    :reverse-ref-attr reverse-ref.a.value.text
+                                                    :filter-attr filter-clause.a.value.text
+                                                    :filter-var filter-clause.v.name
+                                                    :filter-op filter-op
+                                                    :filter-value filter-value
+                                                    :first-value-attr first-value.a.value.text
+                                                    :first-value-var first-value.v.name
+                                                    :hop1-attr hop1.a.value.text
+                                                    :hop1-var hop1.e.name
+                                                    :hop2-attr hop2.a.value.text
+                                                    :hop2-var hop2.e.name
+                                                    :final-value-attr final-value.a.value.text
+                                                    :final-value-var final-value.v.name)
             true)))
 
 (defn source-two-final-value-ref-chain-projection-from-candidates [query: Query, anchor: Clause, reverse-ref: Clause, first-value: Clause, hop1: Clause, hop2: Clause, final-value: Clause, second-final-value: Clause] -> [projection: Source-Multi-Hop-Ref-Chain-Projection, ok: bool]
@@ -885,25 +885,25 @@
             (= final-value.v.name second-final-value.v.name)
             (not (query-find-three-vars? query first-value.v.name final-value.v.name second-final-value.v.name)))
     (return (empty-source-multi-hop-ref-chain-projection) false))
-  (return (Source-Multi-Hop-Ref-Chain-Projection {anchor-var: anchor.e.name
-                                                  anchor-attr: anchor.a.value.text
-                                                  anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
-                                                  anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
-                                                  has-anchor-input: (= anchor.v.kind .Var)
-                                                  first-entity-var: reverse-ref.e.name
-                                                  reverse-ref-attr: reverse-ref.a.value.text
-                                                  filter-attr: second-final-value.a.value.text
-                                                  filter-var: second-final-value.v.name
-                                                  filter-op: ""
-                                                  filter-value: (value-nil)
-                                                  first-value-attr: first-value.a.value.text
-                                                  first-value-var: first-value.v.name
-                                                  hop1-attr: hop1.a.value.text
-                                                  hop1-var: hop1.e.name
-                                                  hop2-attr: hop2.a.value.text
-                                                  hop2-var: hop2.e.name
-                                                  final-value-attr: final-value.a.value.text
-                                                  final-value-var: final-value.v.name})
+  (return (Source-Multi-Hop-Ref-Chain-Projection :anchor-var anchor.e.name
+                                                  :anchor-attr anchor.a.value.text
+                                                  :anchor-value (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                  :anchor-input-name (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                  :has-anchor-input (= anchor.v.kind .Var)
+                                                  :first-entity-var reverse-ref.e.name
+                                                  :reverse-ref-attr reverse-ref.a.value.text
+                                                  :filter-attr second-final-value.a.value.text
+                                                  :filter-var second-final-value.v.name
+                                                  :filter-op ""
+                                                  :filter-value (value-nil)
+                                                  :first-value-attr first-value.a.value.text
+                                                  :first-value-var first-value.v.name
+                                                  :hop1-attr hop1.a.value.text
+                                                  :hop1-var hop1.e.name
+                                                  :hop2-attr hop2.a.value.text
+                                                  :hop2-var hop2.e.name
+                                                  :final-value-attr final-value.a.value.text
+                                                  :final-value-var final-value.v.name)
           true))
 
 (defn db-read-source-query-multi-hop-ref-chain-two-final-values-projection-ordered [query: Query] -> [projection: Source-Multi-Hop-Ref-Chain-Projection, ok: bool]
@@ -1079,26 +1079,26 @@
                      (= find-var first-value.v.name)
                      (= find-var filter-clause.v.name)))
         (return (empty-source-anchor-two-branch-join-projection) false)))
-    (return (Source-Anchor-Two-Branch-Join-Projection {anchor-var: anchor.e.name
-                                                       anchor-attr: anchor.a.value.text
-                                                       anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
-                                                       anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
-                                                       has-anchor-input: (= anchor.v.kind .Var)
-                                                       direct-entity-var: direct-ref.e.name
-                                                       direct-ref-attr: direct-ref.a.value.text
-                                                       direct-value-attr: direct-value.a.value.text
-                                                       direct-value-var: direct-value.v.name
-                                                       first-entity-var: first-ref.e.name
-                                                       first-ref-attr: first-ref.a.value.text
-                                                       filter-attr: filter-clause.a.value.text
-                                                       filter-var: filter-clause.v.name
-                                                       filter-op: filter-op
-                                                       filter-value: filter-value
-                                                       first-value-attr: first-value.a.value.text
-                                                       first-value-var: first-value.v.name
-                                                       hop1-attr: hop1.a.value.text
-                                                       hop1-var: hop1.v.name
-                                                       hop2-attr: hop2.a.value.text})
+    (return (Source-Anchor-Two-Branch-Join-Projection :anchor-var anchor.e.name
+                                                       :anchor-attr anchor.a.value.text
+                                                       :anchor-value (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                       :anchor-input-name (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                       :has-anchor-input (= anchor.v.kind .Var)
+                                                       :direct-entity-var direct-ref.e.name
+                                                       :direct-ref-attr direct-ref.a.value.text
+                                                       :direct-value-attr direct-value.a.value.text
+                                                       :direct-value-var direct-value.v.name
+                                                       :first-entity-var first-ref.e.name
+                                                       :first-ref-attr first-ref.a.value.text
+                                                       :filter-attr filter-clause.a.value.text
+                                                       :filter-var filter-clause.v.name
+                                                       :filter-op filter-op
+                                                       :filter-value filter-value
+                                                       :first-value-attr first-value.a.value.text
+                                                       :first-value-var first-value.v.name
+                                                       :hop1-attr hop1.a.value.text
+                                                       :hop1-var hop1.v.name
+                                                       :hop2-attr hop2.a.value.text)
             true)))
 
 (defn source-two-branch-projection-from-candidates [query: Query, anchor: Clause, direct-ref: Clause, direct-value: Clause, first-ref: Clause, filter-clause: Clause, first-value: Clause, hop1: Clause, hop2: Clause] -> [projection: Source-Anchor-Two-Branch-Join-Projection, ok: bool]
@@ -1148,26 +1148,26 @@
               (= first-value.v.name filter-clause.v.name)
               (not (query-find-three-vars? query direct-value.v.name first-value.v.name filter-clause.v.name)))
       (return (empty-source-anchor-two-branch-join-projection) false))
-    (return (Source-Anchor-Two-Branch-Join-Projection {anchor-var: anchor.e.name
-                                                       anchor-attr: anchor.a.value.text
-                                                       anchor-value: (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
-                                                       anchor-input-name: (if (= anchor.v.kind .Var) anchor.v.name "")
-                                                       has-anchor-input: (= anchor.v.kind .Var)
-                                                       direct-entity-var: direct-ref.e.name
-                                                       direct-ref-attr: direct-ref.a.value.text
-                                                       direct-value-attr: direct-value.a.value.text
-                                                       direct-value-var: direct-value.v.name
-                                                       first-entity-var: first-ref.e.name
-                                                       first-ref-attr: first-ref.a.value.text
-                                                       filter-attr: filter-clause.a.value.text
-                                                       filter-var: filter-clause.v.name
-                                                       filter-op: filter-op
-                                                       filter-value: filter-value
-                                                       first-value-attr: first-value.a.value.text
-                                                       first-value-var: first-value.v.name
-                                                       hop1-attr: hop1.a.value.text
-                                                       hop1-var: hop1.v.name
-                                                       hop2-attr: hop2.a.value.text})
+    (return (Source-Anchor-Two-Branch-Join-Projection :anchor-var anchor.e.name
+                                                       :anchor-attr anchor.a.value.text
+                                                       :anchor-value (if (= anchor.v.kind .Value) anchor.v.value (value-nil))
+                                                       :anchor-input-name (if (= anchor.v.kind .Var) anchor.v.name "")
+                                                       :has-anchor-input (= anchor.v.kind .Var)
+                                                       :direct-entity-var direct-ref.e.name
+                                                       :direct-ref-attr direct-ref.a.value.text
+                                                       :direct-value-attr direct-value.a.value.text
+                                                       :direct-value-var direct-value.v.name
+                                                       :first-entity-var first-ref.e.name
+                                                       :first-ref-attr first-ref.a.value.text
+                                                       :filter-attr filter-clause.a.value.text
+                                                       :filter-var filter-clause.v.name
+                                                       :filter-op filter-op
+                                                       :filter-value filter-value
+                                                       :first-value-attr first-value.a.value.text
+                                                       :first-value-var first-value.v.name
+                                                       :hop1-attr hop1.a.value.text
+                                                       :hop1-var hop1.v.name
+                                                       :hop2-attr hop2.a.value.text)
             true)))
 
 (defn db-read-source-query-anchor-two-branch-join-projection-any-order [query: Query] -> [projection: Source-Anchor-Two-Branch-Join-Projection, ok: bool]
@@ -1320,8 +1320,8 @@
                    (and (= query.find[0] second.v.name)
                         (= query.find[1] first.v.name))))
       (return (empty-two-attr-entity-projection) false))
-    (return (Two-Attr-Entity-Projection {first-attr: first.a.value.text
-                                         first-var: first.v.name
-                                         second-attr: second.a.value.text
-                                         second-var: second.v.name})
+    (return (Two-Attr-Entity-Projection :first-attr first.a.value.text
+                                         :first-var first.v.name
+                                         :second-attr second.a.value.text
+                                         :second-var second.v.name)
             true)))

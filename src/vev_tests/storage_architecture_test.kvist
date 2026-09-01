@@ -905,7 +905,7 @@
     (remove-sqlite-files path)
     (defer (remove-sqlite-files path))
     (let [[store opened-ok opened-error] (vev.open-store path)
-          retained-first (vev.Store-DB {})]
+          retained-first (vev.Store-DB [])]
       (t.is opened-ok opened-error)
       (for [index (arr.range 1 131)]
         (let [tx-data ([]vev.Tx-Data [(vev.add (u64 index) ":item/value" (vev.value-int (i64 index)))])
@@ -2111,11 +2111,11 @@
 
 (t.deftest sqlite-datom-cache-retains-formerly-colliding-log-indexes
   (defer (free_all context.allocator))
-  (let [snapshot (vev.SQLite-DB-Snapshot {datom-cache-log-indexes: (vev.sqlite-db-snapshot-empty-datom-cache-log-indexes)
-                                           datom-cache-datoms: (vev.sqlite-db-snapshot-empty-datom-cache-datoms)
-                                           datom-cache-indexes: (make (map int int))})]
-    (vev.sqlite-db-snapshot-cache-store-datom! (addr snapshot) 1 (vev.Datom {e: 1 a: ":user/value" v: (vev.value-int 10)}))
-    (vev.sqlite-db-snapshot-cache-store-datom! (addr snapshot) 513 (vev.Datom {e: 2 a: ":user/value" v: (vev.value-int 20)}))
+  (let [snapshot (vev.SQLite-DB-Snapshot :datom-cache-log-indexes (vev.sqlite-db-snapshot-empty-datom-cache-log-indexes)
+                                           :datom-cache-datoms (vev.sqlite-db-snapshot-empty-datom-cache-datoms)
+                                           :datom-cache-indexes (make (map int int)))]
+    (vev.sqlite-db-snapshot-cache-store-datom! (addr snapshot) 1 (vev.Datom :e 1 :a ":user/value" :v (vev.value-int 10)))
+    (vev.sqlite-db-snapshot-cache-store-datom! (addr snapshot) 513 (vev.Datom :e 2 :a ":user/value" :v (vev.value-int 20)))
     (let [[first first-found] (vev.sqlite-db-snapshot-cache-find-datom (addr snapshot) 1)
           [second second-found] (vev.sqlite-db-snapshot-cache-find-datom (addr snapshot) 513)]
       (t.is first-found)
@@ -4016,7 +4016,7 @@
     (let [[off-db off-db-ok off-db-error] (vev.store-db (addr store))
           [off off-ok off-error]
             (vev.store-db-index-range-datoms
-              (addr off-db) ":item/value" (vev.Index-Arg {}) false (vev.Index-Arg {}) false)]
+              (addr off-db) ":item/value" (vev.Index-Arg []) false (vev.Index-Arg []) false)]
       (t.is off-db-ok off-db-error)
       (t.is off-ok off-error)
       (t.is (= (count off) 0))
@@ -4028,7 +4028,7 @@
     (let [[on-db on-db-ok on-db-error] (vev.store-db (addr store))
           [on on-ok on-error]
             (vev.store-db-index-range-datoms
-              (addr on-db) ":item/value" (vev.Index-Arg {}) false (vev.Index-Arg {}) false)]
+              (addr on-db) ":item/value" (vev.Index-Arg []) false (vev.Index-Arg []) false)]
       (t.is on-db-ok on-db-error)
       (t.is on-ok on-error)
       (t.is (= (count on) 3))
@@ -4040,7 +4040,7 @@
     (let [[off-db off-db-ok off-db-error] (vev.store-db (addr store))
           [off off-ok off-error]
             (vev.store-db-index-range-datoms
-              (addr off-db) ":item/value" (vev.Index-Arg {}) false (vev.Index-Arg {}) false)]
+              (addr off-db) ":item/value" (vev.Index-Arg []) false (vev.Index-Arg []) false)]
       (t.is off-db-ok off-db-error)
       (t.is off-ok off-error)
       (t.is (= (count off) 0))
@@ -7024,8 +7024,8 @@
       (t.is (= cursor-error ""))
       (t.is (= (vev.sqlite-index-cursor-count cursor) (count db.eavt)))
       (let [view (vev.db-index-view-from-sqlite-cursor (vev.public-index-order ":eavt") (addr cursor))
-            low (vev.lower-bound-index-view db view "eavt-ea" 42 ":item/value" (vev.Value {}))
-            high (vev.upper-bound-index-view db view "eavt-ea" 42 ":item/value" (vev.Value {}))]
+            low (vev.lower-bound-index-view db view "eavt-ea" 42 ":item/value" (vev.Value []))
+            high (vev.upper-bound-index-view db view "eavt-ea" 42 ":item/value" (vev.Value []))]
         (t.is (= (vev.db-index-view-count view) (count db.eavt)))
         (t.is (= (vev.db-index-view-at view 0) db.eavt[0]))
         (t.is (= (vev.db-index-view-at view 129) db.eavt[129]))
@@ -8834,7 +8834,7 @@
 
 (t.deftest unopened-store-report-failures-are-storage-neutral
   (defer (free_all context.allocator))
-  (let [store (vev.Store-Conn {})
+  (let [store (vev.Store-Conn [])
         report-text (vev.transact-store-report-text (addr store) "[{:db/id 1 :user/name \"Ada\"}]")
         report-tx-data (vev.transact-store-report-tx-data
                          (addr store)

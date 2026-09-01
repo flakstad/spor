@@ -219,7 +219,7 @@
     (set! stream^.index (+ stream^.index 1))))
   (load-source-index-datom-stream-current! source stream))
 
-(defn source-entity-int-pair-append-range-stream! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Index-Datom-Stream, projection: Source-Attr-Range-Value-Projection] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-int-pair-append-range-stream! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, stream: ^Source-Index-Datom-Stream, projection: Source-Attr-Range-Value-Projection] -> [ok: bool, type-ok: bool, error: string]
   (while stream^.has-current
     (let [[_ type-ok] (source-entity-int-pair-append-range-datom! columns seen projection stream^.current)]
       (when (not type-ok)
@@ -238,29 +238,29 @@
   (let [order-indexes (make [dynamic]int 0 (count datoms))]
     (for [_ index datoms]
       (arr.push! order-indexes index))
-    (let [out-stream (Source-Index-Datom-Stream {owned-datoms: datoms owned-order-indexes: order-indexes use-owned-datoms: true index: 0 high: (count datoms) current: (Datom {}) has-current: false})
+    (let [out-stream (Source-Index-Datom-Stream :owned-datoms datoms :owned-order-indexes order-indexes :use-owned-datoms true :index 0 :high (count datoms) :current (Datom []) :has-current false)
           [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
       (if load-ok
         (return out-stream true "")
         (do
           (delete-source-index-datom-stream out-stream)
-          (return (Source-Index-Datom-Stream {}) false load-error))))))
+          (return (Source-Index-Datom-Stream []) false load-error))))))
 
 (defn source-direct-sqlite-frontier-stream-for-order [source: DB-Read-Source, order: Public-Index-Order, entities: []u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, used: bool, candidates: int, error: string]
   (when (= (count entities) 0)
-    (return (Source-Index-Datom-Stream {owned-datoms: (make [dynamic]Datom) owned-order-indexes: (make [dynamic]int) use-owned-datoms: true index: 0 high: 0 current: (Datom {}) has-current: false}) true true 0 ""))
+    (return (Source-Index-Datom-Stream :owned-datoms (make [dynamic]Datom) :owned-order-indexes (make [dynamic]int) :use-owned-datoms true :index 0 :high 0 :current (Datom []) :has-current false) true true 0 ""))
   (when (not (= source.kind .SQLite-Snapshot))
-    (return (Source-Index-Datom-Stream {}) true false 0 ""))
+    (return (Source-Index-Datom-Stream []) true false 0 ""))
   (when source.sqlite-snapshot^.has-retractions
-    (return (Source-Index-Datom-Stream {}) true false 0 ""))
+    (return (Source-Index-Datom-Stream []) true false 0 ""))
   (when (not (or (= order .EAVT)
                  (= order .VAET)))
-    (return (Source-Index-Datom-Stream {}) true false 0 ""))
+    (return (Source-Index-Datom-Stream []) true false 0 ""))
   (let [[latest-basis latest-ok latest-error] (vev.sqlite-latest-index-root-basis-raw source.sqlite-snapshot^.indexes.handle)]
     (when (not latest-ok)
-      (return (Source-Index-Datom-Stream {}) false true 0 latest-error))
+      (return (Source-Index-Datom-Stream []) false true 0 latest-error))
     (when (not (= latest-basis source.sqlite-snapshot^.basis-tx))
-      (return (Source-Index-Datom-Stream {}) true false 0 "")))
+      (return (Source-Index-Datom-Stream []) true false 0 "")))
   (let [unique (set.empty u64) :defer
         sorted-entities (make [dynamic]u64)]
     (for [entity entities]
@@ -272,12 +272,12 @@
     (delete sorted-entities)
     (when (not datoms-ok)
       (delete-owned-datoms datoms)
-      (return (Source-Index-Datom-Stream {}) false true 0 datoms-error))
+      (return (Source-Index-Datom-Stream []) false true 0 datoms-error))
     (let [candidate-count (count datoms)
           [out-stream stream-ok stream-error] (source-index-datom-stream-from-owned-datoms source datoms)]
       (if stream-ok
         (return out-stream true true candidate-count "")
-        (return (Source-Index-Datom-Stream {}) false true candidate-count stream-error))))))
+        (return (Source-Index-Datom-Stream []) false true candidate-count stream-error))))))
 
 (defn source-direct-sqlite-same-entity-ref-fanout-values [source: DB-Read-Source, name-attr: string, edge-attr: string, values: []Value] -> [left: [dynamic]Value, right: [dynamic]Value, ok: bool, used: bool, error: string]
   (when (or (> (count values) 256)
@@ -449,13 +449,13 @@
               (mut! stats^.clause-candidates += (count output-values))
               (set! stats^.input-bindings input-count)
               (query-stats-observe-source-operator! stats)
-              (return (Query-Relation {attrs: attrs
-                                       attr-sources: attr-sources
-                                       attr-index: (query-relation-attr-index (slice attrs 0))
-                                       tuples: builder.tuples
-                                       typed-columns: builder.typed-columns
-                                       typed-rows: builder.typed-rows
-                                       has-typed-columns: builder.typed-ok})
+              (return (Query-Relation :attrs attrs
+                                       :attr-sources attr-sources
+                                       :attr-index (query-relation-attr-index (slice attrs 0))
+                                       :tuples builder.tuples
+                                       :typed-columns builder.typed-columns
+                                       :typed-rows builder.typed-rows
+                                       :has-typed-columns builder.typed-ok)
                       true
                       ""))))))))
 
@@ -464,7 +464,7 @@
     (= name projection.title-var) (return values[offset] true)
     (= name projection.album-var) (return values[(+ offset 1)] true)
     (= name projection.year-var) (return values[(+ offset 2)] true)
-    :else (return (Value {}) false)))
+    :else (return (Value []) false)))
 
 (defn db-read-source-query-relation-track-release [source: DB-Read-Source, query: Query, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
   (let [[projection projection-ok] (db-read-source-query-track-release-projection query)]
@@ -524,13 +524,13 @@
               (mut! stats^.clause-candidates += (/ (count values) 3))
               (set! stats^.input-bindings input-count)
               (query-stats-observe-source-operator! stats)
-              (return (Query-Relation {attrs: attrs
-                                       attr-sources: attr-sources
-                                       attr-index: (query-relation-attr-index (slice attrs 0))
-                                       tuples: builder.tuples
-                                       typed-columns: builder.typed-columns
-                                       typed-rows: builder.typed-rows
-                                       has-typed-columns: builder.typed-ok})
+              (return (Query-Relation :attrs attrs
+                                       :attr-sources attr-sources
+                                       :attr-index (query-relation-attr-index (slice attrs 0))
+                                       :tuples builder.tuples
+                                       :typed-columns builder.typed-columns
+                                       :typed-rows builder.typed-rows
+                                       :has-typed-columns builder.typed-ok)
                       true
                       ""))))))))
 
@@ -584,13 +584,13 @@
             (mut! stats^.clause-candidates += (count input-values))
             (set! stats^.input-bindings input-count)
             (query-stats-observe-source-operator! stats)
-            (return (Query-Relation {attrs: attrs
-                                     attr-sources: attr-sources
-                                     attr-index: (query-relation-attr-index (slice attrs 0))
-                                     tuples: builder.tuples
-                                     typed-columns: builder.typed-columns
-                                     typed-rows: builder.typed-rows
-                                     has-typed-columns: builder.typed-ok})
+            (return (Query-Relation :attrs attrs
+                                     :attr-sources attr-sources
+                                     :attr-index (query-relation-attr-index (slice attrs 0))
+                                     :tuples builder.tuples
+                                     :typed-columns builder.typed-columns
+                                     :typed-rows builder.typed-rows
+                                     :has-typed-columns builder.typed-ok)
                     true
                     "")))))))
 
@@ -637,13 +637,13 @@
               (mut! stats^.clause-candidates += (count values))
               (set! stats^.input-bindings input-count)
               (query-stats-observe-source-operator! stats)
-              (return (Query-Relation {attrs: attrs
-                                       attr-sources: attr-sources
-                                       attr-index: (query-relation-attr-index (slice attrs 0))
-                                       tuples: builder.tuples
-                                       typed-columns: builder.typed-columns
-                                       typed-rows: builder.typed-rows
-                                       has-typed-columns: builder.typed-ok})
+              (return (Query-Relation :attrs attrs
+                                       :attr-sources attr-sources
+                                       :attr-index (query-relation-attr-index (slice attrs 0))
+                                       :tuples builder.tuples
+                                       :typed-columns builder.typed-columns
+                                       :typed-rows builder.typed-rows
+                                       :has-typed-columns builder.typed-ok)
                       true
                       ""))))))))
 
@@ -653,7 +653,7 @@
     (= name projection.artist-var) (return values[(+ offset 1)] true)
     (= name projection.first-release-var) (return values[(+ offset 2)] true)
     (= name projection.second-release-var) (return values[(+ offset 3)] true)
-    :else (return (Value {}) false)))
+    :else (return (Value []) false)))
 
 (defn db-read-source-query-relation-fulltext-track-info [source: DB-Read-Source, query: Query, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]
   (let [[projection projection-ok] (db-read-source-query-fulltext-track-info-projection query)]
@@ -716,13 +716,13 @@
               (mut! stats^.clause-candidates += (/ (count values) 4))
               (set! stats^.input-bindings input-count)
               (query-stats-observe-source-operator! stats)
-              (return (Query-Relation {attrs: attrs
-                                       attr-sources: attr-sources
-                                       attr-index: (query-relation-attr-index (slice attrs 0))
-                                       tuples: builder.tuples
-                                       typed-columns: builder.typed-columns
-                                       typed-rows: builder.typed-rows
-                                       has-typed-columns: builder.typed-ok})
+              (return (Query-Relation :attrs attrs
+                                       :attr-sources attr-sources
+                                       :attr-index (query-relation-attr-index (slice attrs 0))
+                                       :tuples builder.tuples
+                                       :typed-columns builder.typed-columns
+                                       :typed-rows builder.typed-rows
+                                       :has-typed-columns builder.typed-ok)
                       true
                       ""))))))))
 
@@ -780,13 +780,13 @@
             (mut! stats^.clause-candidates += (count left-values))
             (set! stats^.input-bindings input-count)
             (query-stats-observe-source-operator! stats)
-            (let [raw (Query-Relation {attrs: attrs
-                                       attr-sources: attr-sources
-                                       attr-index: (query-relation-attr-index (slice attrs 0))
-                                       tuples: builder.tuples
-                                       typed-columns: builder.typed-columns
-                                       typed-rows: builder.typed-rows
-                                       has-typed-columns: builder.typed-ok})]
+            (let [raw (Query-Relation :attrs attrs
+                                       :attr-sources attr-sources
+                                       :attr-index (query-relation-attr-index (slice attrs 0))
+                                       :tuples builder.tuples
+                                       :typed-columns builder.typed-columns
+                                       :typed-rows builder.typed-rows
+                                       :has-typed-columns builder.typed-ok)]
               (if (= (count query.find) 1)
                 (let [deduped (query-relation-dedupe-step raw)]
                   (delete-query-relation raw)
@@ -853,7 +853,7 @@
         (delete-source-index-datom-stream stream)))
     (return out true true scan-count candidate-count "")))
 
-(defn source-frontier-datom-matches? [datom: Datom, order: Public-Index-Order, entities: (ptr (map u64 (struct {}))), attr: string] -> bool
+(defn source-frontier-datom-matches? [datom: Datom, order: Public-Index-Order, entities: (ptr (map u64 (struct []))), attr: string] -> bool
   (cond
     (= order .EAVT)
       (and (= datom.a attr)
@@ -864,7 +864,7 @@
            (set.contains? entities^ datom.v.entity))
     :else false))
 
-(defn append-sqlite-index-root-frontier-datoms! [out: ^[dynamic]Datom, source: DB-Read-Source, cursor: ^SQLite-Index-Cursor, root-id: u64, row-count: int, order: Public-Index-Order, min-entity: u64, max-entity: u64, attr: string, entities: (ptr (map u64 (struct {})))] -> [ok: bool, error: string, candidates: int]
+(defn append-sqlite-index-root-frontier-datoms! [out: ^[dynamic]Datom, source: DB-Read-Source, cursor: ^SQLite-Index-Cursor, root-id: u64, row-count: int, order: Public-Index-Order, min-entity: u64, max-entity: u64, attr: string, entities: (ptr (map u64 (struct [])))] -> [ok: bool, error: string, candidates: int]
   (let [order-text (public-index-order-text order)
         lower-values ([]Value [(value-entity min-entity) (value-keyword attr)])
         upper-values ([]Value [(value-entity max-entity) (value-keyword attr)])
@@ -875,7 +875,7 @@
       (when (not high-ok)
         (return false high-error 0))
       (let [candidate-count 0
-            loaded-page (SQLite-Loaded-Index-Page {})
+            loaded-page (SQLite-Loaded-Index-Page [])
             loaded-page-valid false]
         (for [position (arr.range low high)]
           (let [[entry offset entry-ok entry-error] (sqlite-index-root-ordered-entry-offset-at-retained-page-cache cursor^.handle
@@ -923,14 +923,14 @@
 
 (defn source-entity-attr-sparse-prefix-stream-for-order [source: DB-Read-Source, order: Public-Index-Order, entities: []u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, used: bool, candidates: int, error: string]
   (when (= (count entities) 0)
-    (return (Source-Index-Datom-Stream {owned-datoms: (make [dynamic]Datom) owned-order-indexes: (make [dynamic]int) use-owned-datoms: true index: 0 high: 0 current: (Datom {}) has-current: false}) true true 0 ""))
+    (return (Source-Index-Datom-Stream :owned-datoms (make [dynamic]Datom) :owned-order-indexes (make [dynamic]int) :use-owned-datoms true :index 0 :high 0 :current (Datom []) :has-current false) true true 0 ""))
   (when (db-read-source-has-overlay? source)
-    (return (Source-Index-Datom-Stream {}) true false 0 ""))
+    (return (Source-Index-Datom-Stream []) true false 0 ""))
   (let [view (db-read-source-index-view source order)]
     (when (not (= view.kind .SQLite-Cursor))
-      (return (Source-Index-Datom-Stream {}) true false 0 ""))
+      (return (Source-Index-Datom-Stream []) true false 0 ""))
     (when (sqlite-merge-index-view? view)
-      (return (Source-Index-Datom-Stream {}) true false 0 ""))
+      (return (Source-Index-Datom-Stream []) true false 0 ""))
     (let [unique (set.empty u64) :defer
           sorted-entities (make [dynamic]u64)]
       (for [entity entities]
@@ -940,55 +940,55 @@
       (arr.sort! sorted-entities)
       (when (> (count sorted-entities) 32)
         (delete sorted-entities)
-        (return (Source-Index-Datom-Stream {}) true false 0 ""))
+        (return (Source-Index-Datom-Stream []) true false 0 ""))
       (let [[roots counts roots-ok roots-error] (sqlite-index-view-root-counts-for-sparse-prefix-stream view)]
         (when (not roots-ok)
           (delete sorted-entities)
           (delete roots)
           (delete counts)
-          (return (Source-Index-Datom-Stream {}) false true 0 roots-error))
+          (return (Source-Index-Datom-Stream []) false true 0 roots-error))
         (let [seek-budget (* (count roots) (count sorted-entities))]
           (when (> seek-budget 1024)
             (delete sorted-entities)
             (delete roots)
             (delete counts)
-            (return (Source-Index-Datom-Stream {}) true false 0 "")))
-        (let [out-stream (Source-Index-Datom-Stream {view: view
-                                                     use-sqlite-sparse-prefixes: true
-                                                     sparse-roots: roots
-                                                     sparse-counts: counts
-                                                     sparse-entities: sorted-entities
-                                                     sparse-attr: attr
-                                                     sparse-order-text: (public-index-order-text order)
-                                                     sparse-prefix-index: 0
-                                                     sparse-run-index: 0
-                                                     sparse-position: 0
-                                                     sparse-high: 0
-                                                     sparse-range-active: false
-                                                     sparse-loaded-page: (SQLite-Loaded-Index-Page {})
-                                                     sparse-loaded-page-valid: false
-                                                     sparse-dedupe-entries: (> (count roots) 1)
-                                                     sparse-seen-entries: (set.empty int)
-                                                     current: (Datom {})
-                                                     has-current: false})
+            (return (Source-Index-Datom-Stream []) true false 0 "")))
+        (let [out-stream (Source-Index-Datom-Stream :view view
+                                                     :use-sqlite-sparse-prefixes true
+                                                     :sparse-roots roots
+                                                     :sparse-counts counts
+                                                     :sparse-entities sorted-entities
+                                                     :sparse-attr attr
+                                                     :sparse-order-text (public-index-order-text order)
+                                                     :sparse-prefix-index 0
+                                                     :sparse-run-index 0
+                                                     :sparse-position 0
+                                                     :sparse-high 0
+                                                     :sparse-range-active false
+                                                     :sparse-loaded-page (SQLite-Loaded-Index-Page [])
+                                                     :sparse-loaded-page-valid false
+                                                     :sparse-dedupe-entries (> (count roots) 1)
+                                                     :sparse-seen-entries (set.empty int)
+                                                     :current (Datom [])
+                                                     :has-current false)
               [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
           (if load-ok
             (return out-stream true true -1 "")
             (do
               (delete-source-index-datom-stream out-stream)
-              (return (Source-Index-Datom-Stream {}) false true -1 load-error))))))))
+              (return (Source-Index-Datom-Stream []) false true -1 load-error))))))))
 
 (defn source-entity-attr-frontier-stream-for-order [source: DB-Read-Source, order: Public-Index-Order, entities: []u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, used: bool, candidates: int, error: string]
   (let [[direct-stream direct-ok direct-used direct-candidates direct-error] (source-direct-sqlite-frontier-stream-for-order source order entities attr)]
     (when (or (not direct-ok) direct-used)
       (return direct-stream direct-ok direct-used direct-candidates direct-error)))
   (when (= (count entities) 0)
-    (return (Source-Index-Datom-Stream {owned-datoms: (make [dynamic]Datom) owned-order-indexes: (make [dynamic]int) use-owned-datoms: true index: 0 high: 0 current: (Datom {}) has-current: false}) true true 0 ""))
+    (return (Source-Index-Datom-Stream :owned-datoms (make [dynamic]Datom) :owned-order-indexes (make [dynamic]int) :use-owned-datoms true :index 0 :high 0 :current (Datom []) :has-current false) true true 0 ""))
   (when (db-read-source-has-overlay? source)
-    (return (Source-Index-Datom-Stream {}) true false 0 ""))
+    (return (Source-Index-Datom-Stream []) true false 0 ""))
   (let [view (db-read-source-index-view source order)]
     (when (not (= view.kind .SQLite-Cursor))
-      (return (Source-Index-Datom-Stream {}) true false 0 ""))
+      (return (Source-Index-Datom-Stream []) true false 0 ""))
     (let [entity-set (set.empty u64) :defer
           min-entity entities[0]
           max-entity entities[0]
@@ -1004,14 +1004,14 @@
             dense-limit (* (u64 (count entities)) (u64 16))]
         (when (> span dense-limit)
           (delete-owned-datoms datoms)
-          (return (Source-Index-Datom-Stream {}) true false 0 "")))
+          (return (Source-Index-Datom-Stream []) true false 0 "")))
       (if (sqlite-merge-index-view? view)
         (let [[roots counts runs-ok runs-error] (sqlite-index-cursor-child-runs view.sqlite-cursor)]
           (when (not runs-ok)
             (delete-owned-datoms datoms)
             (delete roots)
             (delete counts)
-            (return (Source-Index-Datom-Stream {}) false true candidate-count runs-error))
+            (return (Source-Index-Datom-Stream []) false true candidate-count runs-error))
           (for [run-index (arr.range 0 (count roots))]
             (let [[append-ok append-error append-candidates] (append-sqlite-index-root-frontier-datoms! (addr datoms) source view.sqlite-cursor roots[run-index] counts[run-index] order min-entity max-entity attr (addr entity-set))]
               (mut! candidate-count += append-candidates)
@@ -1019,18 +1019,18 @@
                 (delete-owned-datoms datoms)
                 (delete roots)
                 (delete counts)
-                (return (Source-Index-Datom-Stream {}) false true candidate-count append-error))))
+                (return (Source-Index-Datom-Stream []) false true candidate-count append-error))))
           (delete roots)
           (delete counts))
         (let [[append-ok append-error append-candidates] (append-sqlite-index-root-frontier-datoms! (addr datoms) source view.sqlite-cursor view.sqlite-cursor^.root-id view.sqlite-cursor^.row-count order min-entity max-entity attr (addr entity-set))]
           (mut! candidate-count += append-candidates)
           (when (not append-ok)
             (delete-owned-datoms datoms)
-            (return (Source-Index-Datom-Stream {}) false true candidate-count append-error))))
+            (return (Source-Index-Datom-Stream []) false true candidate-count append-error))))
       (let [[out-stream stream-ok stream-error] (source-index-datom-stream-from-owned-datoms source datoms)]
         (if stream-ok
           (return out-stream true true candidate-count "")
-          (return (Source-Index-Datom-Stream {}) false true candidate-count stream-error))))))
+          (return (Source-Index-Datom-Stream []) false true candidate-count stream-error))))))
 
 (defn source-eavt-entity-attr-frontier-stream [source: DB-Read-Source, entities: []u64, attr: string] -> [stream: Source-Index-Datom-Stream, ok: bool, used: bool, candidates: int, error: string]
   (source-entity-attr-frontier-stream-for-order source .EAVT entities attr))
@@ -1259,7 +1259,7 @@
             (delete highs)
             (delete-owned-datoms first-datoms)
             (delete-owned-datoms last-datoms)
-            (return (Source-Index-Datom-Stream {}) false low-error))
+            (return (Source-Index-Datom-Stream []) false low-error))
           (let [high stored-high
                 high-ok true
                 high-error ""]
@@ -1279,7 +1279,7 @@
               (delete highs)
               (delete-owned-datoms first-datoms)
               (delete-owned-datoms last-datoms)
-              (return (Source-Index-Datom-Stream {}) false high-error))
+              (return (Source-Index-Datom-Stream []) false high-error))
             (when (< low high)
               (arr.push! selected-roots roots[child-index])
               (arr.push! selected-counts counts[child-index])
@@ -1291,32 +1291,32 @@
     (delete highs)
     (delete-owned-datoms first-datoms)
     (delete-owned-datoms last-datoms)
-    (let [out-stream (Source-Index-Datom-Stream {view: view
-                                                 use-sqlite-run-ranges: true
-                                                 run-roots: selected-roots
-                                                 run-counts: selected-counts
-                                                 run-lows: selected-lows
-                                                 run-highs: selected-highs
-                                                 run-values: (values-owned-array values)
-                                                 run-order-text: order-text
-                                                 run-check-values: true
-                                                 run-index: 0
-                                                 run-position: 0
-                                                 run-page: (make [dynamic]int)
-                                                 run-page-start: -1
-                                                 run-page-end: -1
-                                                 run-loaded-page: (SQLite-Loaded-Index-Page {})
-                                                 run-loaded-page-valid: false
-                                                 run-dedupe-entries: (> (count selected-roots) 1)
-                                                 run-seen-entries: (set.empty int)
-                                                 current: (Datom {})
-                                                 has-current: false})
+    (let [out-stream (Source-Index-Datom-Stream :view view
+                                                 :use-sqlite-run-ranges true
+                                                 :run-roots selected-roots
+                                                 :run-counts selected-counts
+                                                 :run-lows selected-lows
+                                                 :run-highs selected-highs
+                                                 :run-values (values-owned-array values)
+                                                 :run-order-text order-text
+                                                 :run-check-values true
+                                                 :run-index 0
+                                                 :run-position 0
+                                                 :run-page (make [dynamic]int)
+                                                 :run-page-start -1
+                                                 :run-page-end -1
+                                                 :run-loaded-page (SQLite-Loaded-Index-Page [])
+                                                 :run-loaded-page-valid false
+                                                 :run-dedupe-entries (> (count selected-roots) 1)
+                                                 :run-seen-entries (set.empty int)
+                                                 :current (Datom [])
+                                                 :has-current false)
           [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
       (if load-ok
         (return out-stream true "")
         (do
           (delete-source-index-datom-stream out-stream)
-          (return (Source-Index-Datom-Stream {}) false load-error))))))
+          (return (Source-Index-Datom-Stream []) false load-error))))))
 
 (defn source-index-datom-stream-for-sqlite-manifest-sequential-values [source: DB-Read-Source, order: Public-Index-Order, values: []Value, view: DB-Index-View] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
   (let [[prefix-attr has-prefix-attr] (sqlite-manifest-attr-prefix order values)]
@@ -1331,7 +1331,7 @@
             (delete highs)
             (delete-owned-datoms first-datoms)
             (delete-owned-datoms last-datoms)
-            (return (Source-Index-Datom-Stream {}) false runs-error))))
+            (return (Source-Index-Datom-Stream []) false runs-error))))
       (let [[roots counts lows highs first-datoms last-datoms runs-ok runs-error] (sqlite-index-run-manifest-child-runs-with-bound-datoms view.sqlite-cursor^.handle view.sqlite-cursor^.manifest-id)]
         (if runs-ok
           (source-index-datom-stream-from-sqlite-manifest-bound-runs source order values view roots counts lows highs first-datoms last-datoms)
@@ -1342,7 +1342,7 @@
             (delete highs)
             (delete-owned-datoms first-datoms)
             (delete-owned-datoms last-datoms)
-            (return (Source-Index-Datom-Stream {}) false runs-error)))))))
+            (return (Source-Index-Datom-Stream []) false runs-error)))))))
 
 (defn source-index-datom-stream-for-sqlite-sequential-values [source: DB-Read-Source, order: Public-Index-Order, values: []Value, view: DB-Index-View] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
   (when view.sqlite-cursor^.root-is-manifest
@@ -1360,7 +1360,7 @@
       (delete selected-highs)
       (delete roots)
       (delete counts)
-      (return (Source-Index-Datom-Stream {}) false runs-error))
+      (return (Source-Index-Datom-Stream []) false runs-error))
     (for [child-index (arr.range 0 (count roots))]
       (let [[low low-ok low-error] (sqlite-index-root-bound-values view.sqlite-cursor roots[child-index] counts[child-index] order-text values false)]
         (when (not low-ok)
@@ -1370,7 +1370,7 @@
           (delete selected-highs)
           (delete roots)
           (delete counts)
-          (return (Source-Index-Datom-Stream {}) false low-error))
+          (return (Source-Index-Datom-Stream []) false low-error))
         (let [[high high-ok high-error] (sqlite-index-root-bound-values view.sqlite-cursor roots[child-index] counts[child-index] order-text values true)]
           (when (not high-ok)
             (delete selected-roots)
@@ -1379,7 +1379,7 @@
             (delete selected-highs)
             (delete roots)
             (delete counts)
-            (return (Source-Index-Datom-Stream {}) false high-error))
+            (return (Source-Index-Datom-Stream []) false high-error))
           (when (< low high)
             (arr.push! selected-roots roots[child-index])
             (arr.push! selected-counts counts[child-index])
@@ -1387,32 +1387,32 @@
             (arr.push! selected-highs high)))))
     (delete roots)
     (delete counts)
-    (let [out-stream (Source-Index-Datom-Stream {view: view
-                                                 use-sqlite-run-ranges: true
-                                                 run-roots: selected-roots
-                                                 run-counts: selected-counts
-                                                 run-lows: selected-lows
-                                                 run-highs: selected-highs
-                                                 run-values: (values-owned-array values)
-                                                 run-order-text: order-text
-                                                 run-check-values: false
-                                                 run-index: 0
-                                                 run-position: 0
-                                                 run-page: (make [dynamic]int)
-                                                 run-page-start: -1
-                                                 run-page-end: -1
-                                                 run-loaded-page: (SQLite-Loaded-Index-Page {})
-                                                 run-loaded-page-valid: false
-                                                 run-dedupe-entries: (> (count selected-roots) 1)
-                                                 run-seen-entries: (set.empty int)
-                                                 current: (Datom {})
-                                                 has-current: false})
+    (let [out-stream (Source-Index-Datom-Stream :view view
+                                                 :use-sqlite-run-ranges true
+                                                 :run-roots selected-roots
+                                                 :run-counts selected-counts
+                                                 :run-lows selected-lows
+                                                 :run-highs selected-highs
+                                                 :run-values (values-owned-array values)
+                                                 :run-order-text order-text
+                                                 :run-check-values false
+                                                 :run-index 0
+                                                 :run-position 0
+                                                 :run-page (make [dynamic]int)
+                                                 :run-page-start -1
+                                                 :run-page-end -1
+                                                 :run-loaded-page (SQLite-Loaded-Index-Page [])
+                                                 :run-loaded-page-valid false
+                                                 :run-dedupe-entries (> (count selected-roots) 1)
+                                                 :run-seen-entries (set.empty int)
+                                                 :current (Datom [])
+                                                 :has-current false)
           [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
       (if load-ok
         (return out-stream true "")
         (do
           (delete-source-index-datom-stream out-stream)
-          (return (Source-Index-Datom-Stream {}) false load-error))))))
+          (return (Source-Index-Datom-Stream []) false load-error))))))
 
 (defn source-index-datom-stream-for-values [source: DB-Read-Source, order: Public-Index-Order, values: []Value] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
   (when (db-read-source-has-overlay? source)
@@ -1420,29 +1420,29 @@
           [scan-ok scan-error] (db-read-source-append-index-datoms! (addr datoms) source order values)]
       (when (not scan-ok)
         (delete-owned-datoms datoms)
-        (return (Source-Index-Datom-Stream {}) false scan-error))
+        (return (Source-Index-Datom-Stream []) false scan-error))
       (let [order-indexes (sorted-datom-order-indexes (slice datoms 0) order)
-            out-stream (Source-Index-Datom-Stream {owned-datoms: datoms owned-order-indexes: order-indexes use-owned-datoms: true index: 0 high: (count datoms) current: (Datom {}) has-current: false})
+            out-stream (Source-Index-Datom-Stream :owned-datoms datoms :owned-order-indexes order-indexes :use-owned-datoms true :index 0 :high (count datoms) :current (Datom []) :has-current false)
             [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
         (if load-ok
           (return out-stream true "")
           (do
             (delete-source-index-datom-stream out-stream)
-            (return (Source-Index-Datom-Stream {}) false load-error))))))
+            (return (Source-Index-Datom-Stream []) false load-error))))))
   (let [view (db-read-source-index-view source order)]
     (when (sqlite-merge-index-view? view)
       (return (source-index-datom-stream-for-sqlite-sequential-values source order values view))))
   (let [[view low high range-ok range-error] (db-read-source-prefix-index-range source order values)]
     (when (not range-ok)
-      (return (Source-Index-Datom-Stream {}) false range-error))
-    (let [out-stream (Source-Index-Datom-Stream {view: view index: low high: high current: (Datom {}) has-current: false})
+      (return (Source-Index-Datom-Stream []) false range-error))
+    (let [out-stream (Source-Index-Datom-Stream :view view :index low :high high :current (Datom []) :has-current false)
           [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
       (if load-ok
         (return out-stream true "")
         (return out-stream false load-error)))))
 
 (defn source-index-datom-stream-for-index-range [source: DB-Read-Source, view: DB-Index-View, low: int, high: int] -> [stream: Source-Index-Datom-Stream, ok: bool, error: string]
-  (let [out-stream (Source-Index-Datom-Stream {view: view index: low high: high current: (Datom {}) has-current: false})
+  (let [out-stream (Source-Index-Datom-Stream :view view :index low :high high :current (Datom []) :has-current false)
         [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
     (if load-ok
       (return out-stream true "")
@@ -1452,26 +1452,26 @@
   (when (db-read-source-has-overlay? source)
     (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-attr source projection.attr)]
       (when (not datoms-ok)
-        (return (Source-Index-Datom-Stream {}) false datoms-error))
+        (return (Source-Index-Datom-Stream []) false datoms-error))
       (let [filtered (make [dynamic]Datom)]
         (for [datom datoms]
           (when (predicate-pair-matches? projection.op datom.v projection.value)
             (arr.push! filtered (datom-owned datom))))
         (delete-owned-datoms datoms)
         (let [order-indexes (sorted-datom-order-indexes (slice filtered 0) .AVET)
-              out-stream (Source-Index-Datom-Stream {owned-datoms: filtered owned-order-indexes: order-indexes use-owned-datoms: true index: 0 high: (count filtered) current: (Datom {}) has-current: false})
+              out-stream (Source-Index-Datom-Stream :owned-datoms filtered :owned-order-indexes order-indexes :use-owned-datoms true :index 0 :high (count filtered) :current (Datom []) :has-current false)
               [load-ok load-error] (load-source-index-datom-stream-current! source (addr out-stream))]
           (if load-ok
             (return out-stream true "")
             (do
               (delete-source-index-datom-stream out-stream)
-              (return (Source-Index-Datom-Stream {}) false load-error)))))))
+              (return (Source-Index-Datom-Stream []) false load-error)))))))
   (let [[view low high range-ok range-error] (db-read-source-attr-range-index-bounds source projection)]
     (when (not range-ok)
-      (return (Source-Index-Datom-Stream {}) false range-error))
+      (return (Source-Index-Datom-Stream []) false range-error))
     (source-index-datom-stream-for-index-range source view low high)))
 
-(defstruct Source-Clause-Datom-Stream {
+(defstruct Source-Clause-Datom-Stream [
   scan: Clause-Index-Scan
   use-index-stream: bool
   index-stream: Source-Index-Datom-Stream
@@ -1479,7 +1479,7 @@
   current: Datom
   current-owned: bool
   has-current: bool
-})
+])
 
 (defn delete-source-clause-datom-stream [stream: Source-Clause-Datom-Stream]
   (when stream.has-current
@@ -1600,54 +1600,54 @@
     (let [[index-stream index-ok index-error] (source-index-datom-stream-for-clause-index-scan source scan)]
       (when (not index-ok)
         (delete-source-index-datom-stream index-stream)
-        (return (Source-Clause-Datom-Stream {}) false index-error))
-      (let [out-stream (Source-Clause-Datom-Stream {scan: scan
-                                                    use-index-stream: true
-                                                    index-stream: index-stream
-                                                    index: scan.index
-                                                    current: (Datom {})
-                                                    has-current: false})
+        (return (Source-Clause-Datom-Stream []) false index-error))
+      (let [out-stream (Source-Clause-Datom-Stream :scan scan
+                                                    :use-index-stream true
+                                                    :index-stream index-stream
+                                                    :index scan.index
+                                                    :current (Datom [])
+                                                    :has-current false)
             [load-ok load-error] (load-source-clause-datom-stream-current! source (addr out-stream))]
         (if load-ok
           (return out-stream true "")
           (do
             (delete-source-clause-datom-stream out-stream)
-            (return (Source-Clause-Datom-Stream {}) false load-error))))))
-  (let [out-stream (Source-Clause-Datom-Stream {scan: scan index: scan.index current: (Datom {}) has-current: false})
+            (return (Source-Clause-Datom-Stream []) false load-error))))))
+  (let [out-stream (Source-Clause-Datom-Stream :scan scan :index scan.index :current (Datom []) :has-current false)
         [load-ok load-error] (load-source-clause-datom-stream-current! source (addr out-stream))]
     (if load-ok
       (return out-stream true "")
       (do
         (delete-source-clause-datom-stream out-stream)
-        (return (Source-Clause-Datom-Stream {}) false load-error)))))
+        (return (Source-Clause-Datom-Stream []) false load-error)))))
 
 (defn source-clause-datom-stream-for-binding [source: DB-Read-Source, clause-value: Clause, binding: Binding] -> [stream: Source-Clause-Datom-Stream, ok: bool, error: string]
   (let [[scan scan-ok scan-error] (db-read-source-clause-index-scan source clause-value binding)]
     (when (not scan-ok)
       (delete-clause-index-scan scan)
-      (return (Source-Clause-Datom-Stream {}) false scan-error))
+      (return (Source-Clause-Datom-Stream []) false scan-error))
     (source-clause-datom-stream-for-scan source scan)))
 
 (defn source-clause-datom-stream-for-typed-row [source: DB-Read-Source, rel: Query-Relation, row: int, clause-value: Clause] -> [stream: Source-Clause-Datom-Stream, ok: bool, error: string]
   (let [[scan scan-ok scan-error] (db-read-source-clause-index-scan-typed-row source rel row clause-value)]
     (when (not scan-ok)
       (delete-clause-index-scan scan)
-      (return (Source-Clause-Datom-Stream {}) false scan-error))
+      (return (Source-Clause-Datom-Stream []) false scan-error))
     (source-clause-datom-stream-for-scan source scan)))
 
 (defn source-clause-datom-stream-for-typed-row-with-op [source: DB-Read-Source, rel: Query-Relation, row: int, clause-value: Clause, op: Physical-Op] -> [stream: Source-Clause-Datom-Stream, ok: bool, error: string]
   (let [[scan scan-ok scan-error] (db-read-source-clause-index-scan-typed-row source rel row clause-value)]
     (when (not scan-ok)
       (delete-clause-index-scan scan)
-      (return (Source-Clause-Datom-Stream {}) false scan-error))
+      (return (Source-Clause-Datom-Stream []) false scan-error))
     (let [[tighten-ok tighten-error] (physical-op-tighten-db-read-source-attr-value-scan! source (addr scan) clause-value op rel row)]
       (when (not tighten-ok)
         (delete-clause-index-scan scan)
-        (return (Source-Clause-Datom-Stream {}) false tighten-error)))
+        (return (Source-Clause-Datom-Stream []) false tighten-error)))
     (let [[tighten-ok tighten-error] (physical-op-tighten-db-read-source-eavt-ea-value-scan! source (addr scan) clause-value op rel row)]
       (when (not tighten-ok)
         (delete-clause-index-scan scan)
-        (return (Source-Clause-Datom-Stream {}) false tighten-error)))
+        (return (Source-Clause-Datom-Stream []) false tighten-error)))
     (source-clause-datom-stream-for-scan source scan)))
 
 (defn db-read-source-clause-candidates-for-typed-row-with-op [source: DB-Read-Source, rel: Query-Relation, row: int, clause-value: Clause, op: Physical-Op] -> [datoms: [dynamic]Datom, scan: Clause-Index-Scan, ok: bool, error: string]
@@ -1704,7 +1704,7 @@
       (return out candidate-scan true ""))))
 
 (defn source-clause-datom-stream [source: DB-Read-Source, clause-value: Clause] -> [stream: Source-Clause-Datom-Stream, ok: bool, error: string]
-  (let [binding (Binding {items: (make [dynamic]Var-Binding)})
+  (let [binding (Binding :items (make [dynamic]Var-Binding))
         [out-stream stream-ok stream-error] (source-clause-datom-stream-for-binding source clause-value binding)]
     (delete binding.items)
     (return out-stream stream-ok stream-error)))
@@ -1730,13 +1730,13 @@
     (source-avet-attr-value-stream source attr value)
     (source-index-datom-stream source attr)))
 
-(defstruct Source-Attr-Value-Match-Stream {
+(defstruct Source-Attr-Value-Match-Stream [
   exact-stream: Source-Index-Datom-Stream
   attr-stream: Source-Index-Datom-Stream
   resolved: Value
   use-fallback: bool
   has-current: bool
-})
+])
 
 (defn source-attr-value-match-current [stream: Source-Attr-Value-Match-Stream] -> Datom
   (if stream.use-fallback
@@ -1761,17 +1761,17 @@
 (defn source-attr-value-match-stream [source: DB-Read-Source, attr: string, value: Value] -> [stream: Source-Attr-Value-Match-Stream, ok: bool, error: string]
   (let [[resolved resolved-ok resolved-error] (db-read-source-resolve-clause-value-for-attr source attr value)]
     (when (not resolved-ok)
-      (return (Source-Attr-Value-Match-Stream {}) false resolved-error))
+      (return (Source-Attr-Value-Match-Stream []) false resolved-error))
     (let [[exact exact-ok exact-error] (source-avet-attr-value-stream source attr resolved)]
       (when (not exact-ok)
-        (return (Source-Attr-Value-Match-Stream {}) false exact-error))
+        (return (Source-Attr-Value-Match-Stream []) false exact-error))
       (when exact.has-current
-        (return (Source-Attr-Value-Match-Stream {exact-stream: exact resolved: resolved use-fallback: false has-current: true}) true ""))
+        (return (Source-Attr-Value-Match-Stream :exact-stream exact :resolved resolved :use-fallback false :has-current true) true ""))
       (let [[attr-stream attr-ok attr-error] (source-index-datom-stream source attr)]
         (when (not attr-ok)
           (delete-source-index-datom-stream exact)
-          (return (Source-Attr-Value-Match-Stream {}) false attr-error))
-        (let [out (Source-Attr-Value-Match-Stream {exact-stream: exact attr-stream: attr-stream resolved: resolved use-fallback: true has-current: false})
+          (return (Source-Attr-Value-Match-Stream []) false attr-error))
+        (let [out (Source-Attr-Value-Match-Stream :exact-stream exact :attr-stream attr-stream :resolved resolved :use-fallback true :has-current false)
               [load-ok load-error] (load-source-attr-value-match-fallback-current! source (addr out))]
           (if load-ok
             (return out true "")
@@ -1791,7 +1791,7 @@
       (set! stream^.has-current stream^.exact-stream.has-current)
       (return true ""))))
 
-(defn source-entity-int-pair-append-filter-stream! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-int-pair-append-filter-stream! [columns: ^Entity-Int-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
   (while stream^.has-current
     (let [filter-datom (source-attr-value-match-current stream^)
           [append-ok type-ok append-error] (source-entity-int-pair-append-filter-datom! columns seen source filter-datom value-attr many)]
@@ -1804,7 +1804,7 @@
         (return false false advance-error))))
   (return true true ""))
 
-(defn source-entity-string-pair-append-filter-stream! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-string-pair-append-filter-stream! [columns: ^Entity-String-Pair-Columns, seen: (ptr (map string (struct []))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, value-attr: string, many: bool] -> [ok: bool, type-ok: bool, error: string]
   (while stream^.has-current
     (let [filter-datom (source-attr-value-match-current stream^)
           [append-ok type-ok append-error] (source-entity-string-pair-append-filter-datom! columns seen source filter-datom value-attr many)]
@@ -1817,7 +1817,7 @@
         (return false false advance-error))))
   (return true true ""))
 
-(defn source-entity-string-int-triple-append-filter-stream! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct {}))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, plan: Entity-Two-Value-Plan, best-filter-index: int] -> [ok: bool, type-ok: bool, error: string]
+(defn source-entity-string-int-triple-append-filter-stream! [columns: ^Entity-String-Int-Triples, seen: (ptr (map string (struct []))), source: DB-Read-Source, stream: ^Source-Attr-Value-Match-Stream, plan: Entity-Two-Value-Plan, best-filter-index: int] -> [ok: bool, type-ok: bool, error: string]
   (while stream^.has-current
     (let [filter-datom (source-attr-value-match-current stream^)
           [append-ok type-ok append-error] (source-entity-string-int-triple-append-filter-datom! columns seen source filter-datom plan best-filter-index)]
@@ -1845,7 +1845,7 @@
   (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-reverse-entity-attr source entity attr)]
     (if datoms-ok
       (source-index-datom-stream-from-owned-datoms source datoms)
-      (return (Source-Index-Datom-Stream {}) false datoms-error))))
+      (return (Source-Index-Datom-Stream []) false datoms-error))))
 
 (defn append-source-entity-attr-option-values! [option-row: ^Result-Row, source: DB-Read-Source, entity: u64, attr: string] -> [ok: bool, error: string]
   (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity attr)]

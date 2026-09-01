@@ -2,7 +2,7 @@
 
 (defn clone-binding [binding: Binding] -> Binding
   (let [items (arr.into [dynamic]Var-Binding (slice binding.items 0))]
-    (Binding {items: items})))
+    (Binding :items items)))
 
 (defn clone-bindings [bindings: []Binding] -> [dynamic]Binding
   (let [out (make [dynamic]Binding)]
@@ -14,10 +14,10 @@
   (for [item binding.items]
     (when (= item.name name)
       (return item.value true)))
-  (return (Value {}) false))
+  (return (Value []) false))
 
 (defn binding-store! [binding: ^Binding, name: string, value: Value]
-  (arr.push! binding^.items (Var-Binding {name: name value: value})))
+  (arr.push! binding^.items (Var-Binding :name name :value value)))
 
 (defn append-var-binding-attr! [attrs: ^[dynamic]string, attr-sources: ^[dynamic]string, name: string, source: string]
   (when (= name "")
@@ -59,20 +59,20 @@
     (count rel.tuples)))
 
 (defn query-relation-empty [] -> Query-Relation
-  (Query-Relation {attrs: (make [dynamic]string)
-                   attr-sources: (make [dynamic]string)
-                   attr-index: (make (map string int))
-                   tuples: (make [dynamic]Binding)
-                   typed-columns: (make [dynamic]Relation-Column)}))
+  (Query-Relation :attrs (make [dynamic]string)
+                   :attr-sources (make [dynamic]string)
+                   :attr-index (make (map string int))
+                   :tuples (make [dynamic]Binding)
+                   :typed-columns (make [dynamic]Relation-Column)))
 
 (defn query-relation-singleton [] -> Query-Relation
-  (Query-Relation {attrs: (make [dynamic]string)
-                   attr-sources: (make [dynamic]string)
-                   attr-index: (make (map string int))
-                   tuples: (make [dynamic]Binding)
-                   typed-columns: (make [dynamic]Relation-Column)
-                   typed-rows: 1
-                   has-typed-columns: true}))
+  (Query-Relation :attrs (make [dynamic]string)
+                   :attr-sources (make [dynamic]string)
+                   :attr-index (make (map string int))
+                   :tuples (make [dynamic]Binding)
+                   :typed-columns (make [dynamic]Relation-Column)
+                   :typed-rows 1
+                   :has-typed-columns true))
 
 (defn query-relation-from-bindings [bindings: []Binding] -> Query-Relation
   (query-relation-from-bindings-with-source bindings ""))
@@ -90,24 +90,24 @@
           (return (make [dynamic]Relation-Column) 0 false))))
     (return out-columns out-rows true)))
 
-(defstruct Query-Relation-Builder {
+(defstruct Query-Relation-Builder [
   tuples: [dynamic]Binding
   typed-columns: [dynamic]Relation-Column
   typed-rows: int
   typed-ok: bool
-})
+])
 
 (defn query-relation-builder [attrs: []string] -> Query-Relation-Builder
-  (Query-Relation-Builder {tuples: (make [dynamic]Binding)
-                           typed-columns: (relation-columns-for-attrs attrs)
-                           typed-rows: 0
-                           typed-ok: true}))
+  (Query-Relation-Builder :tuples (make [dynamic]Binding)
+                           :typed-columns (relation-columns-for-attrs attrs)
+                           :typed-rows 0
+                           :typed-ok true))
 
 (defn query-relation-builder-with-capacity [attrs: []string, row-capacity: int] -> Query-Relation-Builder
-  (Query-Relation-Builder {tuples: (make [dynamic]Binding 0 row-capacity)
-                           typed-columns: (relation-columns-for-attrs-with-capacity attrs row-capacity)
-                           typed-rows: 0
-                           typed-ok: true}))
+  (Query-Relation-Builder :tuples (make [dynamic]Binding 0 row-capacity)
+                           :typed-columns (relation-columns-for-attrs-with-capacity attrs row-capacity)
+                           :typed-rows 0
+                           :typed-ok true))
 
 (defn delete-query-relation-builder [builder: Query-Relation-Builder]
   (delete builder.tuples)
@@ -259,13 +259,13 @@
           (arr.push! attr-sources source)))
       (arr.push! tuples (clone-binding binding)))
     (let [[typed-columns typed-rows typed-ok] (typed-columns-from-relation-bindings (slice attrs 0) (slice tuples 0))]
-    (Query-Relation {attrs: attrs
-                     attr-sources: attr-sources
-                     attr-index: (query-relation-attr-index (slice attrs 0))
-                     tuples: tuples
-                     typed-columns: typed-columns
-                     typed-rows: typed-rows
-                     has-typed-columns: typed-ok}))))
+    (Query-Relation :attrs attrs
+                     :attr-sources attr-sources
+                     :attr-index (query-relation-attr-index (slice attrs 0))
+                     :tuples tuples
+                     :typed-columns typed-columns
+                     :typed-rows typed-rows
+                     :has-typed-columns typed-ok))))
 
 (defn query-relation-from-bindings-inheriting-sources [bindings: []Binding, parent: Query-Relation] -> Query-Relation
   (let [attrs (make [dynamic]string)
@@ -281,13 +281,13 @@
               (arr.push! attr-sources "")))))
       (arr.push! tuples (clone-binding binding)))
     (let [[typed-columns typed-rows typed-ok] (typed-columns-from-relation-bindings (slice attrs 0) (slice tuples 0))]
-    (Query-Relation {attrs: attrs
-                     attr-sources: attr-sources
-                     attr-index: (query-relation-attr-index (slice attrs 0))
-                     tuples: tuples
-                     typed-columns: typed-columns
-                     typed-rows: typed-rows
-                     has-typed-columns: typed-ok}))))
+    (Query-Relation :attrs attrs
+                     :attr-sources attr-sources
+                     :attr-index (query-relation-attr-index (slice attrs 0))
+                     :tuples tuples
+                     :typed-columns typed-columns
+                     :typed-rows typed-rows
+                     :has-typed-columns typed-ok))))
 
 (defn delete-query-relation [rel: Query-Relation]
   (delete rel.attrs)
@@ -297,20 +297,20 @@
   (delete rel.tuples))
 
 (defn relation-column-empty [] -> Relation-Column
-  (Relation-Column {entities: (make [dynamic]u64)
-                    texts: (make [dynamic]string)
-                    ints: (make [dynamic]i64)
-                    floats: (make [dynamic]f64)
-                    bools: (make [dynamic]bool)
-                    values: (make [dynamic]Value)}))
+  (Relation-Column :entities (make [dynamic]u64)
+                    :texts (make [dynamic]string)
+                    :ints (make [dynamic]i64)
+                    :floats (make [dynamic]f64)
+                    :bools (make [dynamic]bool)
+                    :values (make [dynamic]Value)))
 
 (defn relation-column-empty-with-capacity [row-capacity: int] -> Relation-Column
-  (Relation-Column {entities: (make [dynamic]u64 0 row-capacity)
-                    texts: (make [dynamic]string 0 row-capacity)
-                    ints: (make [dynamic]i64 0 row-capacity)
-                    floats: (make [dynamic]f64 0 row-capacity)
-                    bools: (make [dynamic]bool 0 row-capacity)
-                    values: (make [dynamic]Value 0 row-capacity)}))
+  (Relation-Column :entities (make [dynamic]u64 0 row-capacity)
+                    :texts (make [dynamic]string 0 row-capacity)
+                    :ints (make [dynamic]i64 0 row-capacity)
+                    :floats (make [dynamic]f64 0 row-capacity)
+                    :bools (make [dynamic]bool 0 row-capacity)
+                    :values (make [dynamic]Value 0 row-capacity)))
 
 (defn delete-relation-column [column: Relation-Column]
   (if (= column.kind .Mixed)
@@ -344,14 +344,14 @@
         (arr.push! values (value-owned value)))
       (for [value column.values]
         (arr.push! values value)))
-    (Relation-Column {kind: column.kind
-                      has-kind: column.has-kind
-                      entities: entities
-                      texts: texts
-                      ints: ints
-                      floats: floats
-                      bools: bools
-                      values: values})))
+    (Relation-Column :kind column.kind
+                      :has-kind column.has-kind
+                      :entities entities
+                      :texts texts
+                      :ints ints
+                      :floats floats
+                      :bools bools
+                      :values values)))
 
 (defn clone-relation-columns [columns: []Relation-Column] -> [dynamic]Relation-Column
   (let [out (make [dynamic]Relation-Column 0 (count columns))]
@@ -360,10 +360,10 @@
     out))
 
 (defn typed-relation-empty [] -> Typed-Relation
-  (Typed-Relation {attrs: (make [dynamic]string)
-                   attr-sources: (make [dynamic]string)
-                   attr-index: (make (map string int))
-                   columns: (make [dynamic]Relation-Column)}))
+  (Typed-Relation :attrs (make [dynamic]string)
+                   :attr-sources (make [dynamic]string)
+                   :attr-index (make (map string int))
+                   :columns (make [dynamic]Relation-Column)))
 
 (defn delete-typed-relation [rel: Typed-Relation]
   (delete rel.attrs)
@@ -545,11 +545,11 @@
           attr-sources (arr.into [dynamic]string (slice rel.attr-sources 0))
           attr-index (query-relation-attr-index (slice rel.attrs 0))
           columns (clone-relation-columns (slice rel.typed-columns 0))]
-      (return (Typed-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: attr-index
-                               columns: columns
-                               rows: rel.typed-rows}) true)))
+      (return (Typed-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index attr-index
+                               :columns columns
+                               :rows rel.typed-rows) true)))
   (let [out (typed-relation-empty)]
     (set! out.rows (count rel.tuples))
     (for [attr index rel.attrs]
@@ -650,13 +650,13 @@
     (let [[typed-columns typed-rows typed-ok] (typed-columns-from-relation-bindings (slice attrs 0) (slice tuples 0))]
       (delete left-bindings)
       (delete right-bindings)
-      (Query-Relation {attrs: attrs
-                       attr-sources: attr-sources
-                       attr-index: (query-relation-attr-index (slice attrs 0))
-                       tuples: tuples
-                       typed-columns: typed-columns
-                       typed-rows: typed-rows
-                       has-typed-columns: typed-ok}))))
+      (Query-Relation :attrs attrs
+                       :attr-sources attr-sources
+                       :attr-index (query-relation-attr-index (slice attrs 0))
+                       :tuples tuples
+                       :typed-columns typed-columns
+                       :typed-rows typed-rows
+                       :has-typed-columns typed-ok))))
 
 (defn primitive-value-join-key [value: Value] -> [key: string, ok: bool]
   (case value.kind
@@ -753,7 +753,7 @@
 
 (defn typed-relation-column-value [column: Relation-Column, row: int] -> [value: Value, ok: bool]
   (when (not column.has-kind)
-    (return (Value {}) false))
+    (return (Value []) false))
   (case column.kind
     .Nil (return (value-nil) true)
     .Entity (return (value-entity column.entities[row]) true)
@@ -766,16 +766,16 @@
     .Uuid (return (value-uuid column.texts[row]) true)
     .Instant (return (value-instant column.ints[row]) true)
     .Mixed (return column.values[row] true)
-    (return (Value {}) false))
-  (return (Value {}) false))
+    (return (Value []) false))
+  (return (Value []) false))
 
 (defn binding-from-query-relation-typed-row [rel: Query-Relation, row: int] -> [binding: Binding, ok: bool]
-  (let [out (Binding {items: (make [dynamic]Var-Binding 0 (count rel.attrs))})]
+  (let [out (Binding :items (make [dynamic]Var-Binding 0 (count rel.attrs)))]
     (for [attr index rel.attrs]
       (let [[value value-ok] (typed-relation-column-value rel.typed-columns[index] row)]
         (when (not value-ok)
           (delete out.items)
-          (return (Binding {}) false))
+          (return (Binding []) false))
         (binding-store! (addr out) attr (value-owned value))))
     (return out true)))
 
@@ -820,13 +820,13 @@
         attr-index (query-relation-attr-index (slice rel.attrs 0))
         tuples (make [dynamic]Binding)
         typed-columns (relation-columns-for-attrs (slice rel.attrs 0))]
-    (Query-Relation {attrs: attrs
-                     attr-sources: attr-sources
-                     attr-index: attr-index
-                     tuples: tuples
-                     typed-columns: typed-columns
-                     typed-rows: 0
-                     has-typed-columns: true})))
+    (Query-Relation :attrs attrs
+                     :attr-sources attr-sources
+                     :attr-index attr-index
+                     :tuples tuples
+                     :typed-columns typed-columns
+                     :typed-rows 0
+                     :has-typed-columns true)))
 
 (defn query-relation-single-typed-row [rel: Query-Relation, row: int] -> [out: Query-Relation, ok: bool]
   (when (or (not rel.has-typed-columns)
@@ -841,13 +841,13 @@
       (delete attr-sources)
       (delete-query-relation-builder builder)
       (return (query-relation-empty) false))
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: builder.tuples
-                             typed-columns: builder.typed-columns
-                             typed-rows: builder.typed-rows
-                             has-typed-columns: builder.typed-ok}) true)))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples builder.tuples
+                             :typed-columns builder.typed-columns
+                             :typed-rows builder.typed-rows
+                             :has-typed-columns builder.typed-ok) true)))
 
 (defn query-relation-single-typed-row-projected [rel: Query-Relation, row: int, names: []string] -> [out: Query-Relation, ok: bool]
   (when (or (not rel.has-typed-columns)
@@ -867,13 +867,13 @@
         (delete attr-sources)
         (delete-query-relation-builder builder)
         (return (query-relation-empty) false))
-      (return (Query-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: (query-relation-attr-index (slice attrs 0))
-                               tuples: builder.tuples
-                               typed-columns: builder.typed-columns
-                               typed-rows: builder.typed-rows
-                               has-typed-columns: builder.typed-ok}) true))))
+      (return (Query-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index (query-relation-attr-index (slice attrs 0))
+                               :tuples builder.tuples
+                               :typed-columns builder.typed-columns
+                               :typed-rows builder.typed-rows
+                               :has-typed-columns builder.typed-ok) true))))
 
 (defn query-relation-project-typed [rel: Query-Relation, names: []string] -> [out: Query-Relation, ok: bool]
   (when (not rel.has-typed-columns)
@@ -897,13 +897,13 @@
           (delete-query-relation-builder builder)
           (return (query-relation-empty) false))
         (set! row (+ row 1)))
-      (return (Query-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: (query-relation-attr-index (slice attrs 0))
-                               tuples: builder.tuples
-                               typed-columns: builder.typed-columns
-                               typed-rows: builder.typed-rows
-                               has-typed-columns: builder.typed-ok}) true))))
+      (return (Query-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index (query-relation-attr-index (slice attrs 0))
+                               :tuples builder.tuples
+                               :typed-columns builder.typed-columns
+                               :typed-rows builder.typed-rows
+                               :has-typed-columns builder.typed-ok) true))))
 
 (defn query-relation-append-typed-rows! [out: ^Query-Relation, rel: Query-Relation] -> bool
   (when (not (query-relation-typed-layout-compatible? out^ rel))
@@ -916,7 +916,7 @@
       (set! row (+ row 1))))
   true)
 
-(defn query-relation-append-typed-rows-unique! [out: ^Query-Relation, rel: Query-Relation, seen: (ptr (map string (struct {})))] -> bool
+(defn query-relation-append-typed-rows-unique! [out: ^Query-Relation, rel: Query-Relation, seen: (ptr (map string (struct [])))] -> bool
   (when (not (query-relation-typed-layout-compatible? out^ rel))
     (return false))
   (let [row 0]
@@ -942,7 +942,7 @@
     (set! has-out-rel^ false)
     (set! out-rel-typed^ false)))
 
-(defn query-relation-accumulate-typed-unique! [out-bindings: ^[dynamic]Binding, out-rel: ^Query-Relation, has-out-rel: ^bool, out-rel-typed: ^bool, seen: (ptr (map string (struct {}))), rel: Query-Relation] -> bool
+(defn query-relation-accumulate-typed-unique! [out-bindings: ^[dynamic]Binding, out-rel: ^Query-Relation, has-out-rel: ^bool, out-rel-typed: ^bool, seen: (ptr (map string (struct []))), rel: Query-Relation] -> bool
   (when (not (and out-rel-typed^ rel.has-typed-columns))
     (return false))
   (if has-out-rel^
@@ -1021,10 +1021,10 @@
            (return 0 false)))
      (return 0 false)))
 
-(defstruct Entity-Relation-Row-Ref {
+(defstruct Entity-Relation-Row-Ref [
   entity: u64
   row: int
-})
+])
 
 (defn entity-relation-row-ref-less? [left: Entity-Relation-Row-Ref, right: Entity-Relation-Row-Ref] -> bool
   (or (< left.entity right.entity)
@@ -1074,15 +1074,15 @@
         (when (not entity-ok)
           (delete out)
           (return (make [dynamic]Entity-Relation-Row-Ref) false))
-        (arr.push! out (Entity-Relation-Row-Ref {entity: entity row: row})))
+        (arr.push! out (Entity-Relation-Row-Ref :entity entity :row row)))
       (set! row (+ row 1)))
     (sort-entity-relation-row-refs! (addr out))
     (return out true)))
 
-(defstruct Value-Relation-Row-Ref {
+(defstruct Value-Relation-Row-Ref [
   value: Value
   row: int
-})
+])
 
 (defn delete-value-relation-row-refs [refs: [dynamic]Value-Relation-Row-Ref]
   (for [ref refs]
@@ -1144,7 +1144,7 @@
               (delete-value-relation-row-refs out)
               (return (make [dynamic]Value-Relation-Row-Ref) false resolved-error)))
           (when resolved-ok
-            (arr.push! out (Value-Relation-Row-Ref {value: (value-owned resolved) row: row})))))
+            (arr.push! out (Value-Relation-Row-Ref :value (value-owned resolved) :row row)))))
       (set! row (+ row 1)))
     (sort-value-relation-row-refs! (addr out))
     (return out true "")))
@@ -1168,22 +1168,22 @@
 (defn typed-relation-row-value [rel: Typed-Relation, row: int, name: string] -> [value: Value, ok: bool]
   (let [[column-index column-ok] (typed-relation-attr-index rel name)]
     (when (not column-ok)
-      (return (Value {}) false))
+      (return (Value []) false))
     (typed-relation-column-value rel.columns[column-index] row)))
 
 (defn query-relation-typed-row-value [rel: Query-Relation, row: int, name: string] -> [value: Value, ok: bool]
   (when (not rel.has-typed-columns)
-    (return (Value {}) false))
+    (return (Value []) false))
   (let [[column-index column-ok] (query-relation-attr-index-lookup rel name)]
     (when (not column-ok)
-      (return (Value {}) false))
+      (return (Value []) false))
     (typed-relation-column-value rel.typed-columns[column-index] row)))
 
 (defn query-relation-resolve-typed-term [rel: Query-Relation, row: int, term: Term] -> [value: Value, ok: bool]
   (case term.kind
     .Value (return term.value true)
     .Var (return (query-relation-typed-row-value rel row term.name))
-     (return (Value {}) false)))
+     (return (Value []) false)))
 
 (defn query-relation-resolve-typed-entity-term [db: DB, rel: Query-Relation, row: int, term: Term] -> [value: Value, ok: bool]
   (when (= term.kind .LookupRef)
@@ -1223,7 +1223,7 @@
 
 (defn query-relation-resolve-typed-entity-scan-term [db: DB, rel: Query-Relation, row: int, term: Term] -> [value: Value, ok: bool]
   (when (query-relation-typed-entity-term-needs-semantic-match? rel row term)
-    (return (Value {}) false))
+    (return (Value []) false))
   (query-relation-resolve-typed-entity-term db rel row term))
 
 (defn query-relation-typed-row-var-agrees? [rel: Query-Relation, row: int, name: string, value: Value] -> bool
@@ -1232,22 +1232,22 @@
       (predicate-value-equal? existing value)
       true)))
 
-(defstruct Relation-Column-Source {
+(defstruct Relation-Column-Source [
   side: int
   index: int
-})
+])
 
 (defn relation-column-sources-for-join [left: Typed-Relation, right: Typed-Relation, attrs: []string] -> [sources: [dynamic]Relation-Column-Source, ok: bool]
   (let [out (make [dynamic]Relation-Column-Source 0 (count attrs))]
     (for [attr attrs]
       (let [[left-index left-ok] (typed-relation-attr-index left attr)]
         (if left-ok
-          (arr.push! out (Relation-Column-Source {side: 0 index: left-index}))
+          (arr.push! out (Relation-Column-Source :side 0 :index left-index))
           (let [[right-index right-ok] (typed-relation-attr-index right attr)]
             (when (not right-ok)
               (delete out)
               (return (make [dynamic]Relation-Column-Source) false))
-            (arr.push! out (Relation-Column-Source {side: 1 index: right-index}))))))
+            (arr.push! out (Relation-Column-Source :side 1 :index right-index))))))
     (return out true)))
 
 (defn query-relation-column-sources-for-join [left: Query-Relation, right: Query-Relation, attrs: []string] -> [sources: [dynamic]Relation-Column-Source, ok: bool]
@@ -1255,12 +1255,12 @@
     (for [attr attrs]
       (let [[left-index left-ok] (query-relation-attr-index-lookup left attr)]
         (if left-ok
-          (arr.push! out (Relation-Column-Source {side: 0 index: left-index}))
+          (arr.push! out (Relation-Column-Source :side 0 :index left-index))
           (let [[right-index right-ok] (query-relation-attr-index-lookup right attr)]
             (when (not right-ok)
               (delete out)
               (return (make [dynamic]Relation-Column-Source) false))
-            (arr.push! out (Relation-Column-Source {side: 1 index: right-index}))))))
+            (arr.push! out (Relation-Column-Source :side 1 :index right-index))))))
     (return out true)))
 
 (defn add-typed-joined-column-row! [out: ^[dynamic]Relation-Column, sources: []Relation-Column-Source, left: Typed-Relation, left-row: int, right: Typed-Relation, right-row: int] -> bool
@@ -1328,13 +1328,13 @@
               (set! right-row (+ right-row 1))))
           (set! left-row (+ left-row 1))))
       (delete column-sources)
-      (return (Query-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: (query-relation-attr-index (slice attrs 0))
-                               tuples: tuples
-                               typed-columns: typed-columns
-                               typed-rows: typed-rows
-                               has-typed-columns: true}) true))))
+      (return (Query-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index (query-relation-attr-index (slice attrs 0))
+                               :tuples tuples
+                               :typed-columns typed-columns
+                               :typed-rows typed-rows
+                               :has-typed-columns true) true))))
 
 (defn query-relation-product-typed [left: Query-Relation, right: Query-Relation] -> [rel: Query-Relation, ok: bool]
   (let [[borrowed borrowed-ok] (query-relation-product-typed-borrowed left right)]
@@ -1379,10 +1379,10 @@
                   (set! right-row (+ right-row 1))))
               (set! left-row (+ left-row 1))))
           (delete column-sources)
-          (return (Query-Relation {attrs: attrs
-                                   attr-sources: attr-sources
-                                   attr-index: (query-relation-attr-index (slice attrs 0))
-                                   tuples: tuples
-                                   typed-columns: typed-columns
-                                   typed-rows: typed-rows
-                                   has-typed-columns: true}) true))))))
+          (return (Query-Relation :attrs attrs
+                                   :attr-sources attr-sources
+                                   :attr-index (query-relation-attr-index (slice attrs 0))
+                                   :tuples tuples
+                                   :typed-columns typed-columns
+                                   :typed-rows typed-rows
+                                   :has-typed-columns true) true))))))

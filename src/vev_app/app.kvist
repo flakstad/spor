@@ -33,20 +33,20 @@
 (def native-query-function-result vev.native-query-function-result)
 (def query-aggregate-fn vev.query-aggregate-fn)
 
-(defstruct Tx-Report {
+(defstruct Tx-Report [
   ok: bool
   error: string
   tx: u64
-})
+])
 
-(defstruct Result {
+(defstruct Result [
   ok: bool
   error: string
   rows: [dynamic]Row
   owns-values: bool
-})
+])
 
-(defstruct Direct-Write-Profile {
+(defstruct Direct-Write-Profile [
   resolve-us: f64
   overlay-us: f64
   append-us: f64
@@ -56,20 +56,20 @@
   append-root-persist-us: f64
   append-root-publish-us: f64
   append-commit-us: f64
-})
+])
 
 ;; The application facade is routinely used from HTTP servers where reads and
 ;; writes can arrive on different worker threads. Store-Conn owns mutable
 ;; snapshot and write caches, so access through a shared Conn must be serialized.
-(defstruct Conn-State {
+(defstruct Conn-State [
   store: vev.Store-Conn
   lock: ^sync.Mutex
-})
+])
 
-(defstruct DB-State {
+(defstruct DB-State [
   db: vev.Store-DB
   lock: ^sync.Mutex
-})
+])
 
 (defn- conn-state [conn: Conn] -> ^Conn-State
   (transmute ^Conn-State (rawptr conn)))
@@ -81,15 +81,15 @@
 (defn direct-write-profile [conn: Conn] -> Direct-Write-Profile
   (let [profile (vev.store-direct-write-profile (conn-ptr conn))]
     (Direct-Write-Profile
-      {resolve-us: profile.resolve-us
-       overlay-us: profile.overlay-us
-       append-us: profile.append-us
-       append-datoms-us: profile.append-datoms-us
-       append-roots-us: profile.append-roots-us
-       append-root-sort-us: profile.append-root-sort-us
-       append-root-persist-us: profile.append-root-persist-us
-       append-root-publish-us: profile.append-root-publish-us
-       append-commit-us: profile.append-commit-us})))
+      :resolve-us profile.resolve-us
+       :overlay-us profile.overlay-us
+       :append-us profile.append-us
+       :append-datoms-us profile.append-datoms-us
+       :append-roots-us profile.append-roots-us
+       :append-root-sort-us profile.append-root-sort-us
+       :append-root-persist-us profile.append-root-persist-us
+       :append-root-publish-us profile.append-root-publish-us
+       :append-commit-us profile.append-commit-us)))
 
 (defn reset-direct-write-profile! [conn: Conn]
   (vev.reset-store-direct-write-profile! (conn-ptr conn)))
@@ -141,10 +141,10 @@
     (let [error result.result.error]
       (vev.delete-query-result result)
       (panic error)))
-  (Result {ok: result.result.ok
-           error: result.result.error
-           rows: result.result.rows
-           owns-values: result.ownsValues}))
+  (Result :ok result.result.ok
+           :error result.result.error
+           :rows result.result.rows
+           :owns-values result.ownsValues))
 
 (defn- data-result-value [db: DB, query: Data, result: vev.Query-Result] -> Data
   (let [[value ok error] (vev.query-result-data (db-ptr db) query result)]
@@ -170,17 +170,17 @@
     out))
 
 (defn- unchecked-result-value [result: vev.Query-Result] -> Result
-  (Result {ok: result.result.ok
-           error: result.result.error
-           rows: result.result.rows
-           owns-values: result.ownsValues}))
+  (Result :ok result.result.ok
+           :error result.result.error
+           :rows result.result.rows
+           :owns-values result.ownsValues))
 
 (defn- tx-report-value [report: vev.Store-Tx-Report] -> Tx-Report
   ;; A rejected transaction is an ordinary application-level result.  The
   ;; public report already carries ok/error specifically so callers can keep
   ;; the process alive, explain the failure, and choose whether to retry.
   ;; Reserve panics for failures which cannot be represented by this API.
-  (let [out (Tx-Report {ok: report.ok error: report.error tx: report.tx})]
+  (let [out (Tx-Report :ok report.ok :error report.error :tx report.tx)]
     (vev.delete-store-tx-report report)
     out))
 
@@ -384,9 +384,9 @@
 (defn close-result [result: Result]
   (vev.delete-query-result
     (vev.Query-Result
-      {result: (vev.Result-Set
-                 {ok: result.ok error: result.error rows: result.rows})
-       ownsValues: result.owns-values})))
+      :result (vev.Result-Set
+                 :ok result.ok :error result.error :rows result.rows)
+       :ownsValues result.owns-values)))
 
 (defn- q-input-string [value: string] -> vev.Query-Input
   (vev.query-input-scalar (vev.value-string value)))
@@ -415,9 +415,9 @@
 (defn- q-input-keyword [value: keyword] -> vev.Query-Input
   (vev.query-input-scalar (vev.value-keyword (vev.keyword-text value))))
 
-(defstruct Log-Query-Input {
+(defstruct Log-Query-Input [
   input: vev.Query-Input
-})
+])
 
 (defn- log-query-input [value: Log] -> vev.Query-Input
   (let [start (kdata.from-nil) :defer-with kdata.release
@@ -428,9 +428,9 @@
     (when (not ok)
       (panic error))
     (vev.Query-Input
-      {kind: .Scalar
-       owns-values: true
-       value: log-value})))
+      :kind .Scalar
+       :owns-values true
+       :value log-value)))
 
 (defn- q-input-log [value: Log] -> vev.Query-Input
   (log-query-input value))
@@ -466,7 +466,7 @@
   (kdata.from-keyword (vev.keyword-text value)))
 
 (defn- q-data-input-log [value: Log] -> Log-Query-Input
-  (Log-Query-Input {input: (log-query-input value)}))
+  (Log-Query-Input :input (log-query-input value)))
 
 (def- q-data-input
   (overload q-data-input-data

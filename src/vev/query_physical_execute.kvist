@@ -23,13 +23,13 @@
           (delete-query-relation-builder builder)
           (return (query-relation-empty) false))
         (set! row (+ row 1)))
-      (return (Query-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: (query-relation-attr-index (slice attrs 0))
-                               tuples: builder.tuples
-                               typed-columns: builder.typed-columns
-                               typed-rows: builder.typed-rows
-                               has-typed-columns: builder.typed-ok})
+      (return (Query-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index (query-relation-attr-index (slice attrs 0))
+                               :tuples builder.tuples
+                               :typed-columns builder.typed-columns
+                               :typed-rows builder.typed-rows
+                               :has-typed-columns builder.typed-ok)
               true))))
 
 (defn db-read-source-apply-physical-materialize-op [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, rel: Query-Relation, op: Physical-Op, materialization: Physical-Materialization-Plan, registry: []Native-Query-Fn] -> [batch: Typed-Materialized-Batch, ok: bool, error: string]
@@ -190,19 +190,19 @@
 (defn rule-var-fresh-name [name: string, id: int] -> string
   (fmt.tprintf "%s__rule_%d" name id))
 
-(defstruct Rule-Inline-Binding {
+(defstruct Rule-Inline-Binding [
   name: string
   term: Term
-})
+])
 
 (defn rule-inline-binding-lookup [bindings: []Rule-Inline-Binding, name: string] -> [term: Term, ok: bool]
   (for [binding bindings]
     (when (= binding.name name)
       (return binding.term true)))
-  (return (Term {}) false))
+  (return (Term []) false))
 
 (defn rule-inline-binding-add! [bindings: ^[dynamic]Rule-Inline-Binding, name: string, term: Term]
-  (arr.push! bindings^ (Rule-Inline-Binding {name: name term: term})))
+  (arr.push! bindings^ (Rule-Inline-Binding :name name :term term)))
 
 (defn rule-inline-term [term: Term, subst: ^[dynamic]Rule-Inline-Binding, locals: ^[dynamic]Rule-Inline-Binding, id: int] -> Term
   (when (not (= term.kind .Var))
@@ -218,32 +218,32 @@
     fresh))
 
 (defn rule-inline-clause [clause-value: Clause, subst: ^[dynamic]Rule-Inline-Binding, locals: ^[dynamic]Rule-Inline-Binding, id: int] -> Clause
-  (Clause {e: (rule-inline-term clause-value.e subst locals id)
-           a: (rule-inline-term clause-value.a subst locals id)
-           v: (rule-inline-term clause-value.v subst locals id)
-           tx-term: (rule-inline-term clause-value.tx-term subst locals id)
-           op-term: (rule-inline-term clause-value.op-term subst locals id)
-           source: clause-value.source
-           has-source: clause-value.has-source
-           source-width: clause-value.source-width}))
+  (Clause :e (rule-inline-term clause-value.e subst locals id)
+           :a (rule-inline-term clause-value.a subst locals id)
+           :v (rule-inline-term clause-value.v subst locals id)
+           :tx-term (rule-inline-term clause-value.tx-term subst locals id)
+           :op-term (rule-inline-term clause-value.op-term subst locals id)
+           :source clause-value.source
+           :has-source clause-value.has-source
+           :source-width clause-value.source-width))
 
 (defn rule-inline-predicate [predicate: Predicate, subst: ^[dynamic]Rule-Inline-Binding, locals: ^[dynamic]Rule-Inline-Binding, id: int] -> Predicate
   (let [terms (make [dynamic]Term 0 (count predicate.terms))]
     (for [term predicate.terms]
       (arr.push! terms (rule-inline-term term subst locals id)))
-    (Predicate {op: predicate.op terms: terms})))
+    (Predicate :op predicate.op :terms terms)))
 
 (defn rule-inline-function-clause [function: Function-Clause, subst: ^[dynamic]Rule-Inline-Binding, locals: ^[dynamic]Rule-Inline-Binding, id: int] -> Function-Clause
   (let [terms (make [dynamic]Term 0 (count function.terms))]
     (for [term function.terms]
       (arr.push! terms (rule-inline-term term subst locals id)))
-    (Function-Clause {op: function.op terms: terms out: function.out out-vars: function.out-vars out-binding: function.out-binding is-tuple: function.is-tuple})))
+    (Function-Clause :op function.op :terms terms :out function.out :out-vars function.out-vars :out-binding function.out-binding :is-tuple function.is-tuple)))
 
 (defn rule-inline-call [call: Rule-Call, subst: ^[dynamic]Rule-Inline-Binding, locals: ^[dynamic]Rule-Inline-Binding, id: int] -> Rule-Call
   (let [args (make [dynamic]Term 0 (count call.args))]
     (for [arg call.args]
       (arr.push! args (rule-inline-term arg subst locals id)))
-    (Rule-Call {name: call.name source: call.source has-source: call.has-source args: args})))
+    (Rule-Call :name call.name :source call.source :has-source call.has-source :args args)))
 
 (defn append-inlined-rule-call-steps! [clauses: ^[dynamic]Clause, predicates: ^[dynamic]Predicate, function-clauses: ^[dynamic]Function-Clause, rule-calls: ^[dynamic]Rule-Call, steps: ^[dynamic]Query-Step, rules: []Rule, index: []Rule-Name-Index-Entry, deps: []Rule-Dependency, call: Rule-Call, next-id: ^int] -> bool
   (when (not (rule-call-inlinable? rules index deps call))
@@ -263,15 +263,15 @@
         (if (= step.kind .Clause)
           (do
             (arr.push! clauses^ (rule-inline-clause rule.clauses[step.index] (addr subst) (addr locals) id))
-            (arr.push! steps^ (Query-Step {kind: .Clause index: (- (count clauses^) 1)})))
+            (arr.push! steps^ (Query-Step :kind .Clause :index (- (count clauses^) 1))))
           (if (= step.kind .Predicate)
             (do
               (arr.push! predicates^ (rule-inline-predicate rule.predicates[step.index] (addr subst) (addr locals) id))
-              (arr.push! steps^ (Query-Step {kind: .Predicate index: (- (count predicates^) 1)})))
+              (arr.push! steps^ (Query-Step :kind .Predicate :index (- (count predicates^) 1))))
             (if (= step.kind .Function)
               (do
                 (arr.push! function-clauses^ (rule-inline-function-clause rule.function-clauses[step.index] (addr subst) (addr locals) id))
-                (arr.push! steps^ (Query-Step {kind: .Function index: (- (count function-clauses^) 1)})))
+                (arr.push! steps^ (Query-Step :kind .Function :index (- (count function-clauses^) 1))))
               (if (= step.kind .RuleCall)
                 (let [inner-call (rule-inline-call rule.rule-calls[step.index] (addr subst) (addr locals) id)
                       inner-ok (append-inlined-rule-call-steps! clauses predicates function-clauses rule-calls steps rules index deps inner-call next-id)]
@@ -290,7 +290,7 @@
 
 (defn query-source-inline-simple-rules [query-value: Query] -> [out: Query, ok: bool]
   (when (= (count query-value.rule-calls) 0)
-    (return (Query {}) false))
+    (return (Query []) false))
   (let [index (rule-name-index-build (slice query-value.rules 0))
         deps (rules-dependency-graph-indexed (slice query-value.rules 0) (slice index 0))
         clauses (make [dynamic]Clause)
@@ -308,16 +308,16 @@
 	      (if (= step.kind .Clause)
 	        (do
 	          (arr.push! clauses query-value.clauses[step.index])
-	          (arr.push! steps (Query-Step {kind: .Clause index: (- (count clauses) 1)}))
+	          (arr.push! steps (Query-Step :kind .Clause :index (- (count clauses) 1)))
 	          (append-clause-vars! (addr available) query-value.clauses[step.index]))
 	        (if (= step.kind .Predicate)
 	          (do
 	            (arr.push! predicates query-value.predicates[step.index])
-	            (arr.push! steps (Query-Step {kind: .Predicate index: (- (count predicates) 1)})))
+	            (arr.push! steps (Query-Step :kind .Predicate :index (- (count predicates) 1))))
 	          (if (= step.kind .Function)
 	            (do
 	              (arr.push! function-clauses query-value.function-clauses[step.index])
-	              (arr.push! steps (Query-Step {kind: .Function index: (- (count function-clauses) 1)}))
+	              (arr.push! steps (Query-Step :kind .Function :index (- (count function-clauses) 1)))
 	              (append-function-output-vars! (addr available) query-value.function-clauses[step.index]))
 	            (if (= step.kind .RuleCall)
 	              (if (and (not (rule-call-correlated-with-vars? query-value.rule-calls[step.index] (slice available 0)))
@@ -327,7 +327,7 @@
 	                  (append-rule-call-vars! (addr available) query-value.rule-calls[step.index]))
 	                (do
 	                  (arr.push! rule-calls query-value.rule-calls[step.index])
-	                  (arr.push! steps (Query-Step {kind: .RuleCall index: (- (count rule-calls) 1)}))
+	                  (arr.push! steps (Query-Step :kind .RuleCall :index (- (count rule-calls) 1)))
 	                  (append-rule-call-vars! (addr available) query-value.rule-calls[step.index])))
 	              (do
 	                (delete clauses)
@@ -335,14 +335,14 @@
 	                (delete function-clauses)
 	                (delete rule-calls)
 	                (delete steps)
-	                (return (Query {}) false)))))))
+	                (return (Query []) false)))))))
     (when (not changed)
       (delete clauses)
       (delete predicates)
       (delete function-clauses)
       (delete rule-calls)
       (delete steps)
-      (return (Query {}) false))
+      (return (Query []) false))
     (let [out-query (query (slice query-value.find 0)
                            (slice query-value.with 0)
                            (slice query-value.inputs 0)
@@ -555,4 +555,4 @@
     (return bindings)))
 
 (defn profiled-result-set [result: Result-Set, stats: Query-Stats] -> Profiled-Result-Set
-  (Profiled-Result-Set {result: result stats: stats}))
+  (Profiled-Result-Set :result result :stats stats))

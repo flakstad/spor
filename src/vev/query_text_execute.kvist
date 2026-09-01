@@ -44,7 +44,7 @@
     (not prepared.ok) (profiled-result-set (result-set-error prepared.error) (query-stats-empty))
     (not prepared-rules.ok) (profiled-result-set (result-set-error prepared-rules.error) (query-stats-empty))
     :else (let [query-value (query-with-rule-call-plans (query-copy-with-rules prepared.query (slice prepared-rules.rules 0)))
-                prepared-value (Prepared-Query {ok: true error: "" query: query-value})
+                prepared-value (Prepared-Query :ok true :error "" :query query-value)
                 profiled (q-prepared-db-read-source-profiled-with-sources-inputs-and-fns source ([]DB-Read-Named-Source []) prepared-value inputs registry)]
             (delete-query-shallow query-value)
             profiled)))

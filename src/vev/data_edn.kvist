@@ -185,7 +185,7 @@
     (defer (delete doc.nodes))
     (let [[parsed parsed-ok parsed-error] (edn-value-from-node doc doc.root)]
       (when (not parsed-ok)
-        (return (Value {}) false parsed-error))
+        (return (Value []) false parsed-error))
       (let [owned (value-owned parsed)]
         (delete-value-containers-shallow parsed)
         (return owned true "")))))
@@ -223,7 +223,7 @@
       (let [[rendered rendered-ok rendered-error] (db-read-source-pull-result-value source pulled)]
         (when (not rendered-ok)
           (delete-owned-value-items items)
-          (return (Value {}) false rendered-error))
+          (return (Value []) false rendered-error))
         (arr.push! items (datomic-query-value-owned rendered))
         (delete-owned-value rendered)))
     (return (value-vector-owned items) true "")))
@@ -266,13 +266,13 @@
 
 (defn query-result-shaped-value [source: DB-Read-Source, query-source: Data, query: Query, result: Result-Set] -> [value: Value, ok: bool, error: string]
   (when (not result.ok)
-    (return (Value {}) false result.error))
+    (return (Value []) false result.error))
   (let [rows (make [dynamic]Value)]
     (for [row result.rows]
       (let [[row-value row-ok row-error] (query-result-row-shaped-value source row)]
         (when (not row-ok)
           (delete-owned-value-items rows)
-          (return (Value {}) false row-error))
+          (return (Value []) false row-error))
         (if query.has-return-map
           (do
             (arr.push! rows (query-result-row-return-map-value query row-value))
@@ -375,16 +375,16 @@
         [ok error] (parse-query-edn-with-sources! (addr query-value) doc sources)]
     (delete doc.nodes)
     (if ok
-      (Prepared-Query {ok: true
-                       error: ""
-                       query: (query-with-rule-call-plans query-value)
-                       source-owner: value
-                       owns-source: true})
-      (Prepared-Query {ok: false
-                       error: error
-                       query: query-value
-                       source-owner: value
-                       owns-source: true}))))
+      (Prepared-Query :ok true
+                       :error ""
+                       :query (query-with-rule-call-plans query-value)
+                       :source-owner value
+                       :owns-source true)
+      (Prepared-Query :ok false
+                       :error error
+                       :query query-value
+                       :source-owner value
+                       :owns-source true))))
 
 (defn prepare-query-data [value: Data] -> Prepared-Query
   (prepare-query-data-with-sources value ([]DB-Source [])))
@@ -395,17 +395,17 @@
         [ok error] (parse-rules-edn! (addr rules) doc)]
     (delete doc.nodes)
     (when (not ok)
-      (return (Prepared-Rules {ok: false
-                               error: error
-                               rules: rules
-                               source-owner: value
-                               owns-source: true})))
+      (return (Prepared-Rules :ok false
+                               :error error
+                               :rules rules
+                               :source-owner value
+                               :owns-source true)))
     (let [[valid valid-error] (validate-parsed-rules (slice rules 0))]
-      (Prepared-Rules {ok: valid
-                       error: (if valid "" valid-error)
-                       rules: rules
-                       source-owner: value
-                       owns-source: true}))))
+      (Prepared-Rules :ok valid
+                       :error (if valid "" valid-error)
+                       :rules rules
+                       :source-owner value
+                       :owns-source true))))
 
 (defn parse-pull-pattern-data [value: Data] -> [pattern: [dynamic]Pull-Spec, ok: bool, error: string]
   (let [doc (edn-doc-from-data value)]
@@ -416,11 +416,11 @@
 
 (defn prepare-pull-pattern-data [value: Data] -> Prepared-Pull-Pattern
   (let [[pattern ok error] (parse-pull-pattern-data value)]
-    (Prepared-Pull-Pattern {ok: ok
-                            error: error
-                            pattern: pattern
-                            source-owner: value
-                            owns-source: true})))
+    (Prepared-Pull-Pattern :ok ok
+                            :error error
+                            :pattern pattern
+                            :source-owner value
+                            :owns-source true)))
 
 (defn prepare-tx-data [value: Data] -> Prepared-Tx-Data
   (let [doc (edn-doc-from-data value)
@@ -432,10 +432,10 @@
         (for [data parsed]
           (delete-parser-tx-data-owned-values data))
         (delete parsed)
-        (Prepared-Tx-Data {ok: true error: "" tx-data: owned}))
+        (Prepared-Tx-Data :ok true :error "" :tx-data owned))
       (do
         (delete parsed)
-        (Prepared-Tx-Data {ok: false error: error tx-data: (make [dynamic]Tx-Data)})))))
+        (Prepared-Tx-Data :ok false :error error :tx-data (make [dynamic]Tx-Data))))))
 
 (defn query-input-data-owned [source: Data] -> Query-Input
   (let [doc (edn-doc-from-data source)]
@@ -450,11 +450,11 @@
               lookup-value (get value.items 1)]
           (delete-owned-value (get value.items 0))
           (delete value.items)
-          (Query-Input {kind: .Scalar
-                        owns-values: true
-                        has-lookup-ref: true
-                        lookup-attr: lookup-attr
-                        lookup-value: lookup-value}))
+          (Query-Input :kind .Scalar
+                        :owns-values true
+                        :has-lookup-ref true
+                        :lookup-attr lookup-attr
+                        :lookup-value lookup-value))
         (if (and (or (data.vector? source) (data.set? source))
                  (> (count source) 0)
                  (data.vector? (data.item-at source 0)))
@@ -468,12 +468,12 @@
                   (delete row.items))
                 (arr.push! flat row)))
             (delete value.items)
-            (Query-Input {kind: .Relation owns-values: true values: (slice flat 0) width: width}))
+            (Query-Input :kind .Relation :owns-values true :values (slice flat 0) :width width))
           (if (or (data.vector? source) (data.set? source))
             (let [input (query-input-collection-from-value value)]
               (set! input.owns-values true)
               input)
-            (Query-Input {kind: .Scalar owns-values: true value: value})))))))
+            (Query-Input :kind .Scalar :owns-values true :value value)))))))
 
 (defn q-result-store-db-data-with-inputs [snapshot: ^Store-DB, value: Data, inputs: []Query-Input] -> Query-Result
   (let [prepared (prepare-query-data value)
@@ -536,7 +536,7 @@
           (let [report (failed-store-tx-report snapshot error)]
             (close-store-db snapshot)
             (return report))
-          (return (failed-store-tx-report (Store-DB {}) error)))))
+          (return (failed-store-tx-report (Store-DB []) error)))))
     (let [report (transact-store-report-tx-data store (slice prepared.tx-data 0))]
       (delete-prepared-tx-data-shallow prepared)
       report)))

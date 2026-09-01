@@ -33,17 +33,17 @@
 (def q4-rules
   "[[(author ?d ?c) [?d :dissertation/cid ?c]] [(adv ?x ?y) [?x :person/advised ?d] (author ?d ?y)] [(anc ?x ?y) (adv ?x ?y)] [(anc ?x ?y) (adv ?x ?z) (anc ?z ?y)]]")
 
-(defstruct Import-Result {
+(defstruct Import-Result [
   ok: bool
   error: string
   parse-us: f64
   tx-us: f64
-})
+])
 
-(defstruct Query-Run {
+(defstruct Query-Run [
   profiled: vev.Profiled-Result-Set
   timing: bench.Timing
-})
+])
 
 (defn int-option [name: string, default-value: int] -> int
   (let [text (cli.option os.args name "")]
@@ -57,7 +57,7 @@
 (defn transact-file! [conn: ^vev.Conn, path: string] -> Import-Result
   (let [[data read-err] (os.read_entire_file path context.allocator)]
     (when (!= read-err nil)
-      (return (Import-Result {ok: false error: (fmt.tprintf "read_failed:%s" path)})))
+      (return (Import-Result :ok false :error (fmt.tprintf "read_failed:%s" path))))
     (defer (delete data))
     (let [parse-start (time.now)
           prepared (vev.prepare-tx-text (string data))
@@ -65,7 +65,7 @@
       (when (not prepared.ok)
         (let [error prepared.error]
           (vev.delete-prepared-tx-data-shallow prepared)
-          (return (Import-Result {ok: false error: error parse-us: parse-us}))))
+          (return (Import-Result :ok false :error error :parse-us parse-us))))
       (let [tx-start (time.now)
             report (vev.transact-prepared conn prepared)
             tx-us (bench.elapsed-us tx-start)]
@@ -73,9 +73,9 @@
         (when (not report.ok)
           (let [error report.error]
             (vev.delete-tx-report-shallow report)
-            (return (Import-Result {ok: false error: error parse-us: parse-us tx-us: tx-us}))))
+            (return (Import-Result :ok false :error error :parse-us parse-us :tx-us tx-us))))
         (vev.delete-live-tx-report-shallow report)
-        (return (Import-Result {ok: true error: "" parse-us: parse-us tx-us: tx-us}))))))
+        (return (Import-Result :ok true :error "" :parse-us parse-us :tx-us tx-us))))))
 
 (defn load-math-db! [conn: ^vev.Conn, schema-path: string, values-prefix: string, values-chunks: int] -> Import-Result
   (let [schema (transact-file! conn schema-path)
@@ -89,8 +89,8 @@
         (set! total-parse-us (+ total-parse-us chunk.parse-us))
         (set! total-tx-us (+ total-tx-us chunk.tx-us))
         (when (not chunk.ok)
-          (return (Import-Result {ok: false error: chunk.error parse-us: total-parse-us tx-us: total-tx-us})))))
-    (return (Import-Result {ok: true error: "" parse-us: total-parse-us tx-us: total-tx-us}))))
+          (return (Import-Result :ok false :error chunk.error :parse-us total-parse-us :tx-us total-tx-us)))))
+    (return (Import-Result :ok true :error "" :parse-us total-parse-us :tx-us total-tx-us))))
 
 (defn run-query [db: vev.DB, query: string, rules: string, warmups: int, samples-count: int] -> Query-Run
   (let [prepared (vev.prepare-query-text-with-rules query rules)]
@@ -108,7 +108,7 @@
           (vev.delete-profiled-result-set-shallow profiled)))
       (let [last (vev.q-prepared-profiled-with-inputs db prepared ([]vev.Query-Input []))
             timing (bench.timing-from-samples (slice samples 0))]
-        (Query-Run {profiled: last timing: timing})))))
+        (Query-Run :profiled last :timing timing)))))
 
 (defn expected-rows [name: string] -> [rows: int, ok: bool]
   (cond

@@ -21,29 +21,29 @@
     (return out true)))
 
 (defn typed-flat-result-plan-empty [] -> Typed-Flat-Result-Plan
-  (Typed-Flat-Result-Plan {ok: false
-                           find-indexes: (make [dynamic]int)
-                           with-indexes: (make [dynamic]int)
-                           column-kinds: (make [dynamic]Relation-Column-Kind)
-                           rows: 0}))
+  (Typed-Flat-Result-Plan :ok false
+                           :find-indexes (make [dynamic]int)
+                           :with-indexes (make [dynamic]int)
+                           :column-kinds (make [dynamic]Relation-Column-Kind)
+                           :rows 0))
 
 (defn delete-typed-flat-result-plan [plan: Typed-Flat-Result-Plan]
   (delete plan.find-indexes)
   (delete plan.with-indexes)
   (delete plan.column-kinds))
 
-(defstruct Resolved-Typed-Flat-Materialization {
+(defstruct Resolved-Typed-Flat-Materialization [
   ok: bool
   plan: Typed-Flat-Result-Plan
   trust-unique-bindings: bool
-})
+])
 
-(defstruct Typed-Flat-Materialization-Cursor {
+(defstruct Typed-Flat-Materialization-Cursor [
   row: int
-  seen: (map string (struct {}))
-})
+  seen: (map string (struct []))
+])
 
-(defstruct Typed-Materialized-Batch {
+(defstruct Typed-Materialized-Batch [
   ok: bool
   names: [dynamic]string
   sources: [dynamic]string
@@ -51,20 +51,20 @@
   value-columns: [dynamic]bool
   rows: int
   owns-values: bool
-})
+])
 
 (defn resolved-typed-flat-materialization-empty [] -> Resolved-Typed-Flat-Materialization
-  (Resolved-Typed-Flat-Materialization {ok: false
-                                        plan: (typed-flat-result-plan-empty)
-                                        trust-unique-bindings: false}))
+  (Resolved-Typed-Flat-Materialization :ok false
+                                        :plan (typed-flat-result-plan-empty)
+                                        :trust-unique-bindings false))
 
 (defn delete-resolved-typed-flat-materialization [resolved: Resolved-Typed-Flat-Materialization]
   (delete-typed-flat-result-plan resolved.plan))
 
 (defn typed-flat-materialization-cursor [resolved: Resolved-Typed-Flat-Materialization] -> Typed-Flat-Materialization-Cursor
   (discard resolved)
-  (Typed-Flat-Materialization-Cursor {row: 0
-                                      seen: (set.empty string)}))
+  (Typed-Flat-Materialization-Cursor :row 0
+                                      :seen (set.empty string)))
 
 (defn delete-typed-flat-materialization-cursor [cursor: Typed-Flat-Materialization-Cursor]
   (for [key cursor.seen]
@@ -72,13 +72,13 @@
   (delete cursor.seen))
 
 (defn typed-materialized-batch-empty [] -> Typed-Materialized-Batch
-  (Typed-Materialized-Batch {ok: false
-                             names: (make [dynamic]string)
-                             sources: (make [dynamic]string)
-                             columns: (make [dynamic]Relation-Column)
-                             value-columns: (make [dynamic]bool)
-                             rows: 0
-                             owns-values: false}))
+  (Typed-Materialized-Batch :ok false
+                             :names (make [dynamic]string)
+                             :sources (make [dynamic]string)
+                             :columns (make [dynamic]Relation-Column)
+                             :value-columns (make [dynamic]bool)
+                             :rows 0
+                             :owns-values false))
 
 (defn delete-typed-materialized-batch [batch: Typed-Materialized-Batch]
   (discard batch.owns-values)
@@ -89,13 +89,13 @@
 
 (defn delete-typed-materialized-batch-parts [names: [dynamic]string, sources: [dynamic]string, columns: [dynamic]Relation-Column, value-columns: [dynamic]bool, owns-values: bool]
   (delete-typed-materialized-batch
-    (Typed-Materialized-Batch {ok: false
-                               names: names
-                               sources: sources
-                               columns: columns
-                               value-columns: value-columns
-                               rows: 0
-                               owns-values: owns-values})))
+    (Typed-Materialized-Batch :ok false
+                               :names names
+                               :sources sources
+                               :columns columns
+                               :value-columns value-columns
+                               :rows 0
+                               :owns-values owns-values)))
 
 (defn relation-column-add-owned-value-cell! [column: ^Relation-Column, value: Value] -> bool
   (when (not column^.has-kind)
@@ -207,11 +207,11 @@
             (delete column-kinds)
             (return (typed-flat-result-plan-empty)))
           (arr.push! column-kinds column.kind)))
-      (Typed-Flat-Result-Plan {ok: true
-                               find-indexes: find-indexes
-                               with-indexes: with-indexes
-                               column-kinds: column-kinds
-                               rows: rel.typed-rows}))))
+      (Typed-Flat-Result-Plan :ok true
+                               :find-indexes find-indexes
+                               :with-indexes with-indexes
+                               :column-kinds column-kinds
+                               :rows rel.typed-rows))))
 
 (defn typed-flat-result-plan-from-materialization [rel: Query-Relation, materialization: Physical-Materialization-Plan] -> Typed-Flat-Result-Plan
   (typed-flat-result-plan-from-result-columns rel materialization.shape (slice materialization.columns 0)))
@@ -219,12 +219,12 @@
 (defn resolve-typed-flat-materialization [rel: Query-Relation, materialization: Physical-Materialization-Plan] -> Resolved-Typed-Flat-Materialization
   (let [plan (typed-flat-result-plan-from-materialization rel materialization)]
     (when (not plan.ok)
-      (return (Resolved-Typed-Flat-Materialization {ok: false
-                                                    plan: plan
-                                                    trust-unique-bindings: false})))
-    (Resolved-Typed-Flat-Materialization {ok: true
-                                          plan: plan
-                                          trust-unique-bindings: materialization.trust-unique-bindings})))
+      (return (Resolved-Typed-Flat-Materialization :ok false
+                                                    :plan plan
+                                                    :trust-unique-bindings false)))
+    (Resolved-Typed-Flat-Materialization :ok true
+                                          :plan plan
+                                          :trust-unique-bindings materialization.trust-unique-bindings)))
 
 (defn resolved-typed-flat-materialization-row-count [resolved: Resolved-Typed-Flat-Materialization] -> int
   (if resolved.ok resolved.plan.rows 0))
@@ -254,10 +254,10 @@
   (when (or (not resolved.ok)
             (< row 0)
             (>= row resolved.plan.rows))
-    (return (Value {}) false))
+    (return (Value []) false))
   (let [[column-index column-ok] (resolved-typed-flat-materialization-output-column-index resolved output-column)]
     (when (not column-ok)
-      (return (Value {}) false))
+      (return (Value []) false))
     (typed-relation-column-value rel.typed-columns[column-index] row)))
 
 (defn materialize-typed-flat-batch [rel: Query-Relation, resolved: Resolved-Typed-Flat-Materialization] -> Typed-Materialized-Batch
@@ -297,19 +297,19 @@
               (delete-typed-materialized-batch-parts names sources columns value-columns owns-values)
               (return (typed-materialized-batch-empty)))))
         (set! rows (+ rows 1))))
-    (Typed-Materialized-Batch {ok: true
-                               names: names
-                               sources: sources
-                               columns: columns
-                               value-columns: value-columns
-                               rows: rows
-                               owns-values: owns-values})))
+    (Typed-Materialized-Batch :ok true
+                               :names names
+                               :sources sources
+                               :columns columns
+                               :value-columns value-columns
+                               :rows rows
+                               :owns-values owns-values)))
 
-(defstruct Materialized-Pull-Column {
+(defstruct Materialized-Pull-Column [
   pull-find: Pull-Find
   source: DB-Read-Source
   pattern: []Pull-Spec
-})
+])
 
 (defn materialized-pull-columns-for-query [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input] -> [columns: [dynamic]Materialized-Pull-Column, ok: bool, error: string]
   (let [out (make [dynamic]Materialized-Pull-Column 0 (count query-value.pulls))]
@@ -322,9 +322,9 @@
           (when (not pattern-ok)
             (delete out)
             (return (make [dynamic]Materialized-Pull-Column) false "pull pattern input must be a pull pattern"))
-          (arr.push! out (Materialized-Pull-Column {pull-find: pull-find
-                                                    source: pull-source
-                                                    pattern: pattern})))))
+          (arr.push! out (Materialized-Pull-Column :pull-find pull-find
+                                                    :source pull-source
+                                                    :pattern pattern)))))
     (return out true "")))
 
 (defn materialize-source-typed-pull-batch [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, rel: Query-Relation, registry: []Native-Query-Fn] -> [batch: Typed-Materialized-Batch, ok: bool, error: string]
@@ -403,13 +403,13 @@
                           (delete value-columns)
                           (delete-relation-columns columns)
                           (return (typed-materialized-batch-empty) false "pull result column could not accept value")))))))))
-      (return (Typed-Materialized-Batch {ok: true
-                                         names: names
-                                         sources: sources-out
-                                         columns: columns
-                                         value-columns: value-columns
-                                         rows: rel.typed-rows
-                                         owns-values: true})
+      (return (Typed-Materialized-Batch :ok true
+                                         :names names
+                                         :sources sources-out
+                                         :columns columns
+                                         :value-columns value-columns
+                                         :rows rel.typed-rows
+                                         :owns-values true)
               true
               ""))))
 
@@ -419,7 +419,7 @@
             (>= row batch.rows)
             (< output-column 0)
             (>= output-column (count batch.columns)))
-    (return (Value {}) false))
+    (return (Value []) false))
   (typed-relation-column-value batch.columns[output-column] row))
 
 (defn result-rows-for-typed-materialized-batch [batch: Typed-Materialized-Batch] -> [rows: [dynamic]Result-Row, ok: bool, error: string]
@@ -435,8 +435,8 @@
               (delete-result-rows-owned-values out)
               (return (make [dynamic]Result-Row) false "typed materialized batch cell could not be read"))
             (arr.push! values (value-owned value))))
-        (arr.push! out (Result-Row {values: values
-                                    pulls: (make [dynamic]Pull-Result)}))))
+        (arr.push! out (Result-Row :values values
+                                    :pulls (make [dynamic]Pull-Result)))))
     (return out true "")))
 
 (defn result-rows-for-resolved-typed-flat-materialization [rel: Query-Relation, resolved: Resolved-Typed-Flat-Materialization] -> [rows: [dynamic]Result-Row, ok: bool, error: string]
@@ -462,8 +462,8 @@
                 (delete-result-rows-owned-values out)
                 (return (make [dynamic]Result-Row) false "typed flat result cell could not be read"))
               (arr.push! values (value-owned value))))
-          (arr.push! out (Result-Row {values: values
-                                      pulls: (make [dynamic]Pull-Result)})))))
+          (arr.push! out (Result-Row :values values
+                                      :pulls (make [dynamic]Pull-Result))))))
     (return out true "")))
 
 (defn query-typed-flat-result-plan-from-physical-plan [query: Query, rel: Query-Relation, plan: Physical-Plan] -> Typed-Flat-Result-Plan
@@ -488,11 +488,11 @@
         (return (typed-flat-result-plan-empty)))
       (arr.push! find-indexes index)
       (arr.push! column-kinds column.kind))
-    (Typed-Flat-Result-Plan {ok: true
-                             find-indexes: find-indexes
-                             with-indexes: with-indexes
-                             column-kinds: column-kinds
-                             rows: rel.typed-rows})))
+    (Typed-Flat-Result-Plan :ok true
+                             :find-indexes find-indexes
+                             :with-indexes with-indexes
+                             :column-kinds column-kinds
+                             :rows rel.typed-rows)))
 
 (defn pulls-for-typed-row-with-sources-and-fns [db: DB, sources: []DB-Source, query: Query, inputs: []Query-Input, rel: Query-Relation, row: int, registry: []Native-Query-Fn] -> [pulls: [dynamic]Pull-Result, ok: bool]
   (let [out (make [dynamic]Pull-Result 0 (count query.pulls))]
@@ -546,7 +546,7 @@
         (return dedupe-key true)
         (return "" false)))))
 
-(defn resolved-typed-flat-materialization-row-visible? [rel: Query-Relation, resolved: Resolved-Typed-Flat-Materialization, row: int, seen: (ptr (map string (struct {})))] -> [visible: bool, ok: bool]
+(defn resolved-typed-flat-materialization-row-visible? [rel: Query-Relation, resolved: Resolved-Typed-Flat-Materialization, row: int, seen: (ptr (map string (struct [])))] -> [visible: bool, ok: bool]
   (when resolved.trust-unique-bindings
     (return true true))
   (let [[key key-ok] (typed-flat-result-row-dedupe-key rel resolved.plan row)]
@@ -570,12 +570,12 @@
             (return row true true)))))
     (return -1 false true)))
 
-(defn typed-flat-result-row-visible? [rel: Query-Relation, materialization: Physical-Materialization-Plan, plan: Typed-Flat-Result-Plan, row: int, seen: (ptr (map string (struct {})))] -> [visible: bool, ok: bool]
+(defn typed-flat-result-row-visible? [rel: Query-Relation, materialization: Physical-Materialization-Plan, plan: Typed-Flat-Result-Plan, row: int, seen: (ptr (map string (struct [])))] -> [visible: bool, ok: bool]
   (resolved-typed-flat-materialization-row-visible?
     rel
-    (Resolved-Typed-Flat-Materialization {ok: plan.ok
-                                          plan: plan
-                                          trust-unique-bindings: materialization.trust-unique-bindings})
+    (Resolved-Typed-Flat-Materialization :ok plan.ok
+                                          :plan plan
+                                          :trust-unique-bindings materialization.trust-unique-bindings)
     row
     seen))
 
@@ -639,7 +639,7 @@
               (arr.push! values value)))
           (if trust-unique-bindings
             (do
-              (arr.push! out (Result-Row {values: values pulls: pulls}))
+              (arr.push! out (Result-Row :values values :pulls pulls))
               (set! pushed true))
             (let [dedupe-values (make [dynamic]Value)]
               (for [value values]
@@ -652,12 +652,12 @@
                   (let [already-seen (set.contains? seen key)]
                     (when (not already-seen)
                       (set.add! seen key)
-                      (arr.push! out (Result-Row {values: values pulls: pulls}))
+                      (arr.push! out (Result-Row :values values :pulls pulls))
                       (set! pushed true))
                     (when already-seen
                       (delete key)))
                   (when (not (row-values-exist? (slice out 0) (slice dedupe-values 0)))
-                    (arr.push! out (Result-Row {values: values pulls: pulls}))
+                    (arr.push! out (Result-Row :values values :pulls pulls))
                     (set! pushed true))))
               (delete dedupe-values)))
           (when (not pushed)
@@ -668,7 +668,7 @@
       (return out true)))))
 
 (defn result-rows-for-typed-relation [query: Query, rel: Query-Relation] -> [rows: [dynamic]Result-Row, ok: bool]
-  (result-rows-for-typed-relation-with-sources-and-fns (DB {}) ([]DB-Source []) query ([]Query-Input []) rel ([]Native-Query-Fn [])))
+  (result-rows-for-typed-relation-with-sources-and-fns (DB []) ([]DB-Source []) query ([]Query-Input []) rel ([]Native-Query-Fn [])))
 
 (defn db-read-source-pulls-for-typed-row-with-materialized-pull-columns-and-fns [pull-columns: []Materialized-Pull-Column, rel: Query-Relation, row: int, registry: []Native-Query-Fn] -> [pulls: [dynamic]Pull-Result, ok: bool, error: string]
   (let [out (make [dynamic]Pull-Result 0 (count pull-columns))]
@@ -752,7 +752,7 @@
             (arr.push! values (value-owned row.values[index])))
           (for [index (arr.range 0 (count query-value.aggregates))]
             (arr.push! values (value-owned row.values[(+ (count group-vars) index)])))
-          (arr.push! out (Result-Row {values: values pulls: pulls}))))
+          (arr.push! out (Result-Row :values values :pulls pulls))))
       (delete-result-rows-owned-values aggregate-rows)
       (return out true ""))))
 
@@ -846,19 +846,19 @@
                 (arr.push! dedupe-values value)))
             (if trust-unique-bindings
               (do
-                (arr.push! out (Result-Row {values: values pulls: pulls}))
+                (arr.push! out (Result-Row :values values :pulls pulls))
                 (set! pushed true))
               (let [[key key-ok] (result-row-dedupe-key (slice dedupe-values 0) (slice pulls 0))]
                 (if key-ok
                   (let [already-seen (set.contains? seen key)]
                     (when (not already-seen)
                       (set.add! seen key)
-                      (arr.push! out (Result-Row {values: values pulls: pulls}))
+                      (arr.push! out (Result-Row :values values :pulls pulls))
                       (set! pushed true))
                     (when already-seen
                       (delete key)))
                   (when (not (row-values-exist? (slice out 0) (slice dedupe-values 0)))
-                    (arr.push! out (Result-Row {values: values pulls: pulls}))
+                    (arr.push! out (Result-Row :values values :pulls pulls))
                     (set! pushed true)))))
             (delete dedupe-values)
             (when (not pushed)

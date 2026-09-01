@@ -16,13 +16,13 @@
                 bindings (make [dynamic]Binding)
                 delta (make [dynamic]Binding)
                 seen (set.empty string)]
-            (arr.push! memo (Rule-Memo-Entry {name: rule.name
-                                              params: params
-                                              bindings: bindings
-                                              delta: delta
-                                              seen: seen
-                                              bindings-rel: (query-relation-empty)
-                                              delta-rel: (query-relation-empty)}))))))
+            (arr.push! memo (Rule-Memo-Entry :name rule.name
+                                              :params params
+                                              :bindings bindings
+                                              :delta delta
+                                              :seen seen
+                                              :bindings-rel (query-relation-empty)
+                                              :delta-rel (query-relation-empty)))))))
     memo))
 
 (defn rule-memo-entry-invalidate-bindings-relation! [entry: ^Rule-Memo-Entry]
@@ -60,7 +60,7 @@
       (rule-memo-entry-invalidate-delta-relation! entry))))
 
 (defn rule-output-binding [rule: Rule, result: Binding] -> [binding: Binding, ok: bool]
-  (let [out (Binding {})]
+  (let [out (Binding [])]
     (for [param rule.params]
       (let [[value value-ok] (binding-lookup result param)]
         (when (not value-ok)
@@ -197,13 +197,13 @@
             (delete-relation-columns typed-columns)
             (return (query-relation-empty) false))))
       (set! typed-rows (+ typed-rows 1)))
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: (make [dynamic]Binding)
-                             typed-columns: typed-columns
-                             typed-rows: typed-rows
-                             has-typed-columns: true}) true)))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples (make [dynamic]Binding)
+                             :typed-columns typed-columns
+                             :typed-rows typed-rows
+                             :has-typed-columns true) true)))
 
 (defn query-relation-from-rule-memo-bindings [params: []string, memo-bindings: []Binding] -> [rel: Query-Relation, ok: bool]
   (let [attrs (arr.into [dynamic]string params)
@@ -222,13 +222,13 @@
             (delete-relation-columns typed-columns)
             (return (query-relation-empty) false))))
       (set! typed-rows (+ typed-rows 1)))
-    (return (Query-Relation {attrs: attrs
-                             attr-sources: attr-sources
-                             attr-index: (query-relation-attr-index (slice attrs 0))
-                             tuples: (make [dynamic]Binding)
-                             typed-columns: typed-columns
-                             typed-rows: typed-rows
-                             has-typed-columns: true}) true)))
+    (return (Query-Relation :attrs attrs
+                             :attr-sources attr-sources
+                             :attr-index (query-relation-attr-index (slice attrs 0))
+                             :tuples (make [dynamic]Binding)
+                             :typed-columns typed-columns
+                             :typed-rows typed-rows
+                             :has-typed-columns true) true)))
 
 (defn rule-call-distinct-var-projection-params? [params: []string, call: Rule-Call] -> bool
   (when (not (= (count params) (count call.args)))
@@ -325,13 +325,13 @@
                 (set! typed-rows (+ typed-rows 1))))))
         (set! row (+ row 1)))
       (delete output-indexes)
-      (return (Query-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: attr-index
-                               tuples: (make [dynamic]Binding)
-                               typed-columns: typed-columns
-                               typed-rows: typed-rows
-                               has-typed-columns: true}) true)))))
+      (return (Query-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index attr-index
+                               :tuples (make [dynamic]Binding)
+                               :typed-columns typed-columns
+                               :typed-rows typed-rows
+                               :has-typed-columns true) true)))))
 
 (defn query-relation-project-rule-call-params-typed [rel: Query-Relation, params: []string, call: Rule-Call] -> [projected: Query-Relation, ok: bool]
   (when (not (and rel.has-typed-columns
@@ -361,13 +361,13 @@
         (arr.push! attr-sources rel.attr-sources[param-indexes[arg-index]])
         (arr.push! typed-columns (clone-relation-column rel.typed-columns[param-indexes[arg-index]])))
       (delete param-indexes)
-      (return (Query-Relation {attrs: attrs
-                               attr-sources: attr-sources
-                               attr-index: (query-relation-attr-index (slice attrs 0))
-                               tuples: tuples
-                               typed-columns: typed-columns
-                               typed-rows: rel.typed-rows
-                               has-typed-columns: true}) true))))
+      (return (Query-Relation :attrs attrs
+                               :attr-sources attr-sources
+                               :attr-index (query-relation-attr-index (slice attrs 0))
+                               :tuples tuples
+                               :typed-columns typed-columns
+                               :typed-rows rel.typed-rows
+                               :has-typed-columns true) true))))
 
 (defn query-relation-project-seeded-rule-call-params-typed [body-rel: Query-Relation, passthrough: Query-Relation, params: []string, call: Rule-Call] -> [projected: Query-Relation, ok: bool]
   (when (not (and body-rel.has-typed-columns
@@ -462,13 +462,13 @@
         (delete source-indexes)
         (delete param-indexes)
         (delete call-output-indexes)
-        (return (Query-Relation {attrs: attrs
-                                 attr-sources: attr-sources
-                                 attr-index: (query-relation-attr-index (slice attrs 0))
-                                 tuples: (make [dynamic]Binding)
-                                 typed-columns: typed-columns
-                                 typed-rows: typed-rows
-                                 has-typed-columns: true}) true))))))
+        (return (Query-Relation :attrs attrs
+                                 :attr-sources attr-sources
+                                 :attr-index (query-relation-attr-index (slice attrs 0))
+                                 :tuples (make [dynamic]Binding)
+                                 :typed-columns typed-columns
+                                 :typed-rows typed-rows
+                                 :has-typed-columns true) true))))))
 
 (defn query-relation-project-rule-call-bindings [params: []string, memo-bindings: []Binding, call: Rule-Call] -> Query-Relation
   (let [[typed typed-ok] (query-relation-project-rule-call-bindings-typed-distinct params memo-bindings call)]
@@ -481,7 +481,7 @@
         seen (set.empty string)]
     (defer (delete seen))
     (for [tuple memo-bindings]
-      (let [out (Binding {})
+      (let [out (Binding [])
             ok true]
         (for [param index params]
           (when ok
@@ -884,7 +884,7 @@
           (arr.push! out[entry-index].indexes rule-index)
           (let [indexes (make [dynamic]int)]
             (arr.push! indexes rule-index)
-            (arr.push! out (Rule-Name-Index-Entry {name: rule.name indexes: indexes}))))))
+            (arr.push! out (Rule-Name-Index-Entry :name rule.name :indexes indexes))))))
     out))
 
 (defn delete-rule-name-index [index: [dynamic]Rule-Name-Index-Entry]
@@ -903,7 +903,7 @@
         (let [rule rules[rule-index]]
           (when (= (count call.args) (count rule.params))
             (return rule true))))))
-  (return (Rule {}) false))
+  (return (Rule []) false))
 
 (defn rule-name-dependency-exists? [deps: []Rule-Dependency, from: string, target: string] -> bool
   (for [dep deps]
@@ -937,7 +937,7 @@
 (defn rules-dependency-graph-indexed [rules: []Rule, index: []Rule-Name-Index-Entry] -> [dynamic]Rule-Dependency
   (let [out (make [dynamic]Rule-Dependency)]
     (for [entry index]
-      (arr.push! out (Rule-Dependency {name: entry.name deps: (rule-direct-dependencies-indexed rules index entry.name)})))
+      (arr.push! out (Rule-Dependency :name entry.name :deps (rule-direct-dependencies-indexed rules index entry.name))))
     out))
 
 (defn rules-dependency-graph [rules: []Rule] -> [dynamic]Rule-Dependency
@@ -1034,7 +1034,7 @@
           (when (not (string-slice-contains? (slice assigned 0) name))
             (let [component-names (make [dynamic]string)]
               (rule-component-collect-reverse! deps name (addr assigned) (addr component-names))
-              (arr.push! out (Rule-Component {names: component-names recursive: (rule-component-recursive? deps (slice component-names 0))}))))
+              (arr.push! out (Rule-Component :names component-names :recursive (rule-component-recursive? deps (slice component-names 0))))))
           (set! i (- i 1)))))
     out))
 
@@ -1151,20 +1151,20 @@
         (delete linear-filters)
         (let [owned-linear-filters (arr.into [dynamic]Clause (slice linear-plan.filters 0))]
           (set! linear-filters owned-linear-filters)))
-      (Rule-Call-Plan {rules: call-rules
-                       recursive: recursive
-                       acyclic-depth: acyclic-depth
-                       linear-transitive: linear-ok
-                       linear-attr: linear-plan.attr
-                       linear-derived-edge: linear-plan.derived-edge
-                       linear-derived-left-attr: linear-plan.derived-left-attr
-                       linear-derived-right-attr: linear-plan.derived-right-attr
-                       linear-filters: linear-filters
-                       alternating-transitive: alternating-ok
-                       alternating-left-name: alternating-plan.left-name
-                       alternating-left-attr: alternating-plan.left-attr
-                       alternating-right-name: alternating-plan.right-name
-                       alternating-right-attr: alternating-plan.right-attr}))))
+      (Rule-Call-Plan :rules call-rules
+                       :recursive recursive
+                       :acyclic-depth acyclic-depth
+                       :linear-transitive linear-ok
+                       :linear-attr linear-plan.attr
+                       :linear-derived-edge linear-plan.derived-edge
+                       :linear-derived-left-attr linear-plan.derived-left-attr
+                       :linear-derived-right-attr linear-plan.derived-right-attr
+                       :linear-filters linear-filters
+                       :alternating-transitive alternating-ok
+                       :alternating-left-name alternating-plan.left-name
+                       :alternating-left-attr alternating-plan.left-attr
+                       :alternating-right-name alternating-plan.right-name
+                       :alternating-right-attr alternating-plan.right-attr))))
 
 (defn delete-rule-call-plan [plan: Rule-Call-Plan]
   (delete plan.rules)
@@ -1173,20 +1173,20 @@
 (defn clone-rule-call-plan [plan: Rule-Call-Plan] -> Rule-Call-Plan
   (let [rules (arr.into [dynamic]Rule (slice plan.rules 0))
         linear-filters (arr.into [dynamic]Clause (slice plan.linear-filters 0))]
-    (Rule-Call-Plan {rules: rules
-                     recursive: plan.recursive
-                     acyclic-depth: plan.acyclic-depth
-                     linear-transitive: plan.linear-transitive
-                     linear-attr: plan.linear-attr
-                     linear-derived-edge: plan.linear-derived-edge
-                     linear-derived-left-attr: plan.linear-derived-left-attr
-                     linear-derived-right-attr: plan.linear-derived-right-attr
-                     linear-filters: linear-filters
-                     alternating-transitive: plan.alternating-transitive
-                     alternating-left-name: plan.alternating-left-name
-                     alternating-left-attr: plan.alternating-left-attr
-                     alternating-right-name: plan.alternating-right-name
-                     alternating-right-attr: plan.alternating-right-attr})))
+    (Rule-Call-Plan :rules rules
+                     :recursive plan.recursive
+                     :acyclic-depth plan.acyclic-depth
+                     :linear-transitive plan.linear-transitive
+                     :linear-attr plan.linear-attr
+                     :linear-derived-edge plan.linear-derived-edge
+                     :linear-derived-left-attr plan.linear-derived-left-attr
+                     :linear-derived-right-attr plan.linear-derived-right-attr
+                     :linear-filters linear-filters
+                     :alternating-transitive plan.alternating-transitive
+                     :alternating-left-name plan.alternating-left-name
+                     :alternating-left-attr plan.alternating-left-attr
+                     :alternating-right-name plan.alternating-right-name
+                     :alternating-right-attr plan.alternating-right-attr)))
 
 (defn clone-rule-call-plans [plans: []Rule-Call-Plan] -> [dynamic]Rule-Call-Plan
   (let [out (make [dynamic]Rule-Call-Plan 0 (count plans))]
@@ -1219,11 +1219,11 @@
       (return result-bindings false))
     (let [[rule rule-ok] (first-rule-by-name (slice plan.rules 0) call.name)]
       (when rule-ok
-        (let [linear-plan (Linear-Transitive-Plan {attr: plan.linear-attr
-                                                   derived-edge: plan.linear-derived-edge
-                                                   derived-left-attr: plan.linear-derived-left-attr
-                                                   derived-right-attr: plan.linear-derived-right-attr
-                                                   filters: plan.linear-filters})]
+        (let [linear-plan (Linear-Transitive-Plan :attr plan.linear-attr
+                                                   :derived-edge plan.linear-derived-edge
+                                                   :derived-left-attr plan.linear-derived-left-attr
+                                                   :derived-right-attr plan.linear-derived-right-attr
+                                                   :filters plan.linear-filters)]
           (append-linear-transitive-results! (addr result-bindings) db linear-plan call binding rule)))
       (return result-bindings true))))
 
@@ -1233,10 +1233,10 @@
       (return result-bindings false))
     (let [[rule rule-ok] (first-rule-by-name (slice plan.rules 0) call.name)]
       (when rule-ok
-        (let [alternating-plan (Alternating-Transitive-Plan {left-name: plan.alternating-left-name
-                                                             left-attr: plan.alternating-left-attr
-                                                             right-name: plan.alternating-right-name
-                                                             right-attr: plan.alternating-right-attr})]
+        (let [alternating-plan (Alternating-Transitive-Plan :left-name plan.alternating-left-name
+                                                             :left-attr plan.alternating-left-attr
+                                                             :right-name plan.alternating-right-name
+                                                             :right-attr plan.alternating-right-attr)]
           (append-alternating-transitive-results! (addr result-bindings) db alternating-plan call binding rule)))
       (return result-bindings true))))
 
@@ -1659,10 +1659,10 @@
 
 (defn append-legacy-query-input-specs! [out: ^[dynamic]Query-Input-Spec, query-value: Query]
   (for [name query-value.inputs]
-    (arr.push! out^ (Query-Input-Spec {kind: .Scalar name: name})))
+    (arr.push! out^ (Query-Input-Spec :kind .Scalar :name name)))
   (for [name query-value.collection-inputs]
-    (arr.push! out^ (Query-Input-Spec {kind: .Collection name: name})))
+    (arr.push! out^ (Query-Input-Spec :kind .Collection :name name)))
   (for [tuple query-value.tuple-inputs]
-    (arr.push! out^ (Query-Input-Spec {kind: .Tuple tuple: tuple})))
+    (arr.push! out^ (Query-Input-Spec :kind .Tuple :tuple tuple)))
   (for [relation query-value.relation-inputs]
-    (arr.push! out^ (Query-Input-Spec {kind: .Relation relation: relation}))))
+    (arr.push! out^ (Query-Input-Spec :kind .Relation :relation relation))))

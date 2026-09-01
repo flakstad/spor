@@ -46,7 +46,7 @@
         (return false))))
   true)
 
-(defn incremental-string-sets-equal? [left: (map string (struct {})), right: (map string (struct {}))] -> bool
+(defn incremental-string-sets-equal? [left: (map string (struct [])), right: (map string (struct []))] -> bool
   (when (not (= (count left) (count right)))
     (return false))
   (for [key left]
@@ -288,7 +288,7 @@
 
 (t.deftest schema-transactions-retain-full-rebuild-fallback
   (defer (free_all context.allocator))
-  (let [profile (vev.Tx-Phase-Profile {enabled: true})
+  (let [profile (vev.Tx-Phase-Profile :enabled true)
         conn (vev.create-conn)]
     (set! conn.tx-phase-profile (addr profile))
     (let [schema (incremental-test-schema)

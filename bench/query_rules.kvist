@@ -6,13 +6,13 @@
 (import bench "./support")
 (import vev "../src/vev")
 
-(defstruct Query-Run-Result {
+(defstruct Query-Run-Result [
   profiled: vev.Profiled-Result-Set
   timing: bench.Timing
-})
+])
 
 (defn query-run-result [profiled: vev.Profiled-Result-Set, timing: bench.Timing] -> Query-Run-Result
-  (Query-Run-Result {profiled: profiled, timing: timing}))
+  (Query-Run-Result :profiled profiled, :timing timing))
 
 (defn print-profile [workload: string, n: int, timing: bench.Timing, profiled: vev.Profiled-Result-Set]
   (fmt.printf

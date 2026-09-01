@@ -6,11 +6,11 @@
 (import bench "./support")
 (import vev "../src/vev")
 
-(defstruct Query-Timing {
+(defstruct Query-Timing [
   label: string
   rows: int
   timing: bench.Timing
-})
+])
 
 (defn person-name [i: int] -> string
   (case (% i 8)
@@ -93,7 +93,7 @@
         (arr.push! samples elapsed)
         (delete entities))
       (set! sample-index (+ sample-index 1)))
-    (Query-Timing {rows: rows timing: (bench.timing-from-samples (slice samples 0))})))
+    (Query-Timing :rows rows :timing (bench.timing-from-samples (slice samples 0)))))
 
 (defn time-pair-columns [db: vev.DB, prepared: vev.Prepared-Query, inputs: []vev.Query-Input, warmups: int, samples-count: int] -> Query-Timing
   (let [warmup-index 0]
@@ -115,7 +115,7 @@
         (arr.push! samples elapsed)
         (vev.delete-entity-int-pair-columns columns))
       (set! sample-index (+ sample-index 1)))
-    (Query-Timing {rows: rows timing: (bench.timing-from-samples (slice samples 0))})))
+    (Query-Timing :rows rows :timing (bench.timing-from-samples (slice samples 0)))))
 
 (defn time-triple-columns [db: vev.DB, prepared: vev.Prepared-Query, warmups: int, samples-count: int] -> Query-Timing
   (let [warmup-index 0]
@@ -137,7 +137,7 @@
         (arr.push! samples elapsed)
         (vev.delete-entity-string-int-triples columns))
       (set! sample-index (+ sample-index 1)))
-    (Query-Timing {rows: rows timing: (bench.timing-from-samples (slice samples 0))})))
+    (Query-Timing :rows rows :timing (bench.timing-from-samples (slice samples 0)))))
 
 (defn time-result-set [db: vev.DB, prepared: vev.Prepared-Query, warmups: int, samples-count: int] -> Query-Timing
   (let [warmup-index 0]
@@ -159,7 +159,7 @@
         (arr.push! samples elapsed)
         (vev.delete-result-set-shallow result))
       (set! sample-index (+ sample-index 1)))
-    (Query-Timing {rows: rows timing: (bench.timing-from-samples (slice samples 0))})))
+    (Query-Timing :rows rows :timing (bench.timing-from-samples (slice samples 0)))))
 
 (defn print-timing [label: string, result: Query-Timing]
   (fmt.printf

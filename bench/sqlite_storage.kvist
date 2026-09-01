@@ -38,21 +38,21 @@
     (for [offset (arr.range 0 n)]
       (let [entity (+ start-entity offset)
             entity-id (u64 entity)]
-        (arr.push! datoms (vev.Datom {e: entity-id
-                                      a: ":user/email"
-                                      v: (vev.value-string (fmt.tprintf "user-%d@example.com" entity))
-                                      tx: tx
-                                      added: true}))
-        (arr.push! datoms (vev.Datom {e: entity-id
-                                      a: ":user/name"
-                                      v: (vev.value-string (fmt.tprintf "User %d" entity))
-                                      tx: tx
-                                      added: true}))
-        (arr.push! datoms (vev.Datom {e: entity-id
-                                      a: ":user/age"
-                                      v: (vev.value-int (i64 (% entity 100)))
-                                      tx: tx
-                                      added: true}))))
+        (arr.push! datoms (vev.Datom :e entity-id
+                                      :a ":user/email"
+                                      :v (vev.value-string (fmt.tprintf "user-%d@example.com" entity))
+                                      :tx tx
+                                      :added true))
+        (arr.push! datoms (vev.Datom :e entity-id
+                                      :a ":user/name"
+                                      :v (vev.value-string (fmt.tprintf "User %d" entity))
+                                      :tx tx
+                                      :added true))
+        (arr.push! datoms (vev.Datom :e entity-id
+                                      :a ":user/age"
+                                      :v (vev.value-int (i64 (% entity 100)))
+                                      :tx tx
+                                      :added true))))
     datoms))
 
 (defn clone-log-with-added [base: []vev.Datom, added: []vev.Datom] -> [dynamic]vev.Datom

@@ -1,6 +1,6 @@
 (package vev)
 
-(defstruct SQLite-Index-Cursor {
+(defstruct SQLite-Index-Cursor [
   handle: rawptr
   owns-handle: bool
   index-name: string
@@ -50,46 +50,46 @@
   entry-run-bases: [dynamic]int
   entry-run-counts: [dynamic]int
   entry-run-entry-payloads: [dynamic]bool
-})
+])
 
-(defstruct SQLite-Loaded-Index-Page {
+(defstruct SQLite-Loaded-Index-Page [
   entries: [dynamic]int
   datoms: [dynamic]Datom
   has-datoms: bool
   start: int
   end: int
   refs: [dynamic]int
-})
+])
 
 (defn sqlite-loaded-index-page-empty [start: int] -> SQLite-Loaded-Index-Page
   (let [refs (make [dynamic]int 0 1)]
     (arr.push! refs 1)
-    (SQLite-Loaded-Index-Page {entries: (make [dynamic]int)
-                               datoms: (make [dynamic]Datom)
-                               has-datoms: false
-                               start: start
-                               end: start
-                               refs: refs})))
+    (SQLite-Loaded-Index-Page :entries (make [dynamic]int)
+                               :datoms (make [dynamic]Datom)
+                               :has-datoms false
+                               :start start
+                               :end start
+                               :refs refs)))
 
 (defn sqlite-loaded-index-page-from-entries [entries: [dynamic]int, start: int, end: int] -> SQLite-Loaded-Index-Page
   (let [refs (make [dynamic]int 0 1)]
     (arr.push! refs 1)
-    (SQLite-Loaded-Index-Page {entries: entries
-                               datoms: (make [dynamic]Datom)
-                               has-datoms: false
-                               start: start
-                               end: end
-                               refs: refs})))
+    (SQLite-Loaded-Index-Page :entries entries
+                               :datoms (make [dynamic]Datom)
+                               :has-datoms false
+                               :start start
+                               :end end
+                               :refs refs)))
 
 (defn sqlite-loaded-index-page-from-entries-and-datoms [entries: [dynamic]int, datoms: [dynamic]Datom, start: int, end: int] -> SQLite-Loaded-Index-Page
   (let [refs (make [dynamic]int 0 1)]
     (arr.push! refs 1)
-    (SQLite-Loaded-Index-Page {entries: entries
-                               datoms: datoms
-                               has-datoms: true
-                               start: start
-                               end: end
-                               refs: refs})))
+    (SQLite-Loaded-Index-Page :entries entries
+                               :datoms datoms
+                               :has-datoms true
+                               :start start
+                               :end end
+                               :refs refs)))
 
 (defn retain-sqlite-loaded-index-page! [page: SQLite-Loaded-Index-Page]
   (when (> (count page.refs) 0)
@@ -115,13 +115,13 @@
     page.refs[0]
     0))
 
-(defstruct SQLite-Index-Page-Cache-Key {
+(defstruct SQLite-Index-Page-Cache-Key [
   root-id: u64
   manifest-id: u64
   start: int
-})
+])
 
-(defstruct SQLite-Index-Page-Cache-State {
+(defstruct SQLite-Index-Page-Cache-State [
   root-ids: [dynamic]u64
   manifest-ids: [dynamic]u64
   starts: [dynamic]int
@@ -134,22 +134,22 @@
   last-valid: bool
   previous-index: int
   previous-valid: bool
-})
+])
 
-(defstruct SQLite-Index-Page-Cache {
+(defstruct SQLite-Index-Page-Cache [
   state: ^SQLite-Index-Page-Cache-State
-})
+])
 
 (defn sqlite-index-page-cache-empty [] -> SQLite-Index-Page-Cache
   (let [state (alloc SQLite-Index-Page-Cache-State context.allocator)]
-    (set! state^ (SQLite-Index-Page-Cache-State {root-ids: (make [dynamic]u64)
-                                                 manifest-ids: (make [dynamic]u64)
-                                                 starts: (make [dynamic]int)
-                                                 pages: (make [dynamic]SQLite-Loaded-Index-Page)
-                                                 indexes: (make (map SQLite-Index-Page-Cache-Key int))
-                                                 refs: (make [dynamic]int 0 1)}))
+    (set! state^ (SQLite-Index-Page-Cache-State :root-ids (make [dynamic]u64)
+                                                 :manifest-ids (make [dynamic]u64)
+                                                 :starts (make [dynamic]int)
+                                                 :pages (make [dynamic]SQLite-Loaded-Index-Page)
+                                                 :indexes (make (map SQLite-Index-Page-Cache-Key int))
+                                                 :refs (make [dynamic]int 0 1)))
     (arr.push! state^.refs 1)
-    (SQLite-Index-Page-Cache {state: state})))
+    (SQLite-Index-Page-Cache :state state)))
 
 (defn retain-sqlite-index-page-cache! [cache: SQLite-Index-Page-Cache]
   (when (or (= cache.state nil)
@@ -210,28 +210,28 @@
 
 (defn sqlite-index-page-cache-find-retained [cache: SQLite-Index-Page-Cache, root-id: u64, manifest-id: u64, start: int] -> [page: SQLite-Loaded-Index-Page, found: bool]
   (when (= cache.state nil)
-    (return (SQLite-Loaded-Index-Page {}) false))
-  (let [key (SQLite-Index-Page-Cache-Key {root-id: root-id
-                                          manifest-id: manifest-id
-                                          start: start})
+    (return (SQLite-Loaded-Index-Page []) false))
+  (let [key (SQLite-Index-Page-Cache-Key :root-id root-id
+                                          :manifest-id manifest-id
+                                          :start start)
         [index found] (mmap.get cache.state^.indexes key)]
     (when found
       (when (or (< index 0)
                 (>= index (count cache.state^.pages)))
         (mut! cache.state^.misses += 1)
-        (return (SQLite-Loaded-Index-Page {}) false))
+        (return (SQLite-Loaded-Index-Page []) false))
       (sqlite-index-page-cache-remember-hit! cache index)
       (mut! cache.state^.hits += 1)
       (return (retain-sqlite-loaded-index-page cache.state^.pages[index]) true)))
   (mut! cache.state^.misses += 1)
-  (return (SQLite-Loaded-Index-Page {}) false))
+  (return (SQLite-Loaded-Index-Page []) false))
 
 (defn sqlite-index-page-cache-store! [cache: ^SQLite-Index-Page-Cache, root-id: u64, manifest-id: u64, start: int, page: SQLite-Loaded-Index-Page]
   (when (= cache^.state nil)
     (return))
-  (let [key (SQLite-Index-Page-Cache-Key {root-id: root-id
-                                          manifest-id: manifest-id
-                                          start: start})
+  (let [key (SQLite-Index-Page-Cache-Key :root-id root-id
+                                          :manifest-id manifest-id
+                                          :start start)
         [index found] (mmap.get cache^.state^.indexes key)]
     (when found
       (release-sqlite-loaded-index-page! cache^.state^.pages[index])
@@ -244,13 +244,13 @@
   (arr.push! cache^.state^.pages (retain-sqlite-loaded-index-page page))
   (let [index (- (count cache^.state^.pages) 1)]
     (mmap.assoc! cache^.state^.indexes
-                 (SQLite-Index-Page-Cache-Key {root-id: root-id
-                                               manifest-id: manifest-id
-                                               start: start})
+                 (SQLite-Index-Page-Cache-Key :root-id root-id
+                                               :manifest-id manifest-id
+                                               :start start)
                  index)
     (sqlite-index-page-cache-remember-hit! cache^ index)))
 
-(defstruct SQLite-Index-Snapshot {
+(defstruct SQLite-Index-Snapshot [
   handle: rawptr
   owns-handle: bool
   page-size: int
@@ -258,9 +258,9 @@
   aevt: SQLite-Index-Cursor
   avet: SQLite-Index-Cursor
   vaet: SQLite-Index-Cursor
-})
+])
 
-(defstruct SQLite-DB-Snapshot {
+(defstruct SQLite-DB-Snapshot [
   indexes: SQLite-Index-Snapshot
   datom-stmt: rawptr
   datom-cache-log-indexes: [dynamic]int
@@ -274,7 +274,7 @@
   datom-count: int
   has-retractions: bool
   path: string
-})
+])
 
 (defn sqlite-db-snapshot-next-entity-id [snapshot: ^SQLite-DB-Snapshot]
   -> [entity: u64, ok: bool, error: string]
@@ -306,7 +306,7 @@
   (let [[slot found] (mmap.get snapshot^.datom-cache-indexes log-index)]
     (when found
       (return (datom-owned snapshot^.datom-cache-datoms[slot]) true)))
-  (return (Datom {}) false))
+  (return (Datom []) false))
 
 (defn sqlite-db-snapshot-cache-store-datom! [snapshot: ^SQLite-DB-Snapshot, log-index: int, datom: Datom]
   (let [[slot found] (mmap.get snapshot^.datom-cache-indexes log-index)]

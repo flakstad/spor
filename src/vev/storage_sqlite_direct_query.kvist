@@ -31,7 +31,7 @@
                 (>= index (count added)))
         (delete-owned-datoms datoms)
         (return (make [dynamic]Datom) false "sqlite direct frontier datom parts were uneven"))
-      (let [value (Value {})
+      (let [value (Value [])
             value-ok false
             value-error ""]
         (if (>= value-entities[index] 0)
@@ -45,11 +45,11 @@
         (when (not value-ok)
           (delete-owned-datoms datoms)
           (return (make [dynamic]Datom) false value-error))
-        (arr.push! datoms (Datom {e: loaded-entities[index]
-                                  a: (string-owned attr)
-                                  v: value
-                                  tx: txs[index]
-                                  added: added[index]}))))
+        (arr.push! datoms (Datom :e loaded-entities[index]
+                                  :a (string-owned attr)
+                                  :v value
+                                  :tx txs[index]
+                                  :added added[index]))))
     (return datoms true "")))
 
 (defn sqlite-direct-same-entity-ref-fanout-values [handle: rawptr, name-attr: string, edge-attr: string, wanted-values: []Value] -> [left: [dynamic]Value, right: [dynamic]Value, ok: bool, error: string]
@@ -277,7 +277,7 @@
                   (>= index (count added)))
           (delete-owned-datoms datoms)
           (return (make [dynamic]Datom) false "sqlite direct EAVT entity attrs datom parts were uneven"))
-        (let [value (Value {})
+        (let [value (Value [])
               value-ok false
               value-error ""]
           (if (>= value-entities[index] 0)
@@ -292,9 +292,9 @@
             (delete-owned-datoms datoms)
             (return (make [dynamic]Datom) false value-error))
           (set! moved-attrs[index] true)
-          (arr.push! datoms (Datom {e: loaded-entities[index]
-                                    a: loaded-attrs[index]
-                                    v: value
-                                    tx: txs[index]
-                                    added: added[index]}))))
+          (arr.push! datoms (Datom :e loaded-entities[index]
+                                    :a loaded-attrs[index]
+                                    :v value
+                                    :tx txs[index]
+                                    :added added[index]))))
       (return datoms true ""))))

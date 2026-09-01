@@ -207,8 +207,8 @@
   (let [index-order (public-index-order order)
         [valid error] (validate-public-index-args db index-order args)]
     (when (not valid)
-      (return (Datoms-Result {ok: false error: error datoms: (make [dynamic]Datom)})))
-    (Datoms-Result {ok: true error: "" datoms: (datoms-with-args db order args)})))
+      (return (Datoms-Result :ok false :error error :datoms (make [dynamic]Datom))))
+    (Datoms-Result :ok true :error "" :datoms (datoms-with-args db order args))))
 
 (defn seek-datoms-with-args [db: DB, order: string, args: []Index-Arg] -> [dynamic]Datom
   (let [out (make [dynamic]Datom)
@@ -225,8 +225,8 @@
   (let [index-order (public-index-order order)
         [valid error] (validate-public-index-args db index-order args)]
     (when (not valid)
-      (return (Datoms-Result {ok: false error: error datoms: (make [dynamic]Datom)})))
-    (Datoms-Result {ok: true error: "" datoms: (seek-datoms-with-args db order args)})))
+      (return (Datoms-Result :ok false :error error :datoms (make [dynamic]Datom))))
+    (Datoms-Result :ok true :error "" :datoms (seek-datoms-with-args db order args))))
 
 (defn rseek-datoms-with-args [db: DB, order: string, args: []Index-Arg] -> [dynamic]Datom
   (let [out (make [dynamic]Datom)
@@ -243,20 +243,20 @@
   (let [index-order (public-index-order order)
         [valid error] (validate-public-index-args db index-order args)]
     (when (not valid)
-      (return (Datoms-Result {ok: false error: error datoms: (make [dynamic]Datom)})))
-    (Datoms-Result {ok: true error: "" datoms: (rseek-datoms-with-args db order args)})))
+      (return (Datoms-Result :ok false :error error :datoms (make [dynamic]Datom))))
+    (Datoms-Result :ok true :error "" :datoms (rseek-datoms-with-args db order args))))
 
 (defn find-datom-with-args [db: DB, order: string, args: []Index-Arg] -> Datom-Result
   (let [found (datoms-with-args db order args)]
     (defer (delete found))
     (when (> (count found) 0)
-      (return (Datom-Result {found: true datom: found[0]})))
-    (Datom-Result {})))
+      (return (Datom-Result :found true :datom found[0])))
+    (Datom-Result [])))
 
 (defn index-range-with-args [db: DB, attr: string, start: Index-Arg, has-start: bool, end: Index-Arg, has-end: bool] -> [dynamic]Datom
   (let [out (make [dynamic]Datom)
-        start-value (Value {})
-        end-value (Value {})]
+        start-value (Value [])
+        end-value (Value [])]
     (when has-start
       (let [[value ok] (index-arg-value db start)]
         (when (not ok)
@@ -272,26 +272,26 @@
 
 (defn index-range-checked-with-args [db: DB, attr: string, start: Index-Arg, has-start: bool, end: Index-Arg, has-end: bool] -> Datoms-Result
   (when (not (public-avet-attr? db attr))
-    (return (Datoms-Result {ok: false
-                            error: (fmt.tprintf "Attribute %s should be marked as :db/index true" attr)
-                            datoms: (make [dynamic]Datom)})))
+    (return (Datoms-Result :ok false
+                            :error (fmt.tprintf "Attribute %s should be marked as :db/index true" attr)
+                            :datoms (make [dynamic]Datom))))
   (when has-start
     (let [[start-ok start-error] (validate-index-lookup-refs db ([]Index-Arg [start]))]
       (when (not start-ok)
-        (return (Datoms-Result {ok: false error: start-error datoms: (make [dynamic]Datom)})))))
+        (return (Datoms-Result :ok false :error start-error :datoms (make [dynamic]Datom))))))
   (when has-end
     (let [[end-ok end-error] (validate-index-lookup-refs db ([]Index-Arg [end]))]
       (when (not end-ok)
-        (return (Datoms-Result {ok: false error: end-error datoms: (make [dynamic]Datom)})))))
-  (Datoms-Result {ok: true error: "" datoms: (index-range-with-args db attr start has-start end has-end)}))
+        (return (Datoms-Result :ok false :error end-error :datoms (make [dynamic]Datom))))))
+  (Datoms-Result :ok true :error "" :datoms (index-range-with-args db attr start has-start end has-end)))
 
-(defn append-retract-entity-ops-seen! [ops: ^[dynamic]Tx-Op, db: DB, entity: u64, seen: (ptr (map u64 (struct {})))]
+(defn append-retract-entity-ops-seen! [ops: ^[dynamic]Tx-Op, db: DB, entity: u64, seen: (ptr (map u64 (struct [])))]
   (when (set.contains? seen^ entity)
     (return))
   (set.add! seen^ entity)
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt" entity "" (Value {}))
-        high (upper-bound-index-view db view "eavt" entity "" (Value {}))
+        low (lower-bound-index-view db view "eavt" entity "" (Value []))
+        high (upper-bound-index-view db view "eavt" entity "" (Value []))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)
@@ -328,10 +328,10 @@
     (for [op expanded]
       (arr.push! ops^ op))))
 
-(defn append-retract-attr-ops-seen! [ops: ^[dynamic]Tx-Op, db: DB, entity: u64, attr: string, seen: (ptr (map u64 (struct {})))]
+(defn append-retract-attr-ops-seen! [ops: ^[dynamic]Tx-Op, db: DB, entity: u64, attr: string, seen: (ptr (map u64 (struct [])))]
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity attr (Value {}))
-        high (upper-bound-index-view db view "eavt-ea" entity attr (Value {}))
+        low (lower-bound-index-view db view "eavt-ea" entity attr (Value []))
+        high (upper-bound-index-view db view "eavt-ea" entity attr (Value []))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)
@@ -370,8 +370,8 @@
 
 (defn db-has-schema? [db: DB] -> bool
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 ":db/ident" (Value {}))
-        high (upper-bound-index-view db view "aevt" 0 ":db/ident" (Value {}))
+        low (lower-bound-index-view db view "aevt" 0 ":db/ident" (Value []))
+        high (upper-bound-index-view db view "aevt" 0 ":db/ident" (Value []))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)]
@@ -382,8 +382,8 @@
 
 (defn schema-property-value-for-entity [db: DB, entity: u64, schema-attr: string] -> [value: Value, ok: bool]
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity schema-attr (Value {}))
-        high (upper-bound-index-view db view "eavt-ea" entity schema-attr (Value {}))
+        low (lower-bound-index-view db view "eavt-ea" entity schema-attr (Value []))
+        high (upper-bound-index-view db view "eavt-ea" entity schema-attr (Value []))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)
@@ -391,7 +391,7 @@
         (when (datom-current-at? db datom-index)
           (return datom.v true)))
       (set! i (+ i 1))))
-  (return (Value {}) false))
+  (return (Value []) false))
 
 (defn schema-keyword-property [db: DB, entity: u64, schema-attr: string] -> [value: string, ok: bool]
   (let [[prop prop-ok] (schema-property-value-for-entity db entity schema-attr)]
@@ -428,12 +428,12 @@
       (let [[ident ident-ok] (schema-ident-for-entity db value.entity)]
         (if ident-ok
           (return (value-keyword ident) true)
-          (return (Value {}) false)))
+          (return (Value []) false)))
     (and (= value.kind .Int) (>= value.int-value 0))
       (let [[ident ident-ok] (schema-ident-for-entity db (u64 value.int-value))]
         (if ident-ok
           (return (value-keyword ident) true)
-          (return (Value {}) false)))
+          (return (Value []) false)))
     :else (return value true)))
 
 (defn schema-has-attr? [items: []Schema-Attr, attr: string] -> bool
@@ -445,8 +445,8 @@
 (defn schema-tuple-attrs-for-entity [db: DB, entity: u64] -> [dynamic]string
   (let [out (make [dynamic]string)
         view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity ":db/tupleAttrs" (Value {}))
-        high (upper-bound-index-view db view "eavt-ea" entity ":db/tupleAttrs" (Value {}))
+        low (lower-bound-index-view db view "eavt-ea" entity ":db/tupleAttrs" (Value []))
+        high (upper-bound-index-view db view "eavt-ea" entity ":db/tupleAttrs" (Value []))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)
@@ -478,25 +478,25 @@
       (when (not inferred-has-cardinality)
         (set! inferred-cardinality ":db.cardinality/one")
         (set! inferred-has-cardinality true)))
-    (Schema-Attr {attr: attr
-                  value-type: inferred-value-type
-                  has-value-type: inferred-has-value-type
-                  cardinality: inferred-cardinality
-                  has-cardinality: inferred-has-cardinality
-                  unique: unique
-                  has-unique: has-unique
-                  indexed: indexed
-                  has-indexed: has-indexed
-                  component: component
-                  has-component: has-component
-                  tuple-attrs: tuple-attrs
-                  has-tuple-attrs: has-tuple-attrs})))
+    (Schema-Attr :attr attr
+                  :value-type inferred-value-type
+                  :has-value-type inferred-has-value-type
+                  :cardinality inferred-cardinality
+                  :has-cardinality inferred-has-cardinality
+                  :unique unique
+                  :has-unique has-unique
+                  :indexed indexed
+                  :has-indexed has-indexed
+                  :component component
+                  :has-component has-component
+                  :tuple-attrs tuple-attrs
+                  :has-tuple-attrs has-tuple-attrs)))
 
 (defn db-schema [db: DB] -> [dynamic]Schema-Attr
   (let [out (make [dynamic]Schema-Attr)
         view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 ":db/ident" (Value {}))
-        high (upper-bound-index-view db view "aevt" 0 ":db/ident" (Value {}))
+        low (lower-bound-index-view db view "aevt" 0 ":db/ident" (Value []))
+        high (upper-bound-index-view db view "aevt" 0 ":db/ident" (Value []))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)
@@ -519,8 +519,8 @@
     (when (not schema-ok)
       (return out))
     (let [view (db-index-view db .EAVT)
-          low (lower-bound-index-view db view "eavt-ea" schema-e ":db/tupleAttrs" (Value {}))
-          high (upper-bound-index-view db view "eavt-ea" schema-e ":db/tupleAttrs" (Value {}))
+          low (lower-bound-index-view db view "eavt-ea" schema-e ":db/tupleAttrs" (Value []))
+          high (upper-bound-index-view db view "eavt-ea" schema-e ":db/tupleAttrs" (Value []))
           i low]
       (while (< i high)
         (let [datom-index (db-index-view-at view i)

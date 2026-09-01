@@ -142,7 +142,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
 (defn read-value-arg [arg: string] -> [value: vev.Value, ok: bool, error: string]
   (let [[text text-ok text-error] (read-text-arg arg)]
     (when (not text-ok)
-      (return (vev.Value {}) false text-error))
+      (return (vev.Value []) false text-error))
     (defer (when (text-arg-owned? arg) (delete text)))
     (vev.value-from-owned-serial-text text)))
 
@@ -150,10 +150,10 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
   (when (and (= value.kind .Vector)
              (= (count value.items) 2)
              (= value.items[0].kind .Keyword))
-    (return (vev.Index-Arg {has-lookup-ref: true
-                            lookup-attr: value.items[0].text
-                            lookup-value: value.items[1]})))
-  (vev.Index-Arg {value: value}))
+    (return (vev.Index-Arg :has-lookup-ref true
+                            :lookup-attr value.items[0].text
+                            :lookup-value value.items[1])))
+  (vev.Index-Arg :value value))
 
 (defn index-args-from-value [value: vev.Value] -> [args: [dynamic]vev.Index-Arg, ok: bool]
   (when (not (= value.kind .Vector))
@@ -178,19 +178,19 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
     (return (vev.retain-store-db source) true ""))
   (let [[pipeline pipeline-ok pipeline-error] (read-value-arg pipeline-arg)]
     (when (not pipeline-ok)
-      (return (vev.Store-DB {}) false pipeline-error))
+      (return (vev.Store-DB []) false pipeline-error))
     (defer (vev.delete-owned-value pipeline))
     (when (not (= pipeline.kind .Vector))
-      (return (vev.Store-DB {}) false "database pipeline must be an EDN vector"))
+      (return (vev.Store-DB []) false "database pipeline must be an EDN vector"))
     (let [current (vev.retain-store-db source)]
       (for [form pipeline.items]
         (when (or (not (= form.kind .Vector))
                   (= (count form.items) 0)
                   (not (= form.items[0].kind .Keyword)))
           (vev.close-store-db! (addr current))
-          (return (vev.Store-DB {}) false "database pipeline operation must be a non-empty vector beginning with a keyword"))
+          (return (vev.Store-DB []) false "database pipeline operation must be a non-empty vector beginning with a keyword"))
         (let [operation form.items[0].text
-              next (vev.Store-DB {})
+              next (vev.Store-DB [])
               next-ok true
               next-error ""]
           (cond
@@ -247,34 +247,34 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                 (set! next-error (fmt.tprintf "unknown database pipeline operation %s" operation))))
           (vev.close-store-db! (addr current))
           (when (not next-ok)
-            (return (vev.Store-DB {}) false next-error))
+            (return (vev.Store-DB []) false next-error))
           (set! current next)))
       (return current true ""))))
 
-(defstruct Open-DB {
+(defstruct Open-DB [
   store: vev.Store-Conn
   db: vev.Store-DB
   ok: bool
   error: string
-})
+])
 
 (defn open-command-db [uri: string, pipeline-arg: string] -> Open-DB
   (let [[store store-ok store-error] (vev.open-store-read-only uri)]
     (when (not store-ok)
       (delete-store! store)
-      (return (Open-DB {ok: false error: store-error})))
+      (return (Open-DB :ok false :error store-error)))
     (let [[source source-ok source-error] (vev.store-db (addr store))]
       (when (not source-ok)
         (delete-store! store)
-        (return (Open-DB {ok: false error: source-error})))
+        (return (Open-DB :ok false :error source-error)))
       (let [[selected selected-ok selected-error]
             (apply-db-pipeline source pipeline-arg)]
         (vev.close-store-db! (addr source))
         (if selected-ok
-          (Open-DB {store: store db: selected ok: true})
+          (Open-DB :store store :db selected :ok true)
           (do
             (delete-store! store)
-            (Open-DB {ok: false error: selected-error})))))))
+            (Open-DB :ok false :error selected-error)))))))
 
 (defn close-open-db! [opened: ^Open-DB]
   (when opened^.ok
@@ -286,10 +286,10 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
   -> [value: vev.Value, ok: bool, error: string]
   (let [[basis basis-ok basis-error] (vev.store-db-basis-t db)]
     (when (not basis-ok)
-      (return (vev.Value {}) false basis-error))
+      (return (vev.Value []) false basis-error))
     (let [[next next-ok next-error] (vev.store-db-next-t db)]
       (when (not next-ok)
-        (return (vev.Value {}) false next-error))
+        (return (vev.Value []) false next-error))
       (let [[as-of as-of?] (vev.store-db-as-of-t db)
             [since since?] (vev.store-db-since-t db)
             items (make [dynamic]vev.Value)]
@@ -310,7 +310,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
             (delete args)
             (when (not datoms-ok)
               (delete items)
-              (return (vev.Value {}) false datoms-error))
+              (return (vev.Value []) false datoms-error))
             (let [attr-names (make [dynamic]string)
                   attr-counts (make [dynamic]i64)]
               (defer (delete attr-names))
@@ -349,15 +349,15 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
     .Int
       (if (>= selector.int-value 0)
         (vev.store-db-entity db (u64 selector.int-value))
-        (return (vev.Store-Entity {}) false "entity id must be non-negative"))
+        (return (vev.Store-Entity []) false "entity id must be non-negative"))
     .Entity (vev.store-db-entity db selector.entity)
     .Keyword (vev.store-db-entity-ident db selector.text)
     .Vector
       (if (and (= (count selector.items) 2)
                (= selector.items[0].kind .Keyword))
         (vev.store-db-entity-lookup-ref db selector.items[0].text selector.items[1])
-        (return (vev.Store-Entity {}) false "entity vector must be a lookup ref [attribute value]"))
-     (return (vev.Store-Entity {}) false "entity must be an id, ident, or lookup ref")))
+        (return (vev.Store-Entity []) false "entity vector must be a lookup ref [attribute value]"))
+     (return (vev.Store-Entity []) false "entity must be an id, ident, or lookup ref")))
 
 (defn cli-tx-report-value [report: vev.Store-Tx-Report] -> vev.Value
   (let [base (vev.store-tx-report-value report)
@@ -496,7 +496,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
     (return (vev.store-db-result-value db result)))
   (let [[source source-ok source-error] (vev.store-db-read-source db)]
     (when (not source-ok)
-      (return (vev.Value {}) false source-error))
+      (return (vev.Value []) false source-error))
     (when (= mode "q")
       (return (vev.query-result-shaped-value
                 source prepared.source-owner prepared.query result)))
@@ -509,7 +509,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
               (for [existing rows]
                 (vev.delete-owned-value existing))
               (delete rows)
-              (return (vev.Value {}) false row-error))
+              (return (vev.Value []) false row-error))
             (arr.push! rows row-value)))
         (return (vev.value-vector-owned rows) true "")))
     (when (= mode "scalar")
@@ -517,14 +517,14 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
         (let [[row-value row-ok row-error]
               (vev.query-result-row-shaped-value source result.rows[0])]
           (when (not row-ok)
-            (return (vev.Value {}) false row-error))
+            (return (vev.Value []) false row-error))
           (let [out (if (> (count row-value.items) 0)
                       (vev.value-owned row-value.items[0])
                       (vev.value-nil))]
             (vev.delete-owned-value row-value)
             (return out true "")))
         (return (vev.value-nil) true "")))
-    (return (vev.Value {}) false "query result mode must be envelope, q, rows, or scalar")))
+    (return (vev.Value []) false "query result mode must be envelope, q, rows, or scalar")))
 
 (defn command-query [uri: string,
                      query-arg: string,
@@ -635,12 +635,12 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
     (if (>= selector.int-value 0)
       (return (vev.pull-store-db-value-text
                 db pattern-text (u64 selector.int-value)))
-      (return (vev.Value {}) false "entity id must be non-negative")))
+      (return (vev.Value []) false "entity id must be non-negative")))
   (when (= selector.kind .Entity)
     (return (vev.pull-store-db-value-text db pattern-text selector.entity)))
   (let [[entity entity-ok entity-error] (entity-from-selector db selector)]
     (when (not entity-ok)
-      (return (vev.Value {}) false entity-error))
+      (return (vev.Value []) false entity-error))
     (defer (vev.close-store-entity! (addr entity)))
     (if (vev.store-entity-found? entity)
       (vev.pull-store-db-value-text db pattern-text (vev.store-entity-id entity))
@@ -713,14 +713,14 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                      (= candidate.text key))
             (return value.items[(+ index 1)] true)))
         (set! index (+ index 2)))))
-  (return (vev.Value {}) false))
+  (return (vev.Value []) false))
 
 (defn exec-form-text [value: vev.Value] -> string
   (if (= value.kind .String)
     (vev.string-owned value.text)
     (vev.value-serializable-text value)))
 
-(defstruct Exec-Resource {
+(defstruct Exec-Resource [
   id: string
   value: vev.Value
   has-value: bool
@@ -738,7 +738,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
   has-prepared-pull: bool
   store: ^vev.Store-Conn
   has-store: bool
-})
+])
 
 (defn delete-exec-resource! [resource: ^Exec-Resource]
   (when resource^.has-value
@@ -782,7 +782,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
         (return nil false false "operation requires a store")))
     (when (not (= store-form.kind .String))
       (return nil false false ":store must be a string path"))
-    (let [opened (vev.Store-Conn {})
+    (let [opened (vev.Store-Conn [])
           opened-ok false
           opened-error ""]
       (if writable
@@ -868,10 +868,10 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
   (when (not has-value)
     (return (vev.retain-store-db default-db^) true ""))
   (when (not (exec-ref? value))
-    (return (vev.Store-DB {}) false "database must be a reference"))
+    (return (vev.Store-DB []) false "database must be a reference"))
   (let [index (exec-resource-index resources value.items[1].text)]
     (when (< index 0)
-      (return (vev.Store-DB {}) false "reference names an unknown or later step"))
+      (return (vev.Store-DB []) false "reference names an unknown or later step"))
     (let [resource resources[index]
           path (if (> (count value.items) 2) value.items[2].text "")]
       (cond
@@ -879,15 +879,15 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
           (if (exec-resource-has-db? resource)
             (let [db-pointer (exec-resource-db (addr resources[index]))]
               (return (vev.retain-store-db db-pointer^) true ""))
-            (return (vev.Store-DB {}) false "referenced step does not produce a database"))
+            (return (vev.Store-DB []) false "referenced step does not produce a database"))
         (= path ":db-before")
           (if (exec-resource-has-db-before? resource)
             (let [db-pointer
                   (exec-resource-db-before (addr resources[index]))]
               (return (vev.retain-store-db db-pointer^) true ""))
-            (return (vev.Store-DB {}) false "referenced step does not produce db-before"))
+            (return (vev.Store-DB []) false "referenced step does not produce db-before"))
         :else
-          (return (vev.Store-DB {}) false "reference path does not name a database")))))
+          (return (vev.Store-DB []) false "reference path does not name a database")))))
 
 (defn exec-value-at-path [value: vev.Value, path: []vev.Value]
   -> [result: vev.Value, ok: bool, error: string]
@@ -896,14 +896,14 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
       (if (= part.kind .Keyword)
         (let [[next found] (value-map-field current part.text)]
           (when (not found)
-            (return (vev.Value {}) false "reference path was not found"))
+            (return (vev.Value []) false "reference path was not found"))
           (set! current next))
         (if (and (= part.kind .Int)
                  (or (= current.kind .Vector) (= current.kind .Set))
                  (>= part.int-value 0)
                  (< part.int-value (i64 (count current.items))))
           (set! current current.items[(int part.int-value)])
-          (return (vev.Value {}) false
+          (return (vev.Value []) false
                   "reference paths require map keywords or vector indexes"))))
     (return (vev.value-owned current) true "")))
 
@@ -912,7 +912,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
   (when (exec-ref? form)
     (let [index (exec-resource-index resources form.items[1].text)]
       (when (< index 0)
-        (return (vev.Value {}) false "reference names an unknown or later step"))
+        (return (vev.Value []) false "reference names an unknown or later step"))
       (let [resource resources[index]]
         (when (> (count form.items) 2)
           (let [path-first form.items[2]]
@@ -929,10 +929,10 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                              (exec-resource-has-db-before? resource)
                              (exec-resource-has-db? resource))]
                 (when (not has-db)
-                  (return (vev.Value {}) false "reference path does not name a database"))
+                  (return (vev.Value []) false "reference path does not name a database"))
                 (when (= (count form.items) 3)
                   (return (exec-db-descriptor-value (addr db))))
-                (return (vev.Value {}) false "database descriptors do not support nested reference paths")))))
+                (return (vev.Value []) false "database descriptors do not support nested reference paths")))))
         (when resource.has-value
           (return (exec-value-at-path resource.value
                                       (if (> (count form.items) 2)
@@ -941,7 +941,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
         (when (exec-resource-has-db? resource)
           (return (exec-db-descriptor-value
                     (exec-resource-db (addr resources[index])))))
-        (return (vev.Value {}) false "opaque prepared values cannot be returned"))))
+        (return (vev.Value []) false "opaque prepared values cannot be returned"))))
   (case form.kind
     .Vector
       (let [items (make [dynamic]vev.Value)]
@@ -951,7 +951,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
             (when (not resolved-ok)
               (for [existing items] (vev.delete-owned-value existing))
               (delete items)
-              (return (vev.Value {}) false resolved-error))
+              (return (vev.Value []) false resolved-error))
             (arr.push! items resolved)))
         (return (vev.value-vector-owned items) true ""))
     .Set
@@ -962,7 +962,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
             (when (not resolved-ok)
               (for [existing items] (vev.delete-owned-value existing))
               (delete items)
-              (return (vev.Value {}) false resolved-error))
+              (return (vev.Value []) false resolved-error))
             (arr.push! items resolved)))
         (return (vev.value-set-owned items) true ""))
     .Map
@@ -973,7 +973,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
             (when (not resolved-ok)
               (for [existing items] (vev.delete-owned-value existing))
               (delete items)
-              (return (vev.Value {}) false resolved-error))
+              (return (vev.Value []) false resolved-error))
             (arr.push! items resolved)))
         (return (vev.value-map-owned items) true ""))
      (return (vev.value-owned form) true "")))
@@ -988,9 +988,9 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
         [rules-form rules?] (value-map-field step ":rules")
         [result-form result?] (value-map-field step ":result")]
     (when (not query?)
-      (return (vev.Value {}) false "query step requires :query"))
+      (return (vev.Value []) false "query step requires :query"))
     (when (and sources? (not (= sources-form.kind .Map)))
-      (return (vev.Value {}) false "query :sources must be a map"))
+      (return (vev.Value []) false "query :sources must be a map"))
     (let [source-dbs (make [dynamic]vev.Store-DB)
           source-names (make [dynamic]string)
           source-defs (make [dynamic]vev.DB-Source)]
@@ -1007,23 +1007,23 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
             (let [name sources-form.items[index]
                   ref sources-form.items[(+ index 1)]]
               (when (not (or (= name.kind .Symbol) (= name.kind .Keyword)))
-                (return (vev.Value {}) false "query source names must be symbols or keywords"))
+                (return (vev.Value []) false "query source names must be symbols or keywords"))
               (let [[source-db source-ok source-error]
                     (exec-db-from-value resources db ref true)]
                 (when (not source-ok)
-                  (return (vev.Value {}) false source-error))
+                  (return (vev.Value []) false source-error))
                 (arr.push! source-names name.text)
                 (arr.push! source-dbs source-db)
-                (arr.push! source-defs (vev.DB-Source {name: name.text}))))
+                (arr.push! source-defs (vev.DB-Source :name name.text))))
             (set! index (+ index 2)))))
-      (let [prepared (vev.Prepared-Query {})
+      (let [prepared (vev.Prepared-Query [])
             owns-prepared false]
         (if (exec-ref? query-form)
           (let [prepared-index
                 (exec-resource-index resources query-form.items[1].text)]
             (when (or (< prepared-index 0)
                       (not resources[prepared-index].has-prepared-query))
-              (return (vev.Value {}) false "query reference does not name a prepared query"))
+              (return (vev.Value []) false "query reference does not name a prepared query"))
             (set! prepared resources[prepared-index].prepared-query^))
           (let [query-text (exec-form-text query-form)]
             (defer (delete query-text))
@@ -1039,14 +1039,14 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
             (set! owns-prepared true)))
         (defer (when owns-prepared (vev.delete-prepared-query-shallow prepared)))
         (when (not prepared.ok)
-          (return (vev.Value {}) false prepared.error))
+          (return (vev.Value []) false prepared.error))
         (let [resolved-inputs (vev.value-vector-owned (make [dynamic]vev.Value))]
           (if inputs?
             (let [[resolved resolved-ok resolved-error]
                   (exec-resolve-value resources inputs-form)]
               (when (not resolved-ok)
                 (vev.delete-owned-value resolved-inputs)
-                (return (vev.Value {}) false resolved-error))
+                (return (vev.Value []) false resolved-error))
               (vev.delete-owned-value resolved-inputs)
               (set! resolved-inputs resolved)))
           (defer (vev.delete-owned-value resolved-inputs))
@@ -1057,18 +1057,18 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                     prepared.query inputs-text)]
               (defer (vev.delete-owned-query-inputs query-inputs))
               (when (not query-inputs-ok)
-                (return (vev.Value {}) false query-inputs-error))
+                (return (vev.Value []) false query-inputs-error))
               (let [[default-source default-ok default-error]
                     (vev.store-db-read-source db)]
                 (when (not default-ok)
-                  (return (vev.Value {}) false default-error))
+                  (return (vev.Value []) false default-error))
                 (let [named-sources (make [dynamic]vev.DB-Read-Named-Source)]
                   (defer (delete named-sources))
                   (for [source-db index source-dbs]
                     (let [[read-source read-ok read-error]
                           (vev.store-db-read-source (addr source-dbs[index]))]
                       (when (not read-ok)
-                        (return (vev.Value {}) false read-error))
+                        (return (vev.Value []) false read-error))
                       (arr.push! named-sources
                         (vev.db-read-named-source
                           source-names[index] read-source))))
@@ -1103,7 +1103,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                         (defer
                           (vev.delete-profiled-result-set-owned-values profiled))
                         (when (not profiled.result.ok)
-                          (return (vev.Value {}) false profiled.result.error))
+                          (return (vev.Value []) false profiled.result.error))
                         (let [[selected selected-ok selected-error]
                               (query-selected-value
                                 db prepared profiled.result mode)]
@@ -1132,7 +1132,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                               ([]vev.Native-Query-Fn []))]
                         (defer (vev.delete-query-result result))
                         (when (not result.result.ok)
-                          (return (vev.Value {}) false result.result.error))
+                          (return (vev.Value []) false result.result.error))
                         (query-selected-value
                           db prepared result.result mode)))))))))))))
 
@@ -1143,7 +1143,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
   (let [[pattern pattern?] (value-map-field step ":pattern")
         [entity-form entity?] (value-map-field step ":entity")]
     (when (or (not pattern?) (not entity?))
-      (return (vev.Value {}) false "pull step requires :pattern and :entity"))
+      (return (vev.Value []) false "pull step requires :pattern and :entity"))
     (let [[resolved-entity entity-ok entity-error]
           (exec-resolve-value resources entity-form)]
       (when (not entity-ok)
@@ -1152,11 +1152,11 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
       (if (exec-ref? pattern)
         (let [index (exec-resource-index resources pattern.items[1].text)]
           (when (or (< index 0) (not resources[index].has-prepared-pull))
-            (return (vev.Value {}) false "pull reference does not name a prepared pull pattern"))
+            (return (vev.Value []) false "pull reference does not name a prepared pull pattern"))
           (let [[entity selector-ok selector-error]
                 (entity-from-selector db resolved-entity)]
             (when (not selector-ok)
-              (return (vev.Value {}) false selector-error))
+              (return (vev.Value []) false selector-error))
             (defer (vev.close-store-entity! (addr entity)))
             (if (vev.store-entity-found? entity)
               (vev.pull-store-db-value-prepared
@@ -1180,11 +1180,11 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
               (= (count start.items) 0)
               (not (= start.items[0].kind .Keyword))
               (not (or (= index.text ":avet") (= index.text ":aevt"))))
-      (return (vev.Value {}) false
+      (return (vev.Value []) false
               "index-pull requires :index (:avet or :aevt), :selector, and non-empty :start"))
     (let [[args args-ok] (index-args-from-value start)]
       (when (not args-ok)
-        (return (vev.Value {}) false "invalid index-pull :start"))
+        (return (vev.Value []) false "invalid index-pull :start"))
       (defer (delete args))
       (let [walk-reverse (and reverse? (= reverse.kind .Bool) reverse.bool-value)
             [datoms datoms-ok datoms-error]
@@ -1192,7 +1192,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
               db (if walk-reverse 2 1) index.text (slice args 0))]
         (when (not datoms-ok)
           (vev.delete-owned-datoms datoms)
-          (return (vev.Value {}) false datoms-error))
+          (return (vev.Value []) false datoms-error))
         (defer (vev.delete-owned-datoms datoms))
         (let [pattern-text (vev.value-serializable-text selector)
               skip (if (and offset? (= offset.kind .Int) (> offset.int-value 0))
@@ -1215,7 +1215,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                         (for [existing values]
                           (vev.delete-owned-value existing))
                         (delete values)
-                        (return (vev.Value {}) false pulled-error))
+                        (return (vev.Value []) false pulled-error))
                       (arr.push! values pulled))))
               (set! seen (+ seen 1)))))
           (return (vev.value-vector-owned values) true ""))))))
@@ -1225,11 +1225,11 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
   (let [[selector selector?] (value-map-field step ":entity")
         [attr attr?] (value-map-field step ":attribute")]
     (when (not selector?)
-      (return (vev.Value {}) false "entity operation requires :entity"))
+      (return (vev.Value []) false "entity operation requires :entity"))
     (when (and (or (= operation ":entity-get")
                    (= operation ":entity-contains?"))
                (or (not attr?) (not (= attr.kind .Keyword))))
-      (return (vev.Value {}) false "entity attribute operation requires keyword :attribute"))
+      (return (vev.Value []) false "entity attribute operation requires keyword :attribute"))
     (if (or (= operation ":entity") (= operation ":touch"))
       (pull-selector db "[*]" selector)
       (if (or (= operation ":entity-get")
@@ -1258,7 +1258,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                   (vev.delete-owned-value pulled)
                   (return (vev.value-bool field?) true ""))
                 (let [out (if field? (vev.value-owned field) (vev.value-nil))
-                      schema-entity (vev.Store-Entity {})
+                      schema-entity (vev.Store-Entity [])
                       schema-open false]
                   (when (and field? (= operation ":entity-get"))
                     (let [[candidate candidate-ok _]
@@ -1292,17 +1292,17 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                   out (if id? (vev.value-owned id) (vev.value-nil))]
               (vev.delete-owned-value pulled)
               (return out true "")))
-          (return (vev.Value {}) false "unsupported entity operation"))))))
+          (return (vev.Value []) false "unsupported entity operation"))))))
 
 (defn exec-attribute-value [db: ^vev.Store-DB, step: vev.Value]
   -> [value: vev.Value, ok: bool, error: string]
   (let [[attr attr?] (value-map-field step ":attribute")]
     (when (or (not attr?) (not (= attr.kind .Keyword)))
-      (return (vev.Value {}) false "attribute requires keyword :attribute"))
+      (return (vev.Value []) false "attribute requires keyword :attribute"))
     (let [[entity entity-ok entity-error]
           (vev.store-db-entity-ident db attr.text)]
       (when (not entity-ok)
-        (return (vev.Value {}) false entity-error))
+        (return (vev.Value []) false entity-error))
       (defer (vev.close-store-entity! (addr entity)))
       (when (not (vev.store-entity-found? entity))
         (return (vev.value-nil) true ""))
@@ -1376,7 +1376,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
               out (if stats? (vev.value-owned stats) (vev.value-nil))]
           (vev.delete-owned-value descriptor)
           (return out true "")))
-    :else (return (vev.Value {}) false "unsupported database metadata operation")))
+    :else (return (vev.Value []) false "unsupported database metadata operation")))
 
 (defn exec-index-value [db: ^vev.Store-DB, step: vev.Value, operation: string]
   -> [value: vev.Value, ok: bool, error: string]
@@ -1385,7 +1385,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
           [start start?] (value-map-field step ":start")
           [end end?] (value-map-field step ":end")]
       (when (or (not attr?) (not (= attr.kind .Keyword)))
-        (return (vev.Value {}) false "index-range requires keyword :attribute"))
+        (return (vev.Value []) false "index-range requires keyword :attribute"))
       (let [[datoms datoms-ok datoms-error]
             (vev.store-db-index-range-datoms
               db attr.text
@@ -1393,7 +1393,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
               (index-arg-from-value (if end? end (vev.value-nil))) end?)]
         (when (not datoms-ok)
           (vev.delete-owned-datoms datoms)
-          (return (vev.Value {}) false datoms-error))
+          (return (vev.Value []) false datoms-error))
         (let [out (cli-datoms-value (slice datoms 0))]
           (vev.delete-owned-datoms datoms)
           (return out true ""))))
@@ -1403,10 +1403,10 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
           effective (if components? components empty)]
       (defer (vev.delete-owned-value empty))
       (when (or (not index?) (not (= index.kind .Keyword)))
-        (return (vev.Value {}) false "index operation requires keyword :index"))
+        (return (vev.Value []) false "index operation requires keyword :index"))
       (let [[args args-ok] (index-args-from-value effective)]
         (when (not args-ok)
-          (return (vev.Value {}) false "index :components must be a vector"))
+          (return (vev.Value []) false "index :components must be a vector"))
         (defer (delete args))
         (let [[datoms datoms-ok datoms-error]
               (vev.store-db-index-datoms
@@ -1416,7 +1416,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                 index.text (slice args 0))]
           (when (not datoms-ok)
             (vev.delete-owned-datoms datoms)
-            (return (vev.Value {}) false datoms-error))
+            (return (vev.Value []) false datoms-error))
           (let [out (cli-datoms-value (slice datoms 0))]
             (vev.delete-owned-datoms datoms)
             (return out true "")))))))
@@ -1437,7 +1437,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                  (vev.value-keyword (vev.string-owned ":resident?"))
                  (vev.value-bool true)]))
             true "")
-          (return (vev.Value {}) false error)))
+          (return (vev.Value []) false error)))
     (= operation ":compact-indexes")
       (let [[compacted ok error] (vev.compact-store-indexes! store)]
         (if ok
@@ -1449,7 +1449,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                  (vev.value-keyword (vev.string-owned ":compacted?"))
                  (vev.value-bool compacted)]))
             true "")
-          (return (vev.Value {}) false error)))
+          (return (vev.Value []) false error)))
     (= operation ":reclaim-indexes")
       (let [[reclaimed ok error] (vev.reclaim-store-indexes! store true)]
         (if ok
@@ -1463,7 +1463,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                  (vev.value-keyword (vev.string-owned ":physical?"))
                  (vev.value-bool true)]))
             true "")
-          (return (vev.Value {}) false error)))
+          (return (vev.Value []) false error)))
     (= operation ":maintain-indexes")
       (let [[max-steps max-steps?] (value-map-field step ":max-steps")
             [steps-run compacted ok error]
@@ -1483,7 +1483,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                  (vev.value-keyword (vev.string-owned ":compacted?"))
                  (vev.value-bool compacted)]))
             true "")
-          (return (vev.Value {}) false error)))
+          (return (vev.Value []) false error)))
     (= operation ":index-info")
       (let [[index index?] (value-map-field step ":index")
             index-text (if (and index? (= index.kind .Keyword))
@@ -1501,17 +1501,17 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                  (vev.value-keyword (vev.string-owned ":merge?"))
                  (vev.value-bool merge?)]))
             true "")
-          (return (vev.Value {}) false error)))
-    :else (return (vev.Value {}) false "unsupported maintenance operation")))
+          (return (vev.Value []) false error)))
+    :else (return (vev.Value []) false "unsupported maintenance operation")))
 
 (defn exec-transact-many-value [store: ^vev.Store-Conn,
                                 transactions: vev.Value,
                                 mode: string]
   -> [value: vev.Value, ok: bool, error: string]
   (when (not (= transactions.kind .Vector))
-    (return (vev.Value {}) false "transact-many requires vector :transactions"))
+    (return (vev.Value []) false "transact-many requires vector :transactions"))
   (when (not (or (= mode "committed") (= mode "logical") (= mode "flatten")))
-    (return (vev.Value {}) false "transact-many :mode must be :committed, :logical, or :flatten"))
+    (return (vev.Value []) false "transact-many :mode must be :committed, :logical, or :flatten"))
   (let [texts (make [dynamic]string)]
     (defer (delete-texts! texts))
     (for [tx transactions.items]
@@ -1542,7 +1542,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
               store (slice texts 0))]
         (when (not reports-ok)
           (vev.delete-store-tx-reports reports)
-          (return (vev.Value {}) false reports-error))
+          (return (vev.Value []) false reports-error))
         (let [values (make [dynamic]vev.Value)
               all-ok true]
           (for [report reports]
@@ -1555,7 +1555,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
       (let [[groups groups-ok groups-error]
             (vev.store-tx-data-groups-from-texts (slice texts 0))]
         (when (not groups-ok)
-          (return (vev.Value {}) false groups-error))
+          (return (vev.Value []) false groups-error))
         (let [report
               (vev.transact-store-report-tx-data-groups
                 store (slice groups 0))]
@@ -1572,7 +1572,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
   (let [[report-ref report?] (value-map-field step ":report")
         [tempid tempid?] (value-map-field step ":tempid")]
     (when (or (not report?) (not tempid?) (not (exec-ref? report-ref)))
-      (return (vev.Value {}) false "resolve-tempid requires :report reference and :tempid"))
+      (return (vev.Value []) false "resolve-tempid requires :report reference and :tempid"))
     (let [[report report-ok report-error]
           (exec-resolve-value resources report-ref)]
       (when (not report-ok)
@@ -1632,12 +1632,12 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
         (when (and memory? needs-write)
           (print-cli-error "durable operations are not available with exec --memory")
           (return 1))
-        (let [store (vev.Store-Conn {})
+        (let [store (vev.Store-Conn [])
               has-store false
-              default-db (vev.Store-DB {})]
+              default-db (vev.Store-DB [])]
           (if memory?
             (set! default-db (vev.empty-shared-store-db-for-sqlite-bootstrap))
-            (let [opened (vev.Store-Conn {})
+            (let [opened (vev.Store-Conn [])
                   opened-ok false
                   opened-error ""]
               (if needs-write
@@ -1684,7 +1684,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                 (when (>= (exec-resource-index resources id.text) 0)
                   (print-cli-error "exec step ids must be unique")
                   (return 1))
-                (let [resource (Exec-Resource {id: id.text})
+                (let [resource (Exec-Resource :id id.text)
                       step-ok true
                       step-error ""
                       capture? (and on-error?
@@ -1774,7 +1774,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                                     (set! step-ok false)
                                     (set! step-error "as-of and since require :time"))
                                   (if (= point.kind .Instant)
-                                    (let [filtered (vev.Store-DB {})
+                                    (let [filtered (vev.Store-DB [])
                                           filtered-ok false
                                           filtered-error ""]
                                       (if (= operation.text ":as-of")
@@ -1868,7 +1868,7 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                                     (when (or (= name.kind .Symbol)
                                               (= name.kind .Keyword))
                                       (arr.push! source-defs
-                                        (vev.DB-Source {name: name.text}))))
+                                        (vev.DB-Source :name name.text))))
                                   (set! source-index (+ source-index 2)))))
                             (set! resource.prepared-query
                                   (alloc vev.Prepared-Query))
@@ -2338,10 +2338,10 @@ _ = libc.signal(libc.SIGTERM, watch_signal_handler)
                         (delete-exec-resource! (addr resource))
                         (arr.push! resources
                           (Exec-Resource
-                            {id: id.text
-                             value: (exec-error-value
+                            :id id.text
+                             :value (exec-error-value
                                       step-error operation.text id.text)
-                             has-value: true})))
+                             :has-value true)))
                       (do
                         (delete-exec-resource! (addr resource))
                         (let [error-value

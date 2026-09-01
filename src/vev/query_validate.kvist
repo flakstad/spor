@@ -82,7 +82,7 @@
   (when (not (string-slice-contains? (slice vars^ 0) name))
     (arr.push! vars^ name)))
 
-(defn append-var-once-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), name: string]
+(defn append-var-once-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), name: string]
   (when (= name "")
     (return))
   (let [found (set.contains? seen^ name)]
@@ -94,7 +94,7 @@
   (when (= term.kind .Var)
     (append-var-once! vars term.name)))
 
-(defn append-term-var-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), term: Term]
+(defn append-term-var-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), term: Term]
   (when (= term.kind .Var)
     (append-var-once-indexed! vars seen term.name)))
 
@@ -103,7 +103,7 @@
     (for [name names]
       (append-var-once! vars name))))
 
-(defn append-input-binding-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), binding: Input-Binding]
+(defn append-input-binding-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), binding: Input-Binding]
   (let [names (input-binding-vars binding) :defer]
     (for [name names]
       (append-var-once-indexed! vars seen name))))
@@ -136,7 +136,7 @@
       .Ignore (do)
        (do))))
 
-(defn append-query-input-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), query-value: Query]
+(defn append-query-input-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), query-value: Query]
   (for [name query-value.inputs]
     (append-var-once-indexed! vars seen name))
   (for [name query-value.collection-inputs]
@@ -171,7 +171,7 @@
   (append-term-var! vars clause.tx-term)
   (append-term-var! vars clause.op-term))
 
-(defn append-clause-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), clause: Clause]
+(defn append-clause-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), clause: Clause]
   (append-term-var-indexed! vars seen clause.e)
   (append-term-var-indexed! vars seen clause.a)
   (append-term-var-indexed! vars seen clause.v)
@@ -198,7 +198,7 @@
   (for [name group.join-vars]
     (append-var-once! vars name)))
 
-(defn append-not-group-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), group: Not-Group]
+(defn append-not-group-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), group: Not-Group]
   (for [clause group.clauses]
     (append-clause-vars-indexed! vars seen clause))
   (for [predicate group.predicates]
@@ -233,7 +233,7 @@
   (for [call branch.rule-calls]
     (append-rule-call-vars! vars call)))
 
-(defn append-branch-output-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), branch: Not-Group]
+(defn append-branch-output-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), branch: Not-Group]
   (for [clause branch.clauses]
     (append-clause-vars-indexed! vars seen clause))
   (for [function branch.function-clauses]
@@ -254,7 +254,7 @@
   (for [name group.join-vars]
     (append-var-once! vars name)))
 
-(defn append-or-group-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), group: Or-Group]
+(defn append-or-group-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), group: Or-Group]
   (for [branch group.branches]
     (append-branch-output-vars-indexed! vars seen branch))
   (for [name group.join-vars]
@@ -266,7 +266,7 @@
       (append-var-once! vars name))
     (append-or-group-vars! vars group)))
 
-(defn append-or-group-output-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), group: Or-Group]
+(defn append-or-group-output-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), group: Or-Group]
   (if group.has-join
     (for [name group.join-vars]
       (append-var-once-indexed! vars seen name))
@@ -276,7 +276,7 @@
   (for [arg call.args]
     (append-term-var! vars arg)))
 
-(defn append-rule-call-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), call: Rule-Call]
+(defn append-rule-call-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), call: Rule-Call]
   (for [arg call.args]
     (append-term-var-indexed! vars seen arg)))
 
@@ -286,7 +286,7 @@
     (append-var-once! vars name))
   (append-input-binding-vars! vars ground.binding))
 
-(defn append-ground-output-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), ground: Ground]
+(defn append-ground-output-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), ground: Ground]
   (append-var-once-indexed! vars seen ground.out)
   (for [name ground.tuple-vars]
     (append-var-once-indexed! vars seen name))
@@ -298,7 +298,7 @@
     (append-var-once! vars name))
   (append-input-binding-vars! vars function.out-binding))
 
-(defn append-function-output-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), function: Function-Clause]
+(defn append-function-output-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), function: Function-Clause]
   (append-var-once-indexed! vars seen function.out)
   (for [name function.out-vars]
     (append-var-once-indexed! vars seen name))
@@ -310,7 +310,7 @@
   (for [term predicate.terms]
     (append-term-var! vars term)))
 
-(defn append-predicate-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), predicate: Predicate]
+(defn append-predicate-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), predicate: Predicate]
   (when (query-var-name? predicate.op)
     (append-var-once-indexed! vars seen predicate.op))
   (for [term predicate.terms]
@@ -323,7 +323,7 @@
     (append-term-var! vars term))
   (append-function-output-vars! vars function))
 
-(defn append-function-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), function: Function-Clause]
+(defn append-function-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), function: Function-Clause]
   (when (query-var-name? function.op)
     (append-var-once-indexed! vars seen function.op))
   (for [term function.terms]
@@ -334,7 +334,7 @@
   (append-term-var! vars clause.e)
   (append-var-once! vars clause.out))
 
-(defn append-get-else-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), clause: Get-Else]
+(defn append-get-else-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), clause: Get-Else]
   (append-term-var-indexed! vars seen clause.e)
   (append-var-once-indexed! vars seen clause.out))
 
@@ -343,7 +343,7 @@
   (append-var-once! vars clause.out-attr)
   (append-var-once! vars clause.out-value))
 
-(defn append-get-some-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), clause: Get-Some]
+(defn append-get-some-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), clause: Get-Some]
   (append-term-var-indexed! vars seen clause.e)
   (append-var-once-indexed! vars seen clause.out-attr)
   (append-var-once-indexed! vars seen clause.out-value))
@@ -364,7 +364,7 @@
     (when aggregate.has-limit-var
       (append-var-once! vars aggregate.limit-var))))
 
-(defn append-find-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct {}))), query-value: Query]
+(defn append-find-vars-indexed! [vars: ^[dynamic]string, seen: (ptr (map string (struct []))), query-value: Query]
   (for [name query-value.find]
     (append-var-once-indexed! vars seen name))
   (for [pull-find query-value.pulls]

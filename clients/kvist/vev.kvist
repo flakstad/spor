@@ -10,27 +10,27 @@
 (import os-sync "core:sync")
 (import time "core:time")
 
-(defstruct Conn-State {
+(defstruct Conn-State [
   library: native.Library
   connection: native.Durable-Connection
   query-texts: [dynamic]string
   queries: [dynamic]native.Prepared-Query
   query-lock: os-sync.Mutex
-})
+])
 
-(defstruct DB-State {
+(defstruct DB-State [
   database: native.DB
   conn: ^Conn-State
-})
+])
 
-(defstruct Log-State {
+(defstruct Log-State [
   log-value: native.Log
   conn: ^Conn-State
-})
+])
 
-(defstruct Entity-State {
+(defstruct Entity-State [
   entity-value: native.Entity
-})
+])
 
 (def Conn (distinct rawptr))
 (def DB (distinct rawptr))
@@ -43,7 +43,7 @@
   Unknown
 ])
 
-(defstruct Tx-Report {
+(defstruct Tx-Report [
   ok: bool
   error: string
   error-kind: Tx-Error-Kind
@@ -55,11 +55,11 @@
   tx-meta: Data
   internal-owner-data: Data
   native-report: native.Native-Tx-Report
-})
+])
 
-(defstruct Value {
+(defstruct Value [
   int-value: i64
-})
+])
 
 (defn- clone-text [value: string] -> string
   (let [[owned err] (strings.clone value)]
@@ -333,7 +333,7 @@
   ; those fields and the retained parse tree exactly once.
   (native.close (addr report.native-report))
   (delete report.error)
-  (set! report^ (Tx-Report {})))
+  (set! report^ (Tx-Report [])))
 
 (defn history [db-value: DB] -> DB
   (let [state (db-state db-value)
@@ -794,21 +794,21 @@
     (when (not (and handle-ok value-ok))
       (return
         (Tx-Report
-          {ok: false
-           error: (clone-text "Vev transaction returned no report")
-           error-kind: .Unknown
-           tx: (u64 0)
-           db-before: (if before-ok
+          :ok false
+           :error (clone-text "Vev transaction returned no report")
+           :error-kind .Unknown
+           :tx (u64 0)
+           :db-before (if before-ok
                         (db-from-native state before)
                         (DB nil))
-           db-after: (if after-ok
+           :db-after (if after-ok
                        (db-from-native state after)
                        (DB nil))
-           tx-data: (data.from-nil)
-           tempids: (data.from-nil)
-           tx-meta: (data.from-nil)
-           internal-owner-data: (data.from-nil)
-           native-report: report-handle})))
+           :tx-data (data.from-nil)
+           :tempids (data.from-nil)
+           :tx-meta (data.from-nil)
+           :internal-owner-data (data.from-nil)
+           :native-report report-handle)))
     ;; The Value is borrowed from report-handle. Materialize a fully owned
     ;; Kvist Data tree while that handle is live; the Tx-Report then owns both
     ;; the Data tree and the native report until close-tx-report.
@@ -843,21 +843,21 @@
                 (u64 (data.int tx-value))
                 (u64 0)))]
       (Tx-Report
-        {ok: report-ok
-         error: report-error
-         error-kind: report-error-kind
-         tx: report-tx
-         db-before: (if before-ok
+        :ok report-ok
+         :error report-error
+         :error-kind report-error-kind
+         :tx report-tx
+         :db-before (if before-ok
                       (db-from-native state before)
                       (DB nil))
-         db-after: (if after-ok
+         :db-after (if after-ok
                      (db-from-native state after)
                      (DB nil))
-         tx-data: tx-data-value
-         tempids: tempids-value
-         tx-meta: tx-meta-value
-         internal-owner-data: report
-         native-report: report-handle}))))
+         :tx-data tx-data-value
+         :tempids tempids-value
+         :tx-meta tx-meta-value
+         :internal-owner-data report
+         :native-report report-handle))))
 
 (defn transact-data [conn: Conn, tx: Data] -> Tx-Report
   (let [tx-text (edn.write tx)]
@@ -1001,7 +1001,7 @@
       (set! normalized (fmt.tprintf "%sT00:00:00Z" text)))
     (let [[parsed consumed] (time.iso8601-to-time-utc normalized)]
       (return
-        (Value {int-value: (/ (time.time-to-unix-nano parsed) 1000000)})
+        (Value :int-value (/ (time.time-to-unix-nano parsed) 1000000))
         (= consumed (count normalized))))))
 
 (defn value-instant [unix-millis: i64] -> Data

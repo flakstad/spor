@@ -3,35 +3,35 @@
 (defn db-read-source-term-constant-value [term: Term] -> [value: Value, ok: bool]
   (if (= term.kind .Value)
     (return term.value true)
-    (return (Value {}) false)))
+    (return (Value []) false)))
 
 (defn db-read-source-term-resolved-value [term: Term, binding: Binding] -> [value: Value, ok: bool]
   (case term.kind
     .Value (return term.value true)
     .Var (binding-lookup binding term.name)
-     (return (Value {}) false)))
+     (return (Value []) false)))
 
 (defn db-read-source-query-relation-resolve-typed-term [rel: Query-Relation, row: int, term: Term] -> [value: Value, ok: bool]
   (case term.kind
     .Value (return term.value true)
     .Var (return (query-relation-typed-row-value rel row term.name))
-     (return (Value {}) false)))
+     (return (Value []) false)))
 
 (defn db-read-source-query-relation-resolve-typed-entity-term [source: DB-Read-Source, rel: Query-Relation, row: int, term: Term] -> [value: Value, ok: bool, error: string]
   (when (= term.kind .LookupRef)
     (let [[entity lookup-ok lookup-error] (db-read-source-resolve-lookup-ref source term.lookup-attr term.lookup-value)]
       (if lookup-ok
         (return (value-entity entity) true "")
-        (return (Value {}) false lookup-error))))
+        (return (Value []) false lookup-error))))
   (let [[resolved resolved-ok] (db-read-source-query-relation-resolve-typed-term rel row term)]
     (when (not resolved-ok)
-      (return (Value {}) false ""))
+      (return (Value []) false ""))
     (let [[lookup-attr lookup-value lookup-ok] (value-lookup-ref-parts resolved)]
       (when lookup-ok
         (let [[entity lookup-found lookup-error] (db-read-source-resolve-lookup-ref source lookup-attr lookup-value)]
           (if lookup-found
             (return (value-entity entity) true "")
-            (return (Value {}) false lookup-error)))))
+            (return (Value []) false lookup-error)))))
     (cond
       (= resolved.kind .Entity) (return resolved true "")
       (= resolved.kind .Int) (return (value-entity (u64 resolved.int-value)) true "")
@@ -39,22 +39,22 @@
         (let [[entity ident-ok ident-error] (db-read-source-schema-entity-for-attr source resolved.text)]
           (cond
             ident-ok (return (value-entity entity) true "")
-            (not (= ident-error "")) (return (Value {}) false ident-error)
+            (not (= ident-error "")) (return (Value []) false ident-error)
             :else (return resolved false "")))
       :else (return resolved false ""))))
 
 (defn db-read-source-empty-clause-index-scan [source: DB-Read-Source] -> Clause-Index-Scan
-  (Clause-Index-Scan {view: (db-read-source-index-view source .EAVT)
-                      index: 0
-                      high: 0
-                      e-value: (Value {})
-                      e-ok: false
-                      a-value: (Value {})
-                      a-ok: false
-                      v-value: (Value {})
-                      v-ok: false
-                      reverse-attr: false
-                      forward-attr: ""}))
+  (Clause-Index-Scan :view (db-read-source-index-view source .EAVT)
+                      :index 0
+                      :high 0
+                      :e-value (Value [])
+                      :e-ok false
+                      :a-value (Value [])
+                      :a-ok false
+                      :v-value (Value [])
+                      :v-ok false
+                      :reverse-attr false
+                      :forward-attr ""))
 
 (defn db-read-source-prefix-index-range [source: DB-Read-Source, order: Public-Index-Order, values: []Value] -> [view: DB-Index-View, low: int, high: int, ok: bool, error: string]
   (let [index-view (db-read-source-index-view source order)
@@ -178,17 +178,17 @@
                 (set! high candidate-high))
 
               (return (db-read-source-empty-clause-index-scan source) true "")))
-        (return (Clause-Index-Scan {view: view
-                                    index: low
-                                    high: high
-                                    e-value: e-value-in
-                                    e-ok: e-ok
-                                    a-value: a-value
-                                    a-ok: a-ok
-                                    v-value: v-value
-                                    v-ok: v-ok
-                                    reverse-attr: true
-                                    forward-attr: (forward-attr-for-reverse a-value.text)}) true "")))
+        (return (Clause-Index-Scan :view view
+                                    :index low
+                                    :high high
+                                    :e-value e-value-in
+                                    :e-ok e-ok
+                                    :a-value a-value
+                                    :a-ok a-ok
+                                    :v-value v-value
+                                    :v-ok v-ok
+                                    :reverse-attr true
+                                    :forward-attr (forward-attr-for-reverse a-value.text)) true "")))
     (when (and v-ok
                (= clause.v.kind .Var)
                (= v-value.kind .Entity))
@@ -239,17 +239,17 @@
             (set! high candidate-high))
 
           (do)))
-    (return (Clause-Index-Scan {view: view
-                                index: low
-                                high: high
-                                e-value: e-value-in
-                                e-ok: e-ok
-                                a-value: a-value
-                                a-ok: a-ok
-                                v-value: v-value
-                                v-ok: v-ok
-                                reverse-attr: false
-                                forward-attr: ""}) true "")))
+    (return (Clause-Index-Scan :view view
+                                :index low
+                                :high high
+                                :e-value e-value-in
+                                :e-ok e-ok
+                                :a-value a-value
+                                :a-ok a-ok
+                                :v-value v-value
+                                :v-ok v-ok
+                                :reverse-attr false
+                                :forward-attr "") true "")))
 
 (defn db-read-source-clause-index-scan [source: DB-Read-Source, clause: Clause, binding: Binding] -> [scan: Clause-Index-Scan, ok: bool, error: string]
   (let [[e-value e-ok e-error] (db-read-source-resolve-entity-term source clause.e binding)]
@@ -309,7 +309,7 @@
       (return out true ""))))
 
 (defn db-read-source-clause-candidates [source: DB-Read-Source, clause-value: Clause] -> [datoms: [dynamic]Datom, ok: bool, error: string]
-  (let [binding (Binding {items: (make [dynamic]Var-Binding)})
+  (let [binding (Binding :items (make [dynamic]Var-Binding))
         [datoms datoms-ok datoms-error] (db-read-source-clause-candidates-for-binding source clause-value binding)]
     (delete binding.items)
     (return datoms datoms-ok datoms-error)))
@@ -331,13 +331,13 @@
     (and (= clause-value.e.kind .Var) (= clause-value.e.name name)) (return (value-entity datom.e) true)
     (and (= clause-value.a.kind .Var) (= clause-value.a.name name)) (return (value-keyword (string-owned datom.a)) true)
     (and (= clause-value.v.kind .Var) (= clause-value.v.name name)) (return (value-owned datom.v) true)
-    :else (return (Value {}) false)))
+    :else (return (Value []) false)))
 
 (defn db-read-source-clone-binding-owned [binding: Binding] -> Binding
   (let [items (make [dynamic]Var-Binding 0 (count binding.items))]
     (for [item binding.items]
-      (arr.push! items (Var-Binding {name: item.name value: (value-owned item.value)})))
-    (Binding {items: items})))
+      (arr.push! items (Var-Binding :name item.name :value (value-owned item.value))))
+    (Binding :items items)))
 
 (defn db-read-source-delete-binding-owned [binding: Binding]
   (for [item binding.items]
@@ -359,8 +359,8 @@
     (for [name names]
       (let [[value ok] (binding-lookup binding name)]
         (when ok
-          (arr.push! items (Var-Binding {name: name value: (value-owned value)})))))
-    (Binding {items: items})))
+          (arr.push! items (Var-Binding :name name :value (value-owned value))))))
+    (Binding :items items)))
 
 (defn db-read-source-merge-binding-owned [base: Binding, extra: Binding] -> [binding: Binding, ok: bool]
   (let [out (db-read-source-clone-binding-owned base)]
@@ -369,7 +369,7 @@
         (if exists
           (when (not (predicate-value-equal? existing item.value))
             (db-read-source-delete-binding-owned out)
-            (return (Binding {}) false))
+            (return (Binding []) false))
           (binding-store! (addr out) item.name (value-owned item.value)))))
     (return out true)))
 
@@ -503,11 +503,11 @@
 (defn db-read-source-apply-overlay-ops-for-clause-scan! [out: ^[dynamic]Datom, source: DB-Read-Source, scan: Clause-Index-Scan]
   (when (db-read-source-filter-allows-tx? source source.overlay-tx)
     (for [op source.overlay-ops^]
-      (let [candidate (Datom {e: op.e
-                              a: op.a
-                              v: op.v
-                              tx: source.overlay-tx
-                              added: (= op.kind .Add)})]
+      (let [candidate (Datom :e op.e
+                              :a op.a
+                              :v op.v
+                              :tx source.overlay-tx
+                              :added (= op.kind .Add))]
         (when (db-read-source-clause-index-scan-candidate? scan candidate)
           (if source.filter-history
             (append-owned-log-datom-from-tx-op! out op source.overlay-tx)
@@ -630,38 +630,38 @@
                (reverse-attr? clause-value.a.value.text))
       (when (not (= datom.v.kind .Entity))
         (db-read-source-delete-binding-owned candidate-binding)
-        (return (Binding {}) false))
+        (return (Binding []) false))
       (when (not (db-read-source-binding-match-entity-borrowed! source (addr candidate-binding) clause-value.e (value-entity datom.v.entity)))
         (db-read-source-delete-binding-owned candidate-binding)
-        (return (Binding {}) false))
+        (return (Binding []) false))
       (when (not (db-read-source-binding-match-borrowed! (addr candidate-binding) clause-value.a (value-keyword clause-value.a.value.text)))
         (db-read-source-delete-binding-owned candidate-binding)
-        (return (Binding {}) false))
+        (return (Binding []) false))
       (when (not (db-read-source-binding-match-entity-borrowed! source (addr candidate-binding) clause-value.v (value-entity datom.e)))
         (db-read-source-delete-binding-owned candidate-binding)
-        (return (Binding {}) false))
+        (return (Binding []) false))
       (when (not (db-read-source-binding-match-optional-borrowed! (addr candidate-binding) clause-value.tx-term (datom-tx-value datom)))
         (db-read-source-delete-binding-owned candidate-binding)
-        (return (Binding {}) false))
+        (return (Binding []) false))
       (when (not (db-read-source-binding-match-optional-borrowed! (addr candidate-binding) clause-value.op-term (value-bool datom.added)))
         (db-read-source-delete-binding-owned candidate-binding)
-        (return (Binding {}) false))
+        (return (Binding []) false))
       (return candidate-binding true))
     (when (not (db-read-source-binding-match-entity-borrowed! source (addr candidate-binding) clause-value.e (value-entity datom.e)))
       (db-read-source-delete-binding-owned candidate-binding)
-      (return (Binding {}) false))
+      (return (Binding []) false))
     (when (not (db-read-source-binding-match-attr-borrowed! source (addr candidate-binding) clause-value.a (value-keyword datom.a)))
       (db-read-source-delete-binding-owned candidate-binding)
-      (return (Binding {}) false))
+      (return (Binding []) false))
     (when (not (db-read-source-binding-match-clause-borrowed! source (addr candidate-binding) clause-value.v datom.v))
       (db-read-source-delete-binding-owned candidate-binding)
-      (return (Binding {}) false))
+      (return (Binding []) false))
     (when (not (db-read-source-binding-match-optional-borrowed! (addr candidate-binding) clause-value.tx-term (datom-tx-value datom)))
       (db-read-source-delete-binding-owned candidate-binding)
-      (return (Binding {}) false))
+      (return (Binding []) false))
     (when (not (db-read-source-binding-match-optional-borrowed! (addr candidate-binding) clause-value.op-term (value-bool datom.added)))
       (db-read-source-delete-binding-owned candidate-binding)
-      (return (Binding {}) false))
+      (return (Binding []) false))
     (return candidate-binding true)))
 
 (defn db-read-source-bindings-after-clause [source: DB-Read-Source, input-bindings: []Binding, clause-value: Clause] -> [out-bindings: [dynamic]Binding, ok: bool, error: string]

@@ -111,7 +111,7 @@
                         pulls (make [dynamic]Pull-Result)]
                     (for [aggregate query.aggregates]
                       (arr.push! values (aggregate-value-for-group-with-fns (slice materialized 0) query aggregate ([]Value []) registry)))
-                    (arr.push! rows (Result-Row {values: values pulls: pulls})))
+                    (arr.push! rows (Result-Row :values values :pulls pulls)))
                   (append-aggregate-rows-with-sources-and-fns! (addr rows) db sources query inputs (slice materialized 0) registry))))))
         (do
           (delete rows)
@@ -153,7 +153,7 @@
                   pulls (make [dynamic]Pull-Result)]
               (for [aggregate query.aggregates]
                 (arr.push! values (aggregate-value-for-group-with-fns (slice bindings 0) query aggregate ([]Value []) registry)))
-              (arr.push! rows (Result-Row {values: values pulls: pulls})))
+              (arr.push! rows (Result-Row :values values :pulls pulls)))
             (append-aggregate-rows-with-sources-and-fns! (addr rows) db sources query inputs (slice bindings 0) registry))
           (delete bindings)
           (set! stats.output-rows (count rows))
@@ -259,7 +259,7 @@
                 pulls (make [dynamic]Pull-Result)]
             (for [aggregate query.aggregates]
               (arr.push! values (aggregate-value-for-group-with-fns (slice bindings 0) query aggregate ([]Value []) registry)))
-            (arr.push! rows (Result-Row {values: values pulls: pulls})))
+            (arr.push! rows (Result-Row :values values :pulls pulls)))
           (append-aggregate-rows-with-sources-and-fns! (addr rows) db sources query inputs (slice bindings 0) registry))
         (delete bindings)
         (set! stats.output-rows (count rows))
@@ -296,17 +296,17 @@
     (for [child group.not-groups]
       (arr.push! child-groups (relation-db-not-group child source)))
     (let [owned-child-groups (arr.into [dynamic]Not-Group (slice child-groups 0))]
-    (Not-Group {clauses: owned-clauses
-                predicates: predicates
-                function-clauses: function-clauses
-                get-elses: get-elses
-                get-somes: get-somes
-                grounds: grounds
-                rule-calls: rule-calls
-                not-groups: owned-child-groups
-                steps: steps
-                has-join: group.has-join
-                join-vars: join-vars}))))
+    (Not-Group :clauses owned-clauses
+                :predicates predicates
+                :function-clauses function-clauses
+                :get-elses get-elses
+                :get-somes get-somes
+                :grounds grounds
+                :rule-calls rule-calls
+                :not-groups owned-child-groups
+                :steps steps
+                :has-join group.has-join
+                :join-vars join-vars))))
 
 (defn relation-db-or-group [group: Or-Group, source: string] -> Or-Group
   (let [branches (make [dynamic]Not-Group) :defer]
@@ -337,27 +337,27 @@
           owned-not-groups (arr.into [dynamic]Not-Group (slice not-groups 0))
           owned-or-groups (arr.into [dynamic]Or-Group (slice or-groups 0))
           body-steps (arr.into [dynamic]Query-Step (slice rule.body-steps 0))]
-      (Rule {name: rule.name
-             required-param-count: rule.required-param-count
-             params: params
-             clauses: owned-clauses
-             predicates: predicates
-             function-clauses: function-clauses
-             get-elses: get-elses
-             get-somes: get-somes
-             grounds: grounds
-             rule-calls: rule-calls
-             not-groups: owned-not-groups
-             or-groups: owned-or-groups
-             body-steps: body-steps}))))
+      (Rule :name rule.name
+             :required-param-count rule.required-param-count
+             :params params
+             :clauses owned-clauses
+             :predicates predicates
+             :function-clauses function-clauses
+             :get-elses get-elses
+             :get-somes get-somes
+             :grounds grounds
+             :rule-calls rule-calls
+             :not-groups owned-not-groups
+             :or-groups owned-or-groups
+             :body-steps body-steps))))
 
 (defn relation-db-rule-call [call: Rule-Call, source: string] -> Rule-Call
   (when call.has-source
     (return call))
-  (Rule-Call {name: call.name
-              source: source
-              has-source: true
-              args: call.args}))
+  (Rule-Call :name call.name
+              :source source
+              :has-source true
+              :args call.args))
 
 (defn relation-db-rule-calls [calls: []Rule-Call, source: string] -> [dynamic]Rule-Call
   (let [out (make [dynamic]Rule-Call 0 (count calls))]
@@ -383,14 +383,14 @@
       (do
         (for [input query-value.inputs]
           (when (not (= input "$"))
-            (arr.push! out (Query-Input-Spec {kind: .Scalar name: input}))))
+            (arr.push! out (Query-Input-Spec :kind .Scalar :name input))))
         (for [input query-value.collection-inputs]
-          (arr.push! out (Query-Input-Spec {kind: .Collection name: input})))
+          (arr.push! out (Query-Input-Spec :kind .Collection :name input)))
         (for [input query-value.tuple-inputs]
-          (arr.push! out (Query-Input-Spec {kind: .Tuple tuple: input}))
+          (arr.push! out (Query-Input-Spec :kind .Tuple :tuple input))
         (for [input query-value.relation-inputs]
-          (arr.push! out (Query-Input-Spec {kind: .Relation relation: input}))))))
-    (arr.push! out (Query-Input-Spec {kind: .Scalar name: source}))
+          (arr.push! out (Query-Input-Spec :kind .Relation :relation input))))))
+    (arr.push! out (Query-Input-Spec :kind .Scalar :name source))
     out))
 
 (defn relation-db-query [query-value: Query, source: string] -> Query

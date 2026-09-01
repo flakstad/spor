@@ -11,30 +11,30 @@
 
 (defn edn-entity-ref-from-node [doc: EDN-Doc, node-index: int] -> [ref: Tx-EDN-Entity, ok: bool, error: string]
   (when (= node-index -1)
-    (return (Tx-EDN-Entity {}) false "expected entity id"))
+    (return (Tx-EDN-Entity []) false "expected entity id"))
   (let [node doc.nodes[node-index]]
     (cond
       (= node.kind .Int)
         (if (< node.int-value 0)
-          (return (Tx-EDN-Entity {kind: .Tempid tempid: (fmt.tprintf "%d" node.int-value)}) true "")
-          (return (Tx-EDN-Entity {kind: .Id e: (u64 node.int-value)}) true ""))
+          (return (Tx-EDN-Entity :kind .Tempid :tempid (fmt.tprintf "%d" node.int-value)) true "")
+          (return (Tx-EDN-Entity :kind .Id :e (u64 node.int-value)) true ""))
       (= node.kind .String)
-        (return (Tx-EDN-Entity {kind: .Tempid tempid: node.text}) true "")
+        (return (Tx-EDN-Entity :kind .Tempid :tempid node.text) true "")
       (= node.kind .Keyword)
         (if (current-tx-tempid? node.text)
-          (return (Tx-EDN-Entity {kind: .Tempid tempid: node.text}) true "")
-          (return (Tx-EDN-Entity {kind: .Ident ident: node.text}) true ""))
+          (return (Tx-EDN-Entity :kind .Tempid :tempid node.text) true "")
+          (return (Tx-EDN-Entity :kind .Ident :ident node.text) true ""))
       (edn-lookup-ref-node? doc node-index)
         (let [attr-node (edn-child-at doc node-index 0)
               value-node (edn-child-at doc node-index 1)
               [attr attr-ok] (edn-attr-text doc attr-node)
               [value value-ok value-error] (edn-value-from-node doc value-node)]
           (when (not attr-ok)
-            (return (Tx-EDN-Entity {}) false "lookup ref attribute must be keyword or string"))
+            (return (Tx-EDN-Entity []) false "lookup ref attribute must be keyword or string"))
           (when (not value-ok)
-            (return (Tx-EDN-Entity {}) false value-error))
-          (return (Tx-EDN-Entity {kind: .LookupRef lookup-attr: attr lookup-value: value}) true ""))
-      :else (return (Tx-EDN-Entity {}) false "entity id must be int, tempid string, ident keyword, or lookup ref"))))
+            (return (Tx-EDN-Entity []) false value-error))
+          (return (Tx-EDN-Entity :kind .LookupRef :lookup-attr attr :lookup-value value) true ""))
+      :else (return (Tx-EDN-Entity []) false "entity id must be int, tempid string, ident keyword, or lookup ref"))))
 
 (defn tx-add-from-ref [ref: Tx-EDN-Entity, a: string, v: Value] -> Tx-Data
   (case ref.kind
@@ -42,7 +42,7 @@
     .Tempid (add-tempid ref.tempid a v)
     .LookupRef (add-lookup-ref ref.lookup-attr ref.lookup-value a v)
     .Ident (add-ident ref.ident a v)
-     (Tx-Data {})))
+     (Tx-Data [])))
 
 (defn tx-add-map-collection-from-ref [ref: Tx-EDN-Entity, a: string, v: Value] -> Tx-Data
   (let [data (tx-add-from-ref ref a v)]
@@ -55,28 +55,28 @@
     .Tempid (add-tempid-value-tempid ref.tempid a value-tempid)
     .LookupRef (add-lookup-ref-value-tempid ref.lookup-attr ref.lookup-value a value-tempid)
     .Ident (add-ident-value-tempid ref.ident a value-tempid)
-     (Tx-Data {})))
+     (Tx-Data [])))
 
 (defn tx-add-value-lookup-ref-from-ref [ref: Tx-EDN-Entity, a: string, value-attr: string, value-value: Value] -> Tx-Data
   (case ref.kind
     .Id (add-value-lookup-ref ref.e a value-attr value-value)
     .Tempid (add-tempid-value-lookup-ref ref.tempid a value-attr value-value)
-    .LookupRef (Tx-Data {op: ":db/add"
-                         lookup-attr: ref.lookup-attr
-                         lookup-value: ref.lookup-value
-                         has-lookup-ref: true
-                         a: a
-                         value-lookup-attr: value-attr
-                         value-lookup-value: value-value
-                         has-value-lookup-ref: true})
-    .Ident (Tx-Data {op: ":db/add"
-                     ident: ref.ident
-                     has-ident: true
-                     a: a
-                     value-lookup-attr: value-attr
-                     value-lookup-value: value-value
-                     has-value-lookup-ref: true})
-     (Tx-Data {})))
+    .LookupRef (Tx-Data :op ":db/add"
+                         :lookup-attr ref.lookup-attr
+                         :lookup-value ref.lookup-value
+                         :has-lookup-ref true
+                         :a a
+                         :value-lookup-attr value-attr
+                         :value-lookup-value value-value
+                         :has-value-lookup-ref true)
+    .Ident (Tx-Data :op ":db/add"
+                     :ident ref.ident
+                     :has-ident true
+                     :a a
+                     :value-lookup-attr value-attr
+                     :value-lookup-value value-value
+                     :has-value-lookup-ref true)
+     (Tx-Data [])))
 
 (defn tx-add-nested-map-from-ref [ref: Tx-EDN-Entity, a: string, nested-map: Value, nested-tempid: string] -> Tx-Data
   (case ref.kind
@@ -84,7 +84,7 @@
     .Tempid (add-tempid-nested-map ref.tempid a nested-map nested-tempid)
     .LookupRef (add-lookup-ref-nested-map ref.lookup-attr ref.lookup-value a nested-map nested-tempid)
     .Ident (add-ident-nested-map ref.ident a nested-map nested-tempid)
-     (Tx-Data {})))
+     (Tx-Data [])))
 
 (defn tx-add-ref-value-from-ref [ref: Tx-EDN-Entity, a: string, value-ref: Tx-EDN-Entity] -> Tx-Data
   (case value-ref.kind
@@ -92,7 +92,7 @@
     .Tempid (tx-add-value-tempid-from-ref ref a value-ref.tempid)
     .LookupRef (tx-add-value-lookup-ref-from-ref ref a value-ref.lookup-attr value-ref.lookup-value)
     .Ident (tx-add-from-ref ref a (value-keyword value-ref.ident))
-     (Tx-Data {})))
+     (Tx-Data [])))
 
 (defn tx-retract-from-ref [ref: Tx-EDN-Entity, a: string, v: Value] -> Tx-Data
   (case ref.kind
@@ -100,34 +100,34 @@
     .Tempid (retract-tempid ref.tempid a v)
     .LookupRef (retract-lookup-ref ref.lookup-attr ref.lookup-value a v)
     .Ident (retract-ident ref.ident a v)
-     (Tx-Data {})))
+     (Tx-Data [])))
 
 (defn tx-retract-value-lookup-ref-from-ref [ref: Tx-EDN-Entity, a: string, value-attr: string, value-value: Value] -> Tx-Data
   (case ref.kind
     .Id (retract-value-lookup-ref ref.e a value-attr value-value)
-    .Tempid (Tx-Data {op: ":db/retract"
-                      tempid: ref.tempid
-                      has-tempid: true
-                      a: a
-                      value-lookup-attr: value-attr
-                      value-lookup-value: value-value
-                      has-value-lookup-ref: true})
-    .LookupRef (Tx-Data {op: ":db/retract"
-                         lookup-attr: ref.lookup-attr
-                         lookup-value: ref.lookup-value
-                         has-lookup-ref: true
-                         a: a
-                         value-lookup-attr: value-attr
-                         value-lookup-value: value-value
-                         has-value-lookup-ref: true})
-    .Ident (Tx-Data {op: ":db/retract"
-                     ident: ref.ident
-                     has-ident: true
-                     a: a
-                     value-lookup-attr: value-attr
-                     value-lookup-value: value-value
-                     has-value-lookup-ref: true})
-     (Tx-Data {})))
+    .Tempid (Tx-Data :op ":db/retract"
+                      :tempid ref.tempid
+                      :has-tempid true
+                      :a a
+                      :value-lookup-attr value-attr
+                      :value-lookup-value value-value
+                      :has-value-lookup-ref true)
+    .LookupRef (Tx-Data :op ":db/retract"
+                         :lookup-attr ref.lookup-attr
+                         :lookup-value ref.lookup-value
+                         :has-lookup-ref true
+                         :a a
+                         :value-lookup-attr value-attr
+                         :value-lookup-value value-value
+                         :has-value-lookup-ref true)
+    .Ident (Tx-Data :op ":db/retract"
+                     :ident ref.ident
+                     :has-ident true
+                     :a a
+                     :value-lookup-attr value-attr
+                     :value-lookup-value value-value
+                     :has-value-lookup-ref true)
+     (Tx-Data [])))
 
 (defn tx-retract-attr-from-ref [ref: Tx-EDN-Entity, a: string] -> Tx-Data
   (case ref.kind
@@ -135,7 +135,7 @@
     .Tempid (retract-attr-tempid ref.tempid a)
     .LookupRef (retract-attr-lookup-ref ref.lookup-attr ref.lookup-value a)
     .Ident (retract-attr-ident ref.ident a)
-     (Tx-Data {})))
+     (Tx-Data [])))
 
 (defn tx-retract-entity-from-ref [ref: Tx-EDN-Entity] -> Tx-Data
   (case ref.kind
@@ -143,15 +143,15 @@
     .Tempid (retract-entity-tempid ref.tempid)
     .LookupRef (retract-entity-lookup-ref ref.lookup-attr ref.lookup-value)
     .Ident (retract-entity-ident ref.ident)
-     (Tx-Data {})))
+     (Tx-Data [])))
 
 (defn tx-cas-from-ref [ref: Tx-EDN-Entity, a: string, expected: Value, v: Value] -> Tx-Data
   (case ref.kind
     .Id (cas ref.e a expected v)
     .Tempid (cas-tempid ref.tempid a expected v)
     .LookupRef (cas-lookup-ref ref.lookup-attr ref.lookup-value a expected v)
-    .Ident (Tx-Data {op: ":db.fn/cas" ident: ref.ident has-ident: true a: a expected: expected v: v})
-     (Tx-Data {})))
+    .Ident (Tx-Data :op ":db.fn/cas" :ident ref.ident :has-ident true :a a :expected expected :v v)
+     (Tx-Data [])))
 
 (defn tx-cas-lookup-values-from-ref [ref: Tx-EDN-Entity, a: string, expected: Value, has-expected-lookup: bool, expected-attr: string, expected-value: Value, v: Value, has-value-lookup: bool, value-attr: string, value-value: Value] -> Tx-Data
   (let [data (tx-cas-from-ref ref a expected v)]
@@ -167,15 +167,15 @@
 
 (defn edn-lookup-ref-parts [doc: EDN-Doc, node-index: int] -> [attr: string, value: Value, ok: bool, error: string]
   (when (not (edn-lookup-ref-node? doc node-index))
-    (return "" (Value {}) false "expected lookup ref"))
+    (return "" (Value []) false "expected lookup ref"))
   (let [attr-node (edn-child-at doc node-index 0)
         lookup-value-node (edn-child-at doc node-index 1)
         [lookup-attr attr-ok] (edn-attr-text doc attr-node)
         [lookup-value value-ok value-error] (edn-value-from-node doc lookup-value-node)]
     (when (not attr-ok)
-      (return "" (Value {}) false "lookup ref attribute must be keyword or string"))
+      (return "" (Value []) false "lookup ref attribute must be keyword or string"))
     (when (not value-ok)
-      (return "" (Value {}) false value-error))
+      (return "" (Value []) false value-error))
     (return lookup-attr lookup-value true "")))
 
 (defn append-edn-tx-add-value! [out: ^[dynamic]Tx-Data, doc: EDN-Doc, ref: Tx-EDN-Entity, a: string, value-node: int, map-group: string] -> [ok: bool, error: string]
@@ -225,11 +225,11 @@
     (while (not (= child -1))
       (let [value-node doc.nodes[child].next-sibling]
         (when (= value-node -1)
-          (return (Tx-EDN-Entity {}) false "tx map value missing"))
+          (return (Tx-EDN-Entity []) false "tx map value missing"))
         (when (edn-keyword-text? doc child ":db/id")
           (return (edn-entity-ref-from-node doc value-node)))
         (set! child doc.nodes[value-node].next-sibling)))
-    (return (Tx-EDN-Entity {kind: .Tempid tempid: generated-tempid}) true "")))
+    (return (Tx-EDN-Entity :kind .Tempid :tempid generated-tempid) true "")))
 
 (defn append-edn-tx-map-items! [out: ^[dynamic]Tx-Data, doc: EDN-Doc, map-node: int, ref: Tx-EDN-Entity, map-group: string] -> [ok: bool, error: string]
   (do
@@ -266,7 +266,7 @@
           (for [parsed items]
             (delete-owned-value parsed))
           (delete items)
-          (return (Value {}) false arg-error))
+          (return (Value []) false arg-error))
         (arr.push! items arg)))
     (let [out (value-vector (slice items 0))]
       (delete items)
@@ -361,17 +361,17 @@
                   new-node (edn-child-at doc vector-node 4)
                   [ref ref-ok ref-error] (edn-entity-ref-from-node doc e-node)
                   [attr attr-ok] (edn-attr-text doc a-node)
-                  expected (Value {})
+                  expected (Value [])
                   expected-ok true
                   expected-error ""
                   expected-lookup-attr ""
-                  expected-lookup-value (Value {})
+                  expected-lookup-value (Value [])
                   has-expected-lookup false
-                  value (Value {})
+                  value (Value [])
                   value-ok true
                   value-error ""
                   value-lookup-attr ""
-                  value-lookup-value (Value {})
+                  value-lookup-value (Value [])
                   has-value-lookup false]
               (when (not ref-ok)
                 (return false ref-error))
@@ -479,9 +479,9 @@
         (when (= prepared.error "tx data must be a vector")
           (set! prepared.error "tx text must be an EDN vector"))
         prepared)
-      (Prepared-Tx-Data {ok: false
-                         error: read-error.message
-                         tx-data: (make [dynamic]Tx-Data)}))))
+      (Prepared-Tx-Data :ok false
+                         :error read-error.message
+                         :tx-data (make [dynamic]Tx-Data)))))
 
 (defn transact-prepared [conn: ^Conn, prepared: Prepared-Tx-Data] -> Tx-Report
   (if prepared.ok
