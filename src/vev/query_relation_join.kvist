@@ -1,6 +1,3 @@
-; Copyright (c) Andreas Flakstad and Vev contributors
-; SPDX-License-Identifier: EPL-2.0
-
 (package vev)
 
 (defn query-relation-hash-join-typed-number [left: Query-Relation, right: Query-Relation, common: []string] -> [rel: Query-Relation, ok: bool]

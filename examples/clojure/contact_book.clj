@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Vev contributors
-;; SPDX-License-Identifier: EPL-2.0
-
 (ns contact-book
   (:require [clojure.java.io :as io]
             [vev.core :as d]))

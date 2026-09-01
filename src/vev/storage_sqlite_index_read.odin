@@ -1,6 +1,3 @@
-// Copyright (c) Andreas Flakstad and Vev contributors
-// SPDX-License-Identifier: EPL-2.0
-
 package vev
 
 sqlite_storage_head_basis_raw :: proc(handle: rawptr) -> (u64, bool, string) {

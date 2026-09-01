@@ -1,6 +1,3 @@
-; Copyright (c) Andreas Flakstad and Vev contributors
-; SPDX-License-Identifier: EPL-2.0
-
 (package vev)
 
 (defn db-read-source-primary-typed-branch-group? [rules: []Rule, group: Not-Group, registry: []Native-Query-Fn] -> bool

@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# Copyright (c) Andreas Flakstad and Vev contributors
-# SPDX-License-Identifier: EPL-2.0
 
 import pathlib
 import sys

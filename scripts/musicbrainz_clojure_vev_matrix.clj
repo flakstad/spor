@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Vev contributors
-;; SPDX-License-Identifier: EPL-2.0
-
 (ns musicbrainz-clojure-vev-matrix
   (:require [clojure.edn :as edn]
             [clojure.string :as str]

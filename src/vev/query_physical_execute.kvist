@@ -1,6 +1,3 @@
-; Copyright (c) Andreas Flakstad and Vev contributors
-; SPDX-License-Identifier: EPL-2.0
-
 (package vev)
 
 (defn query-relation-apply-physical-project-op [rel: Query-Relation, op: Physical-Op, materialization: Physical-Materialization-Plan] -> [out: Query-Relation, ok: bool]

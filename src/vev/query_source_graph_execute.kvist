@@ -1,6 +1,3 @@
-; Copyright (c) Andreas Flakstad and Vev contributors
-; SPDX-License-Identifier: EPL-2.0
-
 (package vev)
 
 (defn db-read-source-multi-hop-ref-chain-anchor-value [source: DB-Read-Source, projection: Source-Multi-Hop-Ref-Chain-Projection, inputs: []Query-Input] -> [value: Value, ok: bool, error: string]

@@ -1,6 +1,3 @@
-; Copyright (c) Andreas Flakstad and Vev contributors
-; SPDX-License-Identifier: EPL-2.0
-
 (package vev)
 
 (defn append-db-read-source-two-attr-projection-row! [rows: ^[dynamic]Result-Row, seen: ^Two-Primitive-Seen, query: Query, projection: Two-Attr-Entity-Projection, first-value-source: Value, second-value-source: Value]

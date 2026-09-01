@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Vev contributors
-;; SPDX-License-Identifier: EPL-2.0
-
 (ns history-time-filters
   "Executable Datomic Peer/Vev parity example for as-of, since, and history."
   (:require [datomic.api :as datomic]

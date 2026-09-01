@@ -1,6 +1,3 @@
-// Copyright (c) Andreas Flakstad and Vev contributors
-// SPDX-License-Identifier: EPL-2.0
-
 package com.vevdb.examples;
 
 import java.nio.file.Files;

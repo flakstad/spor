@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Vev contributors
-;; SPDX-License-Identifier: EPL-2.0
-
 (ns vev-datascript-bench.datalevin-runner
   (:require [datalevin.core :as d]
             [datalevin-bench.datalevin :as benchmark]))

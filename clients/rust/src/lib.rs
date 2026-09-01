@@ -1,6 +1,3 @@
-// Copyright (c) Andreas Flakstad and Vev contributors
-// SPDX-License-Identifier: EPL-2.0
-
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_double, c_int, c_longlong, c_ulonglong, c_void};
 use std::ptr;

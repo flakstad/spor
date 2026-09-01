@@ -1,6 +1,3 @@
-; Copyright (c) Andreas Flakstad and Vev contributors
-; SPDX-License-Identifier: EPL-2.0
-
 (package vev)
 
 (defn db-read-source-query-relation-initial-from-inputs [source: DB-Read-Source, query-value: Query, inputs: []Query-Input] -> [rel: Query-Relation, binding-count: int, ok: bool]

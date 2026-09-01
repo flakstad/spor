@@ -1,6 +1,3 @@
-; Copyright (c) Andreas Flakstad and Vev contributors
-; SPDX-License-Identifier: EPL-2.0
-
 (package vev)
 
 (defn sqlite-db-snapshot-index-view [snapshot: ^SQLite-DB-Snapshot, order: Public-Index-Order] -> DB-Index-View

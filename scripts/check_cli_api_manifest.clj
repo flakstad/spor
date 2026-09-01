@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Vev contributors
-;; SPDX-License-Identifier: EPL-2.0
-
 (require '[clojure.edn :as edn]
          '[clojure.java.io :as io]
          '[clojure.set :as set])

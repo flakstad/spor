@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Vev contributors
-;; SPDX-License-Identifier: EPL-2.0
-
 (ns compare-aggregates-tutorial
   (:require [aggregates-tutorial :as vev-agg]
             [datomic.api :as datomic]

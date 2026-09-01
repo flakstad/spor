@@ -1,6 +1,3 @@
-; Copyright (c) Andreas Flakstad and Vev contributors
-; SPDX-License-Identifier: EPL-2.0
-
 (package vev)
 
 (defn sqlite-open-index-cursor-handle [handle: rawptr, index-name: string, page-size: int] -> [out-cursor: SQLite-Index-Cursor, ok: bool, error: string]

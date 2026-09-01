@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Vev contributors
-;; SPDX-License-Identifier: EPL-2.0
-
 (ns datalevin-bench.core
   (:require [clojure.string :as str]
             [vev-comparison.deterministic-core :as deterministic]))

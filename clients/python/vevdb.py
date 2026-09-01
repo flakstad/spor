@@ -1,6 +1,3 @@
-# Copyright (c) Andreas Flakstad and VevDB contributors
-# SPDX-License-Identifier: EPL-2.0
-
 from __future__ import annotations
 
 import ctypes
