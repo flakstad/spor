@@ -31,7 +31,7 @@
                 (>= index (count added)))
         (delete-owned-datoms datoms)
         (return (make [dynamic]Datom) false "sqlite direct frontier datom parts were uneven"))
-      (let [value (Value [])
+      (let [value (Value)
             value-ok false
             value-error ""]
         (if (>= value-entities[index] 0)
@@ -277,7 +277,7 @@
                   (>= index (count added)))
           (delete-owned-datoms datoms)
           (return (make [dynamic]Datom) false "sqlite direct EAVT entity attrs datom parts were uneven"))
-        (let [value (Value [])
+        (let [value (Value)
               value-ok false
               value-error ""]
           (if (>= value-entities[index] 0)

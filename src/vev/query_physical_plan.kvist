@@ -314,7 +314,7 @@
 (defn physical-op-scan-bounds-from-query-step [query: Query, step: Query-Step] -> Physical-Clause-Scan-Bounds
   (if (= step.kind .Clause)
     (physical-clause-scan-bounds query.clauses[step.index])
-    (Physical-Clause-Scan-Bounds [])))
+    (Physical-Clause-Scan-Bounds)))
 
 (defn physical-bound-kind-range-ready? [kind: Physical-Term-Bound-Kind] -> bool
   (or (= kind .Constant)
@@ -340,7 +340,7 @@
 (defn physical-op-scan-range-from-query-step [step: Query-Step, bounds: Physical-Clause-Scan-Bounds] -> Physical-Scan-Range
   (if (= step.kind .Clause)
     (physical-scan-range-from-bounds bounds)
-    (Physical-Scan-Range [])))
+    (Physical-Scan-Range)))
 
 (defn physical-compare-op-equality? [op: string] -> bool
   (or (= op "=")
@@ -470,22 +470,22 @@
 (defn physical-op-scalar-requirement-from-query-step [query: Query, step: Query-Step] -> Physical-Scalar-Requirement
   (if (= step.kind .Predicate)
     (physical-predicate-requirement query.predicates[step.index])
-    (Physical-Scalar-Requirement [])))
+    (Physical-Scalar-Requirement)))
 
 (defn physical-op-function-requirement-from-query-step [query: Query, step: Query-Step] -> Physical-Function-Requirement
   (if (= step.kind .Function)
     (physical-function-requirement query.function-clauses[step.index])
-    (Physical-Function-Requirement [])))
+    (Physical-Function-Requirement)))
 
 (defn physical-normalized-scan-pushdown-requirement [requirement: Physical-Scalar-Requirement, output-vars: []string] -> [normalized: Physical-Scalar-Requirement, ok: bool]
   (when (not requirement.typed-supported)
-    (return (Physical-Scalar-Requirement []) false))
+    (return (Physical-Scalar-Requirement) false))
   (case requirement.kind
     .VarValueCompare
       (if (and (= requirement.value-term.kind .Value)
                (string-slice-contains? output-vars requirement.var-name))
         (return requirement true)
-        (return (Physical-Scalar-Requirement []) false))
+        (return (Physical-Scalar-Requirement) false))
     .VarVarCompare
       (cond
         (and (string-slice-contains? output-vars requirement.var-name)
@@ -504,14 +504,14 @@
                                                     :is-range requirement.is-range
                                                     :typed-supported requirement.typed-supported)
                       true)
-              (return (Physical-Scalar-Requirement []) false)))
+              (return (Physical-Scalar-Requirement) false)))
         :else
-          (return (Physical-Scalar-Requirement []) false))
+          (return (Physical-Scalar-Requirement) false))
 
-      (return (Physical-Scalar-Requirement []) false)))
+      (return (Physical-Scalar-Requirement) false)))
 
 (defn physical-best-scan-pushdown [query: Query, step-index: int, output-vars: []string] -> [requirement: Physical-Scalar-Requirement, predicate-index: int, ok: bool]
-  (let [best-requirement (Physical-Scalar-Requirement [])
+  (let [best-requirement (Physical-Scalar-Requirement)
         best-predicate-index -1
         best-score 0
         candidate-index (+ step-index 1)]
@@ -531,7 +531,7 @@
     (return best-requirement best-predicate-index (>= best-predicate-index 0))))
 
 (defn physical-best-scan-pushdown-from-steps [query: Query, steps: []Query-Step, output-vars: []string] -> [requirement: Physical-Scalar-Requirement, predicate-index: int, ok: bool]
-  (let [best-requirement (Physical-Scalar-Requirement [])
+  (let [best-requirement (Physical-Scalar-Requirement)
         best-predicate-index -1
         best-score 0]
     (for [candidate steps]
@@ -550,12 +550,12 @@
 (defn physical-op-pushdown-from-query-step [query: Query, step: Query-Step, step-index: int, output-vars: []string] -> [requirement: Physical-Scalar-Requirement, predicate-index: int, ok: bool]
   (if (= step.kind .Clause)
     (physical-best-scan-pushdown query step-index output-vars)
-    (return (Physical-Scalar-Requirement []) -1 false)))
+    (return (Physical-Scalar-Requirement) -1 false)))
 
 (defn physical-op-pushdown-from-query-step-and-remaining [query: Query, step: Query-Step, remaining: []Query-Step, output-vars: []string] -> [requirement: Physical-Scalar-Requirement, predicate-index: int, ok: bool]
   (if (= step.kind .Clause)
     (physical-best-scan-pushdown-from-steps query remaining output-vars)
-    (return (Physical-Scalar-Requirement []) -1 false)))
+    (return (Physical-Scalar-Requirement) -1 false)))
 
 (defn physical-pushdown-op-from-clause-and-steps [query: Query, clause-value: Clause, steps: []Query-Step] -> Physical-Op
   (let [output-vars (make [dynamic]string) :defer

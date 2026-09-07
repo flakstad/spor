@@ -946,26 +946,26 @@
       (return entry true "")))
   (let [[schema-type has-type type-ok type-error] (db-read-source-schema-value-type source attr)]
     (when (not type-ok)
-      (return (SQLite-Direct-Attr-Info []) false type-error))
+      (return (SQLite-Direct-Attr-Info) false type-error))
     (let [[unique-kind unique unique-ok unique-error] (source-overlay-schema-unique-kind source ([]Tx-Op []) attr)]
       (when (not unique-ok)
         (when has-type
           (delete schema-type))
-        (return (SQLite-Direct-Attr-Info []) false unique-error))
+        (return (SQLite-Direct-Attr-Info) false unique-error))
       (let [[many many-ok many-error] (db-read-source-schema-cardinality-many? source attr)]
         (when (not many-ok)
           (when has-type
             (delete schema-type))
           (when unique
             (delete unique-kind))
-          (return (SQLite-Direct-Attr-Info []) false many-error))
+          (return (SQLite-Direct-Attr-Info) false many-error))
       (let [[fulltext fulltext-ok fulltext-error] (db-read-source-schema-bool? source attr ":db/fulltext")]
         (when (not fulltext-ok)
           (when has-type
             (delete schema-type))
           (when unique
             (delete unique-kind))
-          (return (SQLite-Direct-Attr-Info []) false fulltext-error))
+          (return (SQLite-Direct-Attr-Info) false fulltext-error))
         (let [entry (SQLite-Direct-Attr-Info :attr (string-owned attr)
                                                :has-type has-type
                                                :schema-type (if has-type schema-type "")
@@ -1246,22 +1246,22 @@
         source (shared-db-snapshot-read-source (addr base))
         [state state-ok state-error] (shared-write-state-from-shared-snapshot-metadata base)]
     (when (not state-ok)
-      (return (Store-DB []) false false state-error))
+      (return (Store-DB) false false state-error))
     (let [resolved (shared-write-state-resolve-tx-data-source-only (addr state) source tx-data)]
       (when (not resolved.ok)
         (delete-resolved-tx resolved)
         (delete-shared-write-state-metadata state)
-        (return (Store-DB []) false true ""))
+        (return (Store-DB) false true ""))
       (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state.conn.next-tx)]
         (when (not instant-ok)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Store-DB []) false false instant-error)))
+          (return (Store-DB) false false instant-error)))
       (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved source resolved)]
         (when (not overlay-ok)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Store-DB []) false false overlay-error))
+          (return (Store-DB) false false overlay-error))
         (let [out (shared-store-db-with-overlay base (slice overlay-ops 0) state.conn.next-tx)]
           (delete-owned-tx-ops overlay-ops)
           (delete-resolved-tx resolved)
@@ -1322,30 +1322,30 @@
         (delete-shared-datom-log log)
         (delete-owned-datoms datoms)
         out)
-     (Store-DB [])))
+     (Store-DB)))
 
 (defn store-db-with-source-overlay-tx-data [snapshot: ^Store-DB, tx-data: []Tx-Data] -> [next: Store-DB, used: bool, ok: bool, error: string]
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
     (when (not source-ok)
-      (return (Store-DB []) false false source-error))
+      (return (Store-DB) false false source-error))
     (let [[state state-ok state-error] (shared-write-state-from-source-metadata source)]
       (when (not state-ok)
-        (return (Store-DB []) false false state-error))
+        (return (Store-DB) false false state-error))
       (let [resolved (shared-write-state-resolve-tx-data-source-only (addr state) source tx-data)]
         (when (not resolved.ok)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Store-DB []) false true ""))
+          (return (Store-DB) false true ""))
         (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state.conn.next-tx)]
           (when (not instant-ok)
             (delete-resolved-tx resolved)
             (delete-shared-write-state-metadata state)
-            (return (Store-DB []) false false instant-error)))
+            (return (Store-DB) false false instant-error)))
         (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved source resolved)]
           (when (not overlay-ok)
             (delete-resolved-tx resolved)
             (delete-shared-write-state-metadata state)
-            (return (Store-DB []) false false overlay-error))
+            (return (Store-DB) false false overlay-error))
           (let [out (store-db-source-overlay-from-resolved snapshot^ (slice overlay-ops 0) state.conn.next-tx)]
             (delete-owned-tx-ops overlay-ops)
             (delete-resolved-tx resolved)

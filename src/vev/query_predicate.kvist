@@ -16,7 +16,7 @@
   (case term.kind
     .Value (return term.value true)
     .Var (return (binding-lookup binding term.name))
-     (return (Value []) false)))
+     (return (Value) false)))
 
 (defn resolve-entity-term [db: DB, term: Term, binding: Binding] -> [value: Value, ok: bool]
   (when (= term.kind .LookupRef)
@@ -142,15 +142,15 @@
 (defn re-find-value [pattern: Value, text: Value] -> [value: Value, ok: bool]
   (when (not (and (= pattern.kind .String)
                   (= text.kind .String)))
-    (return (Value []) false))
+    (return (Value) false))
   (let [[iter err] (regex.create_iterator text.text pattern.text)]
     (when (!= err nil)
-      (return (Value []) false))
+      (return (Value) false))
     (defer (regex.destroy iter))
     (let [[capture _ ok] (regex.match (addr iter))]
       (when (and ok (> (count capture.groups) 0))
         (return (value-string capture.groups[0]) true))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn value-str [value: Value] -> [text: string, ok: bool]
   (case value.kind
@@ -459,7 +459,7 @@
         (return false)))))
 
 (defn predicate-matches-with-fns? [predicate: Predicate, binding: Binding, registry: []Native-Query-Fn] -> bool
-  (predicate-matches-with-db-and-fns? (DB []) predicate binding registry))
+  (predicate-matches-with-db-and-fns? (DB) predicate binding registry))
 
 (defn typed-predicate-op-name [predicate: Predicate, registry: []Native-Query-Fn] -> [op: string, ok: bool]
   (when (query-var-name? predicate.op)

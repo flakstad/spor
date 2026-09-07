@@ -60,7 +60,7 @@
       (rule-memo-entry-invalidate-delta-relation! entry))))
 
 (defn rule-output-binding [rule: Rule, result: Binding] -> [binding: Binding, ok: bool]
-  (let [out (Binding [])]
+  (let [out (Binding)]
     (for [param rule.params]
       (let [[value value-ok] (binding-lookup result param)]
         (when (not value-ok)
@@ -481,7 +481,7 @@
         seen (set.empty string)]
     (defer (delete seen))
     (for [tuple memo-bindings]
-      (let [out (Binding [])
+      (let [out (Binding)
             ok true]
         (for [param index params]
           (when ok
@@ -903,7 +903,7 @@
         (let [rule rules[rule-index]]
           (when (= (count call.args) (count rule.params))
             (return rule true))))))
-  (return (Rule []) false))
+  (return (Rule) false))
 
 (defn rule-name-dependency-exists? [deps: []Rule-Dependency, from: string, target: string] -> bool
   (for [dep deps]

@@ -2,8 +2,8 @@
 
 (defn validate-schema-bool-values [db: DB, schema-attr: string] -> [ok: bool, error: string]
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 schema-attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 schema-attr (Value []))]
+        low (lower-bound-index-view db view "aevt" 0 schema-attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 schema-attr (Value))]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)
             datom db.datoms[datom-index]]
@@ -14,8 +14,8 @@
 
 (defn validate-ident-values [db: DB] -> [ok: bool, error: string]
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 ":db/ident" (Value []))
-        high (upper-bound-index-view db view "aevt" 0 ":db/ident" (Value []))]
+        low (lower-bound-index-view db view "aevt" 0 ":db/ident" (Value))
+        high (upper-bound-index-view db view "aevt" 0 ":db/ident" (Value))]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)
             datom db.datoms[datom-index]]
@@ -48,8 +48,8 @@
 
 (defn validate-schema-keyword-values [db: DB, schema-attr: string] -> [ok: bool, error: string]
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 schema-attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 schema-attr (Value []))]
+        low (lower-bound-index-view db view "aevt" 0 schema-attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 schema-attr (Value))]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)
             datom db.datoms[datom-index]]
@@ -87,8 +87,8 @@
 
 (defn validate-component-schema [db: DB] -> [ok: bool, error: string]
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 ":db/isComponent" (Value []))
-        high (upper-bound-index-view db view "aevt" 0 ":db/isComponent" (Value []))]
+        low (lower-bound-index-view db view "aevt" 0 ":db/isComponent" (Value))
+        high (upper-bound-index-view db view "aevt" 0 ":db/isComponent" (Value))]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)
             datom db.datoms[datom-index]]
@@ -235,8 +235,8 @@
 
 (defn current-db-attr-exists? [db: DB, entity: u64, attr: string] -> bool
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity attr (Value []))
-        high (upper-bound-index-view db view "eavt-ea" entity attr (Value []))]
+        low (lower-bound-index-view db view "eavt-ea" entity attr (Value))
+        high (upper-bound-index-view db view "eavt-ea" entity attr (Value))]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)]
         (when (datom-current-at? db datom-index)
@@ -281,8 +281,8 @@
       (when (not (current-db-attr-exists? before op.e op.a))
         (return))
       (let [view (db-index-view before .EAVT)
-            low (lower-bound-index-view before view "eavt-ea" op.e op.a (Value []))
-            high (upper-bound-index-view before view "eavt-ea" op.e op.a (Value []))]
+            low (lower-bound-index-view before view "eavt-ea" op.e op.a (Value))
+            high (upper-bound-index-view before view "eavt-ea" op.e op.a (Value))]
         (for [i (arr.range low high)]
           (let [datom-index (db-index-view-at view i)
                 datom before.datoms[datom-index]]
@@ -312,8 +312,8 @@
       (delete-owned-db current)
       (return))
     (let [view (db-index-view current .EAVT)
-          low (lower-bound-index-view current view "eavt-ea" op.e op.a (Value []))
-          high (upper-bound-index-view current view "eavt-ea" op.e op.a (Value []))]
+          low (lower-bound-index-view current view "eavt-ea" op.e op.a (Value))
+          high (upper-bound-index-view current view "eavt-ea" op.e op.a (Value))]
       (for [i (arr.range low high)]
         (let [datom-index (db-index-view-at view i)
               datom current.datoms[datom-index]]
@@ -339,8 +339,8 @@
 
 (defn current-db-fact-exists? [db: DB, op: Tx-Op] -> bool
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" op.e op.a (Value []))
-        high (upper-bound-index-view db view "eavt-ea" op.e op.a (Value []))]
+        low (lower-bound-index-view db view "eavt-ea" op.e op.a (Value))
+        high (upper-bound-index-view db view "eavt-ea" op.e op.a (Value))]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)
             datom db.datoms[datom-index]]

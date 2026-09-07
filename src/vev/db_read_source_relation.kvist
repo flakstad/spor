@@ -257,7 +257,7 @@
     (return (datom-tx-value datom) true))
   (when (term-var-name? clause-value.op-term name)
     (return (value-bool datom.added) true))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn db-read-source-direct-clause-var-borrowed-value [rel: Query-Relation, row: int, scan: Clause-Index-Scan, clause-value: Clause, datom: Datom, name: string] -> [value: Value, ok: bool]
   (let [[existing existing-ok] (query-relation-typed-row-value rel row name)]
@@ -273,7 +273,7 @@
     (return (datom-tx-value datom) true))
   (when (term-var-name? clause-value.op-term name)
     (return (value-bool datom.added) true))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn query-relation-builder-can-add-db-source-clause-row? [builder: Query-Relation-Builder, attrs: []string, rel: Query-Relation, row: int, scan: Clause-Index-Scan, clause-value: Clause, datom: Datom] -> bool
   (for [column index rel.typed-columns]
@@ -330,14 +330,14 @@
 (defn db-read-source-append-bind-join-single-value-var-row! [builder: ^Query-Relation-Builder, attrs: []string, rel: Query-Relation, row: int, clause-value: Clause, datom: Datom, op: Physical-Op] -> bool
   (when (not (db-read-source-bind-join-adds-single-value-var? rel clause-value))
     (return false))
-  (when (not (db-read-source-direct-clause-pushdown-matches? rel row (Clause-Index-Scan :v-value (Value []) :v-ok false) clause-value datom op))
+  (when (not (db-read-source-direct-clause-pushdown-matches? rel row (Clause-Index-Scan :v-value (Value) :v-ok false) clause-value datom op))
     (return true))
   (query-relation-builder-add-column-row-with-output-value! builder attrs (slice rel.typed-columns 0) row clause-value.v.name datom.v))
 
 (defn db-read-source-append-bind-join-single-entity-var-row! [builder: ^Query-Relation-Builder, attrs: []string, rel: Query-Relation, row: int, clause-value: Clause, datom: Datom, op: Physical-Op] -> bool
   (when (not (db-read-source-bind-join-adds-single-entity-var? rel clause-value))
     (return false))
-  (when (not (db-read-source-direct-clause-pushdown-matches? rel row (Clause-Index-Scan :e-value (Value []) :e-ok false) clause-value datom op))
+  (when (not (db-read-source-direct-clause-pushdown-matches? rel row (Clause-Index-Scan :e-value (Value) :e-ok false) clause-value datom op))
     (return true))
   (query-relation-builder-add-column-row-with-output-value! builder attrs (slice rel.typed-columns 0) row clause-value.e.name (value-entity datom.e)))
 
@@ -371,13 +371,13 @@
 (defn query-relation-physical-pushdown-other-value [rel: Query-Relation, row: int, op: Physical-Op] -> [value: Value, ok: bool]
   (when (not (and op.has-pushdown-scalar
                   (= op.pushdown-scalar-requirement.kind .VarVarCompare)))
-    (return (Value []) false))
+    (return (Value) false))
   (query-relation-typed-row-value rel row op.pushdown-scalar-requirement.other-var))
 
 (defn binding-physical-pushdown-other-value [binding: Binding, op: Physical-Op] -> [value: Value, ok: bool]
   (when (not (and op.has-pushdown-scalar
                   (= op.pushdown-scalar-requirement.kind .VarVarCompare)))
-    (return (Value []) false))
+    (return (Value) false))
   (binding-lookup binding op.pushdown-scalar-requirement.other-var))
 
 (defn db-read-source-direct-clause-pushdown-matches? [rel: Query-Relation, row: int, scan: Clause-Index-Scan, clause-value: Clause, datom: Datom, op: Physical-Op] -> bool
@@ -412,17 +412,17 @@
 
 (defn physical-op-pushdown-range-value [op: Physical-Op, rel: Query-Relation, row: int] -> [value: Value, ok: bool]
   (when (not op.has-pushdown-scalar)
-    (return (Value []) false))
+    (return (Value) false))
   (let [requirement op.pushdown-scalar-requirement]
     (case requirement.kind
       .VarValueCompare
         (if (= requirement.value-term.kind .Value)
           (return requirement.value-term.value true)
-          (return (Value []) false))
+          (return (Value) false))
       .VarVarCompare
         (query-relation-physical-pushdown-other-value rel row op)
 
-        (return (Value []) false))))
+        (return (Value) false))))
 
 (defn physical-op-pushdown-tightens-value-range? [op: Physical-Op, clause-value: Clause, rel: Query-Relation, row: int] -> bool
   (when (not op.has-pushdown-scalar)
@@ -645,7 +645,7 @@
       true)))
 
 (defn db-read-source-add-primary-clause-datom-typed! [source: DB-Read-Source, builder: ^Query-Relation-Builder, attrs: []string, rel: Query-Relation, row: int, binding: Binding, scan: Clause-Index-Scan, clause-value: Clause, datom: Datom, direct-ok: bool] -> bool
-  (db-read-source-add-primary-clause-datom-typed-with-op! source builder attrs rel row binding scan clause-value datom direct-ok (Physical-Op [])))
+  (db-read-source-add-primary-clause-datom-typed-with-op! source builder attrs rel row binding scan clause-value datom direct-ok (Physical-Op)))
 
 (defn db-read-source-add-primary-clause-datoms-typed-with-op! [source: DB-Read-Source, builder: ^Query-Relation-Builder, attrs: []string, rel: Query-Relation, row: int, binding: Binding, scan: Clause-Index-Scan, clause-value: Clause, datoms: []Datom, direct-ok: bool, op: Physical-Op, stats: ^Query-Stats] -> bool
   (for [datom datoms]
@@ -751,7 +751,7 @@
                                                :e-ok true
                                                :a-value source-clause.a.value
                                                :a-ok true
-                                               :v-value (Value [])
+                                               :v-value (Value)
                                                :v-ok false
                                                :reverse-attr false
                                                :forward-attr "")
@@ -759,7 +759,7 @@
                                     :a source-clause.a.value.text
                                     :v found-value)]
                   (set! stats^.clause-candidates (+ stats^.clause-candidates 1))
-                  (when (not (db-read-source-add-primary-clause-datom-typed-with-op! source (addr builder) (slice attrs 0) rel row (Binding []) scan source-clause datom true op))
+                  (when (not (db-read-source-add-primary-clause-datom-typed-with-op! source (addr builder) (slice attrs 0) rel row (Binding) scan source-clause datom true op))
                     (delete-owned-value found-value)
                     (delete attrs)
                     (delete attr-sources)
@@ -866,7 +866,7 @@
                                                      :e-ok true
                                                      :a-value source-clause.a.value
                                                      :a-ok true
-                                                     :v-value (Value [])
+                                                     :v-value (Value)
                                                      :v-ok false
                                                      :reverse-attr false
                                                      :forward-attr "")
@@ -884,7 +884,7 @@
                                 (delete attr-sources)
                                 (delete-query-relation-builder builder)
                                 (return (query-relation-empty) false))
-                              (when (not (db-read-source-add-primary-clause-datom-typed-with-op! source (addr builder) (slice attrs 0) rel source-row (Binding []) scan source-clause stream.current true op))
+                              (when (not (db-read-source-add-primary-clause-datom-typed-with-op! source (addr builder) (slice attrs 0) rel source-row (Binding) scan source-clause stream.current true op))
                                 (delete-source-index-datom-stream stream)
                                 (delete row-refs)
                                 (delete attrs)
@@ -1095,7 +1095,7 @@
                   (let [scan (Clause-Index-Scan :view (db-read-source-index-view source .AVET)
                                                  :index 0
                                                  :high 1
-                                                 :e-value (Value [])
+                                                 :e-value (Value)
                                                  :e-ok false
                                                  :a-value source-clause.a.value
                                                  :a-ok true
@@ -1115,7 +1115,7 @@
                             (delete attr-sources)
                             (delete-query-relation-builder builder)
                             (return (query-relation-empty) false))
-                          (when (not (db-read-source-add-primary-clause-datom-typed-with-op! source (addr builder) (slice attrs 0) rel source-row (Binding []) scan source-clause stream.current true op))
+                          (when (not (db-read-source-add-primary-clause-datom-typed-with-op! source (addr builder) (slice attrs 0) rel source-row (Binding) scan source-clause stream.current true op))
                             (delete-source-index-datom-stream stream)
                             (delete-value-relation-row-refs row-refs)
                             (delete attrs)
@@ -1201,7 +1201,7 @@
                         (let [scan (Clause-Index-Scan :view (db-read-source-index-view source .AVET)
                                                        :index 0
                                                        :high 1
-                                                       :e-value (Value [])
+                                                       :e-value (Value)
                                                        :e-ok false
                                                        :a-value source-clause.a.value
                                                        :a-ok true
@@ -1221,7 +1221,7 @@
                                   (delete attr-sources)
                                   (delete-query-relation-builder builder)
                                   (return (query-relation-empty) false))
-                                (when (not (db-read-source-add-primary-clause-datom-typed-with-op! source (addr builder) (slice attrs 0) rel source-row (Binding []) scan source-clause stream.current true op))
+                                (when (not (db-read-source-add-primary-clause-datom-typed-with-op! source (addr builder) (slice attrs 0) rel source-row (Binding) scan source-clause stream.current true op))
                                   (delete-source-index-datom-stream stream)
                                   (delete-value-relation-row-refs row-refs)
                                   (delete attrs)
@@ -1331,7 +1331,7 @@
               (delete-query-relation-builder builder)
               (return (query-relation-empty) false))
             (if direct-ok
-              (when (not (db-read-source-add-primary-clause-datoms-typed-with-op! source (addr builder) (slice attrs 0) rel row (Binding []) scan source-clause (slice datoms 0) true op stats))
+              (when (not (db-read-source-add-primary-clause-datoms-typed-with-op! source (addr builder) (slice attrs 0) rel row (Binding) scan source-clause (slice datoms 0) true op stats))
                 (delete-owned-datoms datoms)
                 (delete-clause-index-scan scan)
                 (delete attrs)
@@ -1366,7 +1366,7 @@
             (if direct-ok
               (while stream.has-current
                 (set! stats^.clause-candidates (+ stats^.clause-candidates 1))
-                (when (not (db-read-source-add-primary-clause-datom-typed-with-op! source (addr builder) (slice attrs 0) rel row (Binding []) stream.scan source-clause stream.current true op))
+                (when (not (db-read-source-add-primary-clause-datom-typed-with-op! source (addr builder) (slice attrs 0) rel row (Binding) stream.scan source-clause stream.current true op))
                   (delete-source-clause-datom-stream stream)
                   (delete attrs)
                   (delete attr-sources)
@@ -1418,7 +1418,7 @@
                                :has-typed-columns builder.typed-ok) true))))
 
 (defn db-read-source-query-relation-apply-primary-clause-typed [source: DB-Read-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
-  (db-read-source-query-relation-apply-primary-clause-typed-with-op source rel clause-value (Physical-Op []) stats))
+  (db-read-source-query-relation-apply-primary-clause-typed-with-op source rel clause-value (Physical-Op) stats))
 
 (defn db-read-source-get-else-batch-datoms [source: DB-Read-Source, entities: []u64, attr: string] -> [datoms: [dynamic]Datom, ok: bool, used: bool, scans: int, candidates: int, error: string]
   (when (reverse-attr? attr)
@@ -1521,19 +1521,19 @@
 (defn db-read-source-typed-get-some-row-values [source: DB-Read-Source, rel: Query-Relation, row: int, get-some: Get-Some] -> [attr-result: Value, attr-value: Value, ok: bool, error: string]
   (let [[entity entity-ok entity-error] (db-read-source-query-relation-resolve-typed-entity-term source rel row get-some.e)]
     (when (not (= entity-error ""))
-      (return (Value []) (Value []) false entity-error))
+      (return (Value) (Value) false entity-error))
     (when (not (and entity-ok (= entity.kind .Entity)))
-      (return (Value []) (Value []) false ""))
+      (return (Value) (Value) false ""))
     (for [attr get-some.attrs]
       (let [[value value-ok value-error] (db-read-source-pull-attr-value source entity.entity attr)]
         (when (not (= value-error ""))
-          (return (Value []) (Value []) false value-error))
+          (return (Value) (Value) false value-error))
         (when value-ok
           (let [attr-result-value (value-keyword attr)]
             (when (and (query-relation-typed-row-var-agrees? rel row get-some.out-attr attr-result-value)
                        (query-relation-typed-row-var-agrees? rel row get-some.out-value value))
               (return attr-result-value value true ""))))))
-    (return (Value []) (Value []) false "")))
+    (return (Value) (Value) false "")))
 
 (defn db-read-source-query-relation-apply-primary-get-some-typed [source: DB-Read-Source, rel: Query-Relation, get-some: Get-Some, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (when (not (and rel.has-typed-columns
@@ -1784,7 +1784,7 @@
     (return source call true))
   (let [[resolved-source resolved-ok] (db-read-source-for-rule-call-source source sources call.source)]
     (when (not resolved-ok)
-      (return (DB-Read-Source []) call false))
+      (return (DB-Read-Source) call false))
     (return resolved-source (rule-call-without-source call) true)))
 
 (defn source-positive-recursive-rule-eligible? [rule: Rule] -> bool

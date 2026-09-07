@@ -43,7 +43,7 @@
     (when (= stream.output-index output-index)
       (let [datom db.datoms[(entity-star-stream-datom-index stream)]]
         (return datom.v true))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn entity-star-streams-for-filters-and-outputs [db: DB, filters: []Entity-Int-Pair-Filter, output-attrs: []string] -> [streams: [dynamic]Entity-Star-Stream]
   (let [out (make [dynamic]Entity-Star-Stream)
@@ -57,8 +57,8 @@
                                             :high high
                                             :output-index -1))))
     (for [attr output-index output-attrs]
-      (let [low (lower-bound-index-view db aevt-view "aevt" 0 attr (Value []))
-            high (upper-bound-index-view db aevt-view "aevt" 0 attr (Value []))]
+      (let [low (lower-bound-index-view db aevt-view "aevt" 0 attr (Value))
+            high (upper-bound-index-view db aevt-view "aevt" 0 attr (Value))]
         (arr.push! out (Entity-Star-Stream :view aevt-view
                                             :index low
                                             :high high
@@ -219,8 +219,8 @@
         aevt-view (db-index-view db .AEVT)
         left-low (lower-bound-index-view db avet-view "avet" 0 plan.left-filter-attr plan.left-filter-value)
         left-high (upper-bound-index-view db avet-view "avet" 0 plan.left-filter-attr plan.left-filter-value)
-        output-low (lower-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value []))
-        output-high (upper-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value []))]
+        output-low (lower-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value))
+        output-high (upper-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value))]
     (defer (delete seen-join-values))
     (defer (delete join-values))
     (defer (delete output-by-entity))
@@ -275,8 +275,8 @@
         aevt-view (db-index-view db .AEVT)
         left-low (lower-bound-index-view db avet-view "avet" 0 plan.left-filter-attr plan.left-filter-value)
         left-high (upper-bound-index-view db avet-view "avet" 0 plan.left-filter-attr plan.left-filter-value)
-        output-low (lower-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value []))
-        output-high (upper-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value []))]
+        output-low (lower-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value))
+        output-high (upper-bound-index-view db aevt-view "aevt" 0 plan.output-attr (Value))]
     (defer (delete seen-join-values))
     (defer (delete join-values))
     (defer (delete output-by-entity))

@@ -148,7 +148,7 @@
                       :source-avet-append-mode false
                       :source-vaet-append-mode false
                       :source-published-root-known false
-                      :source-published-root (SQLite-Durable-Published-Root []))))
+                      :source-published-root (SQLite-Durable-Published-Root))))
 
 (defn failed-owned-store-tx-report [snapshot: Store-DB, error: string] -> Store-Tx-Report
   (let [out (failed-store-tx-report snapshot error)]
@@ -182,7 +182,7 @@
                       :source-avet-append-mode false
                       :source-vaet-append-mode false
                       :source-published-root-known false
-                      :source-published-root (SQLite-Durable-Published-Root []))))
+                      :source-published-root (SQLite-Durable-Published-Root))))
 
 (defn delete-temp-resident-store-report-source [report: Tx-Report]
   (if report.ok
@@ -219,7 +219,7 @@
                       :source-avet-append-mode false
                       :source-vaet-append-mode false
                       :source-published-root-known false
-                      :source-published-root (SQLite-Durable-Published-Root []))))
+                      :source-published-root (SQLite-Durable-Published-Root))))
 
 (defn initial-source-overlay-report-from-tx-data [before: Store-DB, tx-data: []Tx-Data] -> Store-Tx-Report
   (let [empty-db (build-db (make [dynamic]Datom))
@@ -235,7 +235,7 @@
       (let [out (failed-store-tx-report snapshot error)]
         (close-store-db snapshot)
         out)
-      (failed-store-tx-report (Store-DB []) error))))
+      (failed-store-tx-report (Store-DB) error))))
 
 (defn empty-shared-store-db-for-sqlite-bootstrap [] -> Store-DB
   (let [empty-db (build-db (make [dynamic]Datom))
@@ -315,12 +315,12 @@
     (set! store^.direct-write-profile.read-source-us (+ store^.direct-write-profile.read-source-us (sqlite-profile-elapsed-us read-source-start)))
     (when (not source-ok)
       (close-store-db owned-before)
-      (return (Store-Tx-Report []) false false source-error))
+      (return (Store-Tx-Report) false false source-error))
     (let [resolve-start (time.now)
           [state-ok state-error] (sqlite-conn-ensure-write-state-cache! store source)]
       (when (not state-ok)
         (close-store-db owned-before)
-        (return (Store-Tx-Report []) false false state-error))
+        (return (Store-Tx-Report) false false state-error))
       (let [state (addr store^.write-state-cache)
             resolved (shared-write-state-resolve-tx-data-source-only state source tx-data)]
         (set! store^.direct-write-profile.resolve-us (+ store^.direct-write-profile.resolve-us (sqlite-profile-elapsed-us resolve-start)))
@@ -341,13 +341,13 @@
           (when (not overlay-ok)
             (delete-resolved-tx resolved)
             (close-store-db owned-before)
-            (return (Store-Tx-Report []) false false overlay-error))
+            (return (Store-Tx-Report) false false overlay-error))
           (when (and publish-indexes
                      (not (= owned-before.kind .SQLite-Snapshot)))
             (delete-owned-tx-ops overlay-ops)
             (delete-resolved-tx resolved)
             (close-store-db owned-before)
-            (return (Store-Tx-Report []) false false "source-direct SQLite write requires a SQLite snapshot basis"))
+            (return (Store-Tx-Report) false false "source-direct SQLite write requires a SQLite snapshot basis"))
           (let [tx state^.conn.next-tx
                 source-eavt (db-read-source-index-view source .EAVT)
                 start-index (db-index-view-count source-eavt)
@@ -360,7 +360,7 @@
                                                            :aevt false
                                                            :avet false
                                                            :vaet false)
-                  published-root (SQLite-Durable-Published-Root [])
+                  published-root (SQLite-Durable-Published-Root)
                   append-ok false
                   append-error ""]
               (if publish-indexes
@@ -393,7 +393,7 @@
                   (return failed true true "")))
               (let [report-open-start (time.now)
                     after (if publish-indexes
-                            (Store-DB [])
+                            (Store-DB)
                             (store-db-source-overlay-from-resolved
                               owned-before (slice overlay-ops 0) tx))
                     out-report (if publish-indexes
@@ -421,7 +421,7 @@
 
 (defn transact-sqlite-store-report-direct-tx-data-mode [store: ^SQLite-Conn, tx-data: []Tx-Data, owns-sqlite-tx: bool, publish-indexes: bool] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (when store^.resident-loaded
-    (return (Store-Tx-Report []) false true ""))
+    (return (Store-Tx-Report) false true ""))
   (let [open-before-start (time.now)
         [before before-ok before-error] (sqlite-store-db-current-root-open-cached store)]
     (set! store^.direct-write-profile.open-before-us (+ store^.direct-write-profile.open-before-us (sqlite-profile-elapsed-us open-before-start)))
@@ -432,15 +432,15 @@
               overlay-report (with-store-db-report-tx-data (addr before) tx-data)]
           (close-store-db before)
           (return (sqlite-commit-initial-source-overlay-report-mode store overlay-report owns-sqlite-tx) true true ""))
-        (return (Store-Tx-Report []) false false before-error)))
+        (return (Store-Tx-Report) false false before-error)))
     (transact-sqlite-store-report-direct-tx-data-with-before-mode store before tx-data owns-sqlite-tx publish-indexes)))
 
 (defn transact-sqlite-store-report-direct-tx-data [store: ^SQLite-Conn, tx-data: []Tx-Data] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (when store^.resident-loaded
-    (return (Store-Tx-Report []) false true ""))
+    (return (Store-Tx-Report) false true ""))
   (let [[begin-ok begin-error] (vev.sqlite-begin-immediate-raw store^.handle)]
     (when (not begin-ok)
-      (return (Store-Tx-Report []) false false begin-error)))
+      (return (Store-Tx-Report) false false begin-error)))
   ;; The write lock must be held before selecting the transaction basis.
   ;; Reuse the direct-write caches when the published root row still matches.
   ;; Comparing the row id as well as the basis detects maintenance that
@@ -450,7 +450,7 @@
       (let [[basis root-row-id identity-ok identity-error] (vev.sqlite-latest-index-root-identity-raw store^.handle)]
         (when (not identity-ok)
           (vev.sqlite-rollback-raw store^.handle)
-          (return (Store-Tx-Report []) false false identity-error))
+          (return (Store-Tx-Report) false false identity-error))
         (when (and (= basis store^.current-root-cache-basis)
                    (= root-row-id store^.current-root-cache-published.root-row-id))
           (set! reuse-caches true))))
@@ -475,7 +475,7 @@
         (sqlite-conn-invalidate-log-metadata-cache! store)
         (sqlite-conn-invalidate-current-root-cache! store)
         (delete-store-tx-report direct-report)
-        (return (Store-Tx-Report []) false false commit-error))
+        (return (Store-Tx-Report) false false commit-error))
       (return direct-report true true ""))))
 
 (defn transact-sqlite-store-report-direct-tx-data-open-tx [store: ^SQLite-Conn, tx-data: []Tx-Data] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
@@ -541,7 +541,7 @@
                       :source-avet-append-mode (and modes-known avet-mode)
                       :source-vaet-append-mode (and modes-known vaet-mode)
                       :source-published-root-known false
-                      :source-published-root (SQLite-Durable-Published-Root []))))
+                      :source-published-root (SQLite-Durable-Published-Root))))
 
 (defn store-tx-report-from-source-overlay [snapshot: Store-DB, overlay-ops: []Tx-Op, tx: u64, resolved: Resolved-Tx, next-entity: u64] -> Store-Tx-Report
   (store-tx-report-from-source-overlay-parts snapshot overlay-ops tx (slice resolved.tx-meta 0) (slice resolved.tempids 0) next-entity))
@@ -551,23 +551,23 @@
         source (shared-db-snapshot-read-source (addr base))
         [state state-ok state-error] (shared-write-state-from-shared-snapshot-metadata base)]
     (when (not state-ok)
-      (return (Store-Tx-Report []) false false state-error))
+      (return (Store-Tx-Report) false false state-error))
     (let [resolved (shared-write-state-resolve-tx-data-source-only (addr state) source tx-data)]
       (when (not resolved.ok)
         (let [error resolved.error]
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Store-Tx-Report []) false false error)))
+          (return (Store-Tx-Report) false false error)))
       (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state.conn.next-tx)]
         (when (not instant-ok)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Store-Tx-Report []) false false instant-error)))
+          (return (Store-Tx-Report) false false instant-error)))
       (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved source resolved)]
         (when (not overlay-ok)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Store-Tx-Report []) false false overlay-error))
+          (return (Store-Tx-Report) false false overlay-error))
         (let [out-report (store-tx-report-from-source-overlay snapshot^ (slice overlay-ops 0) state.conn.next-tx resolved state.next-entity-id)]
           ;; The generic overlay report is ideal for arbitrary source-backed
           ;; DB values. A resident shared snapshot can do better: publish one
@@ -699,26 +699,26 @@
 (defn with-store-db-source-overlay-report-tx-data [snapshot: ^Store-DB, tx-data: []Tx-Data] -> [report: Store-Tx-Report, used: bool, ok: bool, error: string]
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
     (when (not source-ok)
-      (return (Store-Tx-Report []) false false source-error))
+      (return (Store-Tx-Report) false false source-error))
     (let [[state state-ok state-error] (shared-write-state-from-source-metadata source)]
       (when (not state-ok)
-        (return (Store-Tx-Report []) false false state-error))
+        (return (Store-Tx-Report) false false state-error))
       (let [resolved (shared-write-state-resolve-tx-data-source-only (addr state) source tx-data)]
         (when (not resolved.ok)
           (let [error resolved.error]
             (delete-resolved-tx resolved)
             (delete-shared-write-state-metadata state)
-            (return (Store-Tx-Report []) false false error)))
+            (return (Store-Tx-Report) false false error)))
         (let [[instant-ok instant-error] (finalize-source-transaction-instant! source (addr resolved.ops) (addr resolved.tx-meta) state.conn.next-tx)]
           (when (not instant-ok)
             (delete-resolved-tx resolved)
             (delete-shared-write-state-metadata state)
-            (return (Store-Tx-Report []) false false instant-error)))
+            (return (Store-Tx-Report) false false instant-error)))
         (let [[overlay-ops overlay-ok overlay-error] (source-overlay-ops-from-resolved source resolved)]
           (when (not overlay-ok)
             (delete-resolved-tx resolved)
             (delete-shared-write-state-metadata state)
-            (return (Store-Tx-Report []) false false overlay-error))
+            (return (Store-Tx-Report) false false overlay-error))
           (let [out-report (store-tx-report-from-source-overlay snapshot^ (slice overlay-ops 0) state.conn.next-tx resolved state.next-entity-id)]
             (delete-owned-tx-ops overlay-ops)
             (delete-resolved-tx resolved)

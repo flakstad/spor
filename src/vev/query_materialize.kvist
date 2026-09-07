@@ -254,10 +254,10 @@
   (when (or (not resolved.ok)
             (< row 0)
             (>= row resolved.plan.rows))
-    (return (Value []) false))
+    (return (Value) false))
   (let [[column-index column-ok] (resolved-typed-flat-materialization-output-column-index resolved output-column)]
     (when (not column-ok)
-      (return (Value []) false))
+      (return (Value) false))
     (typed-relation-column-value rel.typed-columns[column-index] row)))
 
 (defn materialize-typed-flat-batch [rel: Query-Relation, resolved: Resolved-Typed-Flat-Materialization] -> Typed-Materialized-Batch
@@ -419,7 +419,7 @@
             (>= row batch.rows)
             (< output-column 0)
             (>= output-column (count batch.columns)))
-    (return (Value []) false))
+    (return (Value) false))
   (typed-relation-column-value batch.columns[output-column] row))
 
 (defn result-rows-for-typed-materialized-batch [batch: Typed-Materialized-Batch] -> [rows: [dynamic]Result-Row, ok: bool, error: string]
@@ -668,7 +668,7 @@
       (return out true)))))
 
 (defn result-rows-for-typed-relation [query: Query, rel: Query-Relation] -> [rows: [dynamic]Result-Row, ok: bool]
-  (result-rows-for-typed-relation-with-sources-and-fns (DB []) ([]DB-Source []) query ([]Query-Input []) rel ([]Native-Query-Fn [])))
+  (result-rows-for-typed-relation-with-sources-and-fns (DB) ([]DB-Source []) query ([]Query-Input []) rel ([]Native-Query-Fn [])))
 
 (defn db-read-source-pulls-for-typed-row-with-materialized-pull-columns-and-fns [pull-columns: []Materialized-Pull-Column, rel: Query-Relation, row: int, registry: []Native-Query-Fn] -> [pulls: [dynamic]Pull-Result, ok: bool, error: string]
   (let [out (make [dynamic]Pull-Result 0 (count pull-columns))]

@@ -4,7 +4,7 @@
   (when (not projection.has-anchor-input)
     (return projection.anchor-value true ""))
   (when (not (= (count inputs) 1))
-    (return (Value []) false "wrong number of query inputs for source multi-hop ref-chain projection"))
+    (return (Value) false "wrong number of query inputs for source multi-hop ref-chain projection"))
   (db-read-source-query-input-scalar-value source inputs[0]))
 
 (defn source-multi-hop-ref-chain-value-for-var [projection: Source-Multi-Hop-Ref-Chain-Projection, name: string, final-value: Value, first-value: Value, filter-value: Value] -> Value
@@ -1235,7 +1235,7 @@
   (when (not projection.has-anchor-input)
     (return projection.anchor-value true ""))
   (when (not (= (count inputs) 1))
-    (return (Value []) false "wrong number of query inputs for source anchor/two-branch projection"))
+    (return (Value) false "wrong number of query inputs for source anchor/two-branch projection"))
   (db-read-source-query-input-scalar-value source inputs[0]))
 
 (defn source-anchor-two-branch-value-for-var [projection: Source-Anchor-Two-Branch-Join-Projection, name: string, direct-value: Value, first-value: Value, filter-value: Value] -> Value

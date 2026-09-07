@@ -391,85 +391,85 @@
 ])
 
 (defn empty-two-attr-entity-projection [] -> Two-Attr-Entity-Projection
-  (Two-Attr-Entity-Projection []))
+  (Two-Attr-Entity-Projection))
 
 (defn empty-entity-attr-value-projection [] -> Entity-Attr-Value-Projection
-  (Entity-Attr-Value-Projection []))
+  (Entity-Attr-Value-Projection))
 
 (defn empty-source-entity-value-projection [] -> Source-Entity-Value-Projection
-  (Source-Entity-Value-Projection []))
+  (Source-Entity-Value-Projection))
 
 (defn empty-source-entity-attr-value-projection [] -> Source-Entity-Attr-Value-Projection
-  (Source-Entity-Attr-Value-Projection []))
+  (Source-Entity-Attr-Value-Projection))
 
 (defn empty-source-attr-value-entity-projection [] -> Source-Attr-Value-Entity-Projection
-  (Source-Attr-Value-Entity-Projection []))
+  (Source-Attr-Value-Entity-Projection))
 
 (defn empty-source-attr-input-entity-projection [] -> Source-Attr-Input-Entity-Projection
-  (Source-Attr-Input-Entity-Projection []))
+  (Source-Attr-Input-Entity-Projection))
 
 (defn empty-source-attr-value-projection [] -> Source-Attr-Value-Projection
-  (Source-Attr-Value-Projection []))
+  (Source-Attr-Value-Projection))
 
 (defn empty-source-attr-filtered-value-projection [] -> Source-Attr-Filtered-Value-Projection
-  (Source-Attr-Filtered-Value-Projection []))
+  (Source-Attr-Filtered-Value-Projection))
 
 (defn empty-source-attr-range-value-projection [] -> Source-Attr-Range-Value-Projection
-  (Source-Attr-Range-Value-Projection []))
+  (Source-Attr-Range-Value-Projection))
 
 (defn empty-source-range-filtered-entity-attr-value-projection [] -> Source-Range-Filtered-Entity-Attr-Value-Projection
-  (Source-Range-Filtered-Entity-Attr-Value-Projection []))
+  (Source-Range-Filtered-Entity-Attr-Value-Projection))
 
 (defn empty-source-range-star-projection [] -> Source-Range-Star-Projection
-  (Source-Range-Star-Projection []))
+  (Source-Range-Star-Projection))
 
 (defn empty-source-multi-hop-ref-chain-projection [] -> Source-Multi-Hop-Ref-Chain-Projection
-  (Source-Multi-Hop-Ref-Chain-Projection []))
+  (Source-Multi-Hop-Ref-Chain-Projection))
 
 (defn empty-source-anchor-two-branch-join-projection [] -> Source-Anchor-Two-Branch-Join-Projection
-  (Source-Anchor-Two-Branch-Join-Projection []))
+  (Source-Anchor-Two-Branch-Join-Projection))
 
 (defn empty-source-attr-entity-projection [] -> Source-Attr-Entity-Projection
-  (Source-Attr-Entity-Projection []))
+  (Source-Attr-Entity-Projection))
 
 (defn empty-source-entity-pull-projection [] -> Source-Entity-Pull-Projection
-  (Source-Entity-Pull-Projection []))
+  (Source-Entity-Pull-Projection))
 
 (defn empty-source-entity-get-else-projection [] -> Source-Entity-Get-Else-Projection
-  (Source-Entity-Get-Else-Projection []))
+  (Source-Entity-Get-Else-Projection))
 
 (defn empty-source-fixed-entity-get-else-projection [] -> Source-Fixed-Entity-Get-Else-Projection
-  (Source-Fixed-Entity-Get-Else-Projection []))
+  (Source-Fixed-Entity-Get-Else-Projection))
 
 (defn empty-source-entity-get-some-projection [] -> Source-Entity-Get-Some-Projection
-  (Source-Entity-Get-Some-Projection []))
+  (Source-Entity-Get-Some-Projection))
 
 (defn empty-source-fixed-entity-get-some-projection [] -> Source-Fixed-Entity-Get-Some-Projection
-  (Source-Fixed-Entity-Get-Some-Projection []))
+  (Source-Fixed-Entity-Get-Some-Projection))
 
 (defn empty-source-fixed-entity-attr-projection [] -> Source-Fixed-Entity-Attr-Projection
-  (Source-Fixed-Entity-Attr-Projection []))
+  (Source-Fixed-Entity-Attr-Projection))
 
 (defn empty-source-fixed-reverse-entity-attr-projection [] -> Source-Fixed-Reverse-Entity-Attr-Projection
-  (Source-Fixed-Reverse-Entity-Attr-Projection []))
+  (Source-Fixed-Reverse-Entity-Attr-Projection))
 
 (defn empty-source-fixed-entity-attr-value-projection [] -> Source-Fixed-Entity-Attr-Value-Projection
-  (Source-Fixed-Entity-Attr-Value-Projection []))
+  (Source-Fixed-Entity-Attr-Value-Projection))
 
 (defn empty-source-fixed-entity-two-attr-projection [] -> Source-Fixed-Entity-Two-Attr-Projection
-  (Source-Fixed-Entity-Two-Attr-Projection []))
+  (Source-Fixed-Entity-Two-Attr-Projection))
 
 (defn empty-source-three-attr-entity-projection [] -> Source-Three-Attr-Entity-Projection
-  (Source-Three-Attr-Entity-Projection []))
+  (Source-Three-Attr-Entity-Projection))
 
 (defn empty-source-fixed-entity-ref-attr-projection [] -> Source-Fixed-Entity-Ref-Attr-Projection
-  (Source-Fixed-Entity-Ref-Attr-Projection []))
+  (Source-Fixed-Entity-Ref-Attr-Projection))
 
 (defn empty-source-value-ref-attr-projection [] -> Source-Value-Ref-Attr-Projection
-  (Source-Value-Ref-Attr-Projection []))
+  (Source-Value-Ref-Attr-Projection))
 
 (defn empty-source-value-ref-star-projection [] -> Source-Value-Ref-Star-Projection
-  (Source-Value-Ref-Star-Projection []))
+  (Source-Value-Ref-Star-Projection))
 
 (defn empty-entity-int-pair-plan [] -> Entity-Int-Pair-Plan
   (Entity-Int-Pair-Plan :filters (make [dynamic]Entity-Int-Pair-Filter)))
@@ -587,13 +587,13 @@
   (Entity-Two-Value-Plan :filters (make [dynamic]Entity-Int-Pair-Filter)))
 
 (defn empty-entity-int-threshold-plan [] -> Entity-Int-Threshold-Plan
-  (Entity-Int-Threshold-Plan []))
+  (Entity-Int-Threshold-Plan))
 
 (defn empty-entity-value-self-join-plan [] -> Entity-Value-Self-Join-Plan
-  (Entity-Value-Self-Join-Plan []))
+  (Entity-Value-Self-Join-Plan))
 
 (defn empty-attr-top-n-aggregate-plan [] -> Attr-Top-N-Aggregate-Plan
-  (Attr-Top-N-Aggregate-Plan []))
+  (Attr-Top-N-Aggregate-Plan))
 
 (defn empty-missing-attr-projection-plan [] -> Missing-Attr-Projection-Plan
-  (Missing-Attr-Projection-Plan []))
+  (Missing-Attr-Projection-Plan))

@@ -148,7 +148,7 @@
         (do
           (when (not (db-read-source-pull-spec-supported? spec registry))
             (delete-pull-attrs-owned-values attrs)
-            (return (Pull-Result []) false "SQLite DB snapshot source currently supports forward, wildcard, reverse, nested, pattern-input, default, limit, recursion, and built-in xform pull attrs only"))
+            (return (Pull-Result) false "SQLite DB snapshot source currently supports forward, wildcard, reverse, nested, pattern-input, default, limit, recursion, and built-in xform pull attrs only"))
           (when (not (= spec.a "*"))
             (pull-remove-output-attr-owned-values! (addr attrs) (pull-output-attr spec)))
           (cond
@@ -164,7 +164,7 @@
                   (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity source entity)]
                     (when (not datoms-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result []) false datoms-error))
+                      (return (Pull-Result) false datoms-error))
                     (for [datom datoms]
                       (arr.push! attrs
                         (Pull-Attr :a (string-owned datom.a)
@@ -176,7 +176,7 @@
                   (let [[stream stream-ok stream-error] (source-eavt-entity-stream source entity)]
                     (when (not stream-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result []) false stream-error))
+                      (return (Pull-Result) false stream-error))
                     (while stream.has-current
                       ;; Keep every current datom. The renderer groups repeated
                       ;; attributes into cardinality-many vectors.
@@ -190,7 +190,7 @@
                         (when (not advance-ok)
                           (delete-source-index-datom-stream stream)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result []) false advance-error))))
+                          (return (Pull-Result) false advance-error))))
                     (delete-source-index-datom-stream stream))))
             (= spec.a ":db/id")
               (arr.push! attrs
@@ -210,29 +210,29 @@
                   (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-reverse-entity-attr source entity forward-attr)]
                     (when (not datoms-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result []) false datoms-error))
+                      (return (Pull-Result) false datoms-error))
                     (for [datom datoms]
                       (let [[append-ok append-error] (append-db-read-source-reverse-pull-datom! (addr attrs) source spec root seen-counts registry datom (addr seen) limit)]
                         (when (not append-ok)
                           (delete-owned-datoms datoms)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result []) false append-error))))
+                          (return (Pull-Result) false append-error))))
                     (delete-owned-datoms datoms))
                   (let [[stream stream-ok stream-error] (source-vaet-entity-attr-stream source entity forward-attr)]
                     (when (not stream-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result []) false stream-error))
+                      (return (Pull-Result) false stream-error))
                     (while (and stream.has-current (< seen limit))
                       (let [[append-ok append-error] (append-db-read-source-reverse-pull-datom! (addr attrs) source spec root seen-counts registry stream.current (addr seen) limit)]
                         (when (not append-ok)
                           (delete-source-index-datom-stream stream)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result []) false append-error)))
+                          (return (Pull-Result) false append-error)))
                       (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
                         (when (not advance-ok)
                           (delete-source-index-datom-stream stream)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result []) false advance-error))))
+                          (return (Pull-Result) false advance-error))))
                     (delete-source-index-datom-stream stream)))
                 (when (and (= seen 0) (or spec.has-default spec.has-xform))
                   (arr.push! attrs (db-read-source-pull-missing-attr-with-fns spec registry))))
@@ -243,29 +243,29 @@
                   (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity spec.a)]
                     (when (not datoms-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result []) false datoms-error))
+                      (return (Pull-Result) false datoms-error))
                     (for [datom datoms]
                       (let [[append-ok append-error] (append-db-read-source-forward-pull-datom! (addr attrs) source spec root seen-counts registry datom (addr seen) limit)]
                         (when (not append-ok)
                           (delete-owned-datoms datoms)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result []) false append-error))))
+                          (return (Pull-Result) false append-error))))
                     (delete-owned-datoms datoms))
                   (let [[stream stream-ok stream-error] (source-eavt-entity-attr-stream source entity spec.a)]
                     (when (not stream-ok)
                       (delete-pull-attrs-owned-values attrs)
-                      (return (Pull-Result []) false stream-error))
+                      (return (Pull-Result) false stream-error))
                     (while (and stream.has-current (< seen limit))
                       (let [[append-ok append-error] (append-db-read-source-forward-pull-datom! (addr attrs) source spec root seen-counts registry stream.current (addr seen) limit)]
                         (when (not append-ok)
                           (delete-source-index-datom-stream stream)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result []) false append-error)))
+                          (return (Pull-Result) false append-error)))
                       (let [[advance-ok advance-error] (advance-source-index-datom-stream! source (addr stream))]
                         (when (not advance-ok)
                           (delete-source-index-datom-stream stream)
                           (delete-pull-attrs-owned-values attrs)
-                          (return (Pull-Result []) false advance-error))))
+                          (return (Pull-Result) false advance-error))))
                     (delete-source-index-datom-stream stream)))
                 (when (and (= seen 0) (or spec.has-default spec.has-xform))
                   (arr.push! attrs (db-read-source-pull-missing-attr-with-fns spec registry))))))))

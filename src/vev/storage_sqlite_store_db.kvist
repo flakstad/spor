@@ -5,18 +5,18 @@
 (defn sqlite-store-db-checkpoint-with-tail [path: string] -> [snapshot: Store-DB, ok: bool, error: string]
   (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
     (when (not open-ok)
-      (return (Store-DB []) false open-error))
+      (return (Store-DB) false open-error))
     (let [[read-ok read-started read-error] (vev.sqlite-begin-query-read-raw handle)]
       (when (not read-ok)
         (vev.sqlite-close-live-raw handle)
-        (return (Store-DB []) false read-error))
+        (return (Store-DB) false read-error))
       (discard read-started))
     (let [[head-basis indexed-basis _tail-transactions tail-datoms lag-ok lag-error]
             (vev.sqlite-index-lag-stats-raw handle)]
       (when (not lag-ok)
         (vev.sqlite-end-query-read-raw handle true)
         (vev.sqlite-close-live-raw handle)
-        (return (Store-DB []) false lag-error))
+        (return (Store-DB) false lag-error))
       (when (= indexed-basis 0)
         (vev.sqlite-end-query-read-raw handle true)
         (vev.sqlite-close-live-raw handle)
@@ -25,13 +25,13 @@
             (return (Store-DB :kind .Resident :resident db) true "")
             (do
               (delete-owned-db db)
-              (return (Store-DB []) false db-error)))))
+              (return (Store-DB) false db-error)))))
       (let [[root-count count-ok count-error]
               (vev.sqlite-index-chunk-row-count-at-basis-raw handle ":eavt" indexed-basis)]
         (when (not count-ok)
           (vev.sqlite-end-query-read-raw handle true)
           (vev.sqlite-close-live-raw handle)
-          (return (Store-DB []) false count-error))
+          (return (Store-DB) false count-error))
         ;; A true value is conservative for the checkpoint and avoids a second
         ;; basis-filtered scan. It affects only current-datom acceleration.
         (let [[has-retractions retractions-ok retractions-error]
@@ -39,7 +39,7 @@
           (when (not retractions-ok)
             (vev.sqlite-end-query-read-raw handle true)
             (vev.sqlite-close-live-raw handle)
-            (return (Store-DB []) false retractions-error))
+            (return (Store-DB) false retractions-error))
           (let [[base base-ok base-error]
                   (sqlite-open-db-snapshot-handle-at-basis-known-log
                     handle indexed-basis sqlite-db-source-default-page-size
@@ -47,7 +47,7 @@
             (when (not base-ok)
               (vev.sqlite-end-query-read-raw handle true)
               (vev.sqlite-close-live-raw handle)
-              (return (Store-DB []) false base-error))
+              (return (Store-DB) false base-error))
             (set! base.indexes.owns-handle true)
             (set! base.path (string-owned path))
             (when (or (= head-basis indexed-basis) (= tail-datoms 0))
@@ -57,14 +57,14 @@
                       handle indexed-basis head-basis)]
               (when (not tail-ok)
                 (close-sqlite-db-snapshot base)
-                (return (Store-DB []) false tail-error))
+                (return (Store-DB) false tail-error))
               (defer (delete tail-text))
               (let [[tail-db parsed-ok parsed-error]
                       (from-serializable-text tail-text)]
                 (when (not parsed-ok)
                   (close-sqlite-db-snapshot base)
                   (delete-owned-db tail-db)
-                  (return (Store-DB []) false parsed-error))
+                  (return (Store-DB) false parsed-error))
                 (let [out (sqlite-store-db-with-datom-log-overlay
                             base (slice tail-db.datoms 0))]
                   (set! out.overlay-tx head-basis)
@@ -131,7 +131,7 @@
     (return (sqlite-store-db store)))
   (let [[lags lag-ok lag-error] (sqlite-conn-index-root-lags-log? store)]
     (when (not lag-ok)
-      (return (Store-DB []) false lag-error))
+      (return (Store-DB) false lag-error))
     (when lags
       (return (sqlite-store-db-checkpoint-with-tail store^.path))))
   (let [[basis basis-ok basis-error] (sqlite-conn-current-root-basis store)]
@@ -150,7 +150,7 @@
         (let [published (SQLite-Durable-Published-Root :root-row-id root-row-id
                                                          :basis-tx basis
                                                          :roots roots
-                                                         :modes (SQLite-Index-Append-Modes []))
+                                                         :modes (SQLite-Index-Append-Modes))
               cache (sqlite-index-page-cache-empty)]
           (set! store^.current-root-cache-basis basis)
           (set! store^.current-root-cache-published published)
@@ -168,7 +168,7 @@
             ""))
   (let [[lags lag-ok lag-error] (sqlite-conn-index-root-lags-log? store)]
     (when (not lag-ok)
-      (return (Store-DB []) false lag-error))
+      (return (Store-DB) false lag-error))
     (when lags
       (return (sqlite-store-db-checkpoint-with-tail store^.path))))
   ;; A public DB value is a cheap immutable root descriptor. It must not hold
@@ -178,15 +178,15 @@
   ;; exact root row even if maintenance republishes the same transaction basis.
   (let [[basis basis-ok basis-error] (sqlite-conn-current-root-basis store)]
     (when (not basis-ok)
-      (return (Store-DB []) false basis-error))
+      (return (Store-DB) false basis-error))
     (let [[roots roots-ok roots-error]
             (sqlite-index-root-set-at-basis store^.handle basis)]
       (when (not roots-ok)
-        (return (Store-DB []) false roots-error))
+        (return (Store-DB) false roots-error))
       (let [[root-row-id row-ok row-error]
               (sqlite-index-root-row-id-at-basis store^.handle basis)]
         (when (not row-ok)
-          (return (Store-DB []) false row-error))
+          (return (Store-DB) false row-error))
         (return
           (sqlite-root-store-db
             store^.path
@@ -194,7 +194,7 @@
               :root-row-id root-row-id
                :basis-tx basis
                :roots roots
-               :modes (SQLite-Index-Append-Modes [])))
+               :modes (SQLite-Index-Append-Modes)))
           true
           "")))))
 
@@ -223,7 +223,7 @@
     (return (retain-store-db snapshot^) true ""))
   (let [[datom-count has-retractions log-ok log-error] (sqlite-conn-datom-count-and-retractions store)]
     (when (not log-ok)
-      (return (Store-DB []) false log-error))
+      (return (Store-DB) false log-error))
     (let [[sqlite-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot-handle-at-root-set-known-log
                                                          store^.handle
                                                          snapshot^.sqlite-root-published
@@ -231,7 +231,7 @@
                                                          datom-count
                                                          has-retractions)]
       (when (not snapshot-ok)
-        (return (Store-DB []) false snapshot-error))
+        (return (Store-DB) false snapshot-error))
       (sqlite-index-snapshot-use-page-cache! (addr sqlite-snapshot.indexes) snapshot^.sqlite-root-page-cache)
       (set! sqlite-snapshot.path (string-owned store^.path))
       (return (Store-DB :kind .SQLite-Snapshot :sqlite-snapshot sqlite-snapshot) true ""))))
@@ -252,18 +252,18 @@
                          :sqlite-root-published root-published
                          :sqlite-root-page-cache root-cache)
               true)
-      (return (Store-DB []) false))))
+      (return (Store-DB) false))))
 
 (defn sqlite-root-fields-from-open-snapshot [snapshot: SQLite-DB-Snapshot] -> [path: string, published: SQLite-Durable-Published-Root, cache: SQLite-Index-Page-Cache, ok: bool]
   (when (= snapshot.path "")
-    (return "" (SQLite-Durable-Published-Root []) (SQLite-Index-Page-Cache []) false))
+    (return "" (SQLite-Durable-Published-Root) (SQLite-Index-Page-Cache) false))
   (when (= snapshot.root-row-id 0)
-    (return "" (SQLite-Durable-Published-Root []) (SQLite-Index-Page-Cache []) false))
+    (return "" (SQLite-Durable-Published-Root) (SQLite-Index-Page-Cache) false))
   (when (or (= snapshot.indexes.eavt.root-id 0)
             (= snapshot.indexes.aevt.root-id 0)
             (= snapshot.indexes.avet.root-id 0)
             (= snapshot.indexes.vaet.root-id 0))
-      (return "" (SQLite-Durable-Published-Root []) (SQLite-Index-Page-Cache []) false))
+      (return "" (SQLite-Durable-Published-Root) (SQLite-Index-Page-Cache) false))
   (let [roots (SQLite-Index-Root-Set :eavt (SQLite-Index-Root-Page :root-id snapshot.indexes.eavt.root-id
                                                                      :manifest-id snapshot.indexes.eavt.manifest-id)
                                       :aevt (SQLite-Index-Root-Page :root-id snapshot.indexes.aevt.root-id
@@ -275,7 +275,7 @@
         published-root (SQLite-Durable-Published-Root :root-row-id snapshot.root-row-id
                                                        :basis-tx snapshot.basis-tx
                                                        :roots roots
-                                                       :modes (SQLite-Index-Append-Modes []))]
+                                                       :modes (SQLite-Index-Append-Modes))]
     (return (string-owned snapshot.path) published-root (retain-sqlite-index-page-cache snapshot.indexes.eavt.page-cache) true)))
 
 (defn sqlite-root-store-db-at-basis-or-lazy [path: string, basis-tx: u64] -> Store-DB
@@ -289,7 +289,7 @@
         (sqlite-root-store-db path (SQLite-Durable-Published-Root :root-row-id root-row-id
                                                                    :basis-tx basis-tx
                                                                    :roots roots
-                                                                   :modes (SQLite-Index-Append-Modes [])))
+                                                                   :modes (SQLite-Index-Append-Modes)))
         (sqlite-lazy-store-db-at-basis path basis-tx)))))
 
 (defn store-db-sqlite-page-cache-count [snapshot: ^Store-DB] -> int
@@ -382,11 +382,11 @@
 (defn sqlite-open-db-snapshot-at-root [path: string, published: SQLite-Durable-Published-Root, page-size: int] -> [snapshot: SQLite-DB-Snapshot, ok: bool, error: string]
   (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
     (when (not open-ok)
-      (return (SQLite-DB-Snapshot []) false open-error))
+      (return (SQLite-DB-Snapshot) false open-error))
     (let [[read-started read-ok read-error] (vev.sqlite-begin-query-read-raw handle)]
       (when (not read-ok)
         (vev.sqlite-close-live-raw handle)
-        (return (SQLite-DB-Snapshot []) false read-error))
+        (return (SQLite-DB-Snapshot) false read-error))
       (discard read-started))
     (let [[opened-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot-handle-at-root-set handle published page-size)]
       (when (not snapshot-ok)
@@ -412,7 +412,7 @@
                 (SQLite-Durable-Published-Root :root-row-id root-row-id
                                                 :basis-tx basis-tx
                                                 :roots roots
-                                                :modes (SQLite-Index-Append-Modes [])))
+                                                :modes (SQLite-Index-Append-Modes)))
               true
               "")))
   (let [[sqlite-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot-handle-at-basis store^.handle basis-tx sqlite-db-source-default-page-size)]
@@ -423,7 +423,7 @@
           (close-sqlite-db-snapshot! (addr sqlite-snapshot))
           (return root-backed true "")))
       (return (Store-DB :kind .SQLite-Snapshot :sqlite-snapshot sqlite-snapshot) true ""))
-    (return (Store-DB []) false snapshot-error)))
+    (return (Store-DB) false snapshot-error)))
 
 (defn sqlite-conn-has-durable-index-roots [store: ^SQLite-Conn] -> [has-roots: bool, ok: bool, error: string]
   (let [[snapshot snapshot-ok snapshot-error] (sqlite-store-db store)]
@@ -436,8 +436,8 @@
 
 (defn retain-sqlite-db-snapshot [snapshot: SQLite-DB-Snapshot] -> SQLite-DB-Snapshot
   (when (= snapshot.path "")
-    (return (SQLite-DB-Snapshot [])))
+    (return (SQLite-DB-Snapshot)))
   (let [[retained retained-ok _] (sqlite-open-db-snapshot-at-basis snapshot.path snapshot.basis-tx sqlite-db-source-default-page-size)]
     (if retained-ok
       retained
-      (SQLite-DB-Snapshot []))))
+      (SQLite-DB-Snapshot))))

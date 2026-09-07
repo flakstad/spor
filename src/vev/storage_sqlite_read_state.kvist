@@ -210,7 +210,7 @@
 
 (defn sqlite-index-page-cache-find-retained [cache: SQLite-Index-Page-Cache, root-id: u64, manifest-id: u64, start: int] -> [page: SQLite-Loaded-Index-Page, found: bool]
   (when (= cache.state nil)
-    (return (SQLite-Loaded-Index-Page []) false))
+    (return (SQLite-Loaded-Index-Page) false))
   (let [key (SQLite-Index-Page-Cache-Key :root-id root-id
                                           :manifest-id manifest-id
                                           :start start)
@@ -219,12 +219,12 @@
       (when (or (< index 0)
                 (>= index (count cache.state^.pages)))
         (mut! cache.state^.misses += 1)
-        (return (SQLite-Loaded-Index-Page []) false))
+        (return (SQLite-Loaded-Index-Page) false))
       (sqlite-index-page-cache-remember-hit! cache index)
       (mut! cache.state^.hits += 1)
       (return (retain-sqlite-loaded-index-page cache.state^.pages[index]) true)))
   (mut! cache.state^.misses += 1)
-  (return (SQLite-Loaded-Index-Page []) false))
+  (return (SQLite-Loaded-Index-Page) false))
 
 (defn sqlite-index-page-cache-store! [cache: ^SQLite-Index-Page-Cache, root-id: u64, manifest-id: u64, start: int, page: SQLite-Loaded-Index-Page]
   (when (= cache^.state nil)
@@ -306,7 +306,7 @@
   (let [[slot found] (mmap.get snapshot^.datom-cache-indexes log-index)]
     (when found
       (return (datom-owned snapshot^.datom-cache-datoms[slot]) true)))
-  (return (Datom []) false))
+  (return (Datom) false))
 
 (defn sqlite-db-snapshot-cache-store-datom! [snapshot: ^SQLite-DB-Snapshot, log-index: int, datom: Datom]
   (let [[slot found] (mmap.get snapshot^.datom-cache-indexes log-index)]

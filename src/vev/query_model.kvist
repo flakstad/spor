@@ -156,14 +156,14 @@
 
 (defn steps-from-kinds [kinds: []Query-Step-Kind] -> [dynamic]Query-Step
   (let [steps (make [dynamic]Query-Step 0 (count kinds))
-        counters (Query-Step-Counters [])]
+        counters (Query-Step-Counters)]
     (for [kind kinds]
       (append-query-step-kind! (addr steps) (addr counters) kind))
     steps))
 
 (defn not-group-default-steps [clause-count: int, predicate-count: int, function-count: int, get-else-count: int, get-some-count: int, ground-count: int, rule-call-count: int, not-count: int] -> [dynamic]Query-Step
   (let [steps (make [dynamic]Query-Step 0 (+ clause-count predicate-count function-count get-else-count get-some-count ground-count rule-call-count not-count))
-        counters (Query-Step-Counters [])]
+        counters (Query-Step-Counters)]
     (for [_ (arr.range 0 clause-count)]
       (append-query-step-kind! (addr steps) (addr counters) .Clause))
     (for [_ (arr.range 0 predicate-count)]
@@ -361,7 +361,7 @@
 
 (defn edn-next-child-pair [src: ^EDN-Sibling-Source] -> [pair: EDN-Child-Pair ok: bool]
   (when (= src.cursor -1)
-    (return (EDN-Child-Pair []) false))
+    (return (EDN-Child-Pair) false))
   (let [key src.cursor
         value src.doc.nodes[key].next-sibling]
     (set! src.cursor (if (= value -1) -1 src.doc.nodes[value].next-sibling))
@@ -403,7 +403,7 @@
   (when (or (= node-index -1)
             (not (= doc.nodes[node-index].kind .Vector))
             (not (= doc.nodes[node-index].child-count 2)))
-    (return (Term []) false))
+    (return (Term) false))
   (let [attr-node (edn-child-at doc node-index 0)
         value-node (edn-child-at doc node-index 1)
         attr-doc-node doc.nodes[attr-node]
@@ -411,12 +411,12 @@
     (cond
       (= attr-doc-node.kind .Keyword) (set! attr attr-doc-node.text)
       (= attr-doc-node.kind .String) (set! attr attr-doc-node.text)
-      :else (return (Term []) false))
+      :else (return (Term) false))
     (when (not (strings.has_prefix attr ":"))
-      (return (Term []) false))
+      (return (Term) false))
     (let [[value value-ok _] (edn-value-from-node doc value-node)]
       (when (not value-ok)
-        (return (Term []) false))
+        (return (Term) false))
       (return (term-lookup-ref attr value) true))))
 
 (defn term-from-edn-node [doc: EDN-Doc, node-index: int, attr-position: bool] -> Term

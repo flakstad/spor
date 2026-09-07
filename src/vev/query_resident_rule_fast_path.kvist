@@ -187,7 +187,7 @@
                       (= (count rule.rule-calls) 0)
                       (= (count rule.clauses) 2)
                       (rule-has-only-plain-clauses-and-calls? rule)))
-        (return (Rule []) "" "" false))
+        (return (Rule) "" "" false))
       (let [first rule.clauses[0]
             second rule.clauses[1]
             [first-attr first-attr-ok] (clause-attr-keyword first)
@@ -208,8 +208,8 @@
                    (= first.v.kind .Var)
                    (= first.v.name second.e.name))
           (return rule second-attr first-attr true))
-        (return (Rule []) "" "" false))))
-  (return (Rule []) "" "" false))
+        (return (Rule) "" "" false))))
+  (return (Rule) "" "" false))
 
 (defn derived-edge-call? [rules: []Rule, call: Rule-Call, from-var: string, to-var: string] -> [left-attr: string, right-attr: string, ok: bool]
   (when (not (and (not call.has-source)
@@ -328,7 +328,7 @@
 ])
 
 (defn empty-alternating-transitive-plan [] -> Alternating-Transitive-Plan
-  (Alternating-Transitive-Plan []))
+  (Alternating-Transitive-Plan))
 
 (defn alternating-base-rule-attr [rule: Rule] -> [attr: string, ok: bool]
   (when (not (and (= (count rule.params) 2)
@@ -416,7 +416,7 @@
   (for [rule rules]
     (when (= rule.name name)
       (return rule true)))
-  (return (Rule []) false))
+  (return (Rule) false))
 
 (defn append-transitive-targets! [out: ^[dynamic]u64, db: DB, attr: string, start: u64]
   (let [expanded (set.empty u64)
@@ -430,7 +430,7 @@
     (while (< frontier-index (count frontier))
       (let [current frontier[frontier-index]
             edge-clause (clause (term-value (value-entity current)) attr (term-wildcard))
-            scan (clause-index-scan db edge-clause (Binding []))]
+            scan (clause-index-scan db edge-clause (Binding))]
         (set! frontier-index (+ frontier-index 1))
         (let [already-expanded (set.contains? expanded current)]
           (when (not already-expanded)
@@ -455,7 +455,7 @@
 (defn append-transitive-starts! [out: ^[dynamic]u64, db: DB, attr: string]
   (let [seen (set.empty u64)
         attr-clause (clause (term-wildcard) attr (term-wildcard))
-        scan (clause-index-scan db attr-clause (Binding []))]
+        scan (clause-index-scan db attr-clause (Binding))]
     (defer (delete seen))
     (defer (delete-clause-index-scan scan))
     (let [scan-index scan.index]
@@ -482,7 +482,7 @@
     (while (< frontier-index (count frontier))
       (let [current frontier[frontier-index]
             edge-clause (clause (term-wildcard) attr (term-value (value-entity current)))
-            scan (clause-index-scan db edge-clause (Binding []))]
+            scan (clause-index-scan db edge-clause (Binding))]
         (set! frontier-index (+ frontier-index 1))
         (let [already-expanded (set.contains? expanded current)]
           (when (not already-expanded)
@@ -556,8 +556,8 @@
   (let [view (db-index-view db .EAVT)
         attr filter.a.value.text
         expected filter.v.value
-        low (lower-bound-index-view db view "eavt-ea" entity attr (Value []))
-        high (upper-bound-index-view db view "eavt-ea" entity attr (Value []))
+        low (lower-bound-index-view db view "eavt-ea" entity attr (Value))
+        high (upper-bound-index-view db view "eavt-ea" entity attr (Value))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)
@@ -576,8 +576,8 @@
 
 (defn transitive-adjacency-from-db-with-filters [db: DB, attr: string, filters: []Clause] -> Transitive-Adjacency-Index
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 attr (Value []))
+        low (lower-bound-index-view db view "aevt" 0 attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 attr (Value))
         out (make [dynamic]Transitive-Adjacency 0 (- high low))
         index (make (map u64 int))
         i low]
@@ -596,8 +596,8 @@
 
 (defn transitive-derived-adjacency-from-db [db: DB, left-attr: string, right-attr: string] -> Transitive-Adjacency-Index
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 left-attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 left-attr (Value []))
+        low (lower-bound-index-view db view "aevt" 0 left-attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 left-attr (Value))
         out (make [dynamic]Transitive-Adjacency 0 (- high low))
         index (make (map u64 int))
         i low]
@@ -616,8 +616,8 @@
 
 (defn transitive-reverse-adjacency-from-db-with-filters [db: DB, attr: string, filters: []Clause] -> Transitive-Adjacency-Index
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 attr (Value []))
+        low (lower-bound-index-view db view "aevt" 0 attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 attr (Value))
         out (make [dynamic]Transitive-Adjacency 0 (- high low))
         index (make (map u64 int))
         i low]
@@ -1267,7 +1267,7 @@
   (bindings-after-rule-body-depth-with-fns db rules rule initial depth source has-source ([]Native-Query-Fn [])))
 
 (defn bind-rule-args [outer: Binding, call: Rule-Call, rule: Rule] -> [binding: Binding, ok: bool]
-  (let [out (Binding [])]
+  (let [out (Binding)]
     (when (not (= (count call.args) (count rule.params)))
       (return out false))
     (for [param index rule.params]

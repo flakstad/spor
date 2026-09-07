@@ -14,7 +14,7 @@
       (= snapshot^.kind .SQLite-Datom-Log-Overlay)))
 
 (defn filtered-store-db [snapshot: ^Store-DB, has-as-of: bool, as-of-tx: u64, has-since: bool, since-tx: u64, history: bool] -> Store-DB
-  (let [base (Store-DB [])
+  (let [base (Store-DB)
         next-has-as-of has-as-of
         next-as-of-tx as-of-tx
         next-has-since has-since
@@ -134,13 +134,13 @@
   (let [[tx resolved-ok resolved-error] (store-db-tx-at-or-before-instant snapshot unix-millis)]
     (if resolved-ok
       (return (as-of-store-db snapshot tx) true "")
-      (return (Store-DB []) false resolved-error))))
+      (return (Store-DB) false resolved-error))))
 
 (defn since-store-db-instant [snapshot: ^Store-DB, unix-millis: i64] -> [db: Store-DB, ok: bool, error: string]
   (let [[tx resolved-ok resolved-error] (store-db-tx-at-or-before-instant snapshot unix-millis)]
     (if resolved-ok
       (return (since-store-db snapshot tx) true "")
-      (return (Store-DB []) false resolved-error))))
+      (return (Store-DB) false resolved-error))))
 
 (defn as-of-store-db-instant-or-panic [snapshot: ^Store-DB, unix-millis: i64] -> Store-DB
   (let [[db ok error] (as-of-store-db-instant snapshot unix-millis)]

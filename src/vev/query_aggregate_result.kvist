@@ -11,7 +11,7 @@
           (= aggregate.op "variance")
           (= aggregate.op "stddev"))
     (value-int 0)
-    (Value [])))
+    (Value)))
 
 (defn sort-i64! [values: ^[dynamic]i64]
   (arr.sort! values^))
@@ -104,7 +104,7 @@
         high (upper-bound-index-view-values db view attr-prefix)
         out (make [dynamic]Value)
         all-current (all-datoms-current? db)
-        last-value (Value [])
+        last-value (Value)
         has-last false]
     (if (= aggregate.op "max")
       (let [i high]
@@ -143,7 +143,7 @@
       (value-vector-owned out)
       (do
         (delete out)
-        (Value [])))))
+        (Value)))))
 
 (defn q-attr-top-n-aggregate-profiled [db: DB, query: Query, plan: Attr-Top-N-Aggregate-Plan, stats: Query-Stats] -> Profiled-Result-Set
   (let [out-stats stats
@@ -218,8 +218,8 @@
 (defn q-missing-attr-projection-profiled [db: DB, plan: Missing-Attr-Projection-Plan, stats: Query-Stats] -> Profiled-Result-Set
   (let [out-stats stats
         view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 plan.value-attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 plan.value-attr (Value []))
+        low (lower-bound-index-view db view "aevt" 0 plan.value-attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 plan.value-attr (Value))
         rows (make [dynamic]Result-Row)
         seen (set.empty string)
         i low]
@@ -253,8 +253,8 @@
 (defn q-missing-attr-string-column [db: DB, plan: Missing-Attr-Projection-Plan] -> [values: [dynamic]string, ok: bool]
   (let [out (make [dynamic]string)
         view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 plan.value-attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 plan.value-attr (Value []))
+        low (lower-bound-index-view db view "aevt" 0 plan.value-attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 plan.value-attr (Value))
         seen (set.empty string)
         i low]
     (defer (delete seen))
@@ -413,7 +413,7 @@
         (= name ":sort-reverse")) (return (sorted-values-vector values true) true)
     (or (= name "sort")
         (= name ":sort")) (return (sorted-values-vector values false) true)
-    :else (return (Value []) false)))
+    :else (return (Value) false)))
 
 (defn apply-named-aggregate-with-fns [name: string, values: []Value, registry: []Native-Query-Fn] -> [value: Value, ok: bool]
   (let [[builtin builtin-ok] (apply-named-aggregate name values)]
@@ -421,14 +421,14 @@
       (return builtin true)))
   (let [[index found] (query-fn-index registry name)]
     (when (not found)
-      (return (Value []) false))
+      (return (Value) false))
     (let [entry registry[index]]
       (when entry.has-aggregate-callback
         (let [result (entry.aggregate-callback values)]
           (return result.value result.ok)))
       (when (> (count entry.target) 0)
         (return (apply-named-aggregate entry.target values)))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn apply-aggregate-value [current: Value, aggregate: Aggregate-Find, value: Value] -> Value
   (when (or (= aggregate.op "count")
@@ -481,7 +481,7 @@
 
 (defn random-value-owned [values: []Value] -> Value
   (when (= (count values) 0)
-    (return (Value [])))
+    (return (Value)))
   (value-owned values[(rand.int_max (count values))]))
 
 (defn selection-values-owned [values: []Value, limit: int, op: string] -> Value
@@ -644,7 +644,7 @@
   (case term.kind
     .Value (return term.value true)
     .Var (return (query-relation-typed-row-value rel row term.name))
-     (return (Value []) false)))
+     (return (Value) false)))
 
 (defn query-relation-typed-aggregate-function-name [rel: Query-Relation, row: int, aggregate: Aggregate-Find] -> [name: string, ok: bool]
   (when (not aggregate.has-function-var)
@@ -697,7 +697,7 @@
 (defn aggregate-value-for-typed-group-with-fns [rel: Query-Relation, query: Query, aggregate: Aggregate-Find, group-values: []Value, registry: []Native-Query-Fn] -> [value: Value, ok: bool]
   (when (not (and rel.has-typed-columns
                   (aggregate-supported-from-typed-relation-with-fns? aggregate registry)))
-    (return (Value []) false))
+    (return (Value) false))
   (let [current (aggregate-initial-value aggregate)
         avg-count: i64 0
         aggregate-values (make [dynamic]Value)
@@ -927,7 +927,7 @@
     (when state.custom-name-ok
       (let [[value value-ok] (apply-named-aggregate-with-fns state.custom-name (slice state.aggregate-values 0) registry)]
         (return value value-ok)))
-    (return (Value []) false))
+    (return (Value) false))
   (return state.current true))
 
 (defn typed-aggregate-group-index [groups: []Result-Row, group-index: ^map[string]int, values: []Value] -> [index: int, found: bool, keyable: bool]
@@ -1266,8 +1266,8 @@
     (when (= find-name name)
       (when (< index (count row.values))
         (return row.values[index] true))
-      (return (Value []) false)))
-  (return (Value []) false))
+      (return (Value) false)))
+  (return (Value) false))
 
 (defn aggregate-row-value-for-var [query: Query, row: Result-Row, name: string] -> [value: Value, ok: bool]
   (aggregate-row-value-for-var-in-vars (slice query.find 0) row name))
@@ -1299,16 +1299,16 @@
       (do
         (when (or (< column.source-index 0)
                   (>= column.source-index (count row.values)))
-          (return (Value []) false))
+          (return (Value) false))
         (return row.values[column.source-index] true))
     .AggregateResultColumn
       (do
         (let [aggregate-index (+ (count group-vars) column.source-index)]
           (when (or (< aggregate-index 0)
                     (>= aggregate-index (count row.values)))
-            (return (Value []) false))
+            (return (Value) false))
           (return row.values[aggregate-index] true)))
-    (return (Value []) false)))
+    (return (Value) false)))
 
 (defn materialize-source-typed-pull-aggregate-batch [source: DB-Read-Source, sources: []DB-Read-Named-Source, query-value: Query, inputs: []Query-Input, rel: Query-Relation, registry: []Native-Query-Fn] -> [batch: Typed-Materialized-Batch, ok: bool, error: string]
   (when (or (not rel.has-typed-columns)

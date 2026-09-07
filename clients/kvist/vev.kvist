@@ -333,7 +333,7 @@
   ; those fields and the retained parse tree exactly once.
   (native.close (addr report.native-report))
   (delete report.error)
-  (set! report^ (Tx-Report [])))
+  (set! report^ (Tx-Report)))
 
 (defn history [db-value: DB] -> DB
   (let [state (db-state db-value)

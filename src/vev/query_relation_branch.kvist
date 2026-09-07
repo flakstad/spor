@@ -248,7 +248,7 @@
                                      :has-typed-columns builder.typed-ok) true)))))))
 
 (defn db-read-source-query-relation-extend-function-typed [source: DB-Read-Source, rel: Query-Relation, function: Function-Clause, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]
-  (let [[op op-ok] (query-op-name function.op (Binding []))]
+  (let [[op op-ok] (query-op-name function.op (Binding))]
     (when (and op-ok (source-function-op? op))
       (when (not rel.has-typed-columns)
         (let [materialized (query-relation-materialized-bindings rel)

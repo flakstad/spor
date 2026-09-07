@@ -205,13 +205,13 @@
 (defn query-source-input-binding [query: Query, inputs: []Query-Input, source: string] -> [binding: Binding, ok: bool]
   (let [[index found] (query-input-index-for-source query source)]
     (when (not found)
-      (return (Binding []) false))
+      (return (Binding) false))
     (when (>= index (count inputs))
-      (return (Binding []) false))
+      (return (Binding) false))
     (let [[value value-ok] (query-input-source-value inputs[index])]
       (when (not value-ok)
-        (return (Binding []) false))
-      (let [source-binding (Binding [])]
+        (return (Binding) false))
+      (let [source-binding (Binding)]
         (binding-store! (addr source-binding) source value)
         (return source-binding true)))))
 
@@ -498,7 +498,7 @@
       (return (datom-tx-value datom) true))
     (when (term-var-name? clause-value.op-term name)
       (return (value-bool datom.added) true))
-    (return (Value []) false)))
+    (return (Value) false)))
 
 (defn typed-same-var-term-agrees? [db: DB, name: string, term: Term, actual: Value, base: Value] -> bool
   (if (term-var-name? term name)
@@ -579,7 +579,7 @@
       (return (datom-tx-value datom) true))
     (when (term-var-name? clause-value.op-term name)
       (return (value-bool datom.added) true))
-    (return (Value []) false))
+    (return (Value) false))
   (when (term-var-name? clause-value.e name)
     (return (value-entity datom.e) true))
   (when (term-var-name? clause-value.a name)
@@ -590,7 +590,7 @@
     (return (datom-tx-value datom) true))
   (when (term-var-name? clause-value.op-term name)
     (return (value-bool datom.added) true))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn append-typed-bound-clause-row! [builder: ^Query-Relation-Builder, attrs: []string, rel: Query-Relation, row: int, clause-value: Clause, datom: Datom] -> bool
   (for [column index rel.typed-columns]
@@ -646,8 +646,8 @@
             (delete attr-sources)
             (delete-query-relation-builder builder)
             (return (query-relation-empty) false))
-          (let [base-low (lower-bound-index-view db view "eavt-ea" entity attr (Value []))
-                base-high (upper-bound-index-view db view "eavt-ea" entity attr (Value []))
+          (let [base-low (lower-bound-index-view db view "eavt-ea" entity attr (Value))
+                base-high (upper-bound-index-view db view "eavt-ea" entity attr (Value))
                 [low high] (physical-op-tighten-resident-eavt-ea-value-range db view base-low base-high entity attr clause-value op rel row)]
             (set! stats^.clause-candidates (+ stats^.clause-candidates (- high low)))
             (let [i low]
@@ -675,7 +675,7 @@
                                :has-typed-columns builder.typed-ok) true))))
 
 (defn query-relation-apply-bound-ea-clause-typed [db: DB, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
-  (query-relation-apply-bound-ea-clause-typed-with-op db rel clause-value (Physical-Op []) stats))
+  (query-relation-apply-bound-ea-clause-typed-with-op db rel clause-value (Physical-Op) stats))
 
 (defn query-relation-apply-bound-ea-clause-typed-with-sources-and-op [db: DB, sources: []DB-Source, rel: Query-Relation, clause-value: Clause, op: Physical-Op, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (if clause-value.has-source
@@ -690,7 +690,7 @@
     (query-relation-apply-bound-ea-clause-typed-with-op db rel clause-value op stats)))
 
 (defn query-relation-apply-bound-ea-clause-typed-with-sources [db: DB, sources: []DB-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
-  (query-relation-apply-bound-ea-clause-typed-with-sources-and-op db sources rel clause-value (Physical-Op []) stats))
+  (query-relation-apply-bound-ea-clause-typed-with-sources-and-op db sources rel clause-value (Physical-Op) stats))
 
 (defn resident-clause-pushdown-value [rel: Query-Relation, row: int, datom: Datom, clause-value: Clause, name: string] -> [value: Value, ok: bool]
   (let [[existing existing-ok] (query-relation-typed-row-value rel row name)]
@@ -732,7 +732,7 @@
   true)
 
 (defn append-typed-bound-db-clause-scan-row! [builder: ^Query-Relation-Builder, attrs: []string, db: DB, rel: Query-Relation, row: int, clause-value: Clause, all-current: bool, stats: ^Query-Stats] -> bool
-  (append-typed-bound-db-clause-scan-row-with-op! builder attrs db rel row clause-value all-current (Physical-Op []) stats))
+  (append-typed-bound-db-clause-scan-row-with-op! builder attrs db rel row clause-value all-current (Physical-Op) stats))
 
 (defn typed-row-matches-single-db-clause? [db: DB, sources: []DB-Source, rel: Query-Relation, row: int, clause-value: Clause] -> [matched: bool, ok: bool]
   (let [clause-db db
@@ -789,7 +789,7 @@
                                :has-typed-columns builder.typed-ok) true))))
 
 (defn query-relation-apply-bound-db-clause-typed-scan [db: DB, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
-  (query-relation-apply-bound-db-clause-typed-scan-with-op db rel clause-value (Physical-Op []) stats))
+  (query-relation-apply-bound-db-clause-typed-scan-with-op db rel clause-value (Physical-Op) stats))
 
 (defn query-relation-apply-bound-db-clause-typed-scan-with-sources-and-op [db: DB, sources: []DB-Source, rel: Query-Relation, clause-value: Clause, op: Physical-Op, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (if clause-value.has-source
@@ -804,7 +804,7 @@
     (query-relation-apply-bound-db-clause-typed-scan-with-op db rel clause-value op stats)))
 
 (defn query-relation-apply-bound-db-clause-typed-scan-with-sources [db: DB, sources: []DB-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
-  (query-relation-apply-bound-db-clause-typed-scan-with-sources-and-op db sources rel clause-value (Physical-Op []) stats))
+  (query-relation-apply-bound-db-clause-typed-scan-with-sources-and-op db sources rel clause-value (Physical-Op) stats))
 
 (defn query-relation-apply-bound-clause-typed-fallback [db: DB, sources: []DB-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (when (not rel.has-typed-columns)
@@ -923,7 +923,7 @@
                                  :has-typed-columns builder.typed-ok) true))))))
 
 (defn query-relation-apply-source-input-clause-indexed-typed [source: Value, rel: Query-Relation, clause-value: Clause] -> [out: Query-Relation, ok: bool]
-  (query-relation-apply-source-input-clause-indexed-typed-with-op source rel clause-value (Physical-Op [])))
+  (query-relation-apply-source-input-clause-indexed-typed-with-op source rel clause-value (Physical-Op)))
 
 (defn query-relation-apply-source-input-clause-typed-with-op [query: Query, inputs: []Query-Input, rel: Query-Relation, clause-value: Clause, op: Physical-Op] -> [out: Query-Relation, ok: bool]
   (when (or (not rel.has-typed-columns)
@@ -976,7 +976,7 @@
                                    :has-typed-columns builder.typed-ok) true)))))))
 
 (defn query-relation-apply-source-input-clause-typed [query: Query, inputs: []Query-Input, rel: Query-Relation, clause-value: Clause] -> [out: Query-Relation, ok: bool]
-  (query-relation-apply-source-input-clause-typed-with-op query inputs rel clause-value (Physical-Op [])))
+  (query-relation-apply-source-input-clause-typed-with-op query inputs rel clause-value (Physical-Op)))
 
 (defn query-relation-apply-bound-clause-with-op [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, clause-value: Clause, op: Physical-Op, stats: ^Query-Stats] -> Query-Relation
   (let [[typed typed-ok] (query-relation-apply-source-input-clause-typed-with-op query inputs rel clause-value op)]
@@ -1005,7 +1005,7 @@
       out))))
 
 (defn query-relation-apply-bound-clause [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> Query-Relation
-  (query-relation-apply-bound-clause-with-op db query inputs sources rel clause-value (Physical-Op []) stats))
+  (query-relation-apply-bound-clause-with-op db query inputs sources rel clause-value (Physical-Op) stats))
 
 (defn query-relation-clause-has-bound-var? [rel: Query-Relation, clause-value: Clause] -> bool
   (or (and (= clause-value.e.kind .Var)
@@ -1069,7 +1069,7 @@
         materialized (query-relation-materialized-bindings rel) :defer]
     (defer (delete seen))
     (for [tuple materialized]
-      (let [out (Binding [])
+      (let [out (Binding)
             ok true]
         (for [param index rule.params]
           (when ok
@@ -1330,8 +1330,8 @@
         typed-rows 0
         seen (set.empty string)
         view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 left-attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 left-attr (Value []))
+        low (lower-bound-index-view db view "aevt" 0 left-attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 left-attr (Value))
         all-current (all-datoms-current? db)
         i low]
     (defer (delete seen))
@@ -1342,7 +1342,7 @@
         (when (or all-current (datom-current-at? db datom-index))
           (let [[target-entity target-ok] (value-as-db-entity datom.v)]
             (when target-ok
-              (let [value (Value [])
+              (let [value (Value)
                     value-ok false]
                 (if all-current
                   (let [[found-value found-ok] (cardinality-one-value-fast-all-current db target-entity right-attr)]
@@ -1511,8 +1511,8 @@
         seen (set.empty string)
         values (make [dynamic]Value)
         view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 attr (Value []))
+        low (lower-bound-index-view db view "aevt" 0 attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 attr (Value))
         all-current (all-datoms-current? db)
         current-entity: u64 0
         has-current false
@@ -1561,10 +1561,10 @@
         typed-rows 0
         seen (set.empty string)
         view (db-index-view db .AEVT)
-        first-low (lower-bound-index-view db view "aevt" 0 first-attr (Value []))
-        first-high (upper-bound-index-view db view "aevt" 0 first-attr (Value []))
-        second-low (lower-bound-index-view db view "aevt" 0 second-attr (Value []))
-        second-high (upper-bound-index-view db view "aevt" 0 second-attr (Value []))
+        first-low (lower-bound-index-view db view "aevt" 0 first-attr (Value))
+        first-high (upper-bound-index-view db view "aevt" 0 first-attr (Value))
+        second-low (lower-bound-index-view db view "aevt" 0 second-attr (Value))
+        second-high (upper-bound-index-view db view "aevt" 0 second-attr (Value))
         all-current (all-datoms-current? db)]
     (defer (delete seen))
     (set! stats^.clause-candidates (+ stats^.clause-candidates (- first-high first-low) (- second-high second-low)))
@@ -2145,7 +2145,7 @@
 (defn typed-get-some-row-values [db: DB, rel: Query-Relation, row: int, get-some: Get-Some] -> [attr-result: Value, attr-value: Value, ok: bool]
   (let [[entity entity-ok] (query-relation-resolve-typed-entity-term db rel row get-some.e)]
     (when (not (and entity-ok (= entity.kind .Entity)))
-      (return (Value []) (Value []) false))
+      (return (Value) (Value) false))
     (for [attr get-some.attrs]
       (let [[value value-ok] (pull-attr-value db entity.entity attr)]
         (when value-ok
@@ -2153,7 +2153,7 @@
             (when (and (query-relation-typed-row-var-agrees? rel row get-some.out-attr attr-value-result)
                        (query-relation-typed-row-var-agrees? rel row get-some.out-value value))
               (return attr-value-result value true))))))
-    (return (Value []) (Value []) false)))
+    (return (Value) (Value) false)))
 
 (defn query-relation-apply-get-some-typed [db: DB, rel: Query-Relation, get-some: Get-Some] -> [out: Query-Relation, ok: bool]
   (when (not rel.has-typed-columns)
@@ -2204,7 +2204,7 @@
       (query-relation-from-source-value-clause-with-op source clause-value op))))
 
 (defn query-relation-from-source-input-clause [query: Query, inputs: []Query-Input, clause-value: Clause] -> Query-Relation
-  (query-relation-from-source-input-clause-with-op query inputs clause-value (Physical-Op [])))
+  (query-relation-from-source-input-clause-with-op query inputs clause-value (Physical-Op)))
 
 (defn query-relation-from-db-clause-binding-backed [db: DB, clause-value: Clause, source: string] -> Query-Relation
   (let [[attrs attr-sources] (clause-output-attrs clause-value source)
@@ -2212,7 +2212,7 @@
         typed-columns (relation-columns-for-attrs (slice attrs 0))
         typed-ok true
         typed-rows 0]
-    (let [scan (clause-index-scan db clause-value (Binding []))]
+    (let [scan (clause-index-scan db clause-value (Binding))]
       (defer (delete-clause-index-scan scan))
       (let [scan-index scan.index]
         (while (< scan-index scan.high)
@@ -2265,9 +2265,9 @@
   (let [[attrs attr-sources] (clause-output-attrs clause-value source)
         typed-columns (relation-columns-for-attrs (slice attrs 0))
         typed-rows 0]
-    (let [scan (clause-index-scan db clause-value (Binding []))]
+    (let [scan (clause-index-scan db clause-value (Binding))]
       (defer (delete-clause-index-scan scan))
-      (physical-op-tighten-resident-attr-value-scan! db (addr scan) clause-value op (Query-Relation []) 0)
+      (physical-op-tighten-resident-attr-value-scan! db (addr scan) clause-value op (Query-Relation) 0)
       (let [scan-index scan.index]
         (while (< scan-index scan.high)
           (let [datom-index (clause-index-scan-datom-index scan scan-index)
@@ -2298,7 +2298,7 @@
                              :has-typed-columns true) true)))
 
 (defn query-relation-from-db-clause-typed [db: DB, clause-value: Clause, source: string] -> [rel: Query-Relation, ok: bool]
-  (query-relation-from-db-clause-typed-with-op db clause-value source (Physical-Op [])))
+  (query-relation-from-db-clause-typed-with-op db clause-value source (Physical-Op)))
 
 (defn query-relation-from-db-clause-with-op [db: DB, clause-value: Clause, source: string, op: Physical-Op] -> Query-Relation
   (let [[typed typed-ok] (query-relation-from-db-clause-typed-with-op db clause-value source op)]
@@ -2329,7 +2329,7 @@
   (query-relation-empty))
 
 (defn query-relation-from-clause [db: DB, query: Query, inputs: []Query-Input, sources: []DB-Source, clause-value: Clause] -> Query-Relation
-  (query-relation-from-clause-with-op db query inputs sources clause-value (Physical-Op [])))
+  (query-relation-from-clause-with-op db query inputs sources clause-value (Physical-Op)))
 
 (defn query-stats-observe-clause-relation! [stats: ^Query-Stats, query: Query, sources: []DB-Source, clause-value: Clause, rel: Query-Relation]
   (when (not rel.has-typed-columns)

@@ -2,9 +2,9 @@
 
 (defn result-scalar [result: Result-Set] -> [value: Value, ok: bool]
   (when (= (count result.rows) 0)
-    (return (Value []) false))
+    (return (Value) false))
   (when (not (= (count result.rows[0].values) 1))
-    (return (Value []) false))
+    (return (Value) false))
   (return result.rows[0].values[0] true))
 
 (defn result-collection [result: Result-Set] -> [dynamic]Value
@@ -164,12 +164,12 @@
           (let [[values values-ok values-error] (db-read-source-pull-render-group-values source attrs pulled.a)]
             (when (not values-ok)
               (delete-owned-value (value-map-owned items))
-              (return (Value []) false values-error))
+              (return (Value) false values-error))
             (let [[many many-ok many-error] (db-read-source-pull-render-attr-is-many? source pulled (count values))]
               (when (not many-ok)
                 (delete-owned-value (value-vector-owned values))
                 (delete-owned-value (value-map-owned items))
-                (return (Value []) false many-error))
+                (return (Value) false many-error))
               (let [rendered (if many
                                (value-vector (slice values 0))
                                values[0])]
@@ -198,7 +198,7 @@
 (defn db-read-source-pull-many-results-value [source: DB-Read-Source, results: []Pull-Result] -> [value: Value, ok: bool, error: string]
   (let [[items items-ok items-error] (db-read-source-pull-many-result-values source results)]
     (when (not items-ok)
-      (return (Value []) false items-error))
+      (return (Value) false items-error))
     (defer (delete items))
     (return (value-vector (slice items 0)) true "")))
 
@@ -245,7 +245,7 @@
         [pulls pulls-ok pulls-error] (db-read-source-pull-many-results-value source (slice row.pulls 0))]
     (when (not pulls-ok)
       (delete-owned-value values)
-      (return (Value []) false pulls-error))
+      (return (Value) false pulls-error))
     (return (value-map
               ([]Value [(value-keyword (string-owned ":values")) values
                         (value-keyword (string-owned ":pulls")) pulls]))
@@ -258,14 +258,14 @@
     (for [row rows]
       (let [[row-value row-ok row-error] (db-read-source-result-row-value source row)]
         (when (not row-ok)
-          (return (Value []) false row-error))
+          (return (Value) false row-error))
         (arr.push! items row-value)))
     (return (value-vector (slice items 0)) true "")))
 
 (defn db-read-source-result-set-value [source: DB-Read-Source, result: Result-Set] -> [value: Value, ok: bool, error: string]
   (let [[rows rows-ok rows-error] (db-read-source-result-rows-value source (slice result.rows 0))]
     (when (not rows-ok)
-      (return (Value []) false rows-error))
+      (return (Value) false rows-error))
     (return (value-map
               ([]Value [(value-keyword (string-owned ":ok")) (value-bool result.ok)
                         (value-keyword (string-owned ":error")) (value-string (string-owned result.error))

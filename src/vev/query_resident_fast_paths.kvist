@@ -1,7 +1,7 @@
 (package vev)
 
 (defn query-single-attr-value-distinct-clause [query: Query] -> [clause-value: Clause, ok: bool]
-  (let [empty-clause (Clause [])]
+  (let [empty-clause (Clause)]
     (when (not (and (= (count query.find) 1)
                     (= (count query.with) 0)
                     (= (count query.inputs) 0)
@@ -68,7 +68,7 @@
     (arr.push! rows^ (Result-Row :values values :pulls pulls))))
 
 (defn query-single-entity-by-attr-value-clause [db: DB, query: Query] -> [clause-value: Clause, ok: bool]
-  (let [empty-clause (Clause [])]
+  (let [empty-clause (Clause)]
     (when (not (and (= (count query.find) 1)
                     (= (count query.with) 0)
                     (= (count query.inputs) 0)
@@ -248,7 +248,7 @@
                 (set! i (+ i 1)))
               (arr.push! distinct-values (Distinct-Attr-Value :first-e datom.e :value value)))
             (let [first-current-e: u64 0
-                  first-current-value (Value [])
+                  first-current-value (Value)
                   has-current false]
               (while (and (< i high)
                           (value-equal? db.datoms[(db-index-view-at view i)].v value))
@@ -272,8 +272,8 @@
 (defn current-entity-attr-values [db: DB, attr: string, stats: ^Query-Stats] -> (map u64 Value)
   (let [out (make (map u64 Value))
         view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 attr (Value []))]
+        low (lower-bound-index-view db view "aevt" 0 attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 attr (Value))]
     (set! stats^.clause-candidates (+ stats^.clause-candidates (- high low)))
     (let [i low]
       (while (< i high)
@@ -286,10 +286,10 @@
 
 (defn append-two-attr-entity-projection-cardinality-one-current-merge! [rows: ^[dynamic]Result-Row, seen: ^Two-Primitive-Seen, db: DB, query: Query, projection: Two-Attr-Entity-Projection, stats: ^Query-Stats]
   (let [view (db-index-view db .AEVT)
-        first-low (lower-bound-index-view db view "aevt" 0 projection.first-attr (Value []))
-        first-high (upper-bound-index-view db view "aevt" 0 projection.first-attr (Value []))
-        second-low (lower-bound-index-view db view "aevt" 0 projection.second-attr (Value []))
-        second-high (upper-bound-index-view db view "aevt" 0 projection.second-attr (Value []))
+        first-low (lower-bound-index-view db view "aevt" 0 projection.first-attr (Value))
+        first-high (upper-bound-index-view db view "aevt" 0 projection.first-attr (Value))
+        second-low (lower-bound-index-view db view "aevt" 0 projection.second-attr (Value))
+        second-high (upper-bound-index-view db view "aevt" 0 projection.second-attr (Value))
         first-i first-low
         second-i second-low]
     (set! stats^.clause-candidates (+ stats^.clause-candidates (- first-high first-low) (- second-high second-low)))
@@ -311,8 +311,8 @@
 
 (defn append-two-attr-entity-projection-cardinality-one! [rows: ^[dynamic]Result-Row, seen: ^Two-Primitive-Seen, db: DB, query: Query, projection: Two-Attr-Entity-Projection, stats: ^Query-Stats]
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 projection.first-attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 projection.first-attr (Value []))
+        low (lower-bound-index-view db view "aevt" 0 projection.first-attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 projection.first-attr (Value))
         all-current (all-datoms-current? db)]
     (if all-current
       (append-two-attr-entity-projection-cardinality-one-current-merge! rows seen db query projection stats)
@@ -333,8 +333,8 @@
   (let [out-stats stats
         seen (two-primitive-seen)
         view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 projection.first-attr (Value []))
-        high (upper-bound-index-view db view "aevt" 0 projection.first-attr (Value []))
+        low (lower-bound-index-view db view "aevt" 0 projection.first-attr (Value))
+        high (upper-bound-index-view db view "aevt" 0 projection.first-attr (Value))
         rows (make [dynamic]Result-Row 0 (- high low))]
     (defer (delete-two-primitive-seen seen))
     (set! out-stats.steps 1)
@@ -348,8 +348,8 @@
           (set! out-stats.clause-candidates (+ out-stats.clause-candidates 1))
           (when (datom-current-at? db first-index)
             (let [entity-view (db-index-view db .EAVT)
-                  second-low (lower-bound-index-view db entity-view "eavt-ea" first-datom.e projection.second-attr (Value []))
-                  second-high (upper-bound-index-view db entity-view "eavt-ea" first-datom.e projection.second-attr (Value []))
+                  second-low (lower-bound-index-view db entity-view "eavt-ea" first-datom.e projection.second-attr (Value))
+                  second-high (upper-bound-index-view db entity-view "eavt-ea" first-datom.e projection.second-attr (Value))
                   j second-low]
               (set! out-stats.clause-candidates (+ out-stats.clause-candidates (- second-high second-low)))
               (while (< j second-high)
@@ -384,8 +384,8 @@
 (defn append-entity-attr-value-projection-cardinality-one-current-merge! [rows: ^[dynamic]Result-Row, db: DB, query: Query, projection: Entity-Attr-Value-Projection, stats: ^Query-Stats, filter-low: int, filter-high: int]
   (let [filter-view (db-index-view db .AVET)
         value-view (db-index-view db .AEVT)
-        value-low (lower-bound-index-view db value-view "aevt" 0 projection.value-attr (Value []))
-        value-high (upper-bound-index-view db value-view "aevt" 0 projection.value-attr (Value []))
+        value-low (lower-bound-index-view db value-view "aevt" 0 projection.value-attr (Value))
+        value-high (upper-bound-index-view db value-view "aevt" 0 projection.value-attr (Value))
         filter-i filter-low
         value-i value-low]
     (set! stats^.clause-candidates (+ stats^.clause-candidates (- value-high value-low)))
@@ -429,8 +429,8 @@
             filter-datom db.datoms[filter-index]]
         (when (datom-current-at? db filter-index)
           (let [entity-view (db-index-view db .EAVT)
-                value-low (lower-bound-index-view db entity-view "eavt-ea" filter-datom.e projection.value-attr (Value []))
-                value-high (upper-bound-index-view db entity-view "eavt-ea" filter-datom.e projection.value-attr (Value []))
+                value-low (lower-bound-index-view db entity-view "eavt-ea" filter-datom.e projection.value-attr (Value))
+                value-high (upper-bound-index-view db entity-view "eavt-ea" filter-datom.e projection.value-attr (Value))
                 j value-low]
             (set! out-stats.clause-candidates (+ out-stats.clause-candidates (- value-high value-low)))
             (while (< j value-high)
@@ -455,8 +455,8 @@
         datoms db.datoms
         filter-i (lower-bound-index-view db filter-view "avet" 0 filter.attr filter.value)
         filter-high (upper-bound-index-view db filter-view "avet" 0 filter.attr filter.value)
-        value-i (lower-bound-index-view db value-view "aevt" 0 plan.value-attr (Value []))
-        value-high (upper-bound-index-view db value-view "aevt" 0 plan.value-attr (Value []))
+        value-i (lower-bound-index-view db value-view "aevt" 0 plan.value-attr (Value))
+        value-high (upper-bound-index-view db value-view "aevt" 0 plan.value-attr (Value))
         out (entity-int-pair-columns-with-capacity (- filter-high filter-i))]
     (while (and (< filter-i filter-high)
                 (< value-i value-high))
@@ -489,8 +489,8 @@
         first-high (upper-bound-index-view db filter-view "avet" 0 first-filter.attr first-filter.value)
         second-i (lower-bound-index-view db filter-view "avet" 0 second-filter.attr second-filter.value)
         second-high (upper-bound-index-view db filter-view "avet" 0 second-filter.attr second-filter.value)
-        value-i (lower-bound-index-view db value-view "aevt" 0 plan.value-attr (Value []))
-        value-high (upper-bound-index-view db value-view "aevt" 0 plan.value-attr (Value []))
+        value-i (lower-bound-index-view db value-view "aevt" 0 plan.value-attr (Value))
+        value-high (upper-bound-index-view db value-view "aevt" 0 plan.value-attr (Value))
         out (entity-int-pair-columns-with-capacity (- first-high first-i))]
     (while true
       (when (or (>= first-i first-high)
@@ -708,10 +708,10 @@
         first-filter-high (upper-bound-index-view db filter-view "avet" 0 first-filter.attr first-filter.value)
         second-filter-i (lower-bound-index-view db filter-view "avet" 0 second-filter.attr second-filter.value)
         second-filter-high (upper-bound-index-view db filter-view "avet" 0 second-filter.attr second-filter.value)
-        first-value-i (lower-bound-index-view db value-view "aevt" 0 plan.first-attr (Value []))
-        first-value-high (upper-bound-index-view db value-view "aevt" 0 plan.first-attr (Value []))
-        second-value-i (lower-bound-index-view db value-view "aevt" 0 plan.second-attr (Value []))
-        second-value-high (upper-bound-index-view db value-view "aevt" 0 plan.second-attr (Value []))
+        first-value-i (lower-bound-index-view db value-view "aevt" 0 plan.first-attr (Value))
+        first-value-high (upper-bound-index-view db value-view "aevt" 0 plan.first-attr (Value))
+        second-value-i (lower-bound-index-view db value-view "aevt" 0 plan.second-attr (Value))
+        second-value-high (upper-bound-index-view db value-view "aevt" 0 plan.second-attr (Value))
         out (empty-entity-string-int-triples)]
     (reset-entity-string-int-triples-capacity! (addr out) (- first-filter-high first-filter-i))
     (while true

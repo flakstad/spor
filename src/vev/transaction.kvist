@@ -9,8 +9,8 @@
 (defn tuple-schemas-containing [db: DB, attr: string] -> [dynamic]Tuple-Schema
   (let [out (make [dynamic]Tuple-Schema)
         view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value []))
-        high (upper-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value []))
+        low (lower-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value))
+        high (upper-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)
@@ -211,8 +211,8 @@
 
 (defn current-value-exists? [db: DB, entity: u64, attr: string, value: Value] -> bool
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity attr (Value []))
-        high (upper-bound-index-view db view "eavt-ea" entity attr (Value []))
+        low (lower-bound-index-view db view "eavt-ea" entity attr (Value))
+        high (upper-bound-index-view db view "eavt-ea" entity attr (Value))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)
@@ -240,8 +240,8 @@
         (set! i (+ i 1)))
       (return false)))
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity attr (Value []))
-        high (upper-bound-index-view db view "eavt-ea" entity attr (Value []))
+        low (lower-bound-index-view db view "eavt-ea" entity attr (Value))
+        high (upper-bound-index-view db view "eavt-ea" entity attr (Value))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)]
@@ -264,8 +264,8 @@
 (defn current-cas-value-str [db: DB, entity: u64, attr: string] -> string
   (let [parts (make [dynamic]string) :defer
         view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity attr (Value []))
-        high (upper-bound-index-view db view "eavt-ea" entity attr (Value []))
+        low (lower-bound-index-view db view "eavt-ea" entity attr (Value))
+        high (upper-bound-index-view db view "eavt-ea" entity attr (Value))
         i low]
     (while (< i high)
       (let [datom-index (db-index-view-at view i)
@@ -360,7 +360,7 @@
                (= data.a attr))
       (let [[value value-ok _] (resolve-tx-data-value db data)]
         (return value value-ok))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn tuple-schema-already-seen? [schemas: []string, attr: string] -> bool
   (for [schema-attr schemas]
@@ -620,10 +620,10 @@
 
 (defn latest-attr-value [db: DB, entity: u64, attr: string] -> [value: Value, ok: bool]
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity attr (Value []))
-        high (upper-bound-index-view db view "eavt-ea" entity attr (Value []))
+        low (lower-bound-index-view db view "eavt-ea" entity attr (Value))
+        high (upper-bound-index-view db view "eavt-ea" entity attr (Value))
         latest-index -1
-        latest (Value [])]
+        latest (Value)]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)]
         (when (and (datom-current-at? db datom-index)
@@ -705,25 +705,25 @@
   (let [view (db-index-view db .EAVT)
         [index-pos pos-ok] (eavt-entity-attr-position db entity attr)]
     (when (not pos-ok)
-      (return (Value []) false))
+      (return (Value) false))
     (let [datom-index (db-index-view-at view index-pos)
           datom db.datoms[datom-index]]
       (when (and (= datom.e entity)
                  (= datom.a attr)
                  (datom-current-at? db datom-index))
         (return datom.v true))
-      (return (Value []) false))))
+      (return (Value) false))))
 
 (defn cardinality-one-value-fast-all-current [db: DB, entity: u64, attr: string] -> [value: Value, ok: bool]
   (let [view (db-index-view db .EAVT)
         [index-pos pos-ok] (eavt-entity-attr-position db entity attr)]
     (when (not pos-ok)
-      (return (Value []) false))
+      (return (Value) false))
     (let [datom db.datoms[(db-index-view-at view index-pos)]]
       (when (and (= datom.e entity)
                  (= datom.a attr))
         (return datom.v true))
-      (return (Value []) false))))
+      (return (Value) false))))
 
 (defn current-cardinality-one-value-matches-fast? [db: DB, entity: u64, attr: string, expected: Value] -> bool
   (let [[value ok] (current-cardinality-one-value-fast db entity attr)]
@@ -745,7 +745,7 @@
           (arr.push! items (value-nil)))))
     (when (not any)
       (delete items)
-      (return (Value []) false))
+      (return (Value) false))
     (let [out (value-vector (slice items 0))]
       (delete items)
       (return out true))))
@@ -792,15 +792,15 @@
 
 (defn db-has-tuple-schema? [db: DB] -> bool
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value []))
-        high (upper-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value []))]
+        low (lower-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value))
+        high (upper-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value))]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)]
         (when (datom-current-at? db datom-index)
           (return true)))))
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 ":db/valueType" (Value []))
-        high (upper-bound-index-view db view "aevt" 0 ":db/valueType" (Value []))]
+        low (lower-bound-index-view db view "aevt" 0 ":db/valueType" (Value))
+        high (upper-bound-index-view db view "aevt" 0 ":db/valueType" (Value))]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)
             datom db.datoms[datom-index]]
@@ -850,14 +850,14 @@
 
 (defn tx-map-db-id [map-value: Value] -> [value: Value, ok: bool]
   (when (not (= map-value.kind .Map))
-    (return (Value []) false))
+    (return (Value) false))
   (let [index 0]
     (while (< (+ index 1) (count map-value.items))
       (when (and (= map-value.items[index].kind .Keyword)
                  (= map-value.items[index].text ":db/id"))
         (return map-value.items[(+ index 1)] true))
       (set! index (+ index 2))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn nested-entity-ref-data [map-value: Value, generated-tempid: string] -> [data: Tx-Data, ok: bool, error: string]
   (let [[id-value has-id] (tx-map-db-id map-value)]
@@ -875,8 +875,8 @@
           (return (Tx-Data :lookup-attr id-value.items[0].text
                             :lookup-value id-value.items[1]
                             :has-lookup-ref true) true "")
-          (return (Tx-Data []) false "nested map :db/id vector must be a lookup ref"))
-       (return (Tx-Data []) false "nested map :db/id must be int, entity, tempid string, ident keyword, or lookup ref"))))
+          (return (Tx-Data) false "nested map :db/id vector must be a lookup ref"))
+       (return (Tx-Data) false "nested map :db/id must be int, entity, tempid string, ident keyword, or lookup ref"))))
 
 (defn tx-add-from-entity-data [entity: Tx-Data, attr: string, value: Value] -> Tx-Data
   (cond
@@ -1553,8 +1553,8 @@
 
 (defn validate-tuple-schema [db: DB] -> [ok: bool, error: string]
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 ":db/valueType" (Value []))
-        high (upper-bound-index-view db view "aevt" 0 ":db/valueType" (Value []))]
+        low (lower-bound-index-view db view "aevt" 0 ":db/valueType" (Value))
+        high (upper-bound-index-view db view "aevt" 0 ":db/valueType" (Value))]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)
             datom db.datoms[datom-index]]
@@ -1568,8 +1568,8 @@
                 (when (= (count tuple-attrs) 0)
                   (return false "invalid tuple schema")))))))))
   (let [view (db-index-view db .AEVT)
-        low (lower-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value []))
-        high (upper-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value []))]
+        low (lower-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value))
+        high (upper-bound-index-view db view "aevt" 0 ":db/tupleAttrs" (Value))]
     (for [i (arr.range low high)]
       (let [datom-index (db-index-view-at view i)
             datom db.datoms[datom-index]]

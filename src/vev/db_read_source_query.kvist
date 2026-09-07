@@ -181,7 +181,7 @@
     (db-read-source-query-relation-apply-relation-value-source-clause-with-op source-value rel clause-value op stats)))
 
 (defn db-read-source-query-relation-apply-relation-value-clause [sources: []DB-Read-Named-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
-  (db-read-source-query-relation-apply-relation-value-clause-with-op sources rel clause-value (Physical-Op []) stats))
+  (db-read-source-query-relation-apply-relation-value-clause-with-op sources rel clause-value (Physical-Op) stats))
 
 (defn db-read-source-query-relation-apply-primary-relation-value-clause-with-op [source: DB-Read-Source, rel: Query-Relation, clause-value: Clause, op: Physical-Op, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (when (not (= source.kind .Relation-Value))
@@ -189,7 +189,7 @@
   (db-read-source-query-relation-apply-relation-value-source-clause-with-op source.relation-value rel clause-value op stats))
 
 (defn db-read-source-query-relation-apply-primary-relation-value-clause [source: DB-Read-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
-  (db-read-source-query-relation-apply-primary-relation-value-clause-with-op source rel clause-value (Physical-Op []) stats))
+  (db-read-source-query-relation-apply-primary-relation-value-clause-with-op source rel clause-value (Physical-Op) stats))
 
 (defn db-read-source-query-relation-apply-mixed-source-clause-typed [source: DB-Read-Source, sources: []DB-Read-Named-Source, rel: Query-Relation, clause-value: Clause, stats: ^Query-Stats] -> [out: Query-Relation, ok: bool]
   (let [[_ relation-source-ok] (db-read-source-relation-value-source-for-clause sources clause-value)]
@@ -235,7 +235,7 @@
       (do
         (when (not (query-relation-predicate-can-run-typed? rel predicates[step.index] registry))
           (return (query-relation-empty) false))
-        (let [out (query-relation-filter-predicate (DB []) rel predicates[step.index] registry)]
+        (let [out (query-relation-filter-predicate (DB) rel predicates[step.index] registry)]
           (return out out.has-typed-columns)))
     (= step.kind .Function)
       (let [function functions[step.index]]
@@ -266,7 +266,7 @@
       (return (query-relation-empty) false))
     (when (not (query-relation-predicate-can-run-typed? rel predicate registry))
       (return (query-relation-empty) false))
-    (let [filtered (query-relation-filter-predicate (DB []) rel predicate registry)]
+    (let [filtered (query-relation-filter-predicate (DB) rel predicate registry)]
       (return filtered filtered.has-typed-columns))))
 
 (defn db-read-source-query-relation-apply-physical-function-op [source: DB-Read-Source, sources: []DB-Read-Named-Source, rel: Query-Relation, op: Physical-Op, query-value: Query, registry: []Native-Query-Fn] -> [out: Query-Relation, ok: bool]

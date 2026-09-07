@@ -428,20 +428,20 @@
   (for [input-name index (slice query.inputs 0)]
     (when (= input-name name)
       (when (>= index (count inputs))
-        (return (Value []) false))
+        (return (Value) false))
       (let [input inputs[index]]
         (when (= input.kind .Scalar)
           (return input.value true))
-        (return (Value []) false))))
-  (return (Value []) false))
+        (return (Value) false))))
+  (return (Value) false))
 
 (defn query-input-by-name [query: Query, inputs: []Query-Input, name: string] -> [input: Query-Input, ok: bool]
   (for [input-name index (slice query.inputs 0)]
     (when (= input-name name)
       (when (>= index (count inputs))
-        (return (Query-Input []) false))
+        (return (Query-Input) false))
       (return inputs[index] true)))
-  (return (Query-Input []) false))
+  (return (Query-Input) false))
 
 (defn query-threshold-term-int [query: Query, inputs: []Query-Input, term: Term] -> [value: i64, ok: bool]
   (when (= term.kind .Value)
@@ -539,7 +539,7 @@
           left-entity-var ""
           join-attr ""
           left-filter-attr ""
-          left-filter-value (Value [])
+          left-filter-value (Value)
           output-attr ""
           right-join-found false
           left-join-found false

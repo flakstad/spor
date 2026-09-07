@@ -100,19 +100,19 @@
 
 (defn pull-attr-value [db: DB, entity: u64, attr: string] -> [value: Value, ok: bool]
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity attr (Value []))
-        high (upper-bound-index-view db view "eavt-ea" entity attr (Value []))]
+        low (lower-bound-index-view db view "eavt-ea" entity attr (Value))
+        high (upper-bound-index-view db view "eavt-ea" entity attr (Value))]
     (for [index (arr.range low high)]
       (let [datom-index (db-index-view-at view index)
             datom db.datoms[datom-index]]
         (when (datom-current-at? db datom-index)
           (return datom.v true)))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn pull-attr-entity-target [db: DB, entity: u64, attr: string] -> [target: u64, ok: bool, many: bool]
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity attr (Value []))
-        high (upper-bound-index-view db view "eavt-ea" entity attr (Value []))
+        low (lower-bound-index-view db view "eavt-ea" entity attr (Value))
+        high (upper-bound-index-view db view "eavt-ea" entity attr (Value))
         found-target: u64 0
         found false]
     (for [index (arr.range low high)]
@@ -258,8 +258,8 @@
                                 :v (value-entity entity)
                                 :attrs (make [dynamic]Pull-Attr))))
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt" entity "" (Value []))
-        high (upper-bound-index-view db view "eavt" entity "" (Value []))]
+        low (lower-bound-index-view db view "eavt" entity "" (Value))
+        high (upper-bound-index-view db view "eavt" entity "" (Value))]
     (for [index (arr.range low high)]
       (let [datom-index (db-index-view-at view index)
             datom db.datoms[datom-index]]
@@ -318,7 +318,7 @@
   (= depth 2147483647))
 
 (defn pull-simple-unbounded-forward-recursion-spec [pattern: []Pull-Spec] -> [spec: Pull-Spec, ok: bool]
-  (let [candidate (Pull-Spec [])
+  (let [candidate (Pull-Spec)
         found false]
     (for [spec index pattern]
       (if (and spec.has-recursion
@@ -327,13 +327,13 @@
                (not (reverse-attr? spec.a)))
         (do
           (when (or found (not (= index (- (count pattern) 1))))
-            (return (Pull-Spec []) false))
+            (return (Pull-Spec) false))
           (set! candidate spec)
           (set! found true))
         (when (or spec.has-recursion
                   (> (count spec.pattern) 0)
                   (= spec.a "*"))
-          (return (Pull-Spec []) false))))
+          (return (Pull-Spec) false))))
     (return candidate found)))
 
 (defn pull-flat-pattern-except-attr-with-fns [db: DB, entity: u64, pattern: []Pull-Spec, attr: string, seen: ^[dynamic]u64, seen-counts: (ptr (map u64 int)), registry: []Native-Query-Fn] -> [dynamic]Pull-Attr
@@ -405,7 +405,7 @@
   (for [child children]
     (when (= child.a attr)
       (return child.v true)))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn pull-spec-transform-attr-with-fns [spec: Pull-Spec, attr: Pull-Attr, registry: []Native-Query-Fn] -> Pull-Attr
   (when (not spec.has-xform)
@@ -458,8 +458,8 @@
 
 (defn pull-forward-attr-with-fns! [out: ^[dynamic]Pull-Attr, db: DB, entity: u64, spec: Pull-Spec, root: []Pull-Spec, seen-entities: ^[dynamic]u64, seen-counts: (ptr (map u64 int)), registry: []Native-Query-Fn] -> bool
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity spec.a (Value []))
-        high (upper-bound-index-view db view "eavt-ea" entity spec.a (Value []))
+        low (lower-bound-index-view db view "eavt-ea" entity spec.a (Value))
+        high (upper-bound-index-view db view "eavt-ea" entity spec.a (Value))
         limit (pull-limit spec)
         seen 0
         found false]
@@ -614,8 +614,8 @@
   (arr.push! visits^ (pull-visit-wildcard entity))
   (let [seen-attrs (make [dynamic]string) :defer
         view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt" entity "" (Value []))
-        high (upper-bound-index-view db view "eavt" entity "" (Value []))]
+        low (lower-bound-index-view db view "eavt" entity "" (Value))
+        high (upper-bound-index-view db view "eavt" entity "" (Value))]
     (for [index (arr.range low high)]
       (let [datom-index (db-index-view-at view index)
             datom db.datoms[datom-index]]
@@ -660,8 +660,8 @@
   (when (and spec.has-recursion (<= spec.recursion-depth 0))
     (return))
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt-ea" entity spec.a (Value []))
-        high (upper-bound-index-view db view "eavt-ea" entity spec.a (Value []))
+        low (lower-bound-index-view db view "eavt-ea" entity spec.a (Value))
+        high (upper-bound-index-view db view "eavt-ea" entity spec.a (Value))
         limit (pull-limit spec)
         seen 0]
     (for [index (arr.range low high)]
@@ -713,8 +713,8 @@
 
 (defn entity-exists? [db: DB, e: u64] -> bool
   (let [view (db-index-view db .EAVT)
-        low (lower-bound-index-view db view "eavt" e "" (Value []))
-        high (upper-bound-index-view db view "eavt" e "" (Value []))]
+        low (lower-bound-index-view db view "eavt" e "" (Value))
+        high (upper-bound-index-view db view "eavt" e "" (Value))]
     (for [index (arr.range low high)]
       (let [datom-index (db-index-view-at view index)]
       (when (datom-current-at? db datom-index)
@@ -747,8 +747,8 @@
     (when (not entity.found)
       (return out))
     (let [view (db-index-view entity.db .EAVT)
-          low (lower-bound-index-view entity.db view "eavt-ea" entity.e attr (Value []))
-          high (upper-bound-index-view entity.db view "eavt-ea" entity.e attr (Value []))]
+          low (lower-bound-index-view entity.db view "eavt-ea" entity.e attr (Value))
+          high (upper-bound-index-view entity.db view "eavt-ea" entity.e attr (Value))]
       (for [index (arr.range low high)]
         (let [datom-index (db-index-view-at view index)
               datom entity.db.datoms[datom-index]]
@@ -780,20 +780,20 @@
 
 (defn entity-first-forward-value [entity: Entity, attr: string] -> [value: Value, ok: bool]
   (when (not entity.found)
-    (return (Value []) false))
+    (return (Value) false))
   (let [view (db-index-view entity.db .EAVT)
-        low (lower-bound-index-view entity.db view "eavt-ea" entity.e attr (Value []))
-        high (upper-bound-index-view entity.db view "eavt-ea" entity.e attr (Value []))]
+        low (lower-bound-index-view entity.db view "eavt-ea" entity.e attr (Value))
+        high (upper-bound-index-view entity.db view "eavt-ea" entity.e attr (Value))]
     (for [index (arr.range low high)]
       (let [datom-index (db-index-view-at view index)
             datom entity.db.datoms[datom-index]]
         (when (datom-current-at? entity.db datom-index)
           (return datom.v true)))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn entity-first-reverse-value [entity: Entity, attr: string] -> [value: Value, ok: bool]
   (when (not entity.found)
-    (return (Value []) false))
+    (return (Value) false))
   (let [forward-attr (forward-attr-for-reverse attr)
         ref-value (value-entity entity.e)
         view (db-index-view entity.db .VAET)
@@ -805,13 +805,13 @@
         (when (and (= datom.a forward-attr)
                    (datom-current-at? entity.db datom-index))
           (return (value-entity datom.e) true)))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn entity-first-value [entity: Entity, attr: string] -> [value: Value, ok: bool]
   (when (= attr ":db/id")
     (if entity.found
       (return (value-entity entity.e) true)
-      (return (Value []) false)))
+      (return (Value) false)))
   (if (reverse-attr? attr)
     (entity-first-reverse-value entity attr)
     (entity-first-forward-value entity attr)))
@@ -879,7 +879,7 @@
               :limit 0
               :has-limit false
               :has-default false
-              :default-value (Value [])
+              :default-value (Value)
               :has-alias false
               :alias ""
               :alias-kind .Keyword
@@ -903,7 +903,7 @@
               :limit 0
               :has-limit false
               :has-default false
-              :default-value (Value [])
+              :default-value (Value)
               :has-alias false
               :alias ""
               :alias-kind .Keyword

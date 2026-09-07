@@ -1484,9 +1484,9 @@
       (let [empty-ops ([]Tx-Op [])
             [value value-ok value-skip value-error] (shared-write-state-resolve-source-simple-value state source tx-data empty-ops data tempid-index tempids next-e declared-schema? resolve-index)]
         (if value-skip
-          (return (Value []) false "")
+          (return (Value) false "")
           (return value value-ok value-error)))))
-  (return (Value []) false ""))
+  (return (Value) false ""))
 
 (defn shared-write-state-resolved-local-tuple-tempid-entity [state: ^Shared-Write-State, source: DB-Read-Source, tx-data: []Tx-Data, tempid: string, attrs: []string, values: []Value, tempid-index: (ptr (map string u64)), tempids: ^[dynamic]Tempid, next-e: ^u64, declared-schema?: bool :default true, resolve-index: (ptr Source-Tx-Resolve-Index) :default nil] -> [e: u64, ok: bool, conflict: bool, error: string]
   (let [found: u64 0
@@ -1626,9 +1626,9 @@
                    (= op.a attr))
           (if (= op.kind .Add)
             (return (value-owned op.v) true false)
-            (return (Value []) true true))))
+            (return (Value) true true))))
       (set! index (- index 1))))
-  (return (Value []) false false))
+  (return (Value) false false))
 
 (defn shared-write-state-source-tuple-value-for-entity [source: DB-Read-Source, ops: []Tx-Op, entity: u64, attrs: []string] -> [value: Value, ok: bool, has-value: bool, error: string]
   (let [items (make [dynamic]Value 0 (count attrs))
@@ -1649,7 +1649,7 @@
                 (for [item items]
                   (delete-owned-value item))
                 (delete items)
-                (return (Value []) false false source-error))
+                (return (Value) false false source-error))
               (if source-ok
                 (do
                   (set! any true)
@@ -1657,7 +1657,7 @@
                 (arr.push! items (value-nil)))))))
     (when (not any)
       (delete items)
-      (return (Value []) true false ""))
+      (return (Value) true false ""))
     (let [out (value-vector (slice items 0))]
       (delete items)
       (return out true true ""))))
@@ -1863,9 +1863,9 @@
                (shared-write-state-tx-data-same-entity? candidate data))
       (let [[value value-ok value-skip value-error] (shared-write-state-resolve-source-simple-value state source tx-data ops data tempid-index tempids next-e)]
         (if value-skip
-          (return (Value []) false "")
+          (return (Value) false "")
           (return value value-ok value-error)))))
-  (return (Value []) false ""))
+  (return (Value) false ""))
 
 (defn shared-write-state-resolved-candidate-entity [candidate: Tx-Data, tempid-index: (ptr (map string u64))] -> [entity: u64, ok: bool]
   (if candidate.has-tempid
@@ -2576,14 +2576,14 @@
 (defn shared-write-state-from-source-metadata [source: DB-Read-Source] -> [state: Shared-Write-State, ok: bool, error: string]
   (let [[schema-ref schema-unique schema-unique-identity schema-ok schema-error] (db-read-source-schema-sets source)]
     (when (not schema-ok)
-      (return (Shared-Write-State []) false schema-error))
+      (return (Shared-Write-State) false schema-error))
     (let [[schema-value-types schema-cardinality-many planning-schema-ok planning-schema-error]
             (db-read-source-schema-planning-projection source)]
       (when (not planning-schema-ok)
         (delete-owned-string-set schema-ref)
         (delete-owned-string-set schema-unique)
         (delete-owned-string-set schema-unique-identity)
-        (return (Shared-Write-State []) false planning-schema-error))
+        (return (Shared-Write-State) false planning-schema-error))
     (let [[has-tuple has-tuple-ok has-tuple-error] (db-read-source-has-tuple-schema? source)]
       (when (not has-tuple-ok)
         (delete-shared-write-state-schema-value-types schema-value-types)
@@ -2591,7 +2591,7 @@
         (delete-owned-string-set schema-ref)
         (delete-owned-string-set schema-unique)
         (delete-owned-string-set schema-unique-identity)
-        (return (Shared-Write-State []) false has-tuple-error))
+        (return (Shared-Write-State) false has-tuple-error))
       (let [[next-tx next-tx-ok next-tx-error] (db-read-source-next-tx source)]
         (when (not next-tx-ok)
           (delete-shared-write-state-schema-value-types schema-value-types)
@@ -2599,7 +2599,7 @@
           (delete-owned-string-set schema-ref)
           (delete-owned-string-set schema-unique)
           (delete-owned-string-set schema-unique-identity)
-          (return (Shared-Write-State []) false next-tx-error))
+          (return (Shared-Write-State) false next-tx-error))
         (let [[next-entity next-entity-ok next-entity-error] (db-read-source-next-entity-id source)]
           (when (not next-entity-ok)
             (delete-shared-write-state-schema-value-types schema-value-types)
@@ -2607,7 +2607,7 @@
             (delete-owned-string-set schema-ref)
             (delete-owned-string-set schema-unique)
             (delete-owned-string-set schema-unique-identity)
-            (return (Shared-Write-State []) false next-entity-error))
+            (return (Shared-Write-State) false next-entity-error))
           (return (Shared-Write-State :conn (Conn :next-tx next-tx
                                                      :listeners (make [dynamic]Tx-Listener))
                                       :owns-resident-db false
@@ -2636,7 +2636,7 @@
     (let [[next-tx next-tx-ok next-tx-error] (shared-db-snapshot-next-tx base)]
       (when (not next-tx-ok)
         (delete-shared-write-state-metadata out-state)
-        (return (Shared-Write-State []) false next-tx-error))
+        (return (Shared-Write-State) false next-tx-error))
       (set! out-state.conn.next-tx next-tx)
       (return out-state true ""))))
 
@@ -2648,7 +2648,7 @@
           (shared-write-state-from-shared-snapshot-metadata snapshot)]
     (when (not state-ok)
       (delete-shared-db-snapshot snapshot)
-      (return (Shared-Conn []) false state-error))
+      (return (Shared-Conn) false state-error))
     (return (Shared-Conn :write state :snapshot snapshot :chunk-size size)
             true
             "")))
@@ -2660,7 +2660,7 @@
   ;; candidate: failure can discard the candidate while leaving the live
   ;; connection unchanged; success can install it atomically after durability.
   (when conn.write.owns-resident-db
-    (return (Shared-Conn []) false
+    (return (Shared-Conn) false
             "cannot cheaply clone a materialized shared connection"))
   (let [state
           (Shared-Write-State
@@ -2731,7 +2731,7 @@
 (defn shared-conn-drop-stale-resident! [conn: ^Shared-Conn]
   (when conn^.write.owns-resident-db
     (delete-resident-db conn^.write.conn.db))
-  (set! conn^.write.conn.db (DB []))
+  (set! conn^.write.conn.db (DB))
   (set! conn^.write.owns-resident-db false)
   (set! conn^.write.resident-current false))
 
@@ -2835,24 +2835,24 @@
         source (shared-db-snapshot-read-source (addr base))
         [state state-ok state-error] (shared-write-state-from-shared-snapshot-metadata base)]
     (when (not state-ok)
-      (return (Shared-DB-Snapshot []) false false state-error))
+      (return (Shared-DB-Snapshot) false false state-error))
     (let [resolved (shared-write-state-resolve-tx-data-source-only (addr state) source tx-data)]
       (when (not resolved.ok)
         (delete-resolved-tx resolved)
         (delete-shared-write-state-metadata state)
-        (return (Shared-DB-Snapshot []) false true ""))
+        (return (Shared-DB-Snapshot) false true ""))
       (let [compacted (compact-redundant-add-ops (slice resolved.ops 0))
             [eligible new-entities-after-existing eligible-ok eligible-error] (source-append-ops-eligible? source state (slice compacted 0))]
         (when (not eligible-ok)
           (delete compacted)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Shared-DB-Snapshot []) false false eligible-error))
+          (return (Shared-DB-Snapshot) false false eligible-error))
         (when (not eligible)
           (delete compacted)
           (delete-resolved-tx resolved)
           (delete-shared-write-state-metadata state)
-          (return (Shared-DB-Snapshot []) false true ""))
+          (return (Shared-DB-Snapshot) false true ""))
         (let [appended (source-append-datoms-from-ops (slice compacted 0) state.conn.next-tx)
               next-snapshot (shared-db-snapshot-with-appended-datoms-direct base appended base.datoms.count new-entities-after-existing)]
           (delete-owned-datoms appended)
@@ -2976,7 +2976,7 @@
 
 (defn shared-conn-transact [conn: ^Shared-Conn, tx-data: []Tx-Data] -> Tx-Report
   (when (not (shared-conn-ensure-resident! conn))
-    (return (failed-tx-report (DB []) "failed to materialize shared resident DB")))
+    (return (failed-tx-report (DB) "failed to materialize shared resident DB")))
   (let [before (shared-write-state-before-db (addr conn^.write))
         tx (shared-write-state-next-tx (addr conn^.write))
         source (shared-conn-read-source conn)
@@ -3010,7 +3010,7 @@
 
 (defn shared-conn-transact-direct [conn: ^Shared-Conn, tx-data: []Tx-Data] -> Tx-Report
   (when (not (shared-conn-ensure-resident! conn))
-    (return (failed-tx-report (DB []) "failed to materialize shared resident DB")))
+    (return (failed-tx-report (DB) "failed to materialize shared resident DB")))
   (let [report (transact-tx-data (addr conn^.write.conn) tx-data)]
     (when (not report.ok)
       (return report))
@@ -3022,7 +3022,7 @@
 
 (defn shared-conn-transact-with-string-fns [conn: ^Shared-Conn, tx-data: []Tx-Data, registry: []Tx-Fn-String] -> Tx-Report
   (when (not (shared-conn-ensure-resident! conn))
-    (return (failed-tx-report (DB []) "failed to materialize shared resident DB")))
+    (return (failed-tx-report (DB) "failed to materialize shared resident DB")))
   (let [report (transact-tx-data-with-string-fns (addr conn^.write.conn) tx-data registry)]
     (when (not report.ok)
       (return report))
@@ -3034,7 +3034,7 @@
 
 (defn shared-conn-transact-with-source-string-fns [conn: ^Shared-Conn, tx-data: []Tx-Data, registry: []Tx-Fn-Source-String] -> Tx-Report
   (when (not (shared-conn-ensure-resident! conn))
-    (return (failed-tx-report (DB []) "failed to materialize shared resident DB")))
+    (return (failed-tx-report (DB) "failed to materialize shared resident DB")))
   (let [before (shared-write-state-before-db (addr conn^.write))
         tx (shared-write-state-next-tx (addr conn^.write))
         source (shared-conn-read-source conn)
@@ -3098,27 +3098,27 @@
 
 (defn shared-conn-transact-report-source-append [conn: ^Shared-Conn, tx-data: []Tx-Data] -> [report: Shared-Tx-Report, used: bool]
   (when (> (count conn^.write.conn.listeners) 0)
-    (return (Shared-Tx-Report []) false))
+    (return (Shared-Tx-Report) false))
   (let [source (shared-conn-read-source conn)
         tx (shared-write-state-next-tx (addr conn^.write))
         resolved (shared-write-state-resolve-tx-data-source-only (addr conn^.write) source tx-data)]
     (when (not resolved.ok)
       (delete-resolved-tx resolved)
-      (return (Shared-Tx-Report []) false))
+      (return (Shared-Tx-Report) false))
     (let [compacted (compact-redundant-add-ops (slice resolved.ops 0))]
       (for [op compacted]
         (when (and (= op.e tx)
                    (= op.a ":db/txInstant"))
           (delete compacted)
           (delete-resolved-tx resolved)
-          (return (Shared-Tx-Report []) false)))
+          (return (Shared-Tx-Report) false)))
       (arr.push! compacted (tx-add tx ":db/txInstant" (current-instant)))
       (let [[eligible new-entities-after-existing eligible-ok _] (source-append-ops-eligible? source conn^.write (slice compacted 0))]
         (when (or (not eligible-ok)
                   (not eligible))
           (delete compacted)
           (delete-resolved-tx resolved)
-          (return (Shared-Tx-Report []) false))
+          (return (Shared-Tx-Report) false))
         (let [start-index conn^.snapshot.datoms.count
               appended (source-append-datoms-from-ops (slice compacted 0) tx)
               before-snapshot (retain-shared-db-snapshot conn^.snapshot)

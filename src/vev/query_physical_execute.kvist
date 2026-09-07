@@ -199,7 +199,7 @@
   (for [binding bindings]
     (when (= binding.name name)
       (return binding.term true)))
-  (return (Term []) false))
+  (return (Term) false))
 
 (defn rule-inline-binding-add! [bindings: ^[dynamic]Rule-Inline-Binding, name: string, term: Term]
   (arr.push! bindings^ (Rule-Inline-Binding :name name :term term)))
@@ -290,7 +290,7 @@
 
 (defn query-source-inline-simple-rules [query-value: Query] -> [out: Query, ok: bool]
   (when (= (count query-value.rule-calls) 0)
-    (return (Query []) false))
+    (return (Query) false))
   (let [index (rule-name-index-build (slice query-value.rules 0))
         deps (rules-dependency-graph-indexed (slice query-value.rules 0) (slice index 0))
         clauses (make [dynamic]Clause)
@@ -335,14 +335,14 @@
 	                (delete function-clauses)
 	                (delete rule-calls)
 	                (delete steps)
-	                (return (Query []) false)))))))
+	                (return (Query) false)))))))
     (when (not changed)
       (delete clauses)
       (delete predicates)
       (delete function-clauses)
       (delete rule-calls)
       (delete steps)
-      (return (Query []) false))
+      (return (Query) false))
     (let [out-query (query (slice query-value.find 0)
                            (slice query-value.with 0)
                            (slice query-value.inputs 0)

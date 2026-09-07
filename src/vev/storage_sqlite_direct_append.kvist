@@ -199,7 +199,7 @@
           ;; A general small transaction may merge into every public order.
           ;; Publishing a four-run delta is correct for append, replacement,
           ;; and retraction alike and avoids serializing the complete root.
-          modes (SQLite-Index-Append-Modes [])
+          modes (SQLite-Index-Append-Modes)
           plan
             (sqlite-durable-append-plan-from-modes
               (slice report.tx-data 0) start-index modes
@@ -244,7 +244,7 @@
     (let [offset (- entry start-index)]
       (when (or (< offset 0)
                 (>= offset (count appended)))
-        (return (Datom []) false "appended datom index out of range"))
+        (return (Datom) false "appended datom index out of range"))
       (return (datom-owned appended[offset]) true ""))))
 
 (defn source-appended-datom-index-less? [source: DB-Read-Source, appended: []Datom, start-index: int, order: string, left: int, right: int] -> [less: bool, ok: bool, error: string]
@@ -348,7 +348,7 @@
   (let [added (sorted-appended-datom-slice-indexes appended start-index order) :defer
         pending (make [dynamic]int) :defer
         leaf-ids (make [dynamic]u64) :defer
-        state (Persist-Index-Merge-State [])
+        state (Persist-Index-Merge-State)
         left 0
         right 0]
     (while (and (< left (db-index-view-count view))
@@ -442,7 +442,7 @@
       (when (not (= profile nil))
         (set! profile^.append-root-check-us (+ profile^.append-root-check-us (sqlite-profile-elapsed-us check-start))))
       (when (not appendable-ok)
-        (return (SQLite-Index-Root-Publish []) false appendable-error))
+        (return (SQLite-Index-Root-Publish) false appendable-error))
       (if appendable
         (let [persist-start (time.now)
               [chunk-id manifest-id chunk-ok chunk-error] (persist-source-append-index-delta-root-sqlite-handle-with-stmts handle stmts basis-tx index-name view (slice added 0) appended start-index)]
@@ -513,7 +513,7 @@
     [stmts stmts-ok stmts-error] (sqlite-index-write-stmts-open handle)]
     (when (not stmts-ok)
       (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
-      (return (SQLite-Index-Append-Modes []) false stmts-error))
+      (return (SQLite-Index-Append-Modes) false stmts-error))
     (defer (sqlite-index-write-stmts-close stmts))
     (let [sort-start (time.now)
           [eavt-added aevt-added avet-added vaet-added] (sorted-appended-indexes-for-persist appended start-index)]
@@ -527,25 +527,25 @@
       (set! profile^.append-eavt-root-build-us (+ profile^.append-eavt-root-build-us (sqlite-profile-elapsed-us eavt-start)))
       (when (not eavt-ok)
         (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
-        (return (SQLite-Index-Append-Modes []) false eavt-error))
+        (return (SQLite-Index-Append-Modes) false eavt-error))
       (let [aevt-start (time.now)
             [aevt-publish aevt-ok aevt-error] (persist-source-append-index-root-sqlite-handle-with-added-stmts handle (addr stmts) basis-tx ":aevt" source aevt-view (slice aevt-added 0) appended start-index "aevt" false profile)]
       (set! profile^.append-aevt-root-build-us (+ profile^.append-aevt-root-build-us (sqlite-profile-elapsed-us aevt-start)))
       (when (not aevt-ok)
         (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
-        (return (SQLite-Index-Append-Modes []) false aevt-error))
+        (return (SQLite-Index-Append-Modes) false aevt-error))
       (let [avet-start (time.now)
             [avet-publish avet-ok avet-error] (persist-source-append-index-root-sqlite-handle-with-added-stmts handle (addr stmts) basis-tx ":avet" source avet-view (slice avet-added 0) appended start-index "avet" false profile)]
         (set! profile^.append-avet-root-build-us (+ profile^.append-avet-root-build-us (sqlite-profile-elapsed-us avet-start)))
         (when (not avet-ok)
           (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
-          (return (SQLite-Index-Append-Modes []) false avet-error))
+          (return (SQLite-Index-Append-Modes) false avet-error))
         (let [vaet-start (time.now)
               [vaet-publish vaet-ok vaet-error] (persist-source-append-index-root-sqlite-handle-with-added-stmts handle (addr stmts) basis-tx ":vaet" source vaet-view (slice vaet-added 0) appended start-index "vaet" false profile)]
           (set! profile^.append-vaet-root-build-us (+ profile^.append-vaet-root-build-us (sqlite-profile-elapsed-us vaet-start)))
           (when (not vaet-ok)
             (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
-            (return (SQLite-Index-Append-Modes []) false vaet-error))
+            (return (SQLite-Index-Append-Modes) false vaet-error))
           (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
           (let [publish-start (time.now)
                 publishes (sqlite-index-root-publish-set eavt-publish aevt-publish avet-publish vaet-publish)
@@ -568,25 +568,25 @@
       (set! profile^.append-eavt-root-build-us (+ profile^.append-eavt-root-build-us (sqlite-profile-elapsed-us eavt-start)))
       (when (not eavt-ok)
         (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
-        (return (SQLite-Durable-Append-Publication []) false eavt-error))
+        (return (SQLite-Durable-Append-Publication) false eavt-error))
       (let [aevt-start (time.now)
             [aevt-publish aevt-ok aevt-error] (persist-source-append-index-root-sqlite-handle-known-mode-with-added-stmts handle stmts basis-tx aevt-page.index-name aevt-view (slice aevt-page.entries 0) appended plan.start-index aevt-page.append-mode profile)]
         (set! profile^.append-aevt-root-build-us (+ profile^.append-aevt-root-build-us (sqlite-profile-elapsed-us aevt-start)))
         (when (not aevt-ok)
           (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
-          (return (SQLite-Durable-Append-Publication []) false aevt-error))
+          (return (SQLite-Durable-Append-Publication) false aevt-error))
         (let [avet-start (time.now)
               [avet-publish avet-ok avet-error] (persist-source-append-index-root-sqlite-handle-known-mode-with-added-stmts handle stmts basis-tx avet-page.index-name avet-view (slice avet-page.entries 0) appended plan.start-index avet-page.append-mode profile)]
           (set! profile^.append-avet-root-build-us (+ profile^.append-avet-root-build-us (sqlite-profile-elapsed-us avet-start)))
           (when (not avet-ok)
             (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
-            (return (SQLite-Durable-Append-Publication []) false avet-error))
+            (return (SQLite-Durable-Append-Publication) false avet-error))
           (let [vaet-start (time.now)
                 [vaet-publish vaet-ok vaet-error] (persist-source-append-index-root-sqlite-handle-known-mode-with-added-stmts handle stmts basis-tx vaet-page.index-name vaet-view (slice vaet-page.entries 0) appended plan.start-index vaet-page.append-mode profile)]
             (set! profile^.append-vaet-root-build-us (+ profile^.append-vaet-root-build-us (sqlite-profile-elapsed-us vaet-start)))
             (when (not vaet-ok)
               (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
-              (return (SQLite-Durable-Append-Publication []) false vaet-error))
+              (return (SQLite-Durable-Append-Publication) false vaet-error))
             (set! profile^.append-root-build-us (+ profile^.append-root-build-us (sqlite-profile-elapsed-us build-start)))
             (let [publishes (sqlite-index-root-publish-set eavt-publish aevt-publish avet-publish vaet-publish)]
               (return (SQLite-Durable-Append-Publication :publishes publishes
@@ -601,7 +601,7 @@
           [root-row-id root-ok root-error] (sqlite-republish-latest-index-root-set-with-stmts! handle stmts basis-tx)]
       (set! profile^.append-root-publish-us (+ profile^.append-root-publish-us (sqlite-profile-elapsed-us publish-start)))
       (when (not root-ok)
-        (return (SQLite-Durable-Published-Root []) false root-error))
+        (return (SQLite-Durable-Published-Root) false root-error))
       (let [[roots roots-ok roots-error] (sqlite-index-root-set-at-basis handle basis-tx)]
         (if roots-ok
           (return (SQLite-Durable-Published-Root :root-row-id root-row-id
@@ -610,10 +610,10 @@
                                                   :modes plan.prepared.modes)
                   true
                   "")
-          (return (SQLite-Durable-Published-Root []) false roots-error)))))
+          (return (SQLite-Durable-Published-Root) false roots-error)))))
   (let [[publication publication-ok publication-error] (sqlite-durable-append-plan-root-publication-with-stmts handle stmts basis-tx source appended plan profile)]
     (when (not publication-ok)
-      (return (SQLite-Durable-Published-Root []) false publication-error))
+      (return (SQLite-Durable-Published-Root) false publication-error))
     (let [publish-start (time.now)
           [out-published root-ok root-error] (sqlite-publish-durable-append-publication-with-stmts! handle stmts basis-tx publication enqueue-maintenance)]
       (set! profile^.append-root-publish-us (+ profile^.append-root-publish-us (sqlite-profile-elapsed-us publish-start)))
@@ -654,13 +654,13 @@
         vaet-view (db-read-source-index-view source .VAET)]
       (let [[eavt-mode-value eavt-ok eavt-error] (source-append-index-mode-for-persist-view source eavt-view appended start-index "eavt" false)]
       (when (not eavt-ok)
-        (return (SQLite-Index-Append-Modes []) false eavt-error))
+        (return (SQLite-Index-Append-Modes) false eavt-error))
       (let [[aevt-mode-value aevt-ok aevt-error] (source-append-index-mode-for-persist-view source aevt-view appended start-index "aevt" false)]
         (when (not aevt-ok)
-          (return (SQLite-Index-Append-Modes []) false aevt-error))
+          (return (SQLite-Index-Append-Modes) false aevt-error))
         (let [[avet-mode-value avet-ok avet-error] (source-append-index-mode-for-persist-view source avet-view appended start-index "avet" false)]
           (when (not avet-ok)
-            (return (SQLite-Index-Append-Modes []) false avet-error))
+            (return (SQLite-Index-Append-Modes) false avet-error))
           (let [[vaet-mode-value vaet-ok vaet-error] (source-append-index-mode-for-persist-view source vaet-view appended start-index "vaet" false)]
             (if vaet-ok
               (return (SQLite-Index-Append-Modes :eavt eavt-mode-value
@@ -669,7 +669,7 @@
                                                   :vaet vaet-mode-value)
                       true
                       "")
-              (return (SQLite-Index-Append-Modes []) false vaet-error))))))))
+              (return (SQLite-Index-Append-Modes) false vaet-error))))))))
 
 (defn source-append-build-indexes [source: DB-Read-Source, appended: []Datom, start-index: int, new-entities-after-existing: bool] -> [eavt: [dynamic]int, aevt: [dynamic]int, avet: [dynamic]int, vaet: [dynamic]int, ok: bool, error: string]
   (let [eavt-base (db-index-view-entries (db-read-source-index-view source .EAVT))
@@ -940,68 +940,68 @@
             [begin-ok begin-error] (vev.sqlite-begin-immediate-raw handle)]
         (set! profile^.append-begin-us (+ profile^.append-begin-us (sqlite-profile-elapsed-us begin-start)))
         (when (not begin-ok)
-          (return (SQLite-Durable-Published-Root []) false begin-error))))
+          (return (SQLite-Durable-Published-Root) false begin-error))))
     (let [[source-current current-ok current-error] (sqlite-write-source-current? handle source)]
       (when (not current-ok)
         (sqlite-rollback-if-owned! handle owns-tx)
-        (return (SQLite-Durable-Published-Root []) false current-error))
+        (return (SQLite-Durable-Published-Root) false current-error))
       (when (not source-current)
         (sqlite-rollback-if-owned! handle owns-tx)
-        (return (SQLite-Durable-Published-Root []) false sqlite-write-basis-changed-error)))
+        (return (SQLite-Durable-Published-Root) false sqlite-write-basis-changed-error)))
     (let [tx-start (time.now)
           [write-stmts write-stmts-ok write-stmts-error] (sqlite-conn-direct-write-stmts store)]
       (when (not write-stmts-ok)
         (set! profile^.append-tx-us (+ profile^.append-tx-us (sqlite-profile-elapsed-us tx-start)))
         (sqlite-rollback-if-owned! handle owns-tx)
-        (return (SQLite-Durable-Published-Root []) false write-stmts-error))
+        (return (SQLite-Durable-Published-Root) false write-stmts-error))
       (let [[tx-ok tx-error] (insert-sqlite-tx-with-stmts! handle write-stmts tx)]
         (set! profile^.append-tx-us (+ profile^.append-tx-us (sqlite-profile-elapsed-us tx-start)))
         (when (not tx-ok)
           (sqlite-rollback-if-owned! handle owns-tx)
-          (return (SQLite-Durable-Published-Root []) false tx-error)))
+          (return (SQLite-Durable-Published-Root) false tx-error)))
       (let [datom-start (time.now)
             [fulltext-attrs fulltext-ok fulltext-error] (source-fulltext-attrs-for-direct-append-cached store source tx-data)]
         (when (not fulltext-ok)
           (set! profile^.append-datoms-us (+ profile^.append-datoms-us (sqlite-profile-elapsed-us datom-start)))
           (sqlite-rollback-if-owned! handle owns-tx)
-          (return (SQLite-Durable-Published-Root []) false fulltext-error))
+          (return (SQLite-Durable-Published-Root) false fulltext-error))
         (defer (delete-owned-string-set fulltext-attrs))
         (let [[datoms-ok datoms-error] (append-sqlite-datoms-with-stmts! handle write-stmts plan.start-index tx-data (addr fulltext-attrs))]
         (set! profile^.append-datoms-us (+ profile^.append-datoms-us (sqlite-profile-elapsed-us datom-start)))
         (when (not datoms-ok)
           (sqlite-rollback-if-owned! handle owns-tx)
-          (return (SQLite-Durable-Published-Root []) false datoms-error))))
+          (return (SQLite-Durable-Published-Root) false datoms-error))))
       (let [meta-start (time.now)
             [meta-ok meta-error] (insert-sqlite-tx-meta-with-stmts! handle write-stmts tx tx-meta)]
         (set! profile^.append-meta-us (+ profile^.append-meta-us (sqlite-profile-elapsed-us meta-start)))
         (when (not meta-ok)
           (sqlite-rollback-if-owned! handle owns-tx)
-          (return (SQLite-Durable-Published-Root []) false meta-error))))
+          (return (SQLite-Durable-Published-Root) false meta-error))))
     (let [roots-start (time.now)
           [stmts stmts-ok stmts-error] (sqlite-conn-index-write-stmts store)]
       (when (not stmts-ok)
         (set! profile^.append-roots-us (+ profile^.append-roots-us (sqlite-profile-elapsed-us roots-start)))
         (sqlite-rollback-if-owned! handle owns-tx)
-        (return (SQLite-Durable-Published-Root []) false stmts-error))
+        (return (SQLite-Durable-Published-Root) false stmts-error))
       (let [[out-published roots-ok roots-error] (sqlite-publish-durable-append-plan-with-stmts! handle stmts tx source tx-data plan profile owns-tx)]
         (set! profile^.append-roots-us (+ profile^.append-roots-us (sqlite-profile-elapsed-us roots-start)))
         (when (not roots-ok)
           (sqlite-rollback-if-owned! handle owns-tx)
-          (return (SQLite-Durable-Published-Root []) false roots-error))
+          (return (SQLite-Durable-Published-Root) false roots-error))
         (if owns-tx
           (let [commit-start (time.now)
                 [commit-ok commit-error] (vev.sqlite-commit-raw handle)]
             (set! profile^.append-commit-us (+ profile^.append-commit-us (sqlite-profile-elapsed-us commit-start)))
             (if commit-ok
               (return out-published true "")
-              (return (SQLite-Durable-Published-Root []) false commit-error)))
+              (return (SQLite-Durable-Published-Root) false commit-error)))
           (return out-published true ""))))))
 
 (defn append-source-direct-sqlite-conn-from-source-plan-mode [store: ^SQLite-Conn, source: DB-Read-Source, tx: u64, tx-data: []Datom, tx-meta: []Tx-Meta, plan: SQLite-Durable-Append-Plan, profile: ^SQLite-Direct-Write-Profile, owns-tx: bool] -> [out-modes: SQLite-Index-Append-Modes, ok: bool, error: string]
   (let [[published publish-ok publish-error] (append-source-direct-sqlite-conn-from-source-plan-published-mode store source tx tx-data tx-meta plan profile owns-tx)]
     (if publish-ok
       (return published.modes true "")
-      (return (SQLite-Index-Append-Modes []) false publish-error))))
+      (return (SQLite-Index-Append-Modes) false publish-error))))
 
 (defn append-source-direct-sqlite-conn-from-source-prepared-mode [store: ^SQLite-Conn, source: DB-Read-Source, base-count: int, tx: u64, tx-data: []Datom, tx-meta: []Tx-Meta, prepared: SQLite-Prepared-Index-Append, profile: ^SQLite-Direct-Write-Profile, owns-tx: bool] -> [out-modes: SQLite-Index-Append-Modes, ok: bool, error: string]
   (let [plan (SQLite-Durable-Append-Plan :start-index base-count :prepared prepared)]

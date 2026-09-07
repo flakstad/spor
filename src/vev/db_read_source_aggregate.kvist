@@ -4,14 +4,14 @@
   (if clause-value.has-source
     (if (query-source-input-name? clause-value.source)
       (return (unsourced-clause clause-value) true "")
-      (return (Clause []) false "SQLite DB snapshot source clauses must use $-prefixed source names"))
+      (return (Clause) false "SQLite DB snapshot source clauses must use $-prefixed source names"))
     (return clause-value true "")))
 
 (defn db-read-source-query-clause-source [source: DB-Read-Source, sources: []DB-Read-Named-Source, clause-value: Clause] -> [clause-source: DB-Read-Source, clause: Clause, ok: bool, error: string]
   (if clause-value.has-source
     (let [[clause-source clause-source-ok clause-source-error] (db-read-source-for-name source sources clause-value.source)]
       (when (not clause-source-ok)
-        (return (DB-Read-Source []) (Clause []) false clause-source-error))
+        (return (DB-Read-Source) (Clause) false clause-source-error))
       (return clause-source (unsourced-clause clause-value) true ""))
     (return source clause-value true "")))
 
@@ -27,7 +27,7 @@
      false))
 
 (defn db-read-source-single-clause-aggregate-query [query-value: Query] -> [clause: Clause, ok: bool]
-  (let [empty-clause (Clause [])]
+  (let [empty-clause (Clause)]
     (when (not (and (= (count query-value.find) 0)
                     (= (count query-value.inputs) 0)
                     (= (count query-value.collection-inputs) 0)
@@ -83,7 +83,7 @@
       (return query-clause true))))
 
 (defn db-read-source-single-clause-grouped-aggregate-query [query-value: Query] -> [clause: Clause, ok: bool]
-  (let [empty-clause (Clause [])]
+  (let [empty-clause (Clause)]
     (when (not (and (> (count query-value.find) 0)
                     (= (count query-value.inputs) 0)
                     (= (count query-value.collection-inputs) 0)
@@ -153,13 +153,13 @@
     (and (= clause.e.kind .Var) (= clause.e.name name)) (return (value-entity datom.e) true)
     (and (= clause.a.kind .Var) (= clause.a.name name)) (return (value-keyword (string-owned datom.a)) true)
     (and (= clause.v.kind .Var) (= clause.v.name name)) (return (value-owned datom.v) true)
-    :else (return (Value []) false)))
+    :else (return (Value) false)))
 
 (defn db-read-source-datom-term-value-owned [clause: Clause, datom: Datom, term: Term] -> [value: Value, ok: bool]
   (case term.kind
     .Value (return (value-owned term.value) true)
     .Var (return (db-read-source-datom-value-for-var-owned clause datom term.name))
-     (return (Value []) false)))
+     (return (Value) false)))
 
 (defn db-read-source-aggregate-key-values [clause: Clause, datom: Datom, query-value: Query, aggregate: Aggregate-Find] -> [values: [dynamic]Value, ok: bool]
   (let [out (make [dynamic]Value)]
@@ -280,13 +280,13 @@
 
 (defn db-read-source-single-clause-aggregate-value-streamed [source: DB-Read-Source, clause: Clause, query-value: Query, aggregate: Aggregate-Find] -> [value: Value, ok: bool, error: string]
   (when (not (db-read-source-aggregate-streamable? source))
-    (return (Value []) false ""))
+    (return (Value) false ""))
   (let [binding (Binding :items (make [dynamic]Var-Binding))
         [scan scan-ok scan-error] (db-read-source-clause-index-scan source clause binding)]
     (delete binding.items)
     (when (not scan-ok)
       (delete-clause-index-scan scan)
-      (return (Value []) false scan-error))
+      (return (Value) false scan-error))
     (defer (delete-clause-index-scan scan))
     (let [current (aggregate-initial-value aggregate)
           distinct-values (make [dynamic]Value)
@@ -300,12 +300,12 @@
         (let [entry (clause-index-scan-datom-index scan scan-index)
               [datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
           (when (not datom-ok)
-            (return (Value []) false datom-error))
+            (return (Value) false datom-error))
           (if (db-read-source-clause-index-scan-candidate? scan datom)
             (let [[current-datom current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
               (when (not current-ok)
                 (delete-owned-datom datom)
-                (return (Value []) false current-error))
+                (return (Value) false current-error))
               (when current-datom
                 (let [[key key-ok] (db-read-source-aggregate-key-values clause datom query-value aggregate)]
                   (when key-ok
@@ -575,12 +575,12 @@
         attr-prefix ([]Value [(value-keyword plan.attr)])
         [low low-ok low-error] (db-read-source-lower-bound-values source view attr-prefix)]
     (when (not low-ok)
-      (return (Value []) false low-error))
+      (return (Value) false low-error))
     (let [[high high-ok high-error] (db-read-source-upper-bound-values source view attr-prefix)]
       (when (not high-ok)
-        (return (Value []) false high-error))
+        (return (Value) false high-error))
       (let [out (make [dynamic]Value)
-            last-value (Value [])
+            last-value (Value)
             has-last false]
         (defer
           (when has-last
@@ -595,12 +595,12 @@
                     [current current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
                 (when (not current-ok)
                   (delete-owned-values-array out)
-                  (return (Value []) false current-error))
+                  (return (Value) false current-error))
                 (when current
                   (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
                     (when (not datom-ok)
                       (delete-owned-values-array out)
-                      (return (Value []) false datom-error))
+                      (return (Value) false datom-error))
                     (when (not (and has-last (value-equal? datom.v last-value)))
                       (when (not aggregate.has-limit)
                         (let [value (value-owned datom.v)]
@@ -621,12 +621,12 @@
                     [current current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
                 (when (not current-ok)
                   (delete-owned-values-array out)
-                  (return (Value []) false current-error))
+                  (return (Value) false current-error))
                 (when current
                   (let [[datom datom-ok datom-error] (db-read-source-datom-at-entry source entry)]
                     (when (not datom-ok)
                       (delete-owned-values-array out)
-                      (return (Value []) false datom-error))
+                      (return (Value) false datom-error))
                     (when (not (and has-last (value-equal? datom.v last-value)))
                       (when (not aggregate.has-limit)
                         (let [value (value-owned datom.v)]
@@ -644,7 +644,7 @@
           (return (value-vector-owned out) true "")
           (do
             (delete out)
-            (return (Value []) true "")))))))
+            (return (Value) true "")))))))
 
 (defn q-db-read-source-attr-top-n-aggregates [source: DB-Read-Source, query-value: Query, plan: Attr-Top-N-Aggregate-Plan] -> Result-Set
   (let [values (make [dynamic]Value 0 (count query-value.aggregates))

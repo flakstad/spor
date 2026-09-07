@@ -95,7 +95,7 @@
           (= step.kind .RuleCall)
             (do
               (set! stats^.rule-calls (+ stats^.rule-calls 1))
-              (set! next (query-relation-after-rule-call-from-memo (DB []) memo current branch.rule-calls[step.index] use-delta delta-call-index step.index))
+              (set! next (query-relation-after-rule-call-from-memo (DB) memo current branch.rule-calls[step.index] use-delta delta-call-index step.index))
               (set! next-ok true))
           (or (= step.kind .Clause)
               (= step.kind .Predicate)
@@ -177,7 +177,7 @@
     (= step.kind .RuleCall)
       (do
         (set! stats^.rule-calls (+ stats^.rule-calls 1))
-        (let [out (query-relation-after-rule-call-from-memo (DB []) memo rel rule.rule-calls[step.index] use-delta delta-call-index step.index)]
+        (let [out (query-relation-after-rule-call-from-memo (DB) memo rel rule.rule-calls[step.index] use-delta delta-call-index step.index)]
           (return out true)))
     (or (= step.kind .Clause)
         (= step.kind .Predicate)
@@ -254,7 +254,7 @@
         (rule-memo-replace-deltas! (addr memo) (slice next-delta 0))
         (delete-rule-memo next-delta)))
     (let [seed (query-relation-singleton)
-          projected (query-relation-after-rule-call-from-memo (DB []) (addr memo) seed call false -1 -1)
+          projected (query-relation-after-rule-call-from-memo (DB) (addr memo) seed call false -1 -1)
           deduped (query-relation-dedupe-step projected)]
       (delete-query-relation seed)
       (delete-query-relation projected)
@@ -280,7 +280,7 @@
         (delete-rule-memo next-delta))
       (set! stats^.rule-iterations (+ stats^.rule-iterations 1)))
     (let [seed (query-relation-singleton)
-          projected (query-relation-after-rule-call-from-memo (DB []) (addr memo) seed call false -1 -1)
+          projected (query-relation-after-rule-call-from-memo (DB) (addr memo) seed call false -1 -1)
           deduped (query-relation-dedupe-step projected)]
       (delete-query-relation seed)
       (delete-query-relation projected)
@@ -933,7 +933,7 @@
           (mut! stats^.rule-iterations += 1)
           (query-stats-observe-bindings! stats (query-relation-row-count rule-rel))
           (return rule-rel rule-rel.has-typed-columns))
-        (let [joined (query-relation-join (DB []) ([]DB-Source []) rel rule-rel)
+        (let [joined (query-relation-join (DB) ([]DB-Source []) rel rule-rel)
               deduped (query-relation-dedupe-step joined)]
           (delete-query-relation rule-rel)
           (delete-query-relation joined)
@@ -952,7 +952,7 @@
           (delete-query-relation bounded-two-hop)
           (return (query-relation-empty) false))
         (when bounded-two-hop-ok
-          (let [joined (query-relation-join (DB []) ([]DB-Source []) rel bounded-two-hop)
+          (let [joined (query-relation-join (DB) ([]DB-Source []) rel bounded-two-hop)
                 deduped (query-relation-dedupe-step joined)]
             (delete-query-relation bounded-two-hop)
             (delete-query-relation joined)
@@ -970,7 +970,7 @@
               (mut! stats^.rule-iterations += 1)
               (query-stats-observe-bindings! stats (query-relation-row-count bounded-reverse-derived))
               (return bounded-reverse-derived bounded-reverse-derived.has-typed-columns))
-            (let [joined (query-relation-join (DB []) ([]DB-Source []) rel bounded-reverse-derived)
+            (let [joined (query-relation-join (DB) ([]DB-Source []) rel bounded-reverse-derived)
                   deduped (query-relation-dedupe-step joined)]
               (delete-query-relation bounded-reverse-derived)
               (delete-query-relation joined)
@@ -983,7 +983,7 @@
           (delete-query-relation two-hop)
           (return (query-relation-empty) false))
         (when two-hop-ok
-          (let [joined (query-relation-join (DB []) ([]DB-Source []) rel two-hop)
+          (let [joined (query-relation-join (DB) ([]DB-Source []) rel two-hop)
                 deduped (query-relation-dedupe-step joined)]
             (delete-query-relation two-hop)
             (delete-query-relation joined)
@@ -999,7 +999,7 @@
     (when (not rule-ok)
       (delete-query-relation rule-rel)
       (return (query-relation-empty) false))
-    (let [joined (query-relation-join (DB []) ([]DB-Source []) rel rule-rel)
+    (let [joined (query-relation-join (DB) ([]DB-Source []) rel rule-rel)
           deduped (query-relation-dedupe-step joined)]
       (delete-query-relation rule-rel)
       (delete-query-relation joined)
@@ -1015,7 +1015,7 @@
       (do
         (when (not (query-relation-predicate-can-run-typed? rel predicates[step.index] registry))
           (return (query-relation-empty) false))
-        (let [out (query-relation-filter-predicate (DB []) rel predicates[step.index] registry)]
+        (let [out (query-relation-filter-predicate (DB) rel predicates[step.index] registry)]
           (return out out.has-typed-columns)))
     (= step.kind .Function)
       (let [function functions[step.index]]
@@ -1045,7 +1045,7 @@
       (do
         (when (not (query-relation-predicate-can-run-typed? rel group.predicates[step.index] registry))
           (return (query-relation-empty) false))
-        (let [out (query-relation-filter-predicate (DB []) rel group.predicates[step.index] registry)]
+        (let [out (query-relation-filter-predicate (DB) rel group.predicates[step.index] registry)]
           (return out out.has-typed-columns)))
     (= step.kind .Function)
       (let [function group.function-clauses[step.index]]

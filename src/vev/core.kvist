@@ -151,7 +151,7 @@
 (defn tx-phase-profile-start [profile: ^Tx-Phase-Profile] -> time.Time
   (if (and (not (= profile nil)) profile^.enabled)
     (time.now)
-    (time.Time [])))
+    (time.Time)))
 
 (defn tx-phase-profile-elapsed-us [profile: ^Tx-Phase-Profile, start: time.Time] -> f64
   (if (and (not (= profile nil)) profile^.enabled)
@@ -887,7 +887,7 @@
 ])
 
 (defn query-stats-empty [] -> Query-Stats
-  (Query-Stats []))
+  (Query-Stats))
 
 (defn result-set-ok [rows: [dynamic]Result-Row] -> Result-Set
   (Result-Set :ok true :error "" :rows rows))
@@ -2322,7 +2322,7 @@
         (value-keyword datom.a)
         (if (= position 2)
           datom.v
-          (Value []))))
+          (Value))))
     (if (or (= order ":aevt") (= order "aevt"))
       (if (= position 0)
         (value-keyword datom.a)
@@ -2330,7 +2330,7 @@
           (value-entity datom.e)
           (if (= position 2)
             datom.v
-            (Value []))))
+            (Value))))
       (if (or (= order ":avet") (= order "avet"))
         (if (= position 0)
           (value-keyword datom.a)
@@ -2338,14 +2338,14 @@
             datom.v
             (if (= position 2)
               (value-entity datom.e)
-              (Value []))))
+              (Value))))
         (if (= position 0)
           datom.v
           (if (= position 1)
             (value-keyword datom.a)
             (if (= position 2)
               (value-entity datom.e)
-              (Value []))))))))
+              (Value))))))))
 
 (defn index-position-compare-core [actual: Value, expected: Value] -> int
   (if (and (= actual.kind .Entity) (= expected.kind .Int))
@@ -2394,6 +2394,6 @@
   ;; reported as an allocator-provenance violation by the tracking allocator.
   ;; Nil containers support the same reads, iteration, and first append while
   ;; retaining an unambiguous no-allocation/no-free lifetime.
-  (Conn :db (DB [])
+  (Conn :db (DB)
          :next-tx tx-partition-base
          :listeners nil))

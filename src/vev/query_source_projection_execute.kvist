@@ -28,14 +28,14 @@
     (= name projection.entity-var) (value-entity datom.e)
     (= name projection.attr-var) (value-keyword datom.a)
     (= name projection.value-var) datom.v
-    :else (Value [])))
+    :else (Value)))
 
 (defn db-read-source-entity-attr-value-projection-owned-value [projection: Source-Entity-Attr-Value-Projection, datom: Datom, name: string] -> Value
   (cond
     (= name projection.entity-var) (value-entity datom.e)
     (= name projection.attr-var) (value-keyword (string-owned datom.a))
     (= name projection.value-var) (value-owned datom.v)
-    :else (Value [])))
+    :else (Value)))
 
 (defn append-db-read-source-entity-attr-value-projection-row! [rows: ^[dynamic]Result-Row, query: Query, projection: Source-Entity-Attr-Value-Projection, datom: Datom]
   (let [first-value (db-read-source-entity-attr-value-projection-value projection datom query.find[0])
@@ -1689,13 +1689,13 @@
   (if many
     (let [[attr-value attr-ok attr-error] (db-read-source-pull-attr-value source entity attr)]
       (when (not (= attr-error ""))
-        (return (Value []) false attr-error))
+        (return (Value) false attr-error))
       (if attr-ok
         (return attr-value true "")
         (return (value-owned default-value) true "")))
     (let [[attr-value attr-ok attr-error] (db-read-source-cardinality-one-value-fast-all-current source entity attr)]
       (when (not (= attr-error ""))
-        (return (Value []) false attr-error))
+        (return (Value) false attr-error))
       (if attr-ok
         (return attr-value true "")
         (return (value-owned default-value) true "")))))
@@ -1748,10 +1748,10 @@
   (for [attr attrs]
     (let [[value value-ok value-error] (db-read-source-pull-attr-value source entity attr)]
       (when (not (= value-error ""))
-        (return (Value []) (Value []) false value-error))
+        (return (Value) (Value) false value-error))
       (when value-ok
         (return (value-keyword (string-owned attr)) value true ""))))
-  (return (Value []) (Value []) false ""))
+  (return (Value) (Value) false ""))
 
 (defn append-db-read-source-entity-get-some-rows! [rows: ^[dynamic]Result-Row, get-some-source: DB-Read-Source, query: Query, projection: Source-Entity-Get-Some-Projection, get-some: Get-Some, datoms: []Datom] -> [ok: bool, error: string]
   (for [datom datoms]
@@ -1861,13 +1861,13 @@
   (cond
     (= name projection.attr-var) (value-keyword datom.a)
     (= name projection.value-var) datom.v
-    :else (Value [])))
+    :else (Value)))
 
 (defn db-read-source-fixed-entity-attr-value-projection-owned-value [projection: Source-Fixed-Entity-Attr-Value-Projection, datom: Datom, name: string] -> Value
   (cond
     (= name projection.attr-var) (value-keyword (string-owned datom.a))
     (= name projection.value-var) (value-owned datom.v)
-    :else (Value [])))
+    :else (Value)))
 
 (defn append-db-read-source-fixed-entity-attr-value-projection-row! [rows: ^[dynamic]Result-Row, query: Query, projection: Source-Fixed-Entity-Attr-Value-Projection, datom: Datom]
   (let [first-value (db-read-source-fixed-entity-attr-value-projection-value projection datom query.find[0])
@@ -1953,7 +1953,7 @@
   (when (not projection.has-anchor-input)
     (return projection.anchor-value true ""))
   (when (not (= (count inputs) 1))
-    (return (Value []) false "wrong number of query inputs for source value/ref/value projection"))
+    (return (Value) false "wrong number of query inputs for source value/ref/value projection"))
   (db-read-source-query-input-scalar-value source inputs[0]))
 
 (defn q-db-read-source-value-ref-attr-projection [source: DB-Read-Source, projection: Source-Value-Ref-Attr-Projection, inputs: []Query-Input] -> Result-Set
@@ -2214,7 +2214,7 @@
   (when (not projection.has-anchor-input)
     (return projection.anchor-value true ""))
   (when (not (= (count inputs) 1))
-    (return (Value []) false "wrong number of query inputs for source value/ref/star projection"))
+    (return (Value) false "wrong number of query inputs for source value/ref/star projection"))
   (db-read-source-query-input-scalar-value source inputs[0]))
 
 (defn db-read-source-query-relation-value-ref-star-projection [source: DB-Read-Source, query: Query, inputs: []Query-Input, stats: ^Query-Stats] -> [rel: Query-Relation, ok: bool, error: string]

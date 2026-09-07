@@ -114,19 +114,19 @@
 
 (defn apply-arithmetic-values [op: string, values: []Value] -> [value: Value, ok: bool]
   (when (= (count values) 0)
-    (return (Value []) false))
+    (return (Value) false))
   (when (not (query-numeric-value? values[0]))
-    (return (Value []) false))
+    (return (Value) false))
   (when (or (= op "quot") (= op "rem") (= op "mod"))
     (for [value values]
       (when (not (= value.kind .Int))
-        (return (Value []) false))))
+        (return (Value) false))))
   (let [float-mode (= values[0].kind .Float)
         int-result (if (= values[0].kind .Int) values[0].int-value (i64 0))
         float-result (query-numeric-value-f64 values[0])]
     (for [next (slice values 1)]
       (when (not (query-numeric-value? next))
-        (return (Value []) false))
+        (return (Value) false))
       (when (and (not float-mode) (= next.kind .Float))
         (set! float-mode true)
         (set! float-result (f64 int-result)))
@@ -138,32 +138,32 @@
             (= op "*") (set! float-result (* float-result number))
             (= op "/") (do
               (when (= number 0.0)
-                (return (Value []) false))
+                (return (Value) false))
               (set! float-result (/ float-result number)))
             (= op "min") (when (< number float-result)
               (set! float-result number))
             (= op "max") (when (> number float-result)
               (set! float-result number))
-            :else (return (Value []) false)))
+            :else (return (Value) false)))
         (cond
           (= op "+") (set! int-result (+ int-result next.int-value))
           (= op "-") (set! int-result (- int-result next.int-value))
           (= op "*") (set! int-result (* int-result next.int-value))
           (= op "/") (do
             (when (= next.int-value 0)
-              (return (Value []) false))
+              (return (Value) false))
             (set! int-result (/ int-result next.int-value)))
           (= op "quot") (do
             (when (= next.int-value 0)
-              (return (Value []) false))
+              (return (Value) false))
             (set! int-result (/ int-result next.int-value)))
           (= op "rem") (do
             (when (= next.int-value 0)
-              (return (Value []) false))
+              (return (Value) false))
             (set! int-result (% int-result next.int-value)))
           (= op "mod") (do
             (when (= next.int-value 0)
-              (return (Value []) false))
+              (return (Value) false))
             (let [remainder (% int-result next.int-value)]
               (if (and (not (= remainder 0))
                        (or (and (< remainder 0) (> next.int-value 0))
@@ -174,14 +174,14 @@
             (set! int-result next.int-value))
           (= op "max") (when (> next.int-value int-result)
             (set! int-result next.int-value))
-          :else (return (Value []) false))))
+          :else (return (Value) false))))
     (if float-mode
       (return (value-float float-result) true)
       (return (value-int int-result) true))))
 
 (defn log-map-field [transaction: Value, key: string] -> [value: Value, ok: bool]
   (when (not (= transaction.kind .Map))
-    (return (Value []) false))
+    (return (Value) false))
   (let [index 0]
     (while (< (+ index 1) (count transaction.items))
       (let [candidate transaction.items[index]]
@@ -189,7 +189,7 @@
                    (= candidate.text key))
           (return transaction.items[(+ index 1)] true)))
       (set! index (+ index 2))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn log-transaction-coordinate [transaction: Value] -> [t: i64, ok: bool]
   (let [[value value-ok] (log-map-field transaction ":t")]
@@ -201,7 +201,7 @@
   (let [[value value-ok] (log-map-field transaction ":data")]
     (if (and value-ok (= value.kind .Vector))
       (return value true)
-      (return (Value []) false))))
+      (return (Value) false))))
 
 (defn log-transaction-id [transaction: Value] -> [tx: i64, ok: bool]
   (let [[data data-ok] (log-transaction-data transaction)]
@@ -263,7 +263,7 @@
           start values[1]
           end values[2]]
       (when (not (= log-value.kind .Vector))
-        (return (Value []) false))
+        (return (Value) false))
       (let [ids (make [dynamic]Value)]
         (for [transaction log-value.items]
           (when (and (log-bound-allows-transaction? start true transaction)
@@ -280,7 +280,7 @@
       (when (not (and (= log-value.kind .Vector)
                       (or (= coordinate.kind .Int)
                           (= coordinate.kind .Entity))))
-        (return (Value []) false))
+        (return (Value) false))
       (let [point (if (= coordinate.kind .Entity)
                     (i64 coordinate.entity)
                     coordinate.int-value)]
@@ -291,18 +291,18 @@
                        (or (= point t) (= point tx)))
               (return (log-transaction-data transaction)))))
         (return (value-vector ([]Value [])) true))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn typed-function-op-value [rel: Query-Relation, row: int, function: Function-Clause, registry: []Native-Query-Fn] -> [value: Value, ok: bool]
   (let [[op op-ok] (typed-function-op-name function registry)]
     (when (not op-ok)
-      (return (Value []) false))
+      (return (Value) false))
     (when (or (= op "tx-ids") (= op "tx-data"))
       (let [values (make [dynamic]Value 0 (count function.terms)) :defer]
         (for [term function.terms]
           (let [[value value-ok] (query-relation-resolve-typed-term rel row term)]
             (when (not value-ok)
-              (return (Value []) false))
+              (return (Value) false))
             (arr.push! values value)))
         (return (log-function-op-value op (slice values 0)))))
     (when (and (= op "count")
@@ -310,7 +310,7 @@
       (let [[input input-ok] (query-relation-resolve-typed-term rel row function.terms[0])]
         (when (and input-ok (= input.kind .String))
           (return (value-int (i64 (string-clojure-count input.text))) true))
-        (return (Value []) false)))
+        (return (Value) false)))
     (when (and (or (= op "identity")
                    (= op "ground"))
                (= (count function.terms) 1))
@@ -320,18 +320,18 @@
       (let [[input input-ok] (query-relation-resolve-typed-term rel row function.terms[0])]
         (when (and input-ok (= input.kind .Int))
           (return (value-int (+ input.int-value 1)) true))
-        (return (Value []) false)))
+        (return (Value) false)))
     (when (and (= op "dec")
                (= (count function.terms) 1))
       (let [[input input-ok] (query-relation-resolve-typed-term rel row function.terms[0])]
         (when (and input-ok (= input.kind .Int))
           (return (value-int (- input.int-value 1)) true))
-        (return (Value []) false)))
+        (return (Value) false)))
     (when (and (= op "name")
                (= (count function.terms) 1))
       (let [[input input-ok] (query-relation-resolve-typed-term rel row function.terms[0])]
         (when (not input-ok)
-          (return (Value []) false))
+          (return (Value) false))
         (when (= input.kind .String)
           (return input true))
         (when (= input.kind .Keyword)
@@ -339,14 +339,14 @@
             (if (= slash -1)
               (return (value-string (slice input.text 1)) true)
               (return (value-string (slice input.text (+ slash 1))) true))))
-        (return (Value []) false)))
+        (return (Value) false)))
     (when (and (= op "subs")
                (or (= (count function.terms) 2)
                    (= (count function.terms) 3)))
       (let [[input input-ok] (query-relation-resolve-typed-term rel row function.terms[0])
             [start start-ok] (query-relation-resolve-typed-term rel row function.terms[1])]
         (when (not (and input-ok start-ok (= input.kind .String) (= start.kind .Int)))
-          (return (Value []) false))
+          (return (Value) false))
         (if (= (count function.terms) 2)
           (let [[part ok] (strings.substring_from input.text (int start.int-value))]
             (when ok
@@ -356,7 +356,7 @@
               (let [[part ok] (strings.substring input.text (int start.int-value) (int end.int-value))]
                 (when ok
                   (return (value-string part) true))))))
-        (return (Value []) false)))
+        (return (Value) false)))
     (when (and (= op "re-pattern")
                (= (count function.terms) 1))
       (let [[input input-ok] (query-relation-resolve-typed-term rel row function.terms[0])]
@@ -365,24 +365,24 @@
             (when (= err nil)
               (regex.destroy compiled)
               (return input true))))
-        (return (Value []) false)))
+        (return (Value) false)))
     (when (and (= op "re-find")
                (= (count function.terms) 2))
       (let [[pattern pattern-ok] (query-relation-resolve-typed-term rel row function.terms[0])
             [text text-ok] (query-relation-resolve-typed-term rel row function.terms[1])]
         (when (and pattern-ok text-ok)
           (return (re-find-value pattern text)))
-        (return (Value []) false)))
+        (return (Value) false)))
     (when (= op "str")
       (let [parts (make [dynamic]string 0 (count function.terms))]
         (defer (delete parts))
         (for [term function.terms]
           (let [[value value-ok] (query-relation-resolve-typed-term rel row term)]
             (when (not value-ok)
-              (return (Value []) false))
+              (return (Value) false))
             (let [[part part-ok] (value-str value)]
               (when (not part-ok)
-                (return (Value []) false))
+                (return (Value) false))
               (arr.push! parts part))))
         (return (value-string (strings.concatenate (slice parts 0))) true)))
     (when (and (= op "keyword")
@@ -391,18 +391,18 @@
       (if (= (count function.terms) 1)
         (let [[input input-ok] (query-relation-resolve-typed-term rel row function.terms[0])]
           (when (not input-ok)
-            (return (Value []) false))
+            (return (Value) false))
           (when (= input.kind .Keyword)
             (return input true))
           (when (= input.kind .String)
             (if (strings.has_prefix input.text ":")
               (return (value-keyword input.text) true)
               (return (value-keyword (strings.concatenate ([]string [":" input.text]))) true)))
-          (return (Value []) false))
+          (return (Value) false))
         (let [[namespace namespace-ok] (query-relation-resolve-typed-term rel row function.terms[0])
               [name name-ok] (query-relation-resolve-typed-term rel row function.terms[1])]
           (when (not (and namespace-ok name-ok (= namespace.kind .String) (= name.kind .String)))
-            (return (Value []) false))
+            (return (Value) false))
           (return
             (value-keyword (strings.concatenate ([]string [":" namespace.text "/" name.text])))
             true))))
@@ -415,7 +415,7 @@
                    (= input.kind .Vector)
                    (< index (count input.items)))
           (return input.items[index] true))
-        (return (Value []) false)))
+        (return (Value) false)))
     (when (or (= op "vector")
               (= op "tuple"))
       (let [items (make [dynamic]Value 0 (count function.terms))]
@@ -423,7 +423,7 @@
           (let [[value value-ok] (query-relation-resolve-typed-term rel row term)]
             (when (not value-ok)
               (delete items)
-              (return (Value []) false))
+              (return (Value) false))
             (arr.push! items value)))
         (return (value-vector (slice items 0)) true)))
     (when (and (= op "get")
@@ -432,7 +432,7 @@
             [key key-ok] (query-relation-resolve-typed-term rel row function.terms[1])]
         (when (and map-ok key-ok)
           (return (map-get-value map-value key)))
-        (return (Value []) false)))
+        (return (Value) false)))
     (when (and (or (= op "contains?")
                    (= op "clojure.string/includes?")
                    (= op "clojure.string/starts-with?")
@@ -441,7 +441,7 @@
       (let [[left left-ok] (query-relation-resolve-typed-term rel row function.terms[0])
             [right right-ok] (query-relation-resolve-typed-term rel row function.terms[1])]
         (when (not (and left-ok right-ok (= left.kind .String) (= right.kind .String)))
-          (return (Value []) false))
+          (return (Value) false))
         (cond
           (or (= op "contains?") (= op "clojure.string/includes?"))
             (return (value-bool (strings.contains left.text right.text)) true)
@@ -462,7 +462,7 @@
         (for [term function.terms]
           (let [[value value-ok] (query-relation-resolve-typed-term rel row term)]
             (when (not value-ok)
-              (return (Value []) false))
+              (return (Value) false))
             (arr.push! values value)))
         (return (apply-arithmetic-values op (slice values 0)))))
     (when (and (= op "compare")
@@ -471,51 +471,51 @@
             [right right-ok] (query-relation-resolve-typed-term rel row function.terms[1])]
         (when (and left-ok right-ok)
           (return (value-int (i64 (value-compare left right))) true))
-        (return (Value []) false)))
-    (return (Value []) false)))
+        (return (Value) false)))
+    (return (Value) false)))
 
 (defn db-read-source-typed-entid-value [source: DB-Read-Source, rel: Query-Relation, row: int, function: Function-Clause] -> [value: Value, ok: bool]
   (when (not (and (= (count function.terms) 2)
                   (source-function-has-default-source-token? function)))
-    (return (Value []) false))
+    (return (Value) false))
   (let [[input input-ok] (query-relation-resolve-typed-term rel row function.terms[1])]
     (when (not input-ok)
-      (return (Value []) false))
+      (return (Value) false))
     (let [[resolved resolved-ok _] (db-read-source-resolve-ref-component-value source input)]
       (when (not resolved-ok)
-        (return (Value []) false))
+        (return (Value) false))
       (when (= resolved.kind .Entity)
         (return resolved true))
       (when (= resolved.kind .Int)
         (return (value-entity (u64 resolved.int-value)) true))
-      (return (Value []) false))))
+      (return (Value) false))))
 
 (defn db-read-source-typed-function-op-value [source: DB-Read-Source, rel: Query-Relation, row: int, function: Function-Clause, registry: []Native-Query-Fn] -> [value: Value, ok: bool]
-  (let [[op op-ok] (query-op-name function.op (Binding []))]
+  (let [[op op-ok] (query-op-name function.op (Binding))]
     (when (and op-ok (source-function-op? op))
       (return (db-read-source-typed-entid-value source rel row function))))
   (typed-function-op-value rel row function registry))
 
 (defn map-get-value [map-value: Value, key: Value] -> [value: Value, ok: bool]
   (when (not (= map-value.kind .Map))
-    (return (Value []) false))
+    (return (Value) false))
   (let [index 0]
     (while (< (+ index 1) (count map-value.items))
       (when (value-equal? map-value.items[index] key)
         (return map-value.items[(+ index 1)] true))
       (set! index (+ index 2))))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn apply-function-op [function: Function-Clause, binding: Binding] -> [value: Value, ok: bool]
   (let [[op op-ok] (query-op-name function.op binding)]
     (when (not op-ok)
-      (return (Value []) false))
+      (return (Value) false))
   (when (or (= op "tx-ids") (= op "tx-data"))
     (let [values (make [dynamic]Value 0 (count function.terms)) :defer]
       (for [term function.terms]
         (let [[value value-ok] (resolve-term term binding)]
           (when (not value-ok)
-            (return (Value []) false))
+            (return (Value) false))
           (arr.push! values value)))
       (return (log-function-op-value op (slice values 0)))))
   (when (and (= op "count")
@@ -523,7 +523,7 @@
     (let [[input input-ok] (resolve-term function.terms[0] binding)]
       (when (and input-ok (= input.kind .String))
         (return (value-int (i64 (string-clojure-count input.text))) true))
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (and (or (= op "identity")
                  (= op "ground"))
              (= (count function.terms) 1))
@@ -533,13 +533,13 @@
     (let [[input input-ok] (resolve-term function.terms[0] binding)]
       (when (and input-ok (= input.kind .Int))
         (return (value-int (+ input.int-value 1)) true))
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (and (= op "dec")
              (= (count function.terms) 1))
     (let [[input input-ok] (resolve-term function.terms[0] binding)]
       (when (and input-ok (= input.kind .Int))
         (return (value-int (- input.int-value 1)) true))
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (and (= op "range")
              (or (= (count function.terms) 1)
                  (= (count function.terms) 2)
@@ -550,19 +550,19 @@
       (if (= (count function.terms) 1)
         (let [[end-value end-ok] (resolve-term function.terms[0] binding)]
           (when (not (and end-ok (= end-value.kind .Int)))
-            (return (Value []) false))
+            (return (Value) false))
           (set! end end-value.int-value))
         (do
           (let [[start-value start-ok] (resolve-term function.terms[0] binding)
                 [end-value end-ok] (resolve-term function.terms[1] binding)]
             (when (not (and start-ok end-ok (= start-value.kind .Int) (= end-value.kind .Int)))
-              (return (Value []) false))
+              (return (Value) false))
             (set! start start-value.int-value)
             (set! end end-value.int-value))
           (when (= (count function.terms) 3)
             (let [[step-value step-ok] (resolve-term function.terms[2] binding)]
               (when (not (and step-ok (= step-value.kind .Int) (not (= step-value.int-value 0))))
-                (return (Value []) false))
+                (return (Value) false))
               (set! step step-value.int-value)))))
       (let [items (make [dynamic]Value)]
         (if (> step 0)
@@ -579,7 +579,7 @@
              (= (count function.terms) 1))
     (let [[input input-ok] (resolve-term function.terms[0] binding)]
       (when (not input-ok)
-        (return (Value []) false))
+        (return (Value) false))
       (when (= input.kind .String)
         (return input true))
       (when (= input.kind .Keyword)
@@ -587,14 +587,14 @@
           (if (= slash -1)
             (return (value-string (slice input.text 1)) true)
             (return (value-string (slice input.text (+ slash 1))) true))))
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (and (= op "subs")
              (or (= (count function.terms) 2)
                  (= (count function.terms) 3)))
     (let [[input input-ok] (resolve-term function.terms[0] binding)
           [start start-ok] (resolve-term function.terms[1] binding)]
       (when (not (and input-ok start-ok (= input.kind .String) (= start.kind .Int)))
-        (return (Value []) false))
+        (return (Value) false))
       (if (= (count function.terms) 2)
         (let [[part ok] (strings.substring_from input.text (int start.int-value))]
           (when ok
@@ -604,7 +604,7 @@
             (let [[part ok] (strings.substring input.text (int start.int-value) (int end.int-value))]
               (when ok
                 (return (value-string part) true))))))
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (and (= op "re-pattern")
              (= (count function.terms) 1))
     (let [[input input-ok] (resolve-term function.terms[0] binding)]
@@ -613,24 +613,24 @@
           (when (= err nil)
             (regex.destroy compiled)
             (return input true))))
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (and (= op "re-find")
              (= (count function.terms) 2))
     (let [[pattern pattern-ok] (resolve-term function.terms[0] binding)
           [text text-ok] (resolve-term function.terms[1] binding)]
       (when (and pattern-ok text-ok)
         (return (re-find-value pattern text)))
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (= op "str")
     (let [parts (make [dynamic]string 0 (count function.terms))]
       (defer (delete parts))
       (for [term function.terms]
         (let [[value value-ok] (resolve-term term binding)]
           (when (not value-ok)
-            (return (Value []) false))
+            (return (Value) false))
           (let [[part part-ok] (value-str value)]
             (when (not part-ok)
-              (return (Value []) false))
+              (return (Value) false))
             (arr.push! parts part))))
       (return (value-string (strings.concatenate (slice parts 0))) true)))
   (when (and (= op "keyword")
@@ -639,18 +639,18 @@
     (if (= (count function.terms) 1)
       (let [[input input-ok] (resolve-term function.terms[0] binding)]
         (when (not input-ok)
-          (return (Value []) false))
+          (return (Value) false))
         (when (= input.kind .Keyword)
           (return input true))
         (when (= input.kind .String)
           (if (strings.has_prefix input.text ":")
             (return (value-keyword input.text) true)
             (return (value-keyword (strings.concatenate ([]string [":" input.text]))) true)))
-        (return (Value []) false))
+        (return (Value) false))
       (let [[namespace namespace-ok] (resolve-term function.terms[0] binding)
             [name name-ok] (resolve-term function.terms[1] binding)]
         (when (not (and namespace-ok name-ok (= namespace.kind .String) (= name.kind .String)))
-          (return (Value []) false))
+          (return (Value) false))
         (return
           (value-keyword (strings.concatenate ([]string [":" namespace.text "/" name.text])))
           true))))
@@ -663,14 +663,14 @@
                  (= input.kind .Vector)
                  (< index (count input.items)))
         (return input.items[index] true))
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (or (= op "vector")
             (= op "tuple"))
     (let [items (make [dynamic]Value 0 (count function.terms))]
       (for [term function.terms]
         (let [[value ok] (resolve-term term binding)]
           (when (not ok)
-            (return (Value []) false))
+            (return (Value) false))
           (arr.push! items value)))
       (return (value-vector (slice items 0)) true)))
   (when (and (= op "untuple")
@@ -678,15 +678,15 @@
     (let [[input input-ok] (resolve-term function.terms[0] binding)]
       (when (and input-ok (= input.kind .Vector))
         (return input true))
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (= op "hash-map")
     (when (not (= (% (count function.terms) 2) 0))
-      (return (Value []) false))
+      (return (Value) false))
     (let [items (make [dynamic]Value 0 (count function.terms))]
       (for [term function.terms]
         (let [[value ok] (resolve-term term binding)]
           (when (not ok)
-            (return (Value []) false))
+            (return (Value) false))
           (arr.push! items value)))
       (return (value-map (slice items 0)) true)))
   (when (and (= op "get")
@@ -695,7 +695,7 @@
           [key key-ok] (resolve-term function.terms[1] binding)]
       (when (and map-ok key-ok)
         (return (map-get-value map-value key)))
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (and (or (= op "contains?")
                  (= op "clojure.string/includes?")
                  (= op "clojure.string/starts-with?")
@@ -704,7 +704,7 @@
     (let [[left left-ok] (resolve-term function.terms[0] binding)
           [right right-ok] (resolve-term function.terms[1] binding)]
       (when (not (and left-ok right-ok (= left.kind .String) (= right.kind .String)))
-        (return (Value []) false))
+        (return (Value) false))
       (cond
         (or (= op "contains?") (= op "clojure.string/includes?"))
           (return (value-bool (strings.contains left.text right.text)) true)
@@ -725,7 +725,7 @@
       (for [term function.terms]
         (let [[value value-ok] (resolve-term term binding)]
           (when (not value-ok)
-            (return (Value []) false))
+            (return (Value) false))
           (arr.push! values value)))
       (return (apply-arithmetic-values op (slice values 0)))))
   (when (and (= op "compare")
@@ -734,8 +734,8 @@
           [right right-ok] (resolve-term function.terms[1] binding)]
       (when (and left-ok right-ok)
         (return (value-int (i64 (value-compare left right))) true))
-      (return (Value []) false)))
-  (return (Value []) false)))
+      (return (Value) false)))
+  (return (Value) false)))
 
 (defn apply-function-op-with-fns [function: Function-Clause, binding: Binding, registry: []Native-Query-Fn] -> [value: Value, ok: bool]
   (let [[builtin builtin-ok] (apply-function-op function binding)]
@@ -743,16 +743,16 @@
       (return builtin true)))
   (let [[op op-ok] (query-op-name function.op binding)]
     (when (not op-ok)
-      (return (Value []) false))
+      (return (Value) false))
     (let [[index found] (query-fn-index registry op)]
       (when (not found)
-        (return (Value []) false))
+        (return (Value) false))
       (let [entry registry[index]]
         (when entry.has-function-callback
           (let [[args args-ok] (resolve-query-call-args function.terms binding)]
             (defer (delete args))
             (when (not args-ok)
-              (return (Value []) false))
+              (return (Value) false))
             (let [result (entry.function-callback (slice args 0))]
               (return result.value result.ok))))
         (when (> (count entry.target) 0)
@@ -760,10 +760,10 @@
                                                        :terms function.terms
                                                        :out ""
                                                        :out-vars ([]string [])
-                                                       :out-binding (Input-Binding [])
+                                                       :out-binding (Input-Binding)
                                                        :is-tuple false)
                     binding)))
-        (return (Value []) false)))))
+        (return (Value) false)))))
 
 (defn apply-function-clause [binding: Binding, function: Function-Clause] -> [out: Binding, ok: bool]
   (let [[value value-ok] (apply-function-op function binding)]

@@ -166,12 +166,12 @@
   (let [prepared (vev.prepare-pull-pattern-text text)]
     (when (not prepared.ok)
       (vev.delete-prepared-pull-pattern-shallow prepared)
-      (return (vev.Pull-Result [])))
+      (return (vev.Pull-Result)))
     (let [[result result-ok _] (vev.db-read-source-pull-result-for-pattern source entity (slice prepared.pattern 0))]
       (vev.delete-prepared-pull-pattern-shallow prepared)
       (if result-ok
         result
-        (vev.Pull-Result [])))))
+        (vev.Pull-Result)))))
 
 (defn mb-mini-source-queries-ok? [source: vev.DB-Read-Source] -> bool
   (let [artist-country (vev.q-text-db-read-source source

@@ -78,7 +78,7 @@
   (let [profile (abi-sqlite-conn-tx-boundary-profile-ptr (rawptr conn))]
     (if (and (not (= profile nil)) profile^.enabled)
       (time.now)
-      (time.Time []))))
+      (time.Time))))
 
 (defn- tx-boundary-profile-elapsed-us
   [conn: Vev-SQLite-Conn, start: time.Time] -> f64
@@ -1146,12 +1146,12 @@
 (defn- value-from-edn-text [text: string] -> [value: vev.Value, ok: bool, error: string]
   (let [[source read-error read-ok] (edn.try-read text)]
     (when (not read-ok)
-      (return (vev.Value []) false read-error.message))
+      (return (vev.Value) false read-error.message))
     (let [doc (vev.edn-doc-from-data source)]
       (defer (delete doc.nodes))
       (let [[parsed parsed-ok parsed-error] (vev.edn-value-from-node doc doc.root)]
         (when (not parsed-ok)
-          (return (vev.Value []) false parsed-error))
+          (return (vev.Value) false parsed-error))
         (let [owned (vev.value-owned parsed)]
           (vev.delete-value-containers-shallow parsed)
           (return owned true ""))))))
@@ -3278,7 +3278,7 @@
   (let [[groups groups-ok groups-error] (store-tx-data-groups-from-builders builders builder-count)]
     (when (not groups-ok)
       (delete groups)
-      (let [failed (vev.failed-store-tx-report (vev.Store-DB []) groups-error)
+      (let [failed (vev.failed-store-tx-report (vev.Store-DB) groups-error)
             out (tx-report-handle-from-store-report failed)]
         (vev.delete-store-tx-report failed)
         (return out)))
@@ -3299,7 +3299,7 @@
   (let [[groups groups-ok groups-error] (store-tx-data-groups-from-builders builders builder-count)]
     (when (not groups-ok)
       (delete groups)
-      (let [failed (vev.failed-store-tx-report (vev.Store-DB []) groups-error)
+      (let [failed (vev.failed-store-tx-report (vev.Store-DB) groups-error)
             out (tx-report-array-handle-from-store-report failed)]
         (vev.delete-store-tx-report failed)
         (return out)))
@@ -3328,7 +3328,7 @@
   (let [[texts texts-ok texts-error] (strings-from-c-array tx-texts tx-count)]
     (when (not texts-ok)
       (delete texts)
-      (let [failed (vev.failed-store-tx-report (vev.Store-DB []) texts-error)
+      (let [failed (vev.failed-store-tx-report (vev.Store-DB) texts-error)
             out (tx-report-array-handle-from-store-report failed)]
         (vev.delete-store-tx-report failed)
         (return out)))
@@ -3755,7 +3755,7 @@
           (delete sources)
           (delete query)
           (return (Vev-Prepared-Query nil)))
-        (arr.push! sources (vev.db-source (text-from-c name) (vev.DB []))))
+        (arr.push! sources (vev.db-source (text-from-c name) (vev.DB))))
       (set! index (+ index 1)))
     (let [prepared (abi-alloc-prepared-query query)
           ptr (prepared-query-ptr (Vev-Prepared-Query prepared))]
@@ -4668,20 +4668,20 @@
       (delete rows-source)
       (delete inputs-source)
       (let [query-result (vev.query-result-owned-values (vev.result-set-error query-ptr-value^.error))]
-        (return (result-finish-query-result (Vev-Result result) query-result (vev.DB [])))))
+        (return (result-finish-query-result (Vev-Result result) query-result (vev.DB)))))
     (let [[rows rows-ok rows-error] (value-from-edn-text rows-source)]
       (delete rows-source)
       (when (not rows-ok)
         (delete inputs-source)
         (let [query-result (vev.query-result-owned-values (vev.result-set-error rows-error))]
-          (return (result-finish-query-result (Vev-Result result) query-result (vev.DB [])))))
+          (return (result-finish-query-result (Vev-Result result) query-result (vev.DB)))))
       (let [[inputs input-ok input-error] (vev.parse-query-inputs-text-for-query query-ptr-value^.query inputs-source)]
         (delete inputs-source)
         (when (not input-ok)
           (vev.delete-owned-value rows)
           (vev.delete-owned-query-inputs inputs)
           (let [query-result (vev.query-result-owned-values (vev.result-set-error input-error))]
-            (return (result-finish-query-result (Vev-Result result) query-result (vev.DB [])))))
+            (return (result-finish-query-result (Vev-Result result) query-result (vev.DB)))))
         (let [relation-result (vev.q-query-relation-db rows query-ptr-value^.query (slice inputs 0))
               owned-result (vev.result-set-owned relation-result)]
           (vev.delete-result-set-shallow relation-result)
@@ -5180,7 +5180,7 @@
               relation-inputs (arr.into [dynamic]vev.Query-Input (slice inputs 0)) :defer
               empty-datoms (make [dynamic]vev.Datom)
               empty (vev.build-db empty-datoms)
-              stats (vev.Query-Stats [])]
+              stats (vev.Query-Stats)]
           (if (= rows.kind .Map)
             (arr.push! relation-inputs (vev.query-input-map-relation rows))
             (arr.push! relation-inputs (vev.query-input-scalar rows)))

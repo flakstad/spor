@@ -14,7 +14,7 @@
   (for [item binding.items]
     (when (= item.name name)
       (return item.value true)))
-  (return (Value []) false))
+  (return (Value) false))
 
 (defn binding-store! [binding: ^Binding, name: string, value: Value]
   (arr.push! binding^.items (Var-Binding :name name :value value)))
@@ -753,7 +753,7 @@
 
 (defn typed-relation-column-value [column: Relation-Column, row: int] -> [value: Value, ok: bool]
   (when (not column.has-kind)
-    (return (Value []) false))
+    (return (Value) false))
   (case column.kind
     .Nil (return (value-nil) true)
     .Entity (return (value-entity column.entities[row]) true)
@@ -766,8 +766,8 @@
     .Uuid (return (value-uuid column.texts[row]) true)
     .Instant (return (value-instant column.ints[row]) true)
     .Mixed (return column.values[row] true)
-    (return (Value []) false))
-  (return (Value []) false))
+    (return (Value) false))
+  (return (Value) false))
 
 (defn binding-from-query-relation-typed-row [rel: Query-Relation, row: int] -> [binding: Binding, ok: bool]
   (let [out (Binding :items (make [dynamic]Var-Binding 0 (count rel.attrs)))]
@@ -775,7 +775,7 @@
       (let [[value value-ok] (typed-relation-column-value rel.typed-columns[index] row)]
         (when (not value-ok)
           (delete out.items)
-          (return (Binding []) false))
+          (return (Binding) false))
         (binding-store! (addr out) attr (value-owned value))))
     (return out true)))
 
@@ -1168,22 +1168,22 @@
 (defn typed-relation-row-value [rel: Typed-Relation, row: int, name: string] -> [value: Value, ok: bool]
   (let [[column-index column-ok] (typed-relation-attr-index rel name)]
     (when (not column-ok)
-      (return (Value []) false))
+      (return (Value) false))
     (typed-relation-column-value rel.columns[column-index] row)))
 
 (defn query-relation-typed-row-value [rel: Query-Relation, row: int, name: string] -> [value: Value, ok: bool]
   (when (not rel.has-typed-columns)
-    (return (Value []) false))
+    (return (Value) false))
   (let [[column-index column-ok] (query-relation-attr-index-lookup rel name)]
     (when (not column-ok)
-      (return (Value []) false))
+      (return (Value) false))
     (typed-relation-column-value rel.typed-columns[column-index] row)))
 
 (defn query-relation-resolve-typed-term [rel: Query-Relation, row: int, term: Term] -> [value: Value, ok: bool]
   (case term.kind
     .Value (return term.value true)
     .Var (return (query-relation-typed-row-value rel row term.name))
-     (return (Value []) false)))
+     (return (Value) false)))
 
 (defn query-relation-resolve-typed-entity-term [db: DB, rel: Query-Relation, row: int, term: Term] -> [value: Value, ok: bool]
   (when (= term.kind .LookupRef)
@@ -1223,7 +1223,7 @@
 
 (defn query-relation-resolve-typed-entity-scan-term [db: DB, rel: Query-Relation, row: int, term: Term] -> [value: Value, ok: bool]
   (when (query-relation-typed-entity-term-needs-semantic-match? rel row term)
-    (return (Value []) false))
+    (return (Value) false))
   (query-relation-resolve-typed-entity-term db rel row term))
 
 (defn query-relation-typed-row-var-agrees? [rel: Query-Relation, row: int, name: string, value: Value] -> bool

@@ -6,7 +6,7 @@
 (defn datom-from-owned-serial-text [text: string] -> [datom: Datom, ok: bool, error: string]
   (let [[value read-error read-ok] (edn.try-read text)]
     (when (not read-ok)
-      (return (Datom []) false read-error.message))
+      (return (Datom) false read-error.message))
     (let [doc (edn-doc-from-data value)]
       (defer (delete doc.nodes))
       (datom-from-edn-node doc doc.root))))
@@ -16,13 +16,13 @@
     (when (or (< n 2)
               (not (= (kstr.get text 0) 34))
               (not (= (kstr.get text (- n 1)) 34)))
-      (return (Value []) false false ""))
+      (return (Value) false false ""))
     (let [cursor 1
           escaped false]
       (while (< cursor (- n 1))
         (let [ch (kstr.get text cursor)]
           (cond
-            (= ch 34) (return (Value []) false true "unexpected quote in serialized string value")
+            (= ch 34) (return (Value) false true "unexpected quote in serialized string value")
             (= ch 92)
               (do
                 (set! escaped true)
@@ -30,7 +30,7 @@
             :else
               (set! cursor (+ cursor 1)))))
       (when (> cursor (- n 1))
-        (return (Value []) false true "unterminated escape in serialized string value"))
+        (return (Value) false true "unterminated escape in serialized string value"))
       (let [body (kstr.slice text 1 (- n 1))]
         (if escaped
           (return (value-string (kstr.unescape body)) true true "")
@@ -44,12 +44,12 @@
     (when (not (and (storage-string-starts-with? text prefix)
                     (> n (+ prefix-n (kstr.count suffix)))
                     (= (kstr.get text (- n 1)) 93)))
-      (return (Value []) false false ""))
+      (return (Value) false false ""))
     (let [payload (kstr.slice text prefix-n (- n 1))
           [parsed parsed-ok] (strconv.parse_int payload)]
       (if (and parsed-ok (>= parsed 0))
         (return (value-entity (u64 parsed)) true true "")
-        (return (Value []) false true "invalid serialized entity value")))))
+        (return (Value) false true "invalid serialized entity value")))))
 
 (defn serialized-simple-float-value [text: string] -> [value: Value, ok: bool, matched: bool, error: string]
   (let [prefix "[:vev/float \""
@@ -59,12 +59,12 @@
                     (> n (+ prefix-n 2))
                     (= (kstr.get text (- n 2)) 34)
                     (= (kstr.get text (- n 1)) 93)))
-      (return (Value []) false false ""))
+      (return (Value) false false ""))
     (let [payload (kstr.slice text prefix-n (- n 2))
           [parsed parsed-ok] (serializable-float-from-text payload)]
       (if parsed-ok
         (return (value-float parsed) true true "")
-        (return (Value []) false true "invalid serialized float value")))))
+        (return (Value) false true "invalid serialized float value")))))
 
 (defn serialized-simple-value [text: string] -> [value: Value, ok: bool, matched: bool, error: string]
   (cond
@@ -79,9 +79,9 @@
       (let [[parsed parsed-ok] (strconv.parse_int text)]
         (if parsed-ok
           (return (value-int (i64 parsed)) true true "")
-          (return (Value []) false false "")))
+          (return (Value) false false "")))
     :else
-      (return (Value []) false false "")))
+      (return (Value) false false "")))
 
 (defn value-from-owned-serial-text [text: string] -> [value: Value, ok: bool, error: string]
   (let [[simple simple-ok simple-matched simple-error] (serialized-simple-value text)]
@@ -89,12 +89,12 @@
       (return simple simple-ok simple-error)))
   (let [[parsed-data read-error read-ok] (edn.try-read text)]
     (when (not read-ok)
-      (return (Value []) false read-error.message))
+      (return (Value) false read-error.message))
     (let [doc (edn-doc-from-data parsed-data)]
       (defer (delete doc.nodes))
       (let [[parsed-value parsed-ok parsed-error] (serial-value-from-edn-node doc doc.root)]
         (when (not parsed-ok)
-          (return (Value []) false parsed-error))
+          (return (Value) false parsed-error))
         (let [owned-value (value-owned parsed-value)]
           (delete-value-containers-shallow parsed-value)
           (return owned-value true ""))))))
@@ -106,18 +106,18 @@
   (if (not (= snapshot^.datom-stmt nil))
     (let [[entity attr value-text tx added loaded-ok loaded-error] (vev.sqlite-step-prepared-datom-by-log-index-parts-raw snapshot^.indexes.handle snapshot^.datom-stmt (i64 log-index))]
       (when (not loaded-ok)
-        (return (Datom []) false loaded-error))
+        (return (Datom) false loaded-error))
       (defer (delete value-text))
       (let [[value value-ok value-error] (value-from-owned-serial-text value-text)]
         (when (not value-ok)
           (delete attr)
-          (return (Datom []) false value-error))
+          (return (Datom) false value-error))
         (let [loaded (Datom :e entity :a attr :v value :tx tx :added added)]
           (sqlite-db-snapshot-cache-store-datom! snapshot log-index loaded)
           (return loaded true ""))))
     (let [[text loaded-ok loaded-error] (vev.sqlite-load-datom-by-log-index-text-raw snapshot^.indexes.handle (i64 log-index))]
     (when (not loaded-ok)
-      (return (Datom []) false loaded-error))
+      (return (Datom) false loaded-error))
     (defer (delete text))
       (let [[loaded parsed-ok parsed-error] (datom-from-owned-serial-text text)]
         (when parsed-ok
@@ -329,20 +329,20 @@
 (defn sqlite-open-db-snapshot-handle [handle: rawptr, page-size: int] -> [snapshot: SQLite-DB-Snapshot, ok: bool, error: string]
   (let [[basis basis-ok basis-error] (vev.sqlite-latest-index-root-basis-raw handle)]
     (when (not basis-ok)
-      (return (SQLite-DB-Snapshot []) false basis-error))
+      (return (SQLite-DB-Snapshot) false basis-error))
     (sqlite-open-db-snapshot-handle-at-basis handle basis page-size)))
 
 (defn sqlite-open-db-snapshot-handle-at-basis-known-log [handle: rawptr, basis-tx: u64, page-size: int, datom-count: u64, has-retractions: bool] -> [snapshot: SQLite-DB-Snapshot, ok: bool, error: string]
       (let [[root-row-id root-ok root-error] (sqlite-index-root-row-id-at-basis handle basis-tx)]
         (when (not root-ok)
-          (return (SQLite-DB-Snapshot []) false root-error))
+          (return (SQLite-DB-Snapshot) false root-error))
       (let [[indexes indexes-ok indexes-error] (sqlite-open-index-snapshot-handle-at-basis handle basis-tx page-size)]
         (when (not indexes-ok)
-          (return (SQLite-DB-Snapshot []) false indexes-error))
+          (return (SQLite-DB-Snapshot) false indexes-error))
         (let [[datom-stmt datom-stmt-ok datom-stmt-error] (vev.sqlite-prepare-datom-by-log-index-raw handle)]
           (when (not datom-stmt-ok)
             (close-sqlite-index-snapshot indexes)
-            (return (SQLite-DB-Snapshot []) false datom-stmt-error))
+            (return (SQLite-DB-Snapshot) false datom-stmt-error))
         (return (SQLite-DB-Snapshot :indexes indexes
                                      :datom-stmt datom-stmt
                                      :datom-cache-log-indexes (sqlite-db-snapshot-empty-datom-cache-log-indexes)
@@ -361,11 +361,11 @@
       (let [basis-tx (if (> published.basis-tx 0) published.basis-tx published.root-row-id)
             [indexes indexes-ok indexes-error] (sqlite-open-index-snapshot-handle-at-root-set handle basis-tx published.roots page-size)]
         (when (not indexes-ok)
-          (return (SQLite-DB-Snapshot []) false indexes-error))
+          (return (SQLite-DB-Snapshot) false indexes-error))
         (let [[datom-stmt datom-stmt-ok datom-stmt-error] (vev.sqlite-prepare-datom-by-log-index-raw handle)]
           (when (not datom-stmt-ok)
             (close-sqlite-index-snapshot indexes)
-            (return (SQLite-DB-Snapshot []) false datom-stmt-error))
+            (return (SQLite-DB-Snapshot) false datom-stmt-error))
         (return (SQLite-DB-Snapshot :indexes indexes
                                      :datom-stmt datom-stmt
                                      :datom-cache-log-indexes (sqlite-db-snapshot-empty-datom-cache-log-indexes)
@@ -384,16 +384,16 @@
       (let [basis-tx (if (> published.basis-tx 0) published.basis-tx published.root-row-id)
             [indexes indexes-ok indexes-error] (sqlite-open-index-snapshot-handle-at-root-set handle basis-tx published.roots page-size)]
         (when (not indexes-ok)
-          (return (SQLite-DB-Snapshot []) false indexes-error))
+          (return (SQLite-DB-Snapshot) false indexes-error))
         (let [[datom-stmt datom-stmt-ok datom-stmt-error] (vev.sqlite-prepare-datom-by-log-index-raw handle)]
           (when (not datom-stmt-ok)
             (close-sqlite-index-snapshot indexes)
-            (return (SQLite-DB-Snapshot []) false datom-stmt-error))
+            (return (SQLite-DB-Snapshot) false datom-stmt-error))
           (let [[has-retractions retractions-ok retractions-error] (vev.sqlite-datom-has-retractions-raw handle)]
             (when (not retractions-ok)
               (vev.sqlite-finalize-stmt-raw datom-stmt)
               (close-sqlite-index-snapshot indexes)
-              (return (SQLite-DB-Snapshot []) false retractions-error))
+              (return (SQLite-DB-Snapshot) false retractions-error))
             (return (SQLite-DB-Snapshot :indexes indexes
                                          :datom-stmt datom-stmt
                                          :datom-cache-log-indexes (sqlite-db-snapshot-empty-datom-cache-log-indexes)
@@ -411,10 +411,10 @@
 (defn sqlite-open-db-snapshot-handle-at-basis [handle: rawptr, basis-tx: u64, page-size: int] -> [snapshot: SQLite-DB-Snapshot, ok: bool, error: string]
     (let [[datom-count datom-count-ok datom-count-error] (vev.sqlite-datom-count-raw handle)]
       (when (not datom-count-ok)
-        (return (SQLite-DB-Snapshot []) false datom-count-error))
+        (return (SQLite-DB-Snapshot) false datom-count-error))
       (let [[has-retractions retractions-ok retractions-error] (vev.sqlite-datom-has-retractions-raw handle)]
         (when (not retractions-ok)
-          (return (SQLite-DB-Snapshot []) false retractions-error))
+          (return (SQLite-DB-Snapshot) false retractions-error))
         (sqlite-open-db-snapshot-handle-at-basis-known-log handle basis-tx page-size datom-count has-retractions))))
 
 (defn sqlite-conn-current-root-basis [store: ^SQLite-Conn] -> [basis: u64, ok: bool, error: string]
@@ -426,10 +426,10 @@
 (defn sqlite-conn-open-db-snapshot [store: ^SQLite-Conn, page-size: int] -> [snapshot: SQLite-DB-Snapshot, ok: bool, error: string]
   (let [[basis basis-ok basis-error] (sqlite-conn-current-root-basis store)]
     (when (not basis-ok)
-      (return (SQLite-DB-Snapshot []) false basis-error))
+      (return (SQLite-DB-Snapshot) false basis-error))
     (let [[datom-count has-retractions log-ok log-error] (sqlite-conn-datom-count-and-retractions store)]
       (when (not log-ok)
-        (return (SQLite-DB-Snapshot []) false log-error))
+        (return (SQLite-DB-Snapshot) false log-error))
       (let [[opened-snapshot snapshot-ok snapshot-error] (sqlite-open-db-snapshot-handle-at-basis-known-log store^.handle basis page-size datom-count has-retractions)]
         (when snapshot-ok
           (set! opened-snapshot.path (string-owned store^.path)))

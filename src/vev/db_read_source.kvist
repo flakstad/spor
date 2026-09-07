@@ -14,7 +14,7 @@
     (let [[entity found] (resolve-lookup-ref db arg.lookup-attr arg.lookup-value)]
       (when found
         (return (value-entity entity) true))
-      (return (Value []) false)))
+      (return (Value) false)))
   (return arg.value true))
 
 (defn validate-index-lookup-refs [db: DB, args: []Index-Arg] -> [ok: bool, error: string]
@@ -192,7 +192,7 @@
 
 (defn db-read-source-for-name [primary: DB-Read-Source, sources: []DB-Read-Named-Source, name: string] -> [source: DB-Read-Source, ok: bool, error: string]
   (when (not (query-source-input-name? name))
-    (return (DB-Read-Source []) false "SQLite DB snapshot source names must be $-prefixed"))
+    (return (DB-Read-Source) false "SQLite DB snapshot source names must be $-prefixed"))
   (when (= name "$")
     (return primary true ""))
   (for [candidate sources]
@@ -235,7 +235,7 @@
     .SQLite-Datom-Overlay (sqlite-db-snapshot-index-view source.sqlite-snapshot order)
     .SQLite-Datom-Log-Overlay (sqlite-db-snapshot-index-view source.sqlite-snapshot order)
     .Tx-Ops-Overlay (db-read-source-index-view source.overlay-base^ order)
-     (DB-Index-View [])))
+     (DB-Index-View)))
 
 (defn db-read-source-eavt-entity-range [source: DB-Read-Source, entity: u64] -> [low: int, high: int, exists: bool, ok: bool, error: string]
   (let [view (db-read-source-index-view source .EAVT)
@@ -270,34 +270,34 @@
       (do
         (when (or (< entry 0)
                   (>= entry (count source.db^.datoms)))
-          (return (Datom []) false "resident datom index out of range"))
+          (return (Datom) false "resident datom index out of range"))
         (return (datom-owned source.db^.datoms[entry]) true ""))
     .Shared-Resident-Indexes
       (do
         (when (or (< entry 0)
                   (>= entry (count source.db^.datoms)))
-          (return (Datom []) false "shared resident datom index out of range"))
+          (return (Datom) false "shared resident datom index out of range"))
         (return (datom-owned source.db^.datoms[entry]) true ""))
     .Shared-Resident-Datoms-And-Indexes
       (let [[datom ok] (shared-datom-log-at source.shared-datoms^ entry)]
         (if ok
           (return datom true "")
-          (return (Datom []) false "shared datom log index out of range")))
+          (return (Datom) false "shared datom log index out of range")))
     .Shared-Tx-Ops-Overlay
       (let [[datom ok] (shared-datom-log-at source.shared-datoms^ entry)]
         (if ok
           (return datom true "")
-          (return (Datom []) false "shared overlay datom log index out of range")))
+          (return (Datom) false "shared overlay datom log index out of range")))
     .Shared-Datom-Overlay
       (let [[datom ok] (shared-datom-log-at source.shared-datoms^ entry)]
         (if ok
           (return datom true "")
-          (return (Datom []) false "shared datom overlay log index out of range")))
+          (return (Datom) false "shared datom overlay log index out of range")))
     .Shared-Datom-Log-Overlay
       (let [[datom ok] (shared-datom-log-at source.shared-datoms^ entry)]
         (if ok
           (return datom true "")
-          (return (Datom []) false "shared datom log overlay log index out of range")))
+          (return (Datom) false "shared datom log overlay log index out of range")))
     .SQLite-Snapshot
       (sqlite-db-snapshot-datom-at-log-index source.sqlite-snapshot entry)
     .SQLite-Tx-Ops-Overlay
@@ -306,7 +306,7 @@
       (sqlite-db-snapshot-datom-at-log-index source.sqlite-snapshot entry)
     .SQLite-Datom-Log-Overlay
       (sqlite-db-snapshot-datom-at-log-index source.sqlite-snapshot entry)
-     (return (Datom []) false "unknown DB read source")))
+     (return (Datom) false "unknown DB read source")))
 
 (defn db-read-source-datom-unfiltered-current-at-entry? [source: DB-Read-Source, entry: int] -> [current: bool, ok: bool, error: string]
   (case source.kind
@@ -584,7 +584,7 @@
         (value-keyword datom.a)
         (if (= position 2)
           datom.v
-          (Value []))))
+          (Value))))
     (if (= order ":aevt")
       (if (= position 0)
         (value-keyword datom.a)
@@ -592,7 +592,7 @@
           (value-entity datom.e)
           (if (= position 2)
             datom.v
-            (Value []))))
+            (Value))))
       (if (= order ":avet")
         (if (= position 0)
           (value-keyword datom.a)
@@ -600,14 +600,14 @@
             datom.v
             (if (= position 2)
               (value-entity datom.e)
-              (Value []))))
+              (Value))))
         (if (= position 0)
           datom.v
           (if (= position 1)
             (value-keyword datom.a)
             (if (= position 2)
               (value-entity datom.e)
-              (Value []))))))))
+              (Value))))))))
 
 (defn index-position-equal? [actual: Value, expected: Value] -> bool
   (if (and (= actual.kind .Keyword)
@@ -1011,16 +1011,16 @@
   (when (db-read-source-has-overlay? source)
     (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity attr)]
       (when (not datoms-ok)
-        (return (Value []) false datoms-error))
+        (return (Value) false datoms-error))
       (defer (delete-owned-datoms datoms))
       (when (= (count datoms) 0)
-        (return (Value []) false ""))
+        (return (Value) false ""))
       (return (value-owned datoms[(- (count datoms) 1)].v) true "")))
   (let [[index-pos pos-exists pos-ok pos-error] (db-read-source-eavt-entity-attr-position source entity attr)]
     (when (not pos-ok)
-      (return (Value []) false pos-error))
+      (return (Value) false pos-error))
     (when (not pos-exists)
-      (return (Value []) false ""))
+      (return (Value) false ""))
     (let [view (db-read-source-index-view source .EAVT)
           entry (db-index-view-at view index-pos)
           sqlite-current-by-construction (and (= view.kind .SQLite-Cursor)
@@ -1029,7 +1029,7 @@
       (when (not sqlite-current-by-construction)
         (let [[current current-ok current-error] (db-read-source-datom-current-at-entry? source entry)]
           (when (not current-ok)
-            (return (Value []) false current-error))
+            (return (Value) false current-error))
           (when (not current)
             ;; A cardinality-one replacement leaves the prior value in EAVT
             ;; as a retracted historical entry. The first entry for (e, a)
@@ -1038,12 +1038,12 @@
             ;; absent; source-backed bind joins depend on this helper.
             (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity attr)]
               (when (not datoms-ok)
-                (return (Value []) false datoms-error))
+                (return (Value) false datoms-error))
               (defer (delete-owned-datoms datoms))
               (when (= (count datoms) 0)
-                (return (Value []) false ""))
+                (return (Value) false ""))
               (return (value-owned datoms[(- (count datoms) 1)].v) true "")))))
-      (let [datom (Datom [])
+      (let [datom (Datom)
             datom-ok false
             datom-error ""]
         (if sqlite-current-by-construction
@@ -1057,7 +1057,7 @@
             (set! datom-ok loaded-ok)
             (set! datom-error loaded-error)))
         (when (not datom-ok)
-          (return (Value []) false datom-error))
+          (return (Value) false datom-error))
         (if (and (= datom.e entity)
                  (= datom.a attr))
           (let [out (value-owned datom.v)]
@@ -1065,7 +1065,7 @@
             (return out true ""))
           (do
             (delete-owned-datom datom)
-            (return (Value []) false "")))))))
+            (return (Value) false "")))))))
 
 (defn db-read-source-cardinality-one-int-value-fast-all-current [source: DB-Read-Source, entity: u64, attr: string] -> [value: i64, ok: bool, error: string]
   (let [[owned-value value-ok value-error] (db-read-source-cardinality-one-value-fast-all-current source entity attr)]
@@ -1134,7 +1134,7 @@
             (let [partial (value-map (slice items 0))]
               (delete items)
               (delete-owned-value partial))
-            (return (Value []) false datoms-error))
+            (return (Value) false datoms-error))
           (when (> (count datoms) 0)
             (arr.push! items (value-keyword (string-owned attr)))
             (if (= (count datoms) 1)
@@ -1300,12 +1300,12 @@
       (let [[ident ident-ok ident-error] (db-read-source-schema-ident-for-entity source value.entity)]
         (if ident-ok
           (return (value-keyword ident) true "")
-          (return (Value []) false ident-error)))
+          (return (Value) false ident-error)))
     (and (= value.kind .Int) (>= value.int-value 0))
       (let [[ident ident-ok ident-error] (db-read-source-schema-ident-for-entity source (u64 value.int-value))]
         (if ident-ok
           (return (value-keyword ident) true "")
-          (return (Value []) false ident-error)))
+          (return (Value) false ident-error)))
     :else (return value true "")))
 
 (defn db-read-source-schema-tuple-attrs [source: DB-Read-Source, attr: string] -> [attrs: [dynamic]string, ok: bool, error: string]
@@ -1441,16 +1441,16 @@
     (let [[entity lookup-ok lookup-error] (db-read-source-resolve-lookup-ref source term.lookup-attr term.lookup-value)]
       (if lookup-ok
         (return (value-entity entity) true "")
-        (return (Value []) false lookup-error))))
+        (return (Value) false lookup-error))))
   (let [[resolved resolved-ok] (db-read-source-term-resolved-value term binding)]
     (when (not resolved-ok)
-      (return (Value []) false ""))
+      (return (Value) false ""))
     (let [[lookup-attr lookup-value lookup-ok] (value-lookup-ref-parts resolved)]
       (when lookup-ok
         (let [[entity lookup-found lookup-error] (db-read-source-resolve-lookup-ref source lookup-attr lookup-value)]
           (if lookup-found
             (return (value-entity entity) true "")
-            (return (Value []) false lookup-error)))))
+            (return (Value) false lookup-error)))))
     (cond
       (= resolved.kind .Entity) (return resolved true "")
       (= resolved.kind .Int) (return (value-entity (u64 resolved.int-value)) true "")
@@ -1458,7 +1458,7 @@
         (let [[entity ident-ok ident-error] (db-read-source-schema-entity-for-attr source resolved.text)]
           (cond
             ident-ok (return (value-entity entity) true "")
-            (not (= ident-error "")) (return (Value []) false ident-error)
+            (not (= ident-error "")) (return (Value) false ident-error)
             :else (return resolved false "")))
       :else (return resolved false ""))))
 
@@ -1467,19 +1467,19 @@
     (let [forward (forward-attr-for-reverse attr) :defer
           [datoms datoms-ok datoms-error] (db-read-source-datoms-by-reverse-entity-attr source entity forward)]
       (when (not datoms-ok)
-        (return (Value []) false datoms-error))
+        (return (Value) false datoms-error))
       (when (> (count datoms) 0)
         (let [value (value-entity datoms[0].e)]
           (delete-owned-datoms datoms)
           (return value true "")))
       (delete-owned-datoms datoms)
-      (return (Value []) false ""))
+      (return (Value) false ""))
     (let [[datoms datoms-ok datoms-error] (db-read-source-datoms-by-entity-attr source entity attr)]
       (when (not datoms-ok)
-        (return (Value []) false datoms-error))
+        (return (Value) false datoms-error))
       (when (> (count datoms) 0)
         (let [value (value-owned datoms[0].v)]
           (delete-owned-datoms datoms)
           (return value true "")))
       (delete-owned-datoms datoms)
-      (return (Value []) false ""))))
+      (return (Value) false ""))))

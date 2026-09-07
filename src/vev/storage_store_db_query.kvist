@@ -96,7 +96,7 @@
     .Shared-Datom-Log-Overlay (Store-DB :kind .Shared-Datom-Log-Overlay
                                          :shared-snapshot (retain-shared-db-snapshot snapshot.shared-snapshot)
                                          :overlay-log (retain-shared-datom-log snapshot.overlay-log))
-     (Store-DB [])))
+     (Store-DB)))
 
 (defn store-db-from-read-source [source: DB-Read-Source] -> [snapshot: Store-DB, ok: bool, error: string]
   (case source.kind
@@ -198,13 +198,13 @@
     .Tx-Ops-Overlay
       (let [[base base-ok base-error] (store-db-from-read-source source.overlay-base^)]
         (when (not base-ok)
-          (return (Store-DB []) false base-error))
+          (return (Store-DB) false base-error))
         (let [out (store-db-source-overlay-from-resolved base (slice source.overlay-ops^ 0) source.overlay-tx)]
           (close-store-db base)
           (return out true "")))
     .Relation-Value
-      (return (Store-DB []) false "relation-value source cannot be exposed as a DB handle")
-     (return (Store-DB []) false "unsupported read source for DB handle")))
+      (return (Store-DB) false "relation-value source cannot be exposed as a DB handle")
+     (return (Store-DB) false "unsupported read source for DB handle")))
 
 (defn sqlite-published-root-retained? [path: string, published: SQLite-Durable-Published-Root] -> [retained: bool, ok: bool, error: string]
   (let [[handle open-ok open-error] (vev.sqlite-open-live-raw path)]
@@ -337,7 +337,7 @@
                 snapshot^.sqlite-snapshot.basis-tx
                 snapshot^.sqlite-snapshot.root-row-id)]
         (when (not retained-ok)
-          (return (DB-Read-Source []) false retained-error))
+          (return (DB-Read-Source) false retained-error))
         (when (not retained)
           (let [path (string-owned snapshot^.sqlite-snapshot.path)
                 basis-tx snapshot^.sqlite-snapshot.basis-tx
@@ -345,7 +345,7 @@
             (delete path)
             (if resident-ok
               (return (resident-db-read-source (addr snapshot^.resident)) true "")
-              (return (DB-Read-Source []) false resident-error))))
+              (return (DB-Read-Source) false resident-error))))
         (return (sqlite-db-read-source (addr snapshot^.sqlite-snapshot)) true ""))
     .SQLite-Lazy-Snapshot
       (let [path (string-owned snapshot^.sqlite-lazy-path)
@@ -357,10 +357,10 @@
               (delete path)
               (if resident-ok
                 (return (resident-db-read-source (addr snapshot^.resident)) true "")
-                (return (DB-Read-Source []) false resident-error)))
+                (return (DB-Read-Source) false resident-error)))
             (do
               (delete path)
-              (return (DB-Read-Source []) false opened-error))))
+              (return (DB-Read-Source) false opened-error))))
         (delete path)
         (delete snapshot^.sqlite-lazy-path)
         (set! snapshot^.sqlite-snapshot opened)
@@ -373,22 +373,22 @@
             [retained retained-ok retained-error] (sqlite-published-root-retained? path published-root)]
         (when (not retained-ok)
           (delete path)
-          (return (DB-Read-Source []) false retained-error))
+          (return (DB-Read-Source) false retained-error))
         (when (not retained)
           (let [[resident-ok resident-error] (sqlite-store-db-materialize-resident-at-basis! snapshot path published-root.basis-tx)]
             (delete path)
             (if resident-ok
               (return (resident-db-read-source (addr snapshot^.resident)) true "")
-              (return (DB-Read-Source []) false resident-error))))
+              (return (DB-Read-Source) false resident-error))))
         (let [
             [opened opened-ok opened-error] (sqlite-open-db-snapshot-at-root-with-cache path published-root sqlite-db-source-default-page-size root-cache)]
           (delete path)
           (when (not opened-ok)
-            (return (DB-Read-Source []) false opened-error))
+            (return (DB-Read-Source) false opened-error))
           (delete snapshot^.sqlite-root-path)
           (set! snapshot^.sqlite-snapshot opened)
           (release-sqlite-index-page-cache! snapshot^.sqlite-root-page-cache)
-          (set! snapshot^.sqlite-root-page-cache (SQLite-Index-Page-Cache []))
+          (set! snapshot^.sqlite-root-page-cache (SQLite-Index-Page-Cache))
           (set! snapshot^.kind .SQLite-Snapshot)
           (return (sqlite-db-read-source (addr snapshot^.sqlite-snapshot)) true "")))
     .SQLite-Tx-Ops-Overlay
@@ -397,26 +397,26 @@
           (if (= snapshot^.kind .Shared-Tx-Ops-Overlay)
             (store-db-read-source snapshot)
             (return (sqlite-tx-ops-overlay-db-read-source (addr snapshot^.sqlite-snapshot) (addr snapshot^.overlay-ops) snapshot^.overlay-tx) true ""))
-          (return (DB-Read-Source []) false base-error)))
+          (return (DB-Read-Source) false base-error)))
     .SQLite-Datom-Overlay
       (let [[base-ok base-error] (ensure-sqlite-overlay-base-open! snapshot)]
         (if base-ok
           (if (= snapshot^.kind .Shared-Datom-Overlay)
             (store-db-read-source snapshot)
             (return (sqlite-datom-overlay-db-read-source (addr snapshot^.sqlite-snapshot) (addr snapshot^.overlay-datoms)) true ""))
-          (return (DB-Read-Source []) false base-error)))
+          (return (DB-Read-Source) false base-error)))
     .SQLite-Datom-Log-Overlay
       (let [[base-ok base-error] (ensure-sqlite-overlay-base-open! snapshot)]
         (if base-ok
           (if (= snapshot^.kind .Shared-Datom-Log-Overlay)
             (store-db-read-source snapshot)
             (return (sqlite-datom-log-overlay-db-read-source (addr snapshot^.sqlite-snapshot) (addr snapshot^.overlay-log) snapshot^.overlay-tx) true ""))
-          (return (DB-Read-Source []) false base-error)))
+          (return (DB-Read-Source) false base-error)))
     .Shared-Snapshot (return (shared-db-snapshot-read-source (addr snapshot^.shared-snapshot)) true "")
     .Shared-Tx-Ops-Overlay (return (shared-tx-ops-overlay-db-read-source (addr snapshot^.shared-snapshot.datoms) (addr snapshot^.shared-snapshot.indexes) (addr snapshot^.overlay-ops) snapshot^.overlay-tx) true "")
     .Shared-Datom-Overlay (return (shared-datom-overlay-db-read-source (addr snapshot^.shared-snapshot.datoms) (addr snapshot^.shared-snapshot.indexes) (addr snapshot^.overlay-datoms)) true "")
     .Shared-Datom-Log-Overlay (return (shared-datom-log-overlay-db-read-source (addr snapshot^.shared-snapshot.datoms) (addr snapshot^.shared-snapshot.indexes) (addr snapshot^.overlay-log)) true "")
-     (return (DB-Read-Source []) false "store DB snapshot is not open")))
+     (return (DB-Read-Source) false "store DB snapshot is not open")))
 
 (defn q-result-store-db-text [snapshot: ^Store-DB, text: string] -> Query-Result
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
@@ -579,7 +579,7 @@
   (let [[source source-ok source-error] (store-db-read-source snapshot)]
     (if source-ok
       (db-read-source-result-set-value source result)
-      (return (Value []) false source-error))))
+      (return (Value) false source-error))))
 
 (defn store-db-materialize-db [snapshot: ^Store-DB] -> [db: DB, ok: bool, error: string]
   (let [[source source-ok source-error] (store-db-read-source snapshot)]

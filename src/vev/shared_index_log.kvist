@@ -255,7 +255,7 @@
   (when (or (< position 0)
             (>= position log.count)
             (= (count log.chunk-starts) 0))
-    (return (Datom []) false))
+    (return (Datom) false))
   (let [estimated (/ position log.chunk-size)]
     (when (and (>= estimated 0)
                (< estimated (count log.chunks)))
@@ -275,12 +275,12 @@
     (let [found-index (- low 1)]
       (when (or (< found-index 0)
                 (>= found-index (count log.chunks)))
-        (return (Datom []) false))
+        (return (Datom) false))
       (let [offset (- position log.chunk-starts[found-index])
             chunk log.chunks[found-index]]
         (when (or (< offset 0)
                   (>= offset (count chunk.values)))
-          (return (Datom []) false))
+          (return (Datom) false))
         (return chunk.values[offset] true)))))
 
 (defn shared-int-chunk-matches-slice? [chunk: Shared-Int-Chunk, values: []int, start: int] -> bool
@@ -394,7 +394,7 @@
     (let [appended-index (- index start-index)]
       (when (or (< appended-index 0)
                 (>= appended-index (count appended)))
-        (return (Datom []) false))
+        (return (Datom) false))
       (return appended[appended-index] true))))
 
 (defn shared-datom-index-less? [log: Shared-Datom-Log, appended: []Datom, start-index: int, order: string, left-index: int, right-index: int] -> bool
@@ -782,15 +782,15 @@
 (defn shared-datom-log-at [log: Shared-Datom-Log, position: int] -> [datom: Datom, ok: bool]
   (when (or (< position 0)
             (>= position log.count))
-    (return (Datom []) false))
+    (return (Datom) false))
   (let [[chunk-index chunk-ok] (shared-datom-log-chunk-index-at log position)]
     (when (not chunk-ok)
-      (return (Datom []) false))
+      (return (Datom) false))
     (let [offset (- position log.chunk-starts[chunk-index])
           chunk log.chunks[chunk-index]]
       (when (or (< offset 0)
                 (>= offset (count chunk.values)))
-        (return (Datom []) false))
+        (return (Datom) false))
       (return (datom-owned chunk.values[offset]) true))))
 
 (defn shared-datom-fact-equal? [left: Datom, right: Datom] -> bool

@@ -37,7 +37,7 @@
                 (if exists
                   (when (not (predicate-value-equal? existing value))
                     (db-read-source-delete-binding-owned out)
-                    (return (Binding []) false))
+                    (return (Binding) false))
                   (binding-store! (addr out) arg.name (value-owned value)))))))))
     (return out true)))
 
@@ -159,9 +159,9 @@
       (return (query-relation-empty) false ""))
     (defer (delete seen))
     (while (< row rel.typed-rows)
-      (let [left-value (Value [])
+      (let [left-value (Value)
             left-ok false
-            right-value (Value [])
+            right-value (Value)
             right-ok false]
         (when (and (= call.args[1].kind .Var) left-bound)
           (let [[value value-ok] (query-relation-typed-row-value rel row call.args[1].name)]
@@ -285,8 +285,8 @@
 (defn two-hop-attr-param-derived-rule-shape [rules: []Rule, name: string] -> [direct-rule: Rule, hop-rule: Rule, base-rule: Rule, ok: bool]
   (let [found-direct false
         found-hop false
-        direct (Rule [])
-        hop (Rule [])
+        direct (Rule)
+        hop (Rule)
         base-name ""]
     (for [rule rules]
       (when (= rule.name name)
@@ -301,12 +301,12 @@
             (set! found-hop true)
             (set! base-name candidate-base)))))
     (when (not (and found-direct found-hop))
-      (return direct hop (Rule []) false))
+      (return direct hop (Rule) false))
     (for [rule rules]
       (when (= rule.name base-name)
         (when (attr-param-two-values-same-entity-rule-shape? rule)
           (return direct hop rule true))))
-    (return direct hop (Rule []) false)))
+    (return direct hop (Rule) false)))
 
 (defn append-attr-param-three-value-row! [columns: ^[dynamic]Relation-Column, rows: ^int, seen: (ptr (map string (struct []))), attr: string, left-value: Value, right-value: Value] -> bool
   (append-attr-param-two-values-row! columns rows seen attr left-value right-value))
@@ -697,7 +697,7 @@
       (while left-stream.has-current
         (let [[left-entity left-entity-ok] (value-as-db-entity left-stream.current.v)]
           (when left-entity-ok
-            (let [[append-ok append-error] (db-read-source-query-relation-append-reverse-derived-edge-from-left! source (addr columns) (addr rows) (addr seen) left-attr right-attr left-entity false (Value []))]
+            (let [[append-ok append-error] (db-read-source-query-relation-append-reverse-derived-edge-from-left! source (addr columns) (addr rows) (addr seen) left-attr right-attr left-entity false (Value))]
               (when (not append-ok)
                 (delete-source-index-datom-stream left-stream)
                 (delete-relation-columns columns)
@@ -787,9 +787,9 @@
               (when frontier-used
                 (set! row rel.typed-rows)))))
         (while (< row rel.typed-rows)
-          (let [left-value (Value [])
+          (let [left-value (Value)
                 left-ok false
-                right-value (Value [])
+                right-value (Value)
                 right-ok false]
             (when (and left-bound (= call.args[0].kind .Var))
               (let [[value value-ok] (query-relation-typed-row-value rel row call.args[0].name)]
@@ -1075,9 +1075,9 @@
               (return frontier frontier-ok ""))
             (delete-query-relation frontier)))
         (while (< row rel.typed-rows)
-          (let [left-value (Value [])
+          (let [left-value (Value)
                 left-ok false
-                right-value (Value [])
+                right-value (Value)
                 right-ok false]
             (when (and (= call.args[1].kind .Var) left-bound)
               (let [[value value-ok] (query-relation-typed-row-value rel row call.args[1].name)]
@@ -1091,7 +1091,7 @@
               (let [first-columns (relation-columns-for-attrs (slice attrs 0))
                     first-rows 0
                     first-seen (set.empty string)
-                    [first-ok first-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr first-columns) (addr first-rows) (addr first-seen) attr true left-value (Value []) false stats)]
+                    [first-ok first-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr first-columns) (addr first-rows) (addr first-seen) attr true left-value (Value) false stats)]
                 (delete first-seen)
                 (when (not first-ok)
                   (delete-relation-columns first-columns)
@@ -1143,7 +1143,7 @@
               (let [first-columns (relation-columns-for-attrs (slice attrs 0))
                     first-rows 0
                     first-seen (set.empty string)
-                    [first-ok first-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr first-columns) (addr first-rows) (addr first-seen) attr false right-value (Value []) false stats)]
+                    [first-ok first-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr first-columns) (addr first-rows) (addr first-seen) attr false right-value (Value) false stats)]
                 (delete first-seen)
                 (when (not first-ok)
                   (delete-relation-columns first-columns)
@@ -1164,7 +1164,7 @@
                         (let [second-columns (relation-columns-for-attrs (slice attrs 0))
                               second-rows 0
                               second-seen (set.empty string)
-                              [second-ok second-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr second-columns) (addr second-rows) (addr second-seen) attr false middle-value (Value []) false stats)]
+                              [second-ok second-error] (db-read-source-append-bound-attr-param-same-entity-value! source (addr second-columns) (addr second-rows) (addr second-seen) attr false middle-value (Value) false stats)]
                           (delete second-seen)
                           (when (not second-ok)
                             (delete-relation-columns second-columns)

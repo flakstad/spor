@@ -252,7 +252,7 @@
     (vector-data items)))
 
 (defn workload-tx
-  [workload: string, sample: int, ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids [])]
+  [workload: string, sample: int, ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids)]
   -> Data
   (when (or (= workload "ro-demo")
             (= workload "ro-demo-no-provenance"))
@@ -634,7 +634,7 @@
 
 (defn measure-public!
   [samples: ^Samples, conn: d.Conn, workload: string, sample: int,
-   ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids [])]
+   ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids)]
   (prepare-public! conn workload sample)
   (let [tx (workload-tx workload sample ro-ids)]
     (defer (data.release tx))
@@ -649,7 +649,7 @@
 (defn measure-manual!
   [samples: ^Samples, conn: ^native.Durable-Connection,
    workload: string, sample: int,
-   ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids [])]
+   ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids)]
   (prepare-native! conn workload sample)
   (let [tx (workload-tx workload sample ro-ids)]
     (defer (data.release tx))
@@ -702,7 +702,7 @@
 (defn measure-profile!
   [samples: ^Samples, conn: ^native.Durable-Connection,
    workload: string, sample: int,
-   ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids [])]
+   ro-ids: Ro-Demo-Ids :default (Ro-Demo-Ids)]
   (prepare-native! conn workload sample)
   (let [tx (workload-tx workload sample ro-ids)
         tx-text (edn.write tx)]
@@ -839,7 +839,7 @@
           (native-transact-data! (addr native-conn) native-seed-tx)))
       (let [ids (if (= workload "ro-demo-resolved-ids")
                   (ro-demo-ids public-conn)
-                  (Ro-Demo-Ids []))
+                  (Ro-Demo-Ids))
             samples (empty-samples sample-count)]
         (for [sample (arr.range 0 sample-count)]
           (measure-public! (addr samples) public-conn workload sample ids)

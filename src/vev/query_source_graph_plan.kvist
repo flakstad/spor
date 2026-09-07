@@ -23,22 +23,22 @@
        (= clause-value.e.name name)))
 
 (defn empty-source-same-entity-ref-fanout-projection [] -> Source-Same-Entity-Ref-Fanout-Projection
-  (Source-Same-Entity-Ref-Fanout-Projection []))
+  (Source-Same-Entity-Ref-Fanout-Projection))
 
 (defn empty-source-same-value-collaborator-projection [] -> Source-Same-Value-Collaborator-Projection
-  (Source-Same-Value-Collaborator-Projection []))
+  (Source-Same-Value-Collaborator-Projection))
 
 (defn empty-source-track-release-projection [] -> Source-Track-Release-Projection
-  (Source-Track-Release-Projection []))
+  (Source-Track-Release-Projection))
 
 (defn empty-source-collab-net-two-projection [] -> Source-Collab-Net-Two-Projection
-  (Source-Collab-Net-Two-Projection []))
+  (Source-Collab-Net-Two-Projection))
 
 (defn empty-source-input-ref-value-projection [] -> Source-Input-Ref-Value-Projection
-  (Source-Input-Ref-Value-Projection []))
+  (Source-Input-Ref-Value-Projection))
 
 (defn empty-source-fulltext-track-info-projection [] -> Source-Fulltext-Track-Info-Projection
-  (Source-Fulltext-Track-Info-Projection []))
+  (Source-Fulltext-Track-Info-Projection))
 
 (defn query-two-find-vars? [query: Query, first-var: string, second-var: string] -> bool
   (and (= (count query.find) 2)

@@ -250,14 +250,14 @@
              (not (= source-row.kind .Vector)))
     (if (= position 0)
       (return source-row true)
-      (return (Value []) false)))
+      (return (Value) false)))
   (when (not (= source-row.kind .Vector))
-    (return (Value []) false))
+    (return (Value) false))
   (when (not (= (count source-row.items) width))
-    (return (Value []) false))
+    (return (Value) false))
   (when (or (< position 0)
             (>= position width))
-    (return (Value []) false))
+    (return (Value) false))
   (return source-row.items[position] true))
 
 (defn source-row-prior-var-agrees? [clause: Clause, source-row: Value, position: int, name: string, actual: Value] -> bool
@@ -310,7 +310,7 @@
 (defn source-row-var-value [clause: Clause, source-row: Value, name: string] -> [value: Value, ok: bool]
   (let [[position position-ok] (direct-source-output-position clause name)]
     (when (not position-ok)
-      (return (Value []) false))
+      (return (Value) false))
     (source-row-position-value source-row clause.source-width position)))
 
 (defn direct-source-row-pushdown-matches? [clause: Clause, source-row: Value, op: Physical-Op] -> bool
@@ -401,7 +401,7 @@
     2 (return clause.v true)
     3 (return clause.tx-term true)
     4 (return clause.op-term true)
-     (return (Term []) false)))
+     (return (Term) false)))
 
 (defn source-input-clause-bound-key-position [rel: Query-Relation, clause: Clause] -> [position: int, ok: bool]
   (let [position 0]
@@ -527,14 +527,14 @@
     out))
 
 (defn bindings-after-relation-source-clause [clause: Clause, binding: Binding] -> [dynamic]Binding
-  (bindings-after-relation-source-clause-with-op clause binding (Physical-Op [])))
+  (bindings-after-relation-source-clause-with-op clause binding (Physical-Op)))
 
 (defn bindings-from-relation-source-value-clause [source: Value, clause: Clause] -> [dynamic]Binding
   (let [out (make [dynamic]Binding)]
     (when (not (= source.kind .Vector))
       (return out))
     (for [row source.items]
-      (let [next (Binding [])]
+      (let [next (Binding)]
         (if (relation-source-row-matches? clause row (addr next))
           (arr.push! out next)
           (delete next.items))))
@@ -574,14 +574,14 @@
                              :has-typed-columns true) true)))
 
 (defn query-relation-from-source-value-clause-typed [source: Value, clause-value: Clause] -> [rel: Query-Relation, ok: bool]
-  (query-relation-from-source-value-clause-typed-with-op source clause-value (Physical-Op [])))
+  (query-relation-from-source-value-clause-typed-with-op source clause-value (Physical-Op)))
 
 (defn query-relation-from-source-value-clause-binding-backed-with-op [source: Value, clause-value: Clause, op: Physical-Op] -> Query-Relation
   (let [[attrs attr-sources] (clause-output-attrs clause-value "")
         tuples (make [dynamic]Binding)]
     (when (= source.kind .Vector)
       (for [row source.items]
-        (let [next (Binding [])]
+        (let [next (Binding)]
           (if (and (relation-source-row-matches? clause-value row (addr next))
                    (direct-source-row-pushdown-matches? clause-value row op))
             (arr.push! tuples next)
@@ -596,7 +596,7 @@
                      :has-typed-columns typed-ok))))
 
 (defn query-relation-from-source-value-clause-binding-backed [source: Value, clause-value: Clause] -> Query-Relation
-  (query-relation-from-source-value-clause-binding-backed-with-op source clause-value (Physical-Op [])))
+  (query-relation-from-source-value-clause-binding-backed-with-op source clause-value (Physical-Op)))
 
 (defn query-relation-from-source-value-clause-with-op [source: Value, clause-value: Clause, op: Physical-Op] -> Query-Relation
   (let [[typed typed-ok] (query-relation-from-source-value-clause-typed-with-op source clause-value op)]
@@ -606,7 +606,7 @@
   (query-relation-from-source-value-clause-binding-backed-with-op source clause-value op))
 
 (defn query-relation-from-source-value-clause [source: Value, clause-value: Clause] -> Query-Relation
-  (query-relation-from-source-value-clause-with-op source clause-value (Physical-Op [])))
+  (query-relation-from-source-value-clause-with-op source clause-value (Physical-Op)))
 
 (defn source-db-lookup [db: DB, sources: []DB-Source, name: string] -> [source-db: DB, ok: bool]
   (when (= name "$")
@@ -771,11 +771,11 @@
   (Clause-Index-Scan :view (db-index-view db .EAVT)
                       :index 0
                       :high 0
-                      :e-value (Value [])
+                      :e-value (Value)
                       :e-ok false
-                      :a-value (Value [])
+                      :a-value (Value)
                       :a-ok false
-                      :v-value (Value [])
+                      :v-value (Value)
                       :v-ok false
                       :reverse-attr false
                       :forward-attr ""))
@@ -808,8 +808,8 @@
                     (not (= values[0].kind .Entity)))
             (return index-view 0 0 false))
           (return index-view
-                  (lower-bound-index-view db index-view "eavt" values[0].entity "" (Value []))
-                  (upper-bound-index-view db index-view "eavt" values[0].entity "" (Value []))
+                  (lower-bound-index-view db index-view "eavt" values[0].entity "" (Value))
+                  (upper-bound-index-view db index-view "eavt" values[0].entity "" (Value))
                   true))
       .Attr
         (do
@@ -817,8 +817,8 @@
                     (not (= values[0].kind .Keyword)))
             (return index-view 0 0 false))
           (return index-view
-                  (lower-bound-index-view db index-view "aevt" 0 values[0].text (Value []))
-                  (upper-bound-index-view db index-view "aevt" 0 values[0].text (Value []))
+                  (lower-bound-index-view db index-view "aevt" 0 values[0].text (Value))
+                  (upper-bound-index-view db index-view "aevt" 0 values[0].text (Value))
                   true))
       .Value
         (do
@@ -835,8 +835,8 @@
                     (not (= values[1].kind .Keyword)))
             (return index-view 0 0 false))
           (return index-view
-                  (lower-bound-index-view db index-view "eavt-ea" values[0].entity values[1].text (Value []))
-                  (upper-bound-index-view db index-view "eavt-ea" values[0].entity values[1].text (Value []))
+                  (lower-bound-index-view db index-view "eavt-ea" values[0].entity values[1].text (Value))
+                  (upper-bound-index-view db index-view "eavt-ea" values[0].entity values[1].text (Value))
                   true))
       .AttrValue
         (do
@@ -1108,7 +1108,7 @@
   (bindings-after-clause-group-with-sources db ([]DB-Source []) group binding))
 
 (defn project-binding [binding: Binding, names: []string] -> Binding
-  (let [out (Binding [])]
+  (let [out (Binding)]
     (for [name names]
       (let [[value ok] (binding-lookup binding name)]
         (when ok
@@ -1445,7 +1445,7 @@
     out))
 
 (defn bindings-after-predicate-with-fns [bindings: []Binding, predicate: Predicate, registry: []Native-Query-Fn] -> [dynamic]Binding
-  (bindings-after-predicate-with-db-and-fns (DB []) bindings predicate registry))
+  (bindings-after-predicate-with-db-and-fns (DB) bindings predicate registry))
 
 (defn bindings-after-predicate [bindings: []Binding, predicate: Predicate] -> [dynamic]Binding
   (bindings-after-predicate-with-fns bindings predicate ([]Native-Query-Fn [])))

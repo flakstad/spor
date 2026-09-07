@@ -470,7 +470,7 @@
                                   :source-width 3)
         left-rel (vev.query-relation-from-source-value-clause left-source left-clause)
         right-rel (vev.query-relation-from-source-value-clause right-source right-clause)
-        joined (vev.query-relation-join (vev.DB []) ([]vev.DB-Source []) left-rel right-rel)]
+        joined (vev.query-relation-join (vev.DB) ([]vev.DB-Source []) left-rel right-rel)]
     (t.is left-rel.has-typed-columns)
     (t.is right-rel.has-typed-columns)
     (t.is (= left-rel.typed-columns[1].kind .String))

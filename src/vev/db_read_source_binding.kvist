@@ -108,23 +108,23 @@
 (defn db-read-source-entid-value [source: DB-Read-Source, binding: Binding, function: Function-Clause] -> [value: Value, ok: bool, error: string]
   (when (not (and (= (count function.terms) 2)
                   (source-function-has-default-source-token? function)))
-    (return (Value []) false "entid clauses must have shape [(entid $ value) ?out]"))
+    (return (Value) false "entid clauses must have shape [(entid $ value) ?out]"))
   (let [[input input-ok] (db-read-source-term-resolved-value function.terms[1] binding)]
     (when (not input-ok)
-      (return (Value []) false ""))
+      (return (Value) false ""))
     (let [[resolved resolved-ok resolved-error] (db-read-source-resolve-ref-component-value source input)]
       (when (not resolved-ok)
-        (return (Value []) false resolved-error))
+        (return (Value) false resolved-error))
       (when (= resolved.kind .Entity)
         (return resolved true ""))
       (when (= resolved.kind .Int)
         (return (value-entity (u64 resolved.int-value)) true ""))
-      (return (Value []) false ""))))
+      (return (Value) false ""))))
 
 (defn db-read-source-function-op-value [source: DB-Read-Source, binding: Binding, function: Function-Clause] -> [value: Value, ok: bool, error: string]
   (let [[op op-ok] (query-op-name function.op binding)]
     (when (not op-ok)
-      (return (Value []) false ""))
+      (return (Value) false ""))
     (when (source-function-op? op)
       (return (db-read-source-entid-value source binding function))))
   (let [[applied applied-ok] (apply-function-op function binding)]
@@ -363,12 +363,12 @@
       (let [[value value-ok] (binding-lookup binding ground.source.name)]
         (if value-ok
           (return (value-owned value) true)
-          (return (Value []) false)))
-     (return (Value []) false)))
+          (return (Value) false)))
+     (return (Value) false)))
 
 (defn db-read-source-ground-bind-values [binding: Binding, vars: []string, values: []Value] -> [next: Binding, ok: bool]
   (when (not (= (count vars) (count values)))
-    (return (Binding []) false))
+    (return (Binding) false))
   (let [current (db-read-source-clone-binding-owned binding)]
     (for [name index vars]
       (when (not (= name ""))
@@ -376,7 +376,7 @@
               [next next-ok] (db-read-source-binding-with-owned-value current name owned-value)]
           (db-read-source-delete-binding-owned current)
           (when (not next-ok)
-            (return (Binding []) false))
+            (return (Binding) false))
           (set! current next))))
     (return current true)))
 
@@ -425,12 +425,12 @@
 (defn db-read-source-apply-get-else [source: DB-Read-Source, binding: Binding, clause: Get-Else] -> [next: Binding, ok: bool, error: string]
   (let [[entity entity-ok entity-error] (db-read-source-resolve-entity-term source clause.e binding)]
     (when (not entity-ok)
-      (return (Binding []) false entity-error))
+      (return (Binding) false entity-error))
     (when (not (= entity.kind .Entity))
-      (return (Binding []) false ""))
+      (return (Binding) false ""))
     (let [[value value-ok value-error] (db-read-source-pull-attr-value source entity.entity clause.a)]
       (when (not (= value-error ""))
-        (return (Binding []) false value-error))
+        (return (Binding) false value-error))
       (if value-ok
         (let [[next next-ok] (db-read-source-binding-with-owned-value binding clause.out value)]
           (return next next-ok ""))
@@ -462,20 +462,20 @@
 (defn db-read-source-apply-get-some [source: DB-Read-Source, binding: Binding, clause: Get-Some] -> [next: Binding, ok: bool, error: string]
   (let [[entity entity-ok entity-error] (db-read-source-resolve-entity-term source clause.e binding)]
     (when (not entity-ok)
-      (return (Binding []) false entity-error))
+      (return (Binding) false entity-error))
     (when (not (= entity.kind .Entity))
-      (return (Binding []) false ""))
+      (return (Binding) false ""))
     (for [attr clause.attrs]
       (let [[value value-ok value-error] (db-read-source-pull-attr-value source entity.entity attr)]
         (when (not (= value-error ""))
-          (return (Binding []) false value-error))
+          (return (Binding) false value-error))
         (when value-ok
           (let [[with-attr attr-ok] (db-read-source-binding-with-owned-value binding clause.out-attr (value-keyword (string-owned attr)))]
             (if attr-ok
               (let [[next next-ok] (db-read-source-binding-with-owned-value with-attr clause.out-value value)]
                 (return next next-ok ""))
               (delete-owned-value value))))))
-    (return (Binding []) false "")))
+    (return (Binding) false "")))
 
 (defn db-read-source-for-get-some [source: DB-Read-Source, sources: []DB-Read-Named-Source, get-some: Get-Some] -> [read-source: DB-Read-Source, ok: bool, error: string]
   (if get-some.has-source

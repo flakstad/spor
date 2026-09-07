@@ -200,7 +200,7 @@
       (return (DB (rawptr state)) true (clone-text "")))))
 
 (defn try-open-simple [path: string] -> [db: DB, ok: bool, error: string]
-  (try-open-with path (Open-Options [])))
+  (try-open-with path (Open-Options)))
 
 (def try-open (overload try-open-simple try-open-with))
 
@@ -212,7 +212,7 @@
     db))
 
 (defn open-simple [path: string] -> DB
-  (open-with path (Open-Options [])))
+  (open-with path (Open-Options)))
 
 (def open (overload open-simple open-with))
 

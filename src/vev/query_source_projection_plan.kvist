@@ -263,7 +263,7 @@
                     (= requirement.op "=")
                     (= requirement.var-name var-name)
                     (= requirement.value-term.kind .Value)))
-      (return (Value []) false))
+      (return (Value) false))
     (return requirement.value-term.value true)))
 
 (defn range-predicate-op? [op: string] -> bool
@@ -278,7 +278,7 @@
                     requirement.is-range
                     (= requirement.var-name var-name)
                     (= requirement.value-term.kind .Value)))
-      (return "" (Value []) false))
+      (return "" (Value) false))
     (return requirement.op requirement.value-term.value true)))
 
 (defn source-var-term-equality-filter [predicate: Predicate, var-name: string] -> [term: Term, ok: bool]
@@ -286,7 +286,7 @@
     (when (not (and (= requirement.kind .VarValueCompare)
                     (= requirement.op "=")
                     (= requirement.var-name var-name)))
-      (return (Term []) false))
+      (return (Term) false))
     (return requirement.value-term true)))
 
 (defn source-var-term-range-filter [predicate: Predicate, var-name: string] -> [op: string, term: Term, ok: bool]
@@ -294,25 +294,25 @@
     (when (not (and (= requirement.kind .VarValueCompare)
                     requirement.is-range
                     (= requirement.var-name var-name)))
-      (return "" (Term []) false))
+      (return "" (Term) false))
     (return requirement.op requirement.value-term true)))
 
 (defn source-var-literal-equality-filter [predicate: Predicate, var-name: string] -> [value: Value, ok: bool]
   (let [[term term-ok] (source-var-term-equality-filter predicate var-name)]
     (when (not (and term-ok (= term.kind .Value)))
-      (return (Value []) false))
+      (return (Value) false))
     (return term.value true)))
 
 (defn source-var-literal-range-filter [predicate: Predicate, var-name: string] -> [op: string, value: Value, ok: bool]
   (let [[filter-op term term-ok] (source-var-term-range-filter predicate var-name)]
     (when (not (and term-ok (= term.kind .Value)))
-      (return "" (Value []) false))
+      (return "" (Value) false))
     (return filter-op term.value true)))
 
 (defn legacy-source-var-equality-filter [predicate: Predicate, var-name: string] -> [value: Value, ok: bool]
   (when (not (and (= predicate.op "=")
                   (= (count predicate.terms) 2)))
-    (return (Value []) false))
+    (return (Value) false))
   (let [left predicate.terms[0]
         right predicate.terms[1]]
     (cond
@@ -324,12 +324,12 @@
            (= right.name var-name)
            (= left.kind .Value))
         (return left.value true)
-      :else (return (Value []) false))))
+      :else (return (Value) false))))
 
 (defn legacy-source-var-range-filter [predicate: Predicate, var-name: string] -> [op: string, value: Value, ok: bool]
   (when (not (and (range-predicate-op? predicate.op)
                   (= (count predicate.terms) 2)))
-    (return "" (Value []) false))
+    (return "" (Value) false))
   (let [left predicate.terms[0]
         right predicate.terms[1]]
     (cond
@@ -343,8 +343,8 @@
         (let [[inverted inverted-ok] (inverted-range-predicate-op predicate.op)]
           (if inverted-ok
             (return inverted left.value true)
-            (return "" (Value []) false)))
-      :else (return "" (Value []) false))))
+            (return "" (Value) false)))
+      :else (return "" (Value) false))))
 
 (defn db-read-source-query-attr-filtered-value-projection [query: Query] -> [projection: Source-Attr-Filtered-Value-Projection, ok: bool]
   (when (not (and (= (count query.find) 1)
@@ -497,7 +497,7 @@
           filter-clause left
           value-clause right
           filter-op ""
-          filter-value (Value [])
+          filter-value (Value)
           filter-ok false]
       (cond
         (and left-ok (not right-ok))
@@ -587,7 +587,7 @@
   (let [first query.clauses[0]
         filter-index -1
         filter-op ""
-        filter-value (Value [])
+        filter-value (Value)
         i 0]
     (when (not (and (= first.e.kind .Var)
                     (= first.a.kind .Value)
@@ -714,7 +714,7 @@
               (not (= clause-value.tx-term.kind .Wildcard))
               (not (= clause-value.op-term.kind .Wildcard)))
       (return (empty-source-entity-pull-projection) false))
-    (let [entity-filter (Value [])
+    (let [entity-filter (Value)
           has-entity-filter false]
       (when (= (count query.predicates) 1)
         (when (not (= query.where-steps[1].kind .Predicate))
